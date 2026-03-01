@@ -1,0 +1,16 @@
+name = "yannis-edge-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+API_URL = "http://localhost:4000"
+
+# [kv_namespaces]
+# binding = "DEDUP_CACHE"
+# id = ""
+
+# [durable_objects]
+# bindings = [
+#   { name = "ORDER_BUFFER", class_name = "OrderBuffer" }
+# ]

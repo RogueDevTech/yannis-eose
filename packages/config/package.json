@@ -1,0 +1,10 @@
+{
+  "name": "@yannis/config",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./eslint": "./eslint.js",
+    "./typescript/base": "./tsconfig.base.json",
+    "./tailwind": "./tailwind.config.ts"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@yannis/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./db": "./src/db/index.ts",
+    "./validators": "./src/validators/index.ts",
+    "./enums": "./src/enums/index.ts",
+    "./trpc": "./src/trpc/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.38.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@yannis/config": "workspace:*",
+    "drizzle-kit": "^0.30.2",
+    "typescript": "^5.7.3"
+  }
+}
