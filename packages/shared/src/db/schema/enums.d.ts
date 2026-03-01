@@ -1,0 +1,12 @@
+export declare const userRoleEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["SUPER_ADMIN", "HEAD_OF_MARKETING", "MEDIA_BUYER", "HEAD_OF_CS", "CS_AGENT", "FINANCE_OFFICER", "HEAD_OF_LOGISTICS", "WAREHOUSE_MANAGER", "TPL_MANAGER", "TPL_RIDER", "HR_MANAGER"]>;
+export declare const orderStatusEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["UNPROCESSED", "CS_ENGAGED", "CONFIRMED", "CANCELLED", "ALLOCATED", "DISPATCHED", "IN_TRANSIT", "DELIVERED", "PARTIALLY_DELIVERED", "RETURNED", "RESTOCKED", "WRITTEN_OFF", "COMPLETED"]>;
+export declare const movementTypeEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["INTAKE", "RESERVATION", "ALLOCATION", "DISPATCH", "DELIVERY", "RETURN", "RESTOCK", "WRITE_OFF", "TRANSFER_OUT", "TRANSFER_IN", "ADJUSTMENT"]>;
+export declare const transferStatusEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["PENDING", "IN_TRANSIT", "RECEIVED", "DISPUTED"]>;
+export declare const fundingStatusEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["SENT", "COMPLETED", "DISPUTED"]>;
+export declare const invoiceStatusEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["DRAFT", "SENT", "PAID", "OVERDUE", "CANCELLED"]>;
+export declare const payoutStatusEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["DRAFT", "PENDING_APPROVAL", "APPROVED", "PAID", "REJECTED"]>;
+export declare const adjustmentCategoryEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["BONUS", "EXTRA_SHIFT", "PERFORMANCE", "DEDUCTION", "CLAWBACK", "OTHER"]>;
+export declare const deploymentTypeEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["SNIPPET", "IFRAME", "HOSTED"]>;
+export declare const stockStateEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["AVAILABLE", "RESERVED", "ALLOCATED_TO_3PL", "IN_TRANSIT", "DELIVERED", "RETURNED", "WRITTEN_OFF"]>;
+export declare const callStatusEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["INITIATED", "RINGING", "IN_PROGRESS", "COMPLETED", "FAILED", "NO_ANSWER", "BUSY"]>;
+export declare const recordStatusEnum: import("node_modules/drizzle-orm/pg-core").PgEnum<["ACTIVE", "INACTIVE", "ARCHIVED"]>;

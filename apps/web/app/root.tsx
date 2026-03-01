@@ -10,6 +10,7 @@ import stylesheet from '~/tailwind.css?url';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
+  { rel: 'icon', type: 'image/jpeg', href: '/assets/yannis-logo.jpeg' },
 ];
 
 export default function App() {
@@ -21,7 +22,7 @@ export default function App() {
         <Meta />
         <Links />
       </head>
-      <body className="h-full bg-gray-50 text-gray-900">
+      <body className="h-full">
         <Outlet />
         <ScrollRestoration />
         <Scripts />
