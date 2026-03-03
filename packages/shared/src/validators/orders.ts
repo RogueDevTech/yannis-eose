@@ -31,12 +31,20 @@ export type OrderStatusInput = z.infer<typeof orderStatusSchema>;
 export const orderItemSchema = z.object({
   productId: z.string().uuid(),
   quantity: z.number().int().min(1),
-  unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/, 'Must be a valid price'),
+  unitPrice: z.coerce.number().min(0).multipleOf(0.01),
+  offerLabel: z.string().max(100).optional(),
 });
+
+/**
+ * Reserved system actor ID for Edge Form order creation.
+ * Stored in audit trail to distinguish from generic "System" (null) and other actors.
+ */
+export const EDGE_FORM_ACTOR_ID = '00000000-0000-0000-0000-000000000001';
 
 /**
  * Create order — used by Edge Worker or admin manual entry.
  * Phone number comes pre-hashed from the Edge Worker.
+ * When source is 'edge-form', the audit trail uses EDGE_FORM_ACTOR_ID for traceability.
  */
 export const createOrderSchema = z.object({
   campaignId: z.string().uuid().optional(),
@@ -47,7 +55,11 @@ export const createOrderSchema = z.object({
   deliveryAddress: z.string().optional(),
   deliveryNotes: z.string().optional(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
-  totalAmount: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  /** Set by Edge Worker to identify order source in audit trail */
+  source: z.enum(['edge-form']).optional(),
+  /** Cart ID from prior cart save — marks cart as CONVERTED when order created */
+  cartId: z.string().uuid().optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
@@ -66,6 +78,11 @@ export const transitionOrderSchema = z.object({
     logisticsLocationId: z.string().uuid().optional(),
     logisticsProviderId: z.string().uuid().optional(),
     riderId: z.string().uuid().optional(),
+    otp: z.string().length(4).regex(/^\d{4}$/).optional(),
+    gpsLat: z.number().min(-90).max(90).optional(),
+    gpsLng: z.number().min(-180).max(180).optional(),
+    /** Add-on to delivery fee when marking DELIVERED/PARTIALLY_DELIVERED (tolls, fuel, remote area, etc.) */
+    deliveryFeeAddOn: z.number().min(0).optional(),
   }).optional(),
 });
 
@@ -81,7 +98,7 @@ export const updateOrderSchema = z.object({
   deliveryAddress: z.string().optional(),
   deliveryNotes: z.string().optional(),
   items: z.array(orderItemSchema).min(1).optional(),
-  totalAmount: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
 });
 
 export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;

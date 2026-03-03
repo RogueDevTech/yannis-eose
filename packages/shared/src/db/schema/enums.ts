@@ -106,10 +106,55 @@ export const callStatusEnum = pgEnum('call_status', [
   'FAILED',
   'NO_ANSWER',
   'BUSY',
+  'MANUAL_CALL',
+]);
+
+export const reconciliationStatusEnum = pgEnum('reconciliation_status', [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+]);
+
+export const approvalRequestTypeEnum = pgEnum('approval_request_type', [
+  'MEDIA_SPEND',
+  'PROCUREMENT',
+  'LOGISTICS_REIMBURSEMENT',
+  'AD_HOC',
+]);
+
+export const approvalStatusEnum = pgEnum('approval_status', [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'QUERIED',
+]);
+
+export const settlementWindowEnum = pgEnum('settlement_window', [
+  'WEEKLY',
+  'BIWEEKLY',
+  'MONTHLY',
 ]);
 
 export const recordStatusEnum = pgEnum('record_status', [
   'ACTIVE',
   'INACTIVE',
   'ARCHIVED',
+]);
+
+export const cartStatusEnum = pgEnum('cart_status', [
+  'PENDING',
+  'CONVERTED',
+  'ABANDONED',
+]);
+
+export const permissionRequestTypeEnum = pgEnum('permission_request_type', [
+  'USER_CREATION',
+  'ROLE_CHANGE',
+  'PERMISSION_GRANT',
+]);
+
+export const permissionRequestStatusEnum = pgEnum('permission_request_status', [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
 ]);

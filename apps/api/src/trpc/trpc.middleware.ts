@@ -7,19 +7,24 @@ import { appRouter } from './routers';
 import { createContext } from './context';
 import { REDIS, PG_CLIENT } from '../database/database.module';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { PermissionsService } from '../permissions/permissions.service';
 
 @Injectable()
 export class TrpcMiddleware implements NestMiddleware {
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(PG_CLIENT) private readonly sql: ReturnType<typeof postgres>,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async use(req: Request, res: Response, _next: NextFunction) {
     // Resolve session from cookie (same logic as AuthGuard)
     await this.resolveSession(req);
 
-    const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+    // NestJS strips the mount prefix from req.url, but tRPC's fetchRequestHandler
+    // expects the full path including the endpoint prefix so it can strip it itself.
+    const rawUrl = req.originalUrl || req.url;
+    const url = new URL(rawUrl, `http://${req.headers.host ?? 'localhost'}`);
 
     // Convert Express Request to a Fetch API Request for tRPC v11
     const headers = new Headers();
@@ -80,6 +85,12 @@ export class TrpcMiddleware implements NestMiddleware {
     if (!sessionData) return;
 
     const user: SessionUser = JSON.parse(sessionData);
+    if (user.role !== 'SUPER_ADMIN') {
+      const perms = await this.permissionsService.getEffectivePermissions(user.id, user.role);
+      user.permissions = Array.from(perms);
+    } else {
+      user.permissions = [];
+    }
     (req as Request & { user: SessionUser }).user = user;
 
     // Set Postgres session variables for RLS policies and audit triggers

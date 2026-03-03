@@ -1,7 +1,8 @@
-import { pgTable, text, numeric, jsonb, timestamp, serial } from 'drizzle-orm/pg-core';
-import { invoiceStatusEnum } from './enums';
-import { uuidv7Pk, temporalColumns } from './helpers';
+import { pgTable, text, numeric, jsonb, timestamp, serial, integer } from 'drizzle-orm/pg-core';
+import { invoiceStatusEnum, approvalRequestTypeEnum, approvalStatusEnum, settlementWindowEnum } from './enums';
+import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { orders } from './orders';
+import { users } from './users';
 
 // Table 16: invoices — sequential billing
 export const invoices = pgTable('invoices', {
@@ -16,4 +17,43 @@ export const invoices = pgTable('invoices', {
   dueDate: timestamp('due_date', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,
+});
+
+// Table 20: approval_requests — unified queue for all financial requests
+export const approvalRequests = pgTable('approval_requests', {
+  id: uuidv7Pk(),
+  type: approvalRequestTypeEnum('type').notNull(),
+  requesterId: text('requester_id').notNull().references(() => users.id),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  description: text('description').notNull(),
+  status: approvalStatusEnum('status').default('PENDING').notNull(),
+  approverId: text('approver_id').references(() => users.id),
+  approvalReason: text('approval_reason'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  budgetId: text('budget_id'),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+// Table 21: budgets — department/campaign budget tracking
+export const budgets = pgTable('budgets', {
+  id: uuidv7Pk(),
+  name: text('name').notNull(),
+  departmentOrCampaign: text('department_or_campaign').notNull(),
+  totalBudget: numeric('total_budget', { precision: 12, scale: 2 }).notNull(),
+  periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+  periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+  createdBy: text('created_by').notNull().references(() => users.id),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+// Table 22: settlement_configs — HR settlement window configuration
+export const settlementConfigs = pgTable('settlement_configs', {
+  id: uuidv7Pk(),
+  windowType: settlementWindowEnum('window_type').notNull(),
+  startDay: integer('start_day').default(1).notNull(), // day of week (1=Mon) or month
+  createdBy: text('created_by').notNull().references(() => users.id),
+  ...temporalColumns,
+  ...timestampColumns,
 });

@@ -160,6 +160,7 @@ UNPROCESSED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRA
 
 ### When Building the Inventory Module
 - Inventory is tracked by LOCATION (Main Warehouse, 3PL Location A, 3PL Location B, etc.)
+- Product creation supports optional initial stock: quantity + location. When provided, creates a FIFO batch using cost price as factory cost (landing = 0). Restock via Inventory → Stock Intake.
 - Use FIFO batch costing: each stock intake is a separate batch with its own landed cost
 - Stock states per unit: AVAILABLE, RESERVED, ALLOCATED_TO_3PL, IN_TRANSIT, DELIVERED, RETURNED, WRITTEN_OFF
 - The Virtual Buffer means the Sales Module sees 10% less stock than actually exists, preventing overselling during high-traffic bursts

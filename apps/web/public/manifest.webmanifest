@@ -1,0 +1,25 @@
+{
+  "name": "Yannis EOSE",
+  "short_name": "Yannis",
+  "description": "Enterprise Operations & Sales Engine",
+  "start_url": "/admin",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "orientation": "any",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/assets/yannis-logo1.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/yannis-logo1.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

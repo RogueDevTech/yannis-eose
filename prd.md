@@ -276,6 +276,8 @@ Each product has:
 - `min_threshold` (minimum stock level before triggering restock alert)
 - `category`, `tags`, `status` (active/archived)
 
+**Product Creation with Initial Stock:** When creating a new product, the Stock/Product Manager can optionally add initial stock quantity and select a location (e.g. Main Warehouse). This creates the product and a FIFO batch in one step, using the product's cost price as factory cost (landing cost = 0). Restocking is done separately via Inventory → Stock Intake.
+
 ### 8.3 FIFO Batch Costing
 
 Stock is received in batches. Each batch has its own cost profile:

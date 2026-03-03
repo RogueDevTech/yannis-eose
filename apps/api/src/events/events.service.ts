@@ -94,4 +94,14 @@ export class EventsService {
       timestamp: new Date().toISOString(),
     });
   }
+
+  /**
+   * Generic notification to a named room.
+   */
+  emitToRoom(room: string, event: string, data: Record<string, unknown>) {
+    this.gateway.server.to(room).emit(event, {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
 }

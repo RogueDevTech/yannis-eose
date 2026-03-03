@@ -14,11 +14,37 @@ export const REDIS = Symbol('REDIS');
     {
       provide: PG_CLIENT,
       useFactory: () => {
-        const connectionString = process.env['DATABASE_URL'];
+        let connectionString = process.env['DATABASE_URL'];
         if (!connectionString) {
           throw new Error('DATABASE_URL environment variable is required');
         }
-        return postgres(connectionString, { max: 10 });
+        // Strip Aiven UI params (statusColor, tLSMode, etc.) — Postgres rejects them
+        const aivenParams = [
+          'statusColor',
+          'env',
+          'name',
+          'tLSMode',
+          'usePrivateKey',
+          'safeModeLevel',
+          'advancedSafeModeLevel',
+          'driverVersion',
+          'lazyload',
+        ];
+        try {
+          const url = new URL(connectionString.replace(/^postgresql:/, 'https:'));
+          aivenParams.forEach((p) => url.searchParams.delete(p));
+          connectionString = url.toString().replace(/^https:/, 'postgresql:');
+        } catch {
+          // If URL parse fails, use as-is
+        }
+        // Aiven and most cloud Postgres require SSL
+        // Keep pool small — managed Postgres (Neon, Supabase, Aiven) often limits to 10–20 connections
+        return postgres(connectionString, {
+          max: 5,
+          idle_timeout: 20,
+          connect_timeout: 10,
+          ssl: { rejectUnauthorized: false },
+        });
       },
     },
     {

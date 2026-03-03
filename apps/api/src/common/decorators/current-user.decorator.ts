@@ -7,6 +7,7 @@ export interface SessionUser {
   name: string;
   role: string;
   logisticsLocationId: string | null;
+  permissions?: string[];
 }
 
 /**

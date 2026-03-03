@@ -36,5 +36,14 @@ module.exports = (options) => {
       ...options.resolve,
       extensions: ['.ts', '.js', '.json'],
     },
+    watchOptions: {
+      // Watch shared packages so changes trigger a rebuild in dev mode
+      ignored: /node_modules\/(?!@yannis)/,
+    },
+    snapshot: {
+      // Treat workspace packages as managed (not immutable) so webpack
+      // detects file changes inside packages/shared during --watch
+      managedPaths: [],
+    },
   };
 };

@@ -1,0 +1,185 @@
+/**
+ * Notification types and email configuration.
+ * SuperAdmin can toggle email for configurable types.
+ * Mandatory types always send email (cannot be disabled).
+ */
+
+export const NOTIFICATION_EMAIL_CONFIG_KEY = 'NOTIFICATION_EMAIL_CONFIG';
+
+/** Notification types that ALWAYS send email — action required, cannot be disabled */
+export const MANDATORY_EMAIL_TYPES = [
+  'approval:email_change',
+  'finance:approval_required',
+  'funding:sent',
+  'funding:disputed',
+] as const;
+
+/** Notification types that SuperAdmin can toggle email for */
+export const CONFIGURABLE_EMAIL_TYPES = [
+  'order:new',
+  'order:new_campaign',
+  'order:assigned',
+  'order:assigned_bulk',
+  'order:reassigned',
+  'order:allocated',
+  'delivery:assigned',
+  'marketing:high_cpa',
+  'finance:approval_processed',
+  'logistics:shrinkage',
+  'hr:payout_approved',
+  'hr:deduction_created',
+  'hr:addon_approved',
+  'hr:deduction_applied',
+  'transfer:sent',
+] as const;
+
+export const ALL_NOTIFICATION_TYPES = [
+  ...MANDATORY_EMAIL_TYPES,
+  ...CONFIGURABLE_EMAIL_TYPES,
+] as const;
+
+export type NotificationType = (typeof ALL_NOTIFICATION_TYPES)[number];
+
+export interface NotificationTypeMeta {
+  type: NotificationType;
+  label: string;
+  description: string;
+  mandatory: boolean;
+  category: 'approvals' | 'orders' | 'marketing' | 'finance' | 'logistics' | 'hr';
+}
+
+export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
+  'approval:email_change': {
+    type: 'approval:email_change',
+    label: 'Email change approval',
+    description: 'SuperAdmin must approve user email change requests',
+    mandatory: true,
+    category: 'approvals',
+  },
+  'finance:approval_required': {
+    type: 'finance:approval_required',
+    label: 'Finance approval required',
+    description: 'New approval request needs Finance Officer review',
+    mandatory: true,
+    category: 'finance',
+  },
+  'funding:sent': {
+    type: 'funding:sent',
+    label: 'Funding received',
+    description: 'Media Buyer must mark funding as Received or Not Received',
+    mandatory: true,
+    category: 'marketing',
+  },
+  'funding:disputed': {
+    type: 'funding:disputed',
+    label: 'Funding disputed',
+    description: 'Media Buyer marked funding as Not Received — needs resolution',
+    mandatory: true,
+    category: 'marketing',
+  },
+  'order:new': {
+    type: 'order:new',
+    label: 'New order',
+    description: 'Head of CS / Head of Marketing — new order created',
+    mandatory: false,
+    category: 'orders',
+  },
+  'order:new_campaign': {
+    type: 'order:new_campaign',
+    label: 'New order from campaign',
+    description: 'Media Buyer — new order from their campaign',
+    mandatory: false,
+    category: 'orders',
+  },
+  'order:assigned': {
+    type: 'order:assigned',
+    label: 'Order assigned',
+    description: 'CS Agent — order assigned to them',
+    mandatory: false,
+    category: 'orders',
+  },
+  'order:assigned_bulk': {
+    type: 'order:assigned_bulk',
+    label: 'Orders bulk-assigned',
+    description: 'CS Agent — orders reassigned to them (Hot Swap)',
+    mandatory: false,
+    category: 'orders',
+  },
+  'order:reassigned': {
+    type: 'order:reassigned',
+    label: 'Orders reassigned',
+    description: 'CS Agent — their orders were reassigned to another agent',
+    mandatory: false,
+    category: 'orders',
+  },
+  'order:allocated': {
+    type: 'order:allocated',
+    label: 'Order allocated to location',
+    description: 'TPL Manager — order allocated to their 3PL location',
+    mandatory: false,
+    category: 'orders',
+  },
+  'delivery:assigned': {
+    type: 'delivery:assigned',
+    label: 'Delivery assigned',
+    description: 'Rider — delivery assigned to them',
+    mandatory: false,
+    category: 'orders',
+  },
+  'marketing:high_cpa': {
+    type: 'marketing:high_cpa',
+    label: 'High CPA warning',
+    description: 'SuperAdmin / Head of Marketing — Media Buyer CPA exceeds threshold',
+    mandatory: false,
+    category: 'marketing',
+  },
+  'finance:approval_processed': {
+    type: 'finance:approval_processed',
+    label: 'Approval processed',
+    description: 'Requester — their approval request was approved or rejected',
+    mandatory: false,
+    category: 'finance',
+  },
+  'logistics:shrinkage': {
+    type: 'logistics:shrinkage',
+    label: 'Stock shrinkage',
+    description: 'SuperAdmin / Head of Logistics — transfer received with shortage',
+    mandatory: false,
+    category: 'logistics',
+  },
+  'hr:payout_approved': {
+    type: 'hr:payout_approved',
+    label: 'Payout approved',
+    description: 'Staff — their payout has been approved',
+    mandatory: false,
+    category: 'hr',
+  },
+  'hr:deduction_created': {
+    type: 'hr:deduction_created',
+    label: 'Deduction added',
+    description: 'Staff — clawback or deduction added to earnings',
+    mandatory: false,
+    category: 'hr',
+  },
+  'hr:addon_approved': {
+    type: 'hr:addon_approved',
+    label: 'Add-on approved',
+    description: 'Staff — their add-on earnings have been approved',
+    mandatory: false,
+    category: 'hr',
+  },
+  'hr:deduction_applied': {
+    type: 'hr:deduction_applied',
+    label: 'Deduction applied',
+    description: 'Staff — deduction applied to their earnings',
+    mandatory: false,
+    category: 'hr',
+  },
+  'transfer:sent': {
+    type: 'transfer:sent',
+    label: 'Stock transfer incoming',
+    description: 'TPL Manager — stock transfer on the way to their location',
+    mandatory: false,
+    category: 'logistics',
+  },
+};

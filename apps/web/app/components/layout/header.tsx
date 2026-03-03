@@ -1,3 +1,18 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { Form, useFetcher, useNavigate } from '@remix-run/react';
+import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
+
+interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  read: boolean;
+  createdAt: string;
+  data?: Record<string, unknown> | null;
+}
+
 interface HeaderProps {
   user: {
     name: string;
@@ -6,11 +21,138 @@ interface HeaderProps {
   } | null;
   sidebarCollapsed: boolean;
   darkMode: boolean;
+  notifications?: Notification[];
+  unreadCount?: number;
+  socketConnected?: boolean;
   onToggleDarkMode: () => void;
   onMobileMenuToggle: () => void;
 }
 
-export function Header({ user, sidebarCollapsed, darkMode, onToggleDarkMode, onMobileMenuToggle }: HeaderProps) {
+const NOTIFICATION_COLORS: Record<string, string> = {
+  'order:new': 'bg-brand-500',
+  'order:status': 'bg-info-500',
+  'order:status_changed': 'bg-info-500',
+  'order:assigned': 'bg-brand-500',
+  'transfer:created': 'bg-warning-500',
+  'transfer:verified': 'bg-success-500',
+  'shrinkage:detected': 'bg-danger-500',
+  'reconciliation:pending': 'bg-danger-500',
+  'stock:low': 'bg-warning-500',
+  'stock:updated': 'bg-info-500',
+  'finance:approval': 'bg-success-500',
+  'funding:sent': 'bg-brand-500',
+  'funding:disputed': 'bg-danger-500',
+  'payout:generated': 'bg-success-500',
+  'escalation:transfer': 'bg-danger-500',
+  'escalation:stuck_order': 'bg-danger-500',
+  'high_cpa:warning': 'bg-warning-500',
+  'system:info': 'bg-surface-500',
+};
+
+function getNotificationLink(notif: Notification): string | null {
+  const data = notif.data as Record<string, string> | null | undefined;
+  if (!data) return null;
+
+  if (data.orderId) return `/admin/orders/${data.orderId}`;
+  if (data.transferId) return '/admin/transfers';
+  if (data.productId) return `/admin/products`;
+  if (data.fundingId) return '/admin/marketing';
+  if (data.payoutId) return '/admin/hr';
+  if (data.approvalId) return '/admin/finance';
+  if (data.locationId) return '/admin/logistics';
+  if (data.link && typeof data.link === 'string') return data.link;
+
+  return null;
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+export function Header({ user, sidebarCollapsed, darkMode, notifications = [], unreadCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle }: HeaderProps) {
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const notifTriggerRef = useRef<HTMLButtonElement>(null);
+  const notifPanelRef = useRef<HTMLDivElement>(null);
+  const fetcher = useFetcher();
+  const markReadFetcher = useFetcher();
+  const navigate = useNavigate();
+
+  useSearchShortcut(() => setSearchOpen(true));
+
+  // Close menus on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+      const inNotifPanel = notifPanelRef.current?.contains(event.target as Node);
+      const inNotifTrigger = notifTriggerRef.current?.contains(event.target as Node);
+      if (notifOpen && !inNotifPanel && !inNotifTrigger) {
+        setNotifOpen(false);
+      }
+    }
+    if (userMenuOpen || notifOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [userMenuOpen, notifOpen]);
+
+  // Body scroll lock when notification drawer is open
+  useEffect(() => {
+    if (notifOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [notifOpen]);
+
+  // Escape key to close notification drawer
+  useEffect(() => {
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === 'Escape') setNotifOpen(false);
+    }
+    if (notifOpen) {
+      document.addEventListener('keydown', handleEscape);
+    }
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [notifOpen]);
+
+  const handleMarkAllRead = useCallback(() => {
+    fetcher.submit(
+      { intent: 'markAllNotificationsRead' },
+      { method: 'post', action: '/admin' },
+    );
+  }, [fetcher]);
+
+  const handleNotificationClick = useCallback((notif: Notification) => {
+    // Mark as read if unread
+    if (!notif.read) {
+      markReadFetcher.submit(
+        { intent: 'markNotificationRead', notificationId: notif.id },
+        { method: 'post', action: '/admin' },
+      );
+    }
+    // Navigate to relevant record
+    const link = getNotificationLink(notif);
+    if (link) {
+      setNotifOpen(false);
+      navigate(link);
+    }
+  }, [markReadFetcher, navigate]);
+
   return (
     <header
       className={`fixed top-0 right-0 z-30 h-[var(--header-height)] bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between px-4 lg:px-6 transition-all duration-300 left-0 ${
@@ -24,17 +166,21 @@ export function Header({ user, sidebarCollapsed, darkMode, onToggleDarkMode, onM
         {/* Mobile hamburger */}
         <button
           onClick={onMobileMenuToggle}
-          className="lg:hidden p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+          className="lg:hidden p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-500 dark:hover:bg-surface-800 transition-colors"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
           </svg>
         </button>
 
-        {/* Search */}
-        <div className="relative w-full hidden sm:block">
+        {/* Search trigger */}
+        <button
+          type="button"
+          onClick={() => setSearchOpen(true)}
+          className="relative w-full hidden sm:flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm text-surface-800 bg-surface-50 dark:text-surface-400 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg hover:border-surface-300 dark:hover:border-surface-600 transition-colors"
+        >
           <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400"
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-700 dark:text-surface-400"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -46,12 +192,11 @@ export function Header({ user, sidebarCollapsed, darkMode, onToggleDarkMode, onM
               d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
             />
           </svg>
-          <input
-            type="text"
-            placeholder="Search orders, products, users..."
-            className="input pl-10 py-1.5 text-sm bg-surface-50 dark:bg-surface-800 border-surface-200 dark:border-surface-700"
-          />
-        </div>
+          <span>Search orders, products, users...</span>
+          <kbd className="ml-auto px-1.5 py-0.5 text-[10px] bg-surface-100 dark:bg-surface-700 rounded font-mono">
+            ⌘K
+          </kbd>
+        </button>
       </div>
 
       {/* Right side: dark mode + notifications + user */}
@@ -59,7 +204,7 @@ export function Header({ user, sidebarCollapsed, darkMode, onToggleDarkMode, onM
         {/* Dark mode toggle */}
         <button
           onClick={onToggleDarkMode}
-          className="p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+          className="p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-500 dark:hover:bg-surface-800 transition-colors"
           title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {darkMode ? (
@@ -74,36 +219,246 @@ export function Header({ user, sidebarCollapsed, darkMode, onToggleDarkMode, onM
         </button>
 
         {/* Notifications bell */}
-        <button className="relative p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
-            />
-          </svg>
-          <span className="absolute top-1 right-1 w-2 h-2 bg-danger-500 rounded-full" />
-        </button>
-
-        {/* User menu */}
-        {user && (
-          <div className="flex items-center gap-2 pl-2 lg:pl-3 border-l border-surface-200 dark:border-surface-700">
-            <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center">
-              <span className="text-xs font-semibold text-white">
-                {user.name.charAt(0).toUpperCase()}
+        <div className="relative">
+          <button
+            ref={notifTriggerRef}
+            onClick={() => setNotifOpen(!notifOpen)}
+            className="relative p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-500 dark:hover:bg-surface-800 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
+              />
+            </svg>
+            {/* Socket connection indicator */}
+            {socketConnected !== undefined && (
+              <span
+                className={`absolute bottom-0.5 left-0.5 w-2 h-2 rounded-full border border-white dark:border-surface-900 ${
+                  socketConnected ? 'bg-success-500' : 'bg-danger-500'
+                }`}
+                title={socketConnected ? 'Real-time connected' : 'Real-time disconnected'}
+              />
+            )}
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold bg-danger-500 text-white rounded-full">
+                {unreadCount > 99 ? '99+' : unreadCount}
               </span>
-            </div>
-            <div className="hidden md:block min-w-0">
-              <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate leading-tight">
-                {user.name}
-              </p>
-              <p className="text-2xs text-surface-500 dark:text-surface-400 truncate">
-                {formatRole(user.role)}
-              </p>
-            </div>
+            )}
+          </button>
+
+          {/* Notification drawer - full-page modal, right-aligned, full height */}
+          {notifOpen &&
+            createPortal(
+              <>
+                {/* Backdrop */}
+                <div
+                  className="fixed inset-0 z-[100] bg-black/40 dark:bg-black/60 backdrop-blur-sm"
+                  onClick={() => setNotifOpen(false)}
+                  aria-hidden="true"
+                />
+                {/* Panel - full height, right-aligned */}
+                <div
+                  ref={notifPanelRef}
+                  className="fixed top-0 right-0 h-full w-full max-w-md sm:max-w-lg bg-white dark:bg-surface-800 shadow-2xl z-[101] flex flex-col animate-slide-in-right"
+                  role="dialog"
+                  aria-label="Notifications"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-4 py-4 border-b border-surface-100 dark:border-surface-700 flex-shrink-0">
+                    <h3 className="text-base font-semibold text-surface-900 dark:text-white">
+                      Notifications
+                      {unreadCount > 0 && (
+                        <span className="ml-1.5 text-sm text-surface-800 dark:text-surface-500 font-normal">
+                          ({unreadCount} unread)
+                        </span>
+                      )}
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={handleMarkAllRead}
+                          className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setNotifOpen(false)}
+                        className="p-1.5 rounded-lg text-surface-600 hover:bg-surface-100 dark:text-surface-400 dark:hover:bg-surface-700 transition-colors"
+                        aria-label="Close notifications"
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Notifications list - full height scrollable */}
+                  <div className="flex-1 overflow-y-auto min-h-0">
+                    {notifications.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full px-4 py-12 text-center">
+                        <svg className="w-12 h-12 text-surface-400 dark:text-surface-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                        </svg>
+                        <p className="text-sm text-surface-600 dark:text-surface-500">No notifications yet</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col">
+                        {notifications.map((n: Notification) => {
+                          const link = getNotificationLink(n);
+                          const dotColor = NOTIFICATION_COLORS[n.type] ?? 'bg-surface-400';
+                          return (
+                            <button
+                              key={n.id}
+                              type="button"
+                              onClick={() => handleNotificationClick(n)}
+                              className={`w-full text-left px-4 py-3 border-b border-surface-50 dark:border-surface-700/50 hover:bg-surface-50 dark:hover:bg-surface-700/30 transition-colors ${
+                                link ? 'cursor-pointer' : 'cursor-default'
+                              } ${!n.read ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}
+                            >
+                              <div className="flex items-start gap-2.5">
+                                <div className={`w-2 h-2 mt-1.5 rounded-full flex-shrink-0 ${
+                                  !n.read ? dotColor : 'bg-transparent'
+                                }`} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-surface-900 dark:text-surface-100 leading-tight">
+                                    {n.title}
+                                  </p>
+                                  {n.body && (
+                                    <p className="text-xs text-surface-800 dark:text-surface-400 mt-0.5 line-clamp-2">
+                                      {n.body}
+                                    </p>
+                                  )}
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <p className="text-[11px] text-surface-700 dark:text-surface-500">
+                                      {timeAgo(n.createdAt)}
+                                    </p>
+                                    {link && (
+                                      <span className="text-[11px] text-brand-500 dark:text-brand-400">
+                                        View →
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  {notifications.length > 0 && (
+                    <div className="px-4 py-3 border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
+                      <a
+                        href="/admin/notifications"
+                        className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium"
+                        onClick={() => setNotifOpen(false)}
+                      >
+                        View all notifications
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </>,
+              document.body
+            )}
+        </div>
+
+        {/* User menu with dropdown */}
+        {user && (
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setUserMenuOpen(!userMenuOpen)}
+              className="flex items-center gap-2 pl-2 lg:pl-3 border-l border-surface-200 dark:border-surface-700 hover:opacity-80 transition-opacity"
+            >
+              <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center">
+                <span className="text-xs font-semibold text-white">
+                  {user.name.charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <div className="hidden md:block min-w-0 text-left">
+                <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate leading-tight">
+                  {user.name}
+                </p>
+                <p className="text-2xs text-surface-800 dark:text-surface-400 truncate">
+                  {formatRole(user.role)}
+                </p>
+              </div>
+              <svg
+                className={`w-4 h-4 text-surface-700 dark:text-surface-400 hidden md:block transition-transform duration-200 ${userMenuOpen ? 'rotate-180' : ''}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
+
+            {/* Dropdown menu */}
+            {userMenuOpen && (
+              <div className="absolute right-0 mt-2 w-56 rounded-lg bg-white dark:bg-surface-800 shadow-lg border border-surface-200 dark:border-surface-700 py-1 animate-fade-in z-50">
+                {/* User info (mobile) */}
+                <div className="md:hidden px-4 py-3 border-b border-surface-100 dark:border-surface-700">
+                  <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
+                    {user.name}
+                  </p>
+                  <p className="text-xs text-surface-500 dark:text-surface-400">
+                    {user.email}
+                  </p>
+                  <p className="text-2xs text-surface-700 dark:text-surface-500 mt-0.5">
+                    {formatRole(user.role)}
+                  </p>
+                </div>
+
+                {/* Email on desktop */}
+                <div className="hidden md:block px-4 py-2 border-b border-surface-100 dark:border-surface-700">
+                  <p className="text-xs text-surface-800 dark:text-surface-400 truncate">
+                    {user.email}
+                  </p>
+                </div>
+
+                {/* Menu items */}
+                <div className="py-1">
+                  <a
+                    href="/admin/settings"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Settings
+                  </a>
+                </div>
+
+                {/* Logout */}
+                <div className="border-t border-surface-100 dark:border-surface-700 py-1">
+                  <Form method="post" action="/auth/logout">
+                    <button
+                      type="submit"
+                      className="flex items-center gap-2 w-full px-4 py-2 text-sm text-danger-600 dark:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-700/20 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+                      </svg>
+                      Sign out
+                    </button>
+                  </Form>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
+      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   );
 }

@@ -5,12 +5,35 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 API_URL = "http://localhost:4444"
+QSTASH_URL = ""
+QSTASH_TOKEN = ""
+EDGE_API_KEY = ""
+TURNSTILE_SITE_KEY = ""
+TURNSTILE_SECRET_KEY = ""
 
-# [kv_namespaces]
-# binding = "DEDUP_CACHE"
-# id = ""
+# Healer cron — checks API health every 60 seconds
+[triggers]
+crons = ["* * * * *"]
 
-# [durable_objects]
-# bindings = [
-#   { name = "ORDER_BUFFER", class_name = "OrderBuffer" }
-# ]
+# KV namespaces — create with: wrangler kv:namespace create <NAME>
+# Replace the placeholder IDs with real ones after creation
+
+[[kv_namespaces]]
+binding = "DEDUP_CACHE"
+id = "PLACEHOLDER_DEDUP_CACHE_ID"
+preview_id = "PLACEHOLDER_DEDUP_CACHE_PREVIEW_ID"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_CACHE"
+id = "PLACEHOLDER_RATE_LIMIT_CACHE_ID"
+preview_id = "PLACEHOLDER_RATE_LIMIT_CACHE_PREVIEW_ID"
+
+[[kv_namespaces]]
+binding = "INVENTORY_CACHE"
+id = "PLACEHOLDER_INVENTORY_CACHE_ID"
+preview_id = "PLACEHOLDER_INVENTORY_CACHE_PREVIEW_ID"
+
+[[kv_namespaces]]
+binding = "CAMPAIGN_CACHE"
+id = "PLACEHOLDER_CAMPAIGN_CACHE_ID"
+preview_id = "PLACEHOLDER_CAMPAIGN_CACHE_PREVIEW_ID"

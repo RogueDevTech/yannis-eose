@@ -26,7 +26,20 @@ export const orders = pgTable('orders', {
   landedCost: numeric('landed_cost', { precision: 12, scale: 2 }),
   deliveryFee: numeric('delivery_fee', { precision: 12, scale: 2 }),
   deliveryNotes: text('delivery_notes'),
+  deliveryOtp: text('delivery_otp'),
+  deliveryGpsLat: numeric('delivery_gps_lat', { precision: 10, scale: 7 }),
+  deliveryGpsLng: numeric('delivery_gps_lng', { precision: 10, scale: 7 }),
   parentOrderId: text('parent_order_id'),
+  // Callback reschedule queue: auto-retry on "No Answer"
+  callbackScheduledAt: timestamp('callback_scheduled_at', { withTimezone: true }),
+  callbackAttempts: integer('callback_attempts').default(0).notNull(),
+  callbackNotes: text('callback_notes'),
+  // Duplicate order tracking: agent can merge or dismiss flagged duplicates
+  isDuplicate: text('is_duplicate'), // null = normal, 'FLAGGED' = potential duplicate, 'MERGED' = merged into another, 'DISMISSED' = agent cleared it
+  duplicateOfId: text('duplicate_of_id'), // links to the original order if flagged
+  // 15-min order lock: when an agent clicks Call, order is locked to them
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  lockedBy: text('locked_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),
@@ -47,6 +60,7 @@ export const orderItems = pgTable('order_items', {
     .references(() => products.id),
   quantity: integer('quantity').notNull(),
   unitPrice: numeric('unit_price', { precision: 12, scale: 2 }).notNull(),
+  offerLabel: text('offer_label'),
   batchId: text('batch_id').references(() => stockBatches.id),
   ...temporalColumns,
   ...timestampColumns,

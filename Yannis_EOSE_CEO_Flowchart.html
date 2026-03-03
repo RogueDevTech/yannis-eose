@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yannis EOSE — CEO Business Flow</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f8fafc;
+      color: #1A1A2E;
+    }
+    .header {
+      background: #1A1A2E;
+      color: white;
+      padding: 24px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .header .subtitle { font-size: 13px; color: #93C5FD; font-weight: 400; }
+    .header-right { font-size: 12px; color: #9CA3AF; text-align: right; }
+    .pillars-bar {
+      background: linear-gradient(90deg, #1B5FAA 0%, #7C3AED 50%, #059669 75%, #DC2626 100%);
+      padding: 12px 40px;
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .pillar-tag {
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      color: white;
+    }
+    .chart-container {
+      padding: 30px 20px;
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+    .legend {
+      background: white;
+      border-top: 2px solid #E5E7EB;
+      padding: 24px 40px;
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .legend-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.1);
+    }
+    .footer {
+      background: #1A1A2E;
+      color: #9CA3AF;
+      text-align: center;
+      padding: 16px;
+      font-size: 12px;
+    }
+    .footer a { color: #93C5FD; text-decoration: none; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>Yannis EOSE — Complete Business Flow</h1>
+      <div class="subtitle">Enterprise Operations &amp; Sales Engine · CEO Overview</div>
+    </div>
+    <div class="header-right">
+      Prepared by Rogue Developers Technologies Limited<br>
+      Confidential · March 2026
+    </div>
+  </div>
+
+  <div class="pillars-bar">
+    <div class="pillar-tag">🛡️ Revenue Insurance</div>
+    <div class="pillar-tag">🔒 Lead Fortress</div>
+    <div class="pillar-tag">💰 Financial Truth</div>
+    <div class="pillar-tag">🔴 Absolute Accountability</div>
+  </div>
+
+  <div class="chart-container">
+    <div class="mermaid">
+flowchart TB
+    classDef customer fill:#DBEAFE,stroke:#1B5FAA,stroke-width:2px,color:#1A1A2E,font-weight:bold
+    classDef edge fill:#1B5FAA,stroke:#1A1A2E,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef sales fill:#E0F2FE,stroke:#0284C7,stroke-width:2px,color:#1A1A2E
+    classDef cs fill:#FEF3C7,stroke:#D97706,stroke-width:2px,color:#1A1A2E
+    classDef logistics fill:#D1FAE5,stroke:#059669,stroke-width:2px,color:#1A1A2E
+    classDef finance fill:#FDE68A,stroke:#B45309,stroke-width:2px,color:#1A1A2E
+    classDef hr fill:#E9D5FF,stroke:#7C3AED,stroke-width:2px,color:#1A1A2E
+    classDef marketing fill:#FCE7F3,stroke:#DB2777,stroke-width:2px,color:#1A1A2E
+    classDef protection fill:#1A1A2E,stroke:#1B5FAA,stroke-width:3px,color:#FFFFFF,font-weight:bold
+    classDef audit fill:#DC2626,stroke:#991B1B,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef delivered fill:#059669,stroke:#047857,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef decision fill:#FEF9C3,stroke:#CA8A04,stroke-width:2px,color:#1A1A2E
+    classDef failover fill:#7C3AED,stroke:#5B21B6,stroke-width:2px,color:#FFFFFF,font-weight:bold
+
+    CUST["👤 Customer Sees Ad and Clicks"]:::customer
+
+    subgraph PILLAR1["🛡️ PILLAR 1 — Revenue Insurance: Never Lose a Sale"]
+        direction TB
+        EDGE["⚡ Edge Sales Form\nAlways Online via Global Network"]:::edge
+        EDGE_CHECK{"Server\nReachable?"}:::decision
+        API_OK["✅ Order Goes to Server Instantly"]:::sales
+        BUFFER["📦 Order Safely Buffered\nAuto-syncs When Server Recovers"]:::failover
+        EDGE --> EDGE_CHECK
+        EDGE_CHECK -->|"Yes"| API_OK
+        EDGE_CHECK -->|"No, Server Down"| BUFFER
+        BUFFER -->|"Auto-Recovery"| API_OK
+    end
+
+    CUST --> EDGE
+
+    DEDUP{"Duplicate\nOrder?"}:::decision
+    API_OK --> DEDUP
+    DEDUP -->|"No, New Order"| NEW_ORDER["📋 New Order Created\nStatus: Unprocessed"]:::sales
+    DEDUP -->|"Yes, Flagged"| FLAGGED["⚠️ Agent Warned:\nSimilar order exists\nCan Merge or Dismiss"]:::sales
+    FLAGGED --> NEW_ORDER
+
+    subgraph PILLAR2["🛡️ PILLAR 2 — Lead Fortress: Phone Numbers Protected"]
+        direction TB
+        DISPATCH["🔄 Auto-Assigned to Agent\nWith Fewest Pending Orders"]:::cs
+        CALL["📞 Agent Clicks Call\nSecure Voice Bridge Connects\nAgent NEVER Sees Full Number"]:::cs
+        MASK["🔒 Customer Sees: 0803****1234\nFull Number Never Exposed"]:::protection
+        DISPATCH --> CALL
+        CALL --> MASK
+    end
+
+    NEW_ORDER --> DISPATCH
+
+    CALL_RESULT{"Call\nOutcome"}:::decision
+    MASK --> CALL_RESULT
+
+    CONFIRMED["✅ Order Confirmed\nStock Reserved"]:::cs
+    CANCELLED["❌ Order Cancelled\nReason Logged"]:::cs
+    NO_ANSWER["📵 No Answer\nRescheduled for Callback"]:::cs
+
+    CALL_RESULT -->|"Customer Confirms\nCall must be over 15 sec"| CONFIRMED
+    CALL_RESULT -->|"Customer Declines"| CANCELLED
+    CALL_RESULT -->|"No Answer"| NO_ANSWER
+    NO_ANSWER -->|"Retry Later"| CALL
+
+    subgraph LOGISTICS_FLOW["📦 Logistics and Delivery"]
+        direction TB
+        ASSIGN_3PL["🏢 Assigned to\nNearest Logistics Partner"]:::logistics
+        STOCK_TRANSFER{"Stock at\n3PL Location?"}:::decision
+        TRANSFER["📤 Stock Transferred\nBoth Sides Verify Count"]:::logistics
+        RIDER["🏍️ 3PL Agent Assigns Rider"]:::logistics
+        IN_TRANSIT["🚚 Out for Delivery\nGPS Tracked"]:::logistics
+        ASSIGN_3PL --> STOCK_TRANSFER
+        STOCK_TRANSFER -->|"Yes"| RIDER
+        STOCK_TRANSFER -->|"No, Need Transfer"| TRANSFER
+        TRANSFER --> RIDER
+        RIDER --> IN_TRANSIT
+    end
+
+    CONFIRMED --> ASSIGN_3PL
+
+    DELIVERY{"Delivery\nOutcome"}:::decision
+    IN_TRANSIT --> DELIVERY
+
+    DELIVERED["✅ DELIVERED\nRevenue Recognised"]:::delivered
+    RETURNED_FLOW["↩️ Returned"]:::logistics
+    PARTIAL["📦 Partial Delivery"]:::logistics
+
+    DELIVERY -->|"Customer Accepts"| DELIVERED
+    DELIVERY -->|"Customer Rejects"| RETURNED_FLOW
+    DELIVERY -->|"Partial Accept"| PARTIAL
+    PARTIAL --> DELIVERED
+
+    RETURN_CHECK{"Sellable?"}:::decision
+    RETURNED_FLOW --> RETURN_CHECK
+    RESTOCK["♻️ Restocked\nBack in Local Inventory"]:::logistics
+    WRITTEN_OFF["🗑️ Written Off\nLogged as Loss"]:::logistics
+    RETURN_CHECK -->|"Good Condition"| RESTOCK
+    RETURN_CHECK -->|"Damaged"| WRITTEN_OFF
+
+    subgraph PILLAR3["🛡️ PILLAR 3 — Financial Truth: Real Profit Not Guesses"]
+        direction TB
+        COSTS["💰 Every Cost Layered:\nProduct + Freight + Fulfilment\n+ Delivery + Ad Spend + Commission"]:::finance
+        PROFIT["📊 TRUE NET PROFIT\n= Sale Price Minus All Costs\nSubject to Your Formula"]:::finance
+        APPROVAL["✅ All Spending Requires\nFinance Approval\nNo Self-Approval Allowed"]:::finance
+        COSTS --> PROFIT
+        PROFIT --> APPROVAL
+    end
+
+    DELIVERED --> COSTS
+
+    subgraph HR_FLOW["💼 HR and Payroll — Automated"]
+        direction TB
+        COMMISSION["📝 Commission Calculated\nBased on Delivered Orders\nRules Set by HR, No Dev Needed"]:::hr
+        CLAWBACK{"Order Later\nReturned?"}:::decision
+        DEDUCT["↩️ Auto-Deducted\nfrom Next Payout\nVisible Line Item"]:::hr
+        PAYOUT["💵 Staff Payout\nBase + Bonus - Deductions\nFull Transparent Breakdown"]:::hr
+        COMMISSION --> CLAWBACK
+        CLAWBACK -->|"Yes"| DEDUCT
+        CLAWBACK -->|"No"| PAYOUT
+        DEDUCT --> PAYOUT
+    end
+
+    DELIVERED --> COMMISSION
+    RETURNED_FLOW -.->|"Triggers Clawback"| CLAWBACK
+
+    subgraph MARKETING_FLOW["📢 Marketing Governance"]
+        direction TB
+        FUNDING["💳 HoM Sends Funds\nMedia Buyer Confirms Receipt\nDual Verification"]:::marketing
+        AD_SPEND["📸 Daily Ad Spend Logged\nMandatory Screenshot"]:::marketing
+        METRICS["📈 Auto-Calculated:\nCPA + ROAS + Delivery Rate"]:::marketing
+        HIGH_CPA["🚨 High CPA Alert\nHead of Marketing Notified"]:::marketing
+        FUNDING --> AD_SPEND
+        AD_SPEND --> METRICS
+        METRICS --> HIGH_CPA
+    end
+
+    subgraph PILLAR4["🛡️ PILLAR 4 — Absolute Accountability"]
+        direction LR
+        AUDIT["🔴 PERMANENT AUDIT TRAIL\nEvery Action · Every Actor · Every Timestamp\nCannot Be Deleted or Modified Even by Admin"]:::audit
+    end
+
+    NEW_ORDER -.->|"Logged"| AUDIT
+    CONFIRMED -.->|"Logged"| AUDIT
+    DELIVERED -.->|"Logged"| AUDIT
+    APPROVAL -.->|"Logged"| AUDIT
+    PAYOUT -.->|"Logged"| AUDIT
+    TRANSFER -.->|"Logged"| AUDIT
+    WRITTEN_OFF -.->|"Logged"| AUDIT
+
+    CEO_DASH["👑 CEO DASHBOARD\nReal-Time View of Everything\nRevenue · Profit · Teams · Stock · Marketing · Audit"]:::protection
+
+    PROFIT --> CEO_DASH
+    METRICS -.-> CEO_DASH
+    PAYOUT -.-> CEO_DASH
+    AUDIT -.-> CEO_DASH
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#DBEAFE;border-color:#1B5FAA;"></div> Customer</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#1B5FAA;"></div> Edge Network</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#E0F2FE;border-color:#0284C7;"></div> Sales &amp; Orders</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#FEF3C7;border-color:#D97706;"></div> Customer Service</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#D1FAE5;border-color:#059669;"></div> Logistics</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#FDE68A;border-color:#B45309;"></div> Finance</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#E9D5FF;border-color:#7C3AED;"></div> HR &amp; Payroll</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#FCE7F3;border-color:#DB2777;"></div> Marketing</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#DC2626;"></div> Audit Trail</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#1A1A2E;border-color:#1B5FAA;"></div> CEO / Protection</div>
+  </div>
+
+  <div class="footer">
+    Confidential — Prepared by <a href="https://www.roguedevtech.com/">Rogue Developers Technologies Limited</a> · Mohammed Kabir Kayode, CEO · March 2026
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        primaryColor: '#E0F2FE',
+        primaryTextColor: '#1A1A2E',
+        primaryBorderColor: '#1B5FAA',
+        lineColor: '#6B7280',
+        fontSize: '14px',
+      },
+      flowchart: {
+        htmlLabels: true,
+        curve: 'basis',
+        padding: 16,
+        nodeSpacing: 40,
+        rankSpacing: 50,
+      },
+    });
+  </script>
+</body>
+</html>

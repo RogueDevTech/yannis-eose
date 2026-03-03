@@ -1,25 +1,31 @@
 import {
   Injectable,
   Inject,
+  Logger,
   UnauthorizedException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 const SESSION_PREFIX = 'session:';
 const USER_SESSIONS_PREFIX = 'user_sessions:';
 const RATE_LIMIT_PREFIX = 'login_rate:';
+const RESET_TOKEN_PREFIX = 'pwd_reset:';
 const SALT_ROUNDS = 12;
+const RESET_TOKEN_TTL = 1800; // 30 minutes
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly sessionTtl: number;
   private readonly maxLoginAttempts: number;
   private readonly rateLimitWindow: number;
@@ -27,6 +33,7 @@ export class AuthService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     @Inject(REDIS) private readonly redis: Redis,
+    private readonly notifications: NotificationsService,
   ) {
     this.sessionTtl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10); // 24 hours
     this.maxLoginAttempts = 5;
@@ -130,6 +137,111 @@ export class AuthService {
    */
   async hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, SALT_ROUNDS);
+  }
+
+  /**
+   * Request a password reset. Generates a token, stores it in Redis,
+   * and sends the reset link via email.
+   * Always returns success to prevent email enumeration attacks.
+   */
+  async forgotPassword(email: string, resetBaseUrl: string): Promise<void> {
+    const [user] = await this.db
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, status: schema.users.status })
+      .from(schema.users)
+      .where(eq(schema.users.email, email))
+      .limit(1);
+
+    if (!user || user.status !== 'ACTIVE') {
+      // Don't reveal if user exists — silently return
+      this.logger.warn(`Password reset requested for unknown/inactive email: ${email}`);
+      return;
+    }
+
+    // Generate a cryptographically secure token
+    const token = randomBytes(32).toString('hex');
+
+    // Store token → userId mapping in Redis with 30-minute TTL
+    await this.redis.setex(`${RESET_TOKEN_PREFIX}${token}`, RESET_TOKEN_TTL, user.id);
+
+    // Build reset link
+    const resetUrl = `${resetBaseUrl}?token=${token}`;
+
+    // Send email (best-effort, non-blocking)
+    const html = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 0;">
+        <div style="background: #1565C0; padding: 24px 32px; border-radius: 12px 12px 0 0;">
+          <h1 style="color: #fff; margin: 0; font-size: 22px;">Password Reset</h1>
+        </div>
+        <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
+          <p style="color: #374151; font-size: 15px; line-height: 1.6; margin: 0 0 16px;">
+            Hi <strong>${user.name}</strong>,
+          </p>
+          <p style="color: #374151; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
+            We received a request to reset your password. Click the button below to set a new password. This link expires in 30 minutes.
+          </p>
+          <a href="${resetUrl}" style="display: block; text-align: center; background: #1565C0; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+            Reset Password
+          </a>
+          <p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 24px 0 0; text-align: center;">
+            If you didn't request this, you can safely ignore this email.
+          </p>
+        </div>
+      </div>
+    `;
+
+    const text = `Hi ${user.name},\n\nWe received a request to reset your password.\n\nReset your password: ${resetUrl}\n\nThis link expires in 30 minutes.\n\nIf you didn't request this, you can safely ignore this email.`;
+
+    await this.notifications.sendEmail({
+      to: user.email,
+      subject: 'Yannis EOSE — Password Reset',
+      html,
+      text,
+    });
+
+    this.logger.log(`Password reset token generated for user ${user.id}`);
+  }
+
+  /**
+   * Reset password using a valid token.
+   * Validates the token, updates the password, and invalidates all existing sessions.
+   */
+  async resetPasswordWithToken(token: string, newPassword: string): Promise<void> {
+    // Look up the token in Redis
+    const userId = await this.redis.get(`${RESET_TOKEN_PREFIX}${token}`);
+    if (!userId) {
+      throw new BadRequestException('Invalid or expired reset link. Please request a new one.');
+    }
+
+    // Verify user exists and is active
+    const [user] = await this.db
+      .select({ id: schema.users.id, status: schema.users.status })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user || user.status !== 'ACTIVE') {
+      throw new BadRequestException('Account not found or deactivated.');
+    }
+
+    // Hash the new password
+    const passwordHash = await this.hashPassword(newPassword);
+
+    // Update password in database (with actor injection for audit trail)
+    await this.db.execute(
+      sql`SELECT set_config('yannis.current_user_id', ${userId}, true)`,
+    );
+    await this.db
+      .update(schema.users)
+      .set({ passwordHash })
+      .where(eq(schema.users.id, userId));
+
+    // Invalidate the reset token (single-use)
+    await this.redis.del(`${RESET_TOKEN_PREFIX}${token}`);
+
+    // Kill all existing sessions for security
+    await this.killUserSessions(userId);
+
+    this.logger.log(`Password reset completed for user ${userId}`);
   }
 
   /**

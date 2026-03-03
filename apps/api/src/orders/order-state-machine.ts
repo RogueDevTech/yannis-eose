@@ -32,7 +32,7 @@ const ALLOWED_TRANSITIONS: TransitionRule[] = [
   { from: 'DISPATCHED', to: 'IN_TRANSIT', gate: 'Rider confirms departure' },
 
   // Delivery outcomes
-  { from: 'IN_TRANSIT', to: 'DELIVERED' },
+  { from: 'IN_TRANSIT', to: 'DELIVERED', gate: 'OTP match required (SuperAdmin override allowed)' },
   { from: 'IN_TRANSIT', to: 'PARTIALLY_DELIVERED', gate: 'Must specify delivered qty vs returned qty' },
   { from: 'IN_TRANSIT', to: 'RETURNED', gate: 'Mandatory return reason' },
 

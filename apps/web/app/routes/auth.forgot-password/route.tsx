@@ -1,0 +1,156 @@
+import { json, redirect } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
+import { apiRequest, getCurrentUser } from '~/lib/api.server';
+
+export const meta: MetaFunction = () => {
+  return [
+    { title: 'Yannis EOSE — Forgot Password' },
+    { name: 'description', content: 'Reset your Yannis EOSE password' },
+  ];
+};
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await getCurrentUser(request);
+  if (user) return redirect('/admin');
+  return json({});
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const email = formData.get('email')?.toString()?.trim().toLowerCase() ?? '';
+
+  if (!email) {
+    return json({ error: 'Please enter your email address.' }, { status: 400 });
+  }
+
+  const url = new URL(request.url);
+  const resetBaseUrl = `${url.protocol}//${url.host}/auth/reset-password`;
+
+  const res = await apiRequest<{ message: string }>('/auth/forgot-password', {
+    method: 'POST',
+    body: { email, resetBaseUrl },
+  });
+
+  if (res.ok) {
+    return json({ success: res.data.message });
+  }
+
+  return json({ success: 'If an account with that email exists, a reset link has been sent.' });
+}
+
+const mobileInput =
+  'max-lg:!bg-surface-800 max-lg:!border-surface-700 max-lg:!text-surface-100 max-lg:!placeholder-surface-500';
+
+export default function ForgotPasswordRoute() {
+  const actionData = useActionData<{ error?: string; success?: string }>();
+  const navigation = useNavigation();
+  const isSubmitting = navigation.state === 'submitting';
+
+  return (
+    <div className="flex min-h-screen">
+      {/* Left panel — brand (desktop only) */}
+      <div className="hidden lg:flex lg:w-1/2 bg-surface-900 items-center justify-center p-12">
+        <div className="text-center">
+          <div className="flex items-center justify-center mb-6">
+            <img
+              src="/assets/yannis-logo1.png"
+              alt="Yannis"
+              className="h-14 w-auto max-w-full object-contain"
+            />
+          </div>
+          <p className="text-surface-400 text-lg">Enterprise Operations & Sales Engine</p>
+        </div>
+      </div>
+
+      {/* Right panel — form */}
+      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white lg:dark:bg-surface-950">
+        <div className="w-full max-w-sm space-y-8">
+          {/* Mobile logo */}
+          <div className="lg:hidden text-center">
+            <div className="flex items-center justify-center mb-2">
+              <img
+                src="/assets/yannis-logo1.png"
+                alt="Yannis"
+                className="h-10 w-auto max-w-full object-contain"
+              />
+            </div>
+            <p className="text-surface-400 text-sm">Enterprise Operations & Sales Engine</p>
+          </div>
+
+          <div>
+            <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
+              Reset your password
+            </h2>
+            <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-400">
+              Enter your email address and we'll send you a reset link.
+            </p>
+          </div>
+
+          {actionData?.error && (
+            <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 lg:dark:bg-danger-700/20 border border-danger-700/50 lg:border-danger-200 lg:dark:border-danger-700/50 px-4 py-3">
+              <p className="text-sm text-danger-400 lg:text-danger-700 lg:dark:text-danger-500">{actionData.error}</p>
+            </div>
+          )}
+
+          {actionData?.success ? (
+            <>
+              <div className="rounded-lg bg-success-700/20 lg:bg-success-50 lg:dark:bg-success-700/20 border border-success-700/50 lg:border-success-200 lg:dark:border-success-700/50 px-4 py-3">
+                <p className="text-sm text-success-400 lg:text-success-700 lg:dark:text-success-500">{actionData.success}</p>
+              </div>
+
+              <Link
+                to="/auth"
+                className="btn-primary w-full flex items-center justify-center gap-2"
+              >
+                Back to sign in
+              </Link>
+            </>
+          ) : (
+            <Form method="post" className="space-y-4">
+              <div>
+                <label
+                  htmlFor="email"
+                  className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+                >
+                  Email address
+                </label>
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  className={`input ${mobileInput}`}
+                  placeholder="you@company.com"
+                  autoFocus
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="btn-primary w-full flex items-center justify-center gap-2"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  'Send reset link'
+                )}
+              </button>
+
+              <div className="text-center">
+                <Link
+                  to="/auth"
+                  className="text-sm text-brand-400 hover:text-brand-300 lg:text-brand-500 lg:hover:text-brand-600"
+                >
+                  Back to sign in
+                </Link>
+              </div>
+            </Form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -3,17 +3,104 @@ import { TrpcMiddleware } from './trpc.middleware';
 import { OrdersModule } from '../orders/orders.module';
 import { OrdersService } from '../orders/orders.service';
 import { setOrdersService } from './routers/orders.router';
+import { UsersModule } from '../users/users.module';
+import { UsersService } from '../users/users.service';
+import { setUsersService } from './routers/users.router';
+import { ProductsModule } from '../products/products.module';
+import { ProductsService } from '../products/products.service';
+import { setProductsService } from './routers/products.router';
+import { ProductCategoriesService } from '../products/product-categories.service';
+import { setProductCategoriesService } from './routers/product-categories.router';
+import { InventoryModule } from '../inventory/inventory.module';
+import { InventoryService } from '../inventory/inventory.service';
+import { setInventoryService } from './routers/inventory.router';
+import { LogisticsModule } from '../logistics/logistics.module';
+import { LogisticsService } from '../logistics/logistics.service';
+import { setLogisticsService } from './routers/logistics.router';
+import { MarketingModule } from '../marketing/marketing.module';
+import { MarketingService } from '../marketing/marketing.service';
+import { setMarketingService } from './routers/marketing.router';
+import { FinanceModule } from '../finance/finance.module';
+import { FinanceService } from '../finance/finance.service';
+import { setFinanceService } from './routers/finance.router';
+import { HrModule } from '../hr/hr.module';
+import { HrService } from '../hr/hr.service';
+import { setHrService } from './routers/hr.router';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { NotificationsService } from '../notifications/notifications.service';
+import { setNotificationsService } from './routers/notifications.router';
+import { AuditModule } from '../audit/audit.module';
+import { AuditService } from '../audit/audit.service';
+import { setAuditService } from './routers/audit.router';
+import { VoipModule } from '../voip/voip.module';
+import { VoipService } from '../voip/voip.service';
+import { setVoipService } from './routers/orders.router';
+import { setDashboardServices } from './routers/dashboard.router';
+import { setVoipServiceForRouter } from './routers/voip.router';
+import { SettingsModule } from '../settings/settings.module';
+import { SettingsService } from '../settings/settings.service';
+import { setSettingsService } from './routers/settings.router';
+import { setCartService } from './routers/cart.router';
+import { CartModule } from '../cart/cart.module';
+import { CartService } from '../cart/cart.service';
+import { PermissionsModule } from '../permissions/permissions.module';
+import { PermissionRequestsModule } from '../permission-requests/permission-requests.module';
+import { PermissionRequestsService } from '../permission-requests/permission-requests.service';
+import { setPermissionRequestsService } from './routers/permission-requests.router';
 
 @Module({
-  imports: [OrdersModule],
+  imports: [
+    OrdersModule, UsersModule, ProductsModule, InventoryModule,
+    LogisticsModule, MarketingModule, FinanceModule, HrModule,
+    NotificationsModule, AuditModule, VoipModule, SettingsModule, CartModule,
+    PermissionsModule, PermissionRequestsModule,
+  ],
   providers: [TrpcMiddleware],
 })
 export class TrpcModule implements NestModule, OnModuleInit {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly permissionRequestsService: PermissionRequestsService,
+    private readonly ordersService: OrdersService,
+    private readonly usersService: UsersService,
+    private readonly productsService: ProductsService,
+    private readonly productCategoriesService: ProductCategoriesService,
+    private readonly inventoryService: InventoryService,
+    private readonly logisticsService: LogisticsService,
+    private readonly marketingService: MarketingService,
+    private readonly financeService: FinanceService,
+    private readonly hrService: HrService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditService: AuditService,
+    private readonly voipService: VoipService,
+    private readonly settingsService: SettingsService,
+    private readonly cartService: CartService,
+  ) {}
 
   onModuleInit() {
     // Inject NestJS service instances into tRPC routers
+    setPermissionRequestsService(this.permissionRequestsService);
     setOrdersService(this.ordersService);
+    setUsersService(this.usersService);
+    setProductsService(this.productsService);
+    setProductCategoriesService(this.productCategoriesService);
+    setInventoryService(this.inventoryService);
+    setLogisticsService(this.logisticsService);
+    setMarketingService(this.marketingService);
+    setFinanceService(this.financeService);
+    setHrService(this.hrService);
+    setNotificationsService(this.notificationsService);
+    setAuditService(this.auditService);
+    setVoipService(this.voipService);
+    setVoipServiceForRouter(this.voipService);
+    setSettingsService(this.settingsService);
+    setCartService(this.cartService);
+    setDashboardServices({
+      orders: this.ordersService,
+      finance: this.financeService,
+      marketing: this.marketingService,
+      hr: this.hrService,
+      inventory: this.inventoryService,
+    });
   }
 
   configure(consumer: MiddlewareConsumer) {
