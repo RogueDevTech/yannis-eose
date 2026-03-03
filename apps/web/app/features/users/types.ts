@@ -127,9 +127,12 @@ export interface UserAuditEntry {
   id: string;
   action: string;
   tableName: string;
+  recordId?: string;
   oldValues: Record<string, unknown> | null;
   newValues: Record<string, unknown> | null;
   createdAt: string;
+  /** Raw row data (alias for newValues) — used by formatActivityDescription */
+  data?: Record<string, unknown>;
 }
 
 export interface UserMarketingMetrics {

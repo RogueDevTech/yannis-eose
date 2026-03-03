@@ -1,7 +1,7 @@
 import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { DateFilterBar } from '~/components/dashboard/DateFilterBar';
-import type { DashboardData, DashboardLoaderData, DashboardPageProps } from './types';
+import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 
 const STATUS_COLORS: Record<string, string> = {
   UNPROCESSED: 'badge-warning',
@@ -44,7 +44,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
             {getGreeting()}, {firstName}
           </h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 font-medium mt-1">
+          <p className="text-sm text-surface-800 dark:text-surface-200 font-medium mt-1">
             {getRoleDescription(role)}
           </p>
         </div>
@@ -104,12 +104,12 @@ function GenericFallbackDashboard() {
     <div className="card">
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <div className="w-12 h-12 rounded-full bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-4">
-          <svg className="w-6 h-6 text-surface-500 dark:text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg className="w-6 h-6 text-surface-500 dark:text-surface-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
           </svg>
         </div>
         <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Welcome</h2>
-        <p className="text-sm text-surface-600 dark:text-surface-400 mb-6 max-w-sm">
+        <p className="text-sm text-surface-600 dark:text-surface-200 mb-6 max-w-sm">
           Use the sidebar to navigate to your modules, or visit settings to manage your account.
         </p>
         <Link
@@ -126,7 +126,7 @@ function GenericFallbackDashboard() {
 
 // ── SuperAdmin Dashboard ─────────────────────────────────
 
-function SuperAdminDashboard({ data }: { data: DashboardLoaderData }) {
+function SuperAdminDashboard({ data }: { data: DashboardPageData }) {
   const counts = data.orderCounts as Record<string, number>;
   const unprocessed = counts['UNPROCESSED'] ?? 0;
 
@@ -174,7 +174,7 @@ function SuperAdminDashboard({ data }: { data: DashboardLoaderData }) {
           ].map((item) => (
             <div key={item.key} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
               <p className={`text-2xl font-bold ${item.color}`}>{counts[item.key] ?? 0}</p>
-              <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">{item.label}</p>
+              <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{item.label}</p>
             </div>
           ))}
         </div>
@@ -193,7 +193,7 @@ function SuperAdminDashboard({ data }: { data: DashboardLoaderData }) {
 
 // ── CS Dashboard ─────────────────────────────────────────
 
-function CSDashboard({ data, role }: { data: DashboardLoaderData; role: string }) {
+function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) {
   const counts = data.orderCounts as Record<string, number>;
   const unprocessed = counts['UNPROCESSED'] ?? 0;
   const engaged = counts['CS_ENGAGED'] ?? 0;
@@ -213,7 +213,7 @@ function CSDashboard({ data, role }: { data: DashboardLoaderData; role: string }
       {role === 'HEAD_OF_CS' && (
         <div className="card">
           <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Team Management</h2>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mb-4">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
             Manage agent assignments and monitor queue health.
           </p>
           <div className="flex gap-2">
@@ -230,7 +230,7 @@ function CSDashboard({ data, role }: { data: DashboardLoaderData; role: string }
 
 // ── Marketing Dashboard ──────────────────────────────────
 
-function MarketingDashboard({ data, role }: { data: DashboardLoaderData; role: string }) {
+function MarketingDashboard({ data, role }: { data: DashboardPageData; role: string }) {
   return (
     <>
       <DeferredSection resolve={data.metrics} skeleton="stat">
@@ -247,7 +247,7 @@ function MarketingDashboard({ data, role }: { data: DashboardLoaderData; role: s
       {role === 'HEAD_OF_MARKETING' && (
         <div className="card">
           <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Team Management</h2>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mb-4">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
             Manage media buyers and monitor team performance.
           </p>
           <div className="flex gap-2">
@@ -264,9 +264,9 @@ function MarketingDashboard({ data, role }: { data: DashboardLoaderData; role: s
             <div className="card">
               <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Performance Summary</h2>
               <div className="space-y-3">
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Total Orders</span><span className="text-sm font-medium text-surface-900 dark:text-white">{metrics.totalOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Delivered Revenue</span><span className="text-sm font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(metrics.deliveredRevenue).toLocaleString()}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Total Orders</span><span className="text-sm font-medium text-surface-900 dark:text-white">{metrics.totalOrders}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivered Revenue</span><span className="text-sm font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(metrics.deliveredRevenue).toLocaleString()}</span></div>
               </div>
             </div>
 
@@ -280,7 +280,7 @@ function MarketingDashboard({ data, role }: { data: DashboardLoaderData; role: s
 
 // ── Finance Dashboard ────────────────────────────────────
 
-function FinanceDashboard({ data }: { data: DashboardLoaderData }) {
+function FinanceDashboard({ data }: { data: DashboardPageData }) {
   return (
     <>
       <DeferredSection resolve={data.profit} skeleton="stat">
@@ -299,12 +299,12 @@ function FinanceDashboard({ data }: { data: DashboardLoaderData }) {
                 <div className="card">
                   <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Breakdown</h2>
                   <div className="space-y-3">
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Landed COGS</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.landedCost).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Delivery Fees</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.deliveryFee).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Ad Spend</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.adSpend).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Commission</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.commission).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Fulfillment</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.fulfillmentCost).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Operational Loss</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.operationalLoss).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Landed COGS</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.landedCost).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivery Fees</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.deliveryFee).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Ad Spend</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.adSpend).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Commission</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.commission).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Fulfillment</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.fulfillmentCost).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Operational Loss</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.operationalLoss).toLocaleString()}</span></div>
                     <div className="pt-2 border-t border-surface-200 dark:border-surface-700 flex justify-between">
                       <span className="text-sm font-semibold text-surface-900 dark:text-white">True Profit</span>
                       <span className={`text-sm font-bold ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
@@ -325,7 +325,7 @@ function FinanceDashboard({ data }: { data: DashboardLoaderData }) {
 
 // ── Logistics Dashboard ──────────────────────────────────
 
-function LogisticsDashboard({ data, role }: { data: DashboardLoaderData; role: string }) {
+function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: string }) {
   const counts = data.orderCounts as Record<string, number>;
   const allocated = counts['ALLOCATED'] ?? 0;
   const dispatched = counts['DISPATCHED'] ?? 0;
@@ -345,10 +345,10 @@ function LogisticsDashboard({ data, role }: { data: DashboardLoaderData; role: s
         <div className="card">
           <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Delivery Pipeline</h2>
           <div className="space-y-3">
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Awaiting Allocation</span><span className="text-sm font-medium">{counts['CONFIRMED'] ?? 0}</span></div>
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Ready for Dispatch</span><span className="text-sm font-medium">{allocated}</span></div>
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Active Deliveries</span><span className="text-sm font-medium">{inTransit}</span></div>
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-400">Returns Queue</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{counts['RETURNED'] ?? 0}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Awaiting Allocation</span><span className="text-sm font-medium">{counts['CONFIRMED'] ?? 0}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Ready for Dispatch</span><span className="text-sm font-medium">{allocated}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Active Deliveries</span><span className="text-sm font-medium">{inTransit}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Returns Queue</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{counts['RETURNED'] ?? 0}</span></div>
           </div>
         </div>
         <QuickActionsCard role={role} unprocessed={0} />
@@ -359,7 +359,7 @@ function LogisticsDashboard({ data, role }: { data: DashboardLoaderData; role: s
 
 // ── Warehouse Dashboard ──────────────────────────────────
 
-function WarehouseDashboard({ data }: { data: DashboardLoaderData }) {
+function WarehouseDashboard({ data }: { data: DashboardPageData }) {
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -374,7 +374,7 @@ function WarehouseDashboard({ data }: { data: DashboardLoaderData }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
           <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Inventory Management</h2>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mb-4">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
             Monitor stock levels, process intakes, and manage transfers.
           </p>
           <div className="flex gap-2">
@@ -391,7 +391,7 @@ function WarehouseDashboard({ data }: { data: DashboardLoaderData }) {
 
 // ── HR Dashboard ─────────────────────────────────────────
 
-function HRDashboard({ data }: { data: DashboardLoaderData }) {
+function HRDashboard({ data }: { data: DashboardPageData }) {
   return (
     <DeferredSection resolve={data.payoutSummary} skeleton="stat">
       {(summary) => {
@@ -413,12 +413,12 @@ function HRDashboard({ data }: { data: DashboardLoaderData }) {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
               <div className="card">
                 <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Payroll Actions</h2>
-                <p className="text-sm text-surface-800 dark:text-surface-400 mb-4">
+                <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
                   Generate payouts, manage commission plans, and process adjustments.
                 </p>
                 <div className="flex gap-2">
-                  <Link to="/admin/hr" prefetch="intent" className="btn-primary btn-sm">HR & Payroll</Link>
-                  <Link to="/admin/users" prefetch="intent" className="btn-secondary btn-sm">Staff Directory</Link>
+                  <Link to="/hr/payroll" prefetch="intent" className="btn-primary btn-sm">HR & Payroll</Link>
+                  <Link to="/hr/users" prefetch="intent" className="btn-secondary btn-sm">Staff Directory</Link>
                 </div>
               </div>
 
@@ -432,10 +432,10 @@ function HRDashboard({ data }: { data: DashboardLoaderData }) {
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Pending Approval</h3>
-                      <p className="text-sm text-surface-800 dark:text-surface-400 mt-1">
+                      <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
                         {summary['DRAFT']?.count ?? 0} draft payouts totaling {'\u20A6'}{draftTotal.toLocaleString()} awaiting review.
                       </p>
-                      <Link to="/admin/hr" prefetch="intent" className="text-sm text-brand-500 hover:text-brand-600 font-medium mt-2 inline-block">
+                      <Link to="/hr/payroll" prefetch="intent" className="text-sm text-brand-500 hover:text-brand-600 font-medium mt-2 inline-block">
                         Review payouts →
                       </Link>
                     </div>
@@ -470,7 +470,7 @@ function RecentOrdersCard({ orders }: { orders: DashboardData['recentOrders'] })
             >
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-surface-900 dark:text-surface-100 truncate">{order.customerName}</p>
-                <p className="text-sm text-surface-700 dark:text-surface-400">
+                <p className="text-sm text-surface-700 dark:text-surface-200">
                   {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
@@ -486,7 +486,7 @@ function RecentOrdersCard({ orders }: { orders: DashboardData['recentOrders'] })
           ))}
         </div>
       ) : (
-        <div className="flex items-center justify-center h-32 text-surface-700 dark:text-surface-500 text-sm">No orders yet</div>
+        <div className="flex items-center justify-center h-32 text-surface-700 dark:text-surface-300 text-sm">No orders yet</div>
       )}
     </div>
   );
@@ -510,7 +510,7 @@ function QuickActionsCard({ role, unprocessed }: { role: string; unprocessed: nu
             </div>
             <div>
               <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{action.label}</p>
-              <p className="text-sm text-surface-800 dark:text-surface-400">{action.description}</p>
+              <p className="text-sm text-surface-800 dark:text-surface-200">{action.description}</p>
             </div>
           </Link>
         ))}
@@ -528,7 +528,7 @@ function getQuickActions(role: string, unprocessed: number) {
     case 'SUPER_ADMIN':
       return [
         { href: '/admin/products/new', label: 'Add Product', description: 'Create a new product', icon: 'add', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
-        { href: '/admin/users/new', label: 'Add Staff', description: 'Invite a team member', icon: 'users', bg: 'bg-success-50 dark:bg-success-700/20 text-success-600 dark:text-success-400' },
+        { href: '/hr/users/new', label: 'Add Staff', description: 'Invite a team member', icon: 'users', bg: 'bg-success-50 dark:bg-success-700/20 text-success-600 dark:text-success-400' },
         ...common,
         { href: '/admin/finance', label: 'Finance', description: 'True profit reports', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
       ];
@@ -536,7 +536,7 @@ function getQuickActions(role: string, unprocessed: number) {
     case 'MEDIA_BUYER':
       return [
         { href: '/admin/marketing', label: 'Marketing', description: 'Funding & ad spend', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
-        { href: '/admin/campaigns', label: 'Campaigns', description: 'Manage campaigns', icon: 'orders', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
+        { href: '/admin/forms', label: 'Forms', description: 'Manage forms', icon: 'orders', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
       ];
     case 'FINANCE_OFFICER':
       return [
@@ -552,7 +552,7 @@ function getQuickActions(role: string, unprocessed: number) {
     default:
       return [
         ...common,
-        { href: '/admin/settings', label: 'Settings', description: 'Account settings', icon: 'settings', bg: 'bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400' },
+        { href: '/admin/settings', label: 'Settings', description: 'Account settings', icon: 'settings', bg: 'bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-200' },
       ];
   }
 }
@@ -569,7 +569,7 @@ function StatCard({ label, value, icon, highlight }: { label: string; value: str
   return (
     <div className="card">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-surface-800 dark:text-surface-400 uppercase tracking-wider">{label}</p>
+        <p className="text-xs font-semibold text-surface-800 dark:text-surface-200 uppercase tracking-wider">{label}</p>
         <div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}>
           <StatIcon type={icon} />
         </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import type { AuthActionData, AuthPageProps } from './types';
 
 /**
@@ -83,7 +84,7 @@ function LoginForm({
         <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
           Sign in to your account
         </h2>
-        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-400">
+        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
           Enter your credentials to access the dashboard
         </p>
       </div>
@@ -192,13 +193,9 @@ function LoginForm({
           </div>
         </div>
 
-        <button type="submit" className="btn-primary w-full flex items-center justify-center gap-2" disabled={isSubmitting}>
-          {isSubmitting ? (
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          ) : (
-            'Sign in'
-          )}
-        </button>
+        <Button type="submit" variant="primary" className="w-full" loading={isSubmitting} loadingText="Signing in...">
+          Sign in
+        </Button>
       </Form>
     </>
   );
@@ -234,7 +231,7 @@ function SetupForm({
           </span>
         </div>
         <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">Create Super Admin</h2>
-        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-400">
+        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
           Set up the first administrator account. This can only be done once.
         </p>
       </div>
@@ -367,13 +364,9 @@ function SetupForm({
           />
         </div>
 
-        <button type="submit" className="btn-primary w-full flex items-center justify-center gap-2" disabled={isSubmitting}>
-          {isSubmitting ? (
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          ) : (
-            'Create Super Admin'
-          )}
-        </button>
+        <Button type="submit" variant="primary" className="w-full" loading={isSubmitting} loadingText="Creating...">
+          Create Super Admin
+        </Button>
       </Form>
     </>
   );

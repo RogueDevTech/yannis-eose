@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Form, useNavigation, Link } from '@remix-run/react';
+import { AmountInput } from '~/components/ui/amount-input';
+import { Button } from '~/components/ui/button';
+import { InlineNotification } from '~/components/ui/inline-notification';
 
 interface CategoryOption {
   id: string;
@@ -51,7 +54,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
     <div className="w-full space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <Link to="/admin/products" className="text-surface-800 dark:text-surface-400 hover:text-brand-500">
+        <Link to="/admin/products" className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
           Products
         </Link>
         <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -62,7 +65,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
 
       <div>
         <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Add Product</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-400 mt-1">
+        <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
           Add a new product to the catalog with bundle offers and stock thresholds.
         </p>
       </div>
@@ -110,7 +113,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
             ) : (
               <div>
                 <input id="category" name="category" type="text" className="input" placeholder="e.g. Skincare" />
-                <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                   <Link to="/admin/categories" className="text-brand-500 hover:text-brand-600">
                     Create categories
                   </Link>{' '}
@@ -133,7 +136,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Offer Bundles</h2>
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                 Define pricing tiers. E.g. &quot;Buy 1 Get 1 Free&quot; = 2 units at &#8358;16,500
               </p>
             </div>
@@ -192,15 +195,13 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
                   <label htmlFor={`offer-price-${index}`} className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                     Price (&#8358;)
                   </label>
-                  <input
+                  <AmountInput
                     id={`offer-price-${index}`}
-                    type="text"
                     required
-                    pattern="^\d+(\.\d{1,2})?$"
                     className="input py-2 text-sm"
-                    placeholder="16500.00"
+                    placeholder="16,500.00"
                     value={offer.price}
-                    onChange={(e) => updateOffer(index, 'price', e.target.value)}
+                    onChange={(v) => updateOffer(index, 'price', v)}
                   />
                 </div>
                 {offers.length > 1 && (
@@ -228,22 +229,22 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
             <label htmlFor="costPrice" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
               Cost Price per Unit (&#8358;)
             </label>
-            <input
+            <AmountInput
               id="costPrice"
               name="costPrice"
-              type="text"
               required
-              pattern="^\d+(\.\d{1,2})?$"
               className="input"
               placeholder="0.00"
             />
-            <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+            <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
               Only visible to Finance and SuperAdmin roles.
             </p>
           </div>
-          <p className="text-xs text-surface-600 dark:text-surface-400">
-            Add stock after creating the product via Inventory → Stock Intake.
-          </p>
+          <InlineNotification
+            variant="info"
+            message="Add stock after creating the product via Inventory → Stock Intake."
+            action={{ label: 'Stock Intake', href: '/admin/inventory' }}
+          />
         </div>
 
         {/* Actions */}
@@ -251,9 +252,9 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
           <Link to="/admin/products" className="btn-secondary w-full sm:w-auto">
             Cancel
           </Link>
-          <button type="submit" className="btn-primary w-full sm:w-auto" disabled={isSubmitting || offers.length === 0}>
-            {isSubmitting ? 'Creating...' : 'Create Product'}
-          </button>
+          <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isSubmitting} loadingText="Creating..." disabled={offers.length === 0}>
+            Create Product
+          </Button>
         </div>
       </Form>
     </div>

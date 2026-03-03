@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Form, useFetcher, useNavigate } from '@remix-run/react';
 import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
+import { Button } from '~/components/ui/button';
+import { DeferredSection } from '~/components/ui/deferred-section';
 
 interface Notification {
   id: string;
@@ -21,8 +23,9 @@ interface HeaderProps {
   } | null;
   sidebarCollapsed: boolean;
   darkMode: boolean;
-  notifications?: Notification[];
-  unreadCount?: number;
+  notificationsPromise: Promise<{ notifications: Notification[]; unreadCount: number }>;
+  realtimeNotifications?: Notification[];
+  realtimeCount?: number;
   socketConnected?: boolean;
   onToggleDarkMode: () => void;
   onMobileMenuToggle: () => void;
@@ -57,7 +60,7 @@ function getNotificationLink(notif: Notification): string | null {
   if (data.transferId) return '/admin/transfers';
   if (data.productId) return `/admin/products`;
   if (data.fundingId) return '/admin/marketing';
-  if (data.payoutId) return '/admin/hr';
+  if (data.payoutId) return '/hr/payroll';
   if (data.approvalId) return '/admin/finance';
   if (data.locationId) return '/admin/logistics';
   if (data.link && typeof data.link === 'string') return data.link;
@@ -76,7 +79,7 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export function Header({ user, sidebarCollapsed, darkMode, notifications = [], unreadCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle }: HeaderProps) {
+export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -166,7 +169,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notifications = [], u
         {/* Mobile hamburger */}
         <button
           onClick={onMobileMenuToggle}
-          className="lg:hidden p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-500 dark:hover:bg-surface-800 transition-colors"
+          className="lg:hidden p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -177,10 +180,10 @@ export function Header({ user, sidebarCollapsed, darkMode, notifications = [], u
         <button
           type="button"
           onClick={() => setSearchOpen(true)}
-          className="relative w-full hidden sm:flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm text-surface-800 bg-surface-50 dark:text-surface-400 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg hover:border-surface-300 dark:hover:border-surface-600 transition-colors"
+          className="relative w-full hidden sm:flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm text-surface-800 bg-surface-50 dark:text-surface-200 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg hover:border-surface-300 dark:hover:border-surface-600 transition-colors"
         >
           <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-700 dark:text-surface-400"
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-700 dark:text-surface-200"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -204,7 +207,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notifications = [], u
         {/* Dark mode toggle */}
         <button
           onClick={onToggleDarkMode}
-          className="p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-500 dark:hover:bg-surface-800 transition-colors"
+          className="p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
           title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {darkMode ? (
@@ -218,156 +221,159 @@ export function Header({ user, sidebarCollapsed, darkMode, notifications = [], u
           )}
         </button>
 
-        {/* Notifications bell */}
+        {/* Notifications bell — deferred so layout loads immediately */}
         <div className="relative">
-          <button
-            ref={notifTriggerRef}
-            onClick={() => setNotifOpen(!notifOpen)}
-            className="relative p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-500 dark:hover:bg-surface-800 transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
-              />
-            </svg>
-            {/* Socket connection indicator */}
-            {socketConnected !== undefined && (
-              <span
-                className={`absolute bottom-0.5 left-0.5 w-2 h-2 rounded-full border border-white dark:border-surface-900 ${
-                  socketConnected ? 'bg-success-500' : 'bg-danger-500'
-                }`}
-                title={socketConnected ? 'Real-time connected' : 'Real-time disconnected'}
-              />
-            )}
-            {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold bg-danger-500 text-white rounded-full">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
-          </button>
-
-          {/* Notification drawer - full-page modal, right-aligned, full height */}
-          {notifOpen &&
-            createPortal(
-              <>
-                {/* Backdrop */}
-                <div
-                  className="fixed inset-0 z-[100] bg-black/40 dark:bg-black/60 backdrop-blur-sm"
-                  onClick={() => setNotifOpen(false)}
-                  aria-hidden="true"
-                />
-                {/* Panel - full height, right-aligned */}
-                <div
-                  ref={notifPanelRef}
-                  className="fixed top-0 right-0 h-full w-full max-w-md sm:max-w-lg bg-white dark:bg-surface-800 shadow-2xl z-[101] flex flex-col animate-slide-in-right"
-                  role="dialog"
-                  aria-label="Notifications"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* Header */}
-                  <div className="flex items-center justify-between px-4 py-4 border-b border-surface-100 dark:border-surface-700 flex-shrink-0">
-                    <h3 className="text-base font-semibold text-surface-900 dark:text-white">
-                      Notifications
-                      {unreadCount > 0 && (
-                        <span className="ml-1.5 text-sm text-surface-800 dark:text-surface-500 font-normal">
-                          ({unreadCount} unread)
-                        </span>
-                      )}
-                    </h3>
-                    <div className="flex items-center gap-2">
-                      {unreadCount > 0 && (
-                        <button
-                          onClick={handleMarkAllRead}
-                          className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium"
-                        >
-                          Mark all read
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setNotifOpen(false)}
-                        className="p-1.5 rounded-lg text-surface-600 hover:bg-surface-100 dark:text-surface-400 dark:hover:bg-surface-700 transition-colors"
-                        aria-label="Close notifications"
-                      >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Notifications list - full height scrollable */}
-                  <div className="flex-1 overflow-y-auto min-h-0">
-                    {notifications.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center h-full px-4 py-12 text-center">
-                        <svg className="w-12 h-12 text-surface-400 dark:text-surface-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-                        </svg>
-                        <p className="text-sm text-surface-600 dark:text-surface-500">No notifications yet</p>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col">
-                        {notifications.map((n: Notification) => {
-                          const link = getNotificationLink(n);
-                          const dotColor = NOTIFICATION_COLORS[n.type] ?? 'bg-surface-400';
-                          return (
-                            <button
-                              key={n.id}
-                              type="button"
-                              onClick={() => handleNotificationClick(n)}
-                              className={`w-full text-left px-4 py-3 border-b border-surface-50 dark:border-surface-700/50 hover:bg-surface-50 dark:hover:bg-surface-700/30 transition-colors ${
-                                link ? 'cursor-pointer' : 'cursor-default'
-                              } ${!n.read ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}
-                            >
-                              <div className="flex items-start gap-2.5">
-                                <div className={`w-2 h-2 mt-1.5 rounded-full flex-shrink-0 ${
-                                  !n.read ? dotColor : 'bg-transparent'
-                                }`} />
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-surface-900 dark:text-surface-100 leading-tight">
-                                    {n.title}
-                                  </p>
-                                  {n.body && (
-                                    <p className="text-xs text-surface-800 dark:text-surface-400 mt-0.5 line-clamp-2">
-                                      {n.body}
-                                    </p>
-                                  )}
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <p className="text-[11px] text-surface-700 dark:text-surface-500">
-                                      {timeAgo(n.createdAt)}
-                                    </p>
-                                    {link && (
-                                      <span className="text-[11px] text-brand-500 dark:text-brand-400">
-                                        View →
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+          <DeferredSection resolve={notificationsPromise} skeleton="inline">
+            {({ notifications, unreadCount }) => {
+              const mergedNotifications = [...realtimeNotifications, ...notifications];
+              const mergedUnreadCount = unreadCount + realtimeCount;
+              return (
+                <>
+                  <button
+                    ref={notifTriggerRef}
+                    onClick={() => setNotifOpen(!notifOpen)}
+                    className="relative p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
+                      />
+                    </svg>
+                    {socketConnected !== undefined && (
+                      <span
+                        className={`absolute bottom-0.5 left-0.5 w-2 h-2 rounded-full border border-white dark:border-surface-900 ${
+                          socketConnected ? 'bg-success-500' : 'bg-danger-500'
+                        }`}
+                        title={socketConnected ? 'Real-time connected' : 'Real-time disconnected'}
+                      />
                     )}
-                  </div>
+                    {mergedUnreadCount > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold bg-danger-500 text-white rounded-full">
+                        {mergedUnreadCount > 99 ? '99+' : mergedUnreadCount}
+                      </span>
+                    )}
+                  </button>
 
-                  {/* Footer */}
-                  {notifications.length > 0 && (
-                    <div className="px-4 py-3 border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
-                      <a
-                        href="/admin/notifications"
-                        className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium"
-                        onClick={() => setNotifOpen(false)}
-                      >
-                        View all notifications
-                      </a>
-                    </div>
-                  )}
-                </div>
-              </>,
-              document.body
-            )}
+                  {notifOpen &&
+                    createPortal(
+                      <>
+                        <div
+                          className="fixed inset-0 z-[100] bg-black/40 dark:bg-black/60 backdrop-blur-sm"
+                          onClick={() => setNotifOpen(false)}
+                          aria-hidden="true"
+                        />
+                        <div
+                          ref={notifPanelRef}
+                          className="fixed top-0 right-0 h-full w-full max-w-md sm:max-w-lg bg-white dark:bg-surface-800 shadow-2xl z-[101] flex flex-col animate-slide-in-right"
+                          role="dialog"
+                          aria-label="Notifications"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-between px-4 py-4 border-b border-surface-100 dark:border-surface-700 flex-shrink-0">
+                            <h3 className="text-base font-semibold text-surface-900 dark:text-white">
+                              Notifications
+                              {mergedUnreadCount > 0 && (
+                                <span className="ml-1.5 text-sm text-surface-800 dark:text-surface-300 font-normal">
+                                  ({mergedUnreadCount} unread)
+                                </span>
+                              )}
+                            </h3>
+                            <div className="flex items-center gap-2">
+                              {mergedUnreadCount > 0 && (
+                                <button
+                                  onClick={handleMarkAllRead}
+                                  className="text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium"
+                                >
+                                  Mark all read
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setNotifOpen(false)}
+                                className="p-1.5 rounded-lg text-surface-600 hover:bg-surface-100 dark:text-surface-200 dark:hover:bg-surface-700 transition-colors"
+                                aria-label="Close notifications"
+                              >
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex-1 overflow-y-auto min-h-0">
+                            {mergedNotifications.length === 0 ? (
+                              <div className="flex flex-col items-center justify-center h-full px-4 py-12 text-center">
+                                <svg className="w-12 h-12 text-surface-400 dark:text-surface-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                                </svg>
+                                <p className="text-sm text-surface-600 dark:text-surface-300">No notifications yet</p>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col">
+                                {mergedNotifications.map((n: Notification) => {
+                                  const link = getNotificationLink(n);
+                                  const dotColor = NOTIFICATION_COLORS[n.type] ?? 'bg-surface-400';
+                                  return (
+                                    <button
+                                      key={n.id}
+                                      type="button"
+                                      onClick={() => handleNotificationClick(n)}
+                                      className={`w-full text-left px-4 py-3 border-b border-surface-50 dark:border-surface-700/50 hover:bg-surface-50 dark:hover:bg-surface-700/30 transition-colors ${
+                                        link ? 'cursor-pointer' : 'cursor-default'
+                                      } ${!n.read ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}
+                                    >
+                                      <div className="flex items-start gap-2.5">
+                                        <div className={`w-2 h-2 mt-1.5 rounded-full flex-shrink-0 ${
+                                          !n.read ? dotColor : 'bg-transparent'
+                                        }`} />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-medium text-surface-900 dark:text-surface-100 leading-tight">
+                                            {n.title}
+                                          </p>
+                                          {n.body && (
+                                            <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5 line-clamp-2">
+                                              {n.body}
+                                            </p>
+                                          )}
+                                          <div className="flex items-center gap-2 mt-1">
+                                            <p className="text-[11px] text-surface-700 dark:text-surface-300">
+                                              {timeAgo(n.createdAt)}
+                                            </p>
+                                            {link && (
+                                              <span className="text-[11px] text-brand-500 dark:text-brand-400">
+                                                View →
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+
+                          {mergedNotifications.length > 0 && (
+                            <div className="px-4 py-3 border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
+                              <a
+                                href="/admin/notifications"
+                                className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium"
+                                onClick={() => setNotifOpen(false)}
+                              >
+                                View all notifications
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      </>,
+                      document.body
+                    )}
+                </>
+              );
+            }}
+          </DeferredSection>
         </div>
 
         {/* User menu with dropdown */}
@@ -386,12 +392,12 @@ export function Header({ user, sidebarCollapsed, darkMode, notifications = [], u
                 <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate leading-tight">
                   {user.name}
                 </p>
-                <p className="text-2xs text-surface-800 dark:text-surface-400 truncate">
+                <p className="text-2xs text-surface-800 dark:text-surface-200 truncate">
                   {formatRole(user.role)}
                 </p>
               </div>
               <svg
-                className={`w-4 h-4 text-surface-700 dark:text-surface-400 hidden md:block transition-transform duration-200 ${userMenuOpen ? 'rotate-180' : ''}`}
+                className={`w-4 h-4 text-surface-700 dark:text-surface-200 hidden md:block transition-transform duration-200 ${userMenuOpen ? 'rotate-180' : ''}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -409,17 +415,17 @@ export function Header({ user, sidebarCollapsed, darkMode, notifications = [], u
                   <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
                     {user.name}
                   </p>
-                  <p className="text-xs text-surface-500 dark:text-surface-400">
+                  <p className="text-xs text-surface-500 dark:text-surface-200">
                     {user.email}
                   </p>
-                  <p className="text-2xs text-surface-700 dark:text-surface-500 mt-0.5">
+                  <p className="text-2xs text-surface-700 dark:text-surface-300 mt-0.5">
                     {formatRole(user.role)}
                   </p>
                 </div>
 
                 {/* Email on desktop */}
                 <div className="hidden md:block px-4 py-2 border-b border-surface-100 dark:border-surface-700">
-                  <p className="text-xs text-surface-800 dark:text-surface-400 truncate">
+                  <p className="text-xs text-surface-800 dark:text-surface-200 truncate">
                     {user.email}
                   </p>
                 </div>
@@ -442,15 +448,16 @@ export function Header({ user, sidebarCollapsed, darkMode, notifications = [], u
                 {/* Logout */}
                 <div className="border-t border-surface-100 dark:border-surface-700 py-1">
                   <Form method="post" action="/auth/logout">
-                    <button
+                    <Button
                       type="submit"
-                      className="flex items-center gap-2 w-full px-4 py-2 text-sm text-danger-600 dark:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-700/20 transition-colors"
+                      variant="ghost"
+                      className="flex items-center gap-2 w-full justify-start text-danger-600 dark:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-700/20 transition-colors h-auto py-2 px-4 font-normal"
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
                       </svg>
                       Sign out
-                    </button>
+                    </Button>
                   </Form>
                 </div>
               </div>

@@ -30,6 +30,14 @@ export async function apiRequest<T = unknown>(
 ): Promise<ApiResponse<T>> {
   const { method = 'GET', body, cookie } = options;
 
+  // tRPC GET queries need ?input={} even when all fields are optional,
+  // otherwise Zod receives undefined instead of an object and fails.
+  let resolvedPath = path;
+  if (method === 'GET' && path.includes('/trpc/') && !path.includes('?input=')) {
+    const sep = path.includes('?') ? '&' : '?';
+    resolvedPath = `${path}${sep}input=${encodeURIComponent(JSON.stringify({}))}`;
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -38,7 +46,7 @@ export async function apiRequest<T = unknown>(
     headers['Cookie'] = cookie;
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${API_URL}${resolvedPath}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,

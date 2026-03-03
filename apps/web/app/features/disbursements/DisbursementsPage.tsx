@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { AmountInput } from '~/components/ui/amount-input';
+import { Button } from '~/components/ui/button';
 import { FileUpload } from '~/components/ui/file-upload';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { S3_FOLDERS } from '~/lib/s3-upload';
@@ -64,17 +66,14 @@ export function DisbursementsPage({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Disbursements</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Tier 1: Super Admin / Finance → Head of Marketing. Tier 2: HoM → Media Buyers
           </p>
         </div>
         {canCreate && (
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="btn-primary btn-sm"
-          >
+          <Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>
             + New Disbursement
-          </button>
+          </Button>
         )}
       </div>
 
@@ -107,7 +106,7 @@ export function DisbursementsPage({
             </div>
             <div>
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Amount (₦)</label>
-              <input name="amount" type="text" required placeholder="e.g. 50000.00" pattern="^\d+(\.\d{1,2})?$" className="input" />
+              <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input" />
             </div>
             <div>
               <FileUpload
@@ -120,10 +119,12 @@ export function DisbursementsPage({
             </div>
           </div>
           <div className="flex gap-2">
-            <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-              {fetcher.state === 'submitting' ? 'Sending...' : 'Send Disbursement'}
-            </button>
-            <button type="button" onClick={() => setShowForm(false)} className="btn-secondary btn-sm">Cancel</button>
+            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Sending...">
+              Send Disbursement
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
+              Cancel
+            </Button>
           </div>
         </fetcher.Form>
       )}
@@ -132,7 +133,7 @@ export function DisbursementsPage({
         <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
           <h2 className="text-sm font-semibold text-surface-900 dark:text-white">
             All Disbursements
-            <span className="text-surface-500 dark:text-surface-400 font-normal ml-2">({totalFunding})</span>
+            <span className="text-surface-500 dark:text-surface-200 font-normal ml-2">({totalFunding})</span>
           </h2>
         </div>
         <div className="overflow-x-auto">
@@ -151,12 +152,12 @@ export function DisbursementsPage({
               {funding.map((f) => (
                 <tr key={f.id} className="table-row">
                   <td className="table-cell text-surface-900 dark:text-surface-100 text-sm">
-                    <Link to={`/admin/users/${f.senderId}`} className="text-brand-500 hover:text-brand-600">
+                    <Link to={`/hr/users/${f.senderId}`} className="text-brand-500 hover:text-brand-600">
                       {getName(f.senderId)}
                     </Link>
                   </td>
                   <td className="table-cell text-surface-900 dark:text-surface-100 text-sm">
-                    <Link to={`/admin/users/${f.receiverId}`} className="text-brand-500 hover:text-brand-600">
+                    <Link to={`/hr/users/${f.receiverId}`} className="text-brand-500 hover:text-brand-600">
                       {getName(f.receiverId)}
                     </Link>
                   </td>
@@ -173,7 +174,7 @@ export function DisbursementsPage({
                   <td className="table-cell">
                     <span className={FUNDING_COLORS[f.status] ?? 'badge'}>{f.status}</span>
                   </td>
-                  <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                  <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
                     {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </td>
                 </tr>

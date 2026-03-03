@@ -15,9 +15,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const canViewEscalations = ['SUPER_ADMIN', 'HEAD_OF_LOGISTICS'].includes(user.role);
 
-  // Start all fetches concurrently
-  const providersPromise = apiRequest<unknown>('/trpc/logistics.listProviders', { method: 'GET', cookie });
-  const locationsPromise = apiRequest<unknown>('/trpc/logistics.listLocations', { method: 'GET', cookie });
+  const listInput = JSON.stringify({ page: 1, limit: 100 });
+  const providersPromise = apiRequest<unknown>(`/trpc/logistics.listProviders?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
+  const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
   const healthPromise = canViewEscalations
     ? apiRequest<unknown>('/trpc/logistics.healthDashboard', { method: 'GET', cookie })
     : null;
@@ -60,19 +60,65 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
 
-  if (intent === 'createProvider') {
-    const res = await apiRequest<unknown>('/trpc/logistics.createProvider', {
+  if (intent === 'createProvider' || intent === 'createProviders') {
+    const providers: { name: string; contactInfo?: string; coverageArea?: string }[] = [];
+    if (intent === 'createProviders') {
+      for (let i = 0; i < 50; i++) {
+        const name = formData.get(`provider_${i}_name`)?.toString()?.trim();
+        if (name) {
+          providers.push({
+            name,
+            contactInfo: formData.get(`provider_${i}_contactInfo`)?.toString()?.trim() || undefined,
+            coverageArea: formData.get(`provider_${i}_coverageArea`)?.toString()?.trim() || undefined,
+          });
+        }
+      }
+    } else {
+      const name = formData.get('name')?.toString()?.trim();
+      if (name) {
+        providers.push({
+          name,
+          contactInfo: formData.get('contactInfo')?.toString()?.trim() || undefined,
+          coverageArea: formData.get('coverageArea')?.toString()?.trim() || undefined,
+        });
+      }
+    }
+    if (providers.length === 0) {
+      return json({ error: 'At least one provider with a name is required' }, { status: 400 });
+    }
+    const errors: string[] = [];
+    for (const p of providers) {
+      const res = await apiRequest<unknown>('/trpc/logistics.createProvider', {
+        method: 'POST',
+        cookie,
+        body: { name: p.name, contactInfo: p.contactInfo, coverageArea: p.coverageArea },
+      });
+      if (!res.ok) {
+        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to create provider';
+        errors.push(`${p.name}: ${err}`);
+      }
+    }
+    if (errors.length > 0) {
+      return json({ error: errors.join('; ') }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'updateProvider') {
+    const res = await apiRequest<unknown>('/trpc/logistics.updateProvider', {
       method: 'POST',
       cookie,
       body: {
-        name: formData.get('name')?.toString() ?? '',
-        contactInfo: formData.get('contactInfo')?.toString() || undefined,
-        coverageArea: formData.get('coverageArea')?.toString() || undefined,
+        providerId: formData.get('providerId')?.toString() ?? '',
+        name: formData.get('name')?.toString()?.trim() || undefined,
+        contactInfo: formData.get('contactInfo')?.toString()?.trim() || undefined,
+        coverageArea: formData.get('coverageArea')?.toString()?.trim() || undefined,
+        status: formData.get('status')?.toString() || undefined,
       },
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create provider' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to update provider' }, { status: res.status });
     }
     return json({ success: true });
   }

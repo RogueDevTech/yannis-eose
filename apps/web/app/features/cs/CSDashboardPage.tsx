@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
@@ -107,7 +108,7 @@ export function CSDashboardPage({
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-surface-900 dark:text-white">CS Dashboard</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
           Manage customer service agents, dispatch orders, and monitor workloads
         </p>
       </div>
@@ -144,23 +145,23 @@ export function CSDashboardPage({
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Active Agents</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Active Agents</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{workloads.length}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Pending</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Pending</p>
           <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{totalPending}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Unassigned</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Unassigned</p>
           <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">{unassignedTotal}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Confirmed</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Confirmed</p>
           <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{confirmedCount}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Capacity</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Capacity</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
             {totalPending}<span className="text-sm font-normal text-surface-700">/{totalCapacity}</span>
           </p>
@@ -173,19 +174,19 @@ export function CSDashboardPage({
           {(stats: { pending: number; abandonedLast24h: number }) => (
             <div className="card">
               <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Cart Abandonment</h2>
-              <p className="text-sm text-surface-800 dark:text-surface-400 mb-3">
+              <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
                 Carts saved when customers fill name + phone but don&apos;t submit. Pending carts may convert to orders soon.
               </p>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="rounded-lg bg-surface-100 dark:bg-surface-800 p-3">
-                  <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Pending</p>
+                  <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Pending</p>
                   <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{stats.pending}</p>
-                  <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">May convert soon</p>
+                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">May convert soon</p>
                 </div>
                 <div className="rounded-lg bg-surface-100 dark:bg-surface-800 p-3">
-                  <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Abandoned (24h)</p>
+                  <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Abandoned (24h)</p>
                   <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{stats.abandonedLast24h}</p>
-                  <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">Marked abandoned</p>
+                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">Marked abandoned</p>
                 </div>
               </div>
               <DeferredSection resolve={pendingCarts} skeleton="table">
@@ -207,9 +208,9 @@ export function CSDashboardPage({
                             <tr key={c.id} className="table-row">
                               <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{c.customerName}</td>
                               <td className="table-cell font-mono text-xs">{c.customerPhoneDisplay}</td>
-                              <td className="table-cell text-surface-800 dark:text-surface-400">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
-                              <td className="table-cell text-surface-800 dark:text-surface-400">{c.campaignName ?? '—'}</td>
-                              <td className="table-cell text-surface-700 dark:text-surface-500">
+                              <td className="table-cell text-surface-800 dark:text-surface-200">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
+                              <td className="table-cell text-surface-800 dark:text-surface-200">{c.campaignName ?? '—'}</td>
+                              <td className="table-cell text-surface-700 dark:text-surface-300">
                                 {new Date(c.updatedAt).toLocaleDateString('en-NG', {
                                   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                                 })}
@@ -220,7 +221,7 @@ export function CSDashboardPage({
                       </table>
                     </div>
                   ) : (
-                    <p className="text-sm text-surface-700 dark:text-surface-500 py-4 text-center">No pending carts</p>
+                    <p className="text-sm text-surface-700 dark:text-surface-300 py-4 text-center">No pending carts</p>
                   )
                 }
               </DeferredSection>
@@ -234,8 +235,8 @@ export function CSDashboardPage({
         <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Agent Workloads</h2>
         {workloads.length === 0 ? (
           <div className="card text-center py-8">
-            <p className="text-surface-700 dark:text-surface-500">No CS agents found. Add CS agents from the Users page.</p>
-            <Link to="/admin/users/new" className="btn-primary inline-block mt-3">Add CS Agent</Link>
+            <p className="text-surface-700 dark:text-surface-300">No CS agents found. Add CS agents from the Users page.</p>
+            <Link to="/hr/users/new" className="btn-primary inline-block mt-3">Add CS Agent</Link>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -259,7 +260,7 @@ export function CSDashboardPage({
                       <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
                         {agent.agentName}
                       </p>
-                      <p className="text-xs text-surface-800 dark:text-surface-400">
+                      <p className="text-xs text-surface-800 dark:text-surface-200">
                         {agent.pendingCount} of {agent.capacity} slots
                       </p>
                     </div>
@@ -272,7 +273,7 @@ export function CSDashboardPage({
                     />
                   </div>
                   <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-surface-700 dark:text-surface-500">
+                    <span className="text-xs text-surface-700 dark:text-surface-300">
                       {Math.round(utilization)}% utilized
                     </span>
                     {agent.pendingCount >= agent.capacity && (
@@ -296,7 +297,7 @@ export function CSDashboardPage({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold text-surface-900 dark:text-white">CS Agent Performance</h3>
-                    <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+                    <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                       Ranked by delivery rate ({leaderboardPeriod === 'all_time' ? 'all time' : 'this month'})
                     </p>
                   </div>
@@ -306,7 +307,7 @@ export function CSDashboardPage({
                       className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                         leaderboardPeriod === 'this_month'
                           ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                          : 'text-surface-700 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'
+                          : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
                       }`}
                     >
                       This month
@@ -316,7 +317,7 @@ export function CSDashboardPage({
                       className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                         leaderboardPeriod === 'all_time'
                           ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                          : 'text-surface-700 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'
+                          : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
                       }`}
                     >
                       All time
@@ -342,7 +343,7 @@ export function CSDashboardPage({
                   <tbody>
                     {lb.map((e: CSLeaderboardEntry, idx: number) => (
                       <tr key={e.agentId} className="table-row">
-                        <td className="table-cell text-surface-700 dark:text-surface-500 font-mono text-sm">{idx + 1}</td>
+                        <td className="table-cell text-surface-700 dark:text-surface-300 font-mono text-sm">{idx + 1}</td>
                         <td className="table-cell">
                           <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{e.agentName}</p>
                         </td>
@@ -356,7 +357,7 @@ export function CSDashboardPage({
                             {e.deliveryRate.toFixed(1)}%
                           </span>
                         </td>
-                        <td className="table-cell text-right text-sm text-surface-700 dark:text-surface-500">
+                        <td className="table-cell text-right text-sm text-surface-700 dark:text-surface-300">
                           {e.avgCallDurationSeconds >= 60
                             ? `${Math.floor(e.avgCallDurationSeconds / 60)}m ${e.avgCallDurationSeconds % 60}s`
                             : `${e.avgCallDurationSeconds}s`}
@@ -373,7 +374,7 @@ export function CSDashboardPage({
                   <div key={e.agentId} className="p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono text-surface-700 dark:text-surface-500">#{idx + 1}</span>
+                        <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
                         <span className="font-medium text-surface-900 dark:text-white text-sm">{e.agentName}</span>
                       </div>
                       <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-surface-900 dark:text-white'}`}>
@@ -382,15 +383,15 @@ export function CSDashboardPage({
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div>
-                        <span className="text-surface-700 dark:text-surface-500">Confirmed</span>
+                        <span className="text-surface-700 dark:text-surface-300">Confirmed</span>
                         <p className="font-medium text-surface-900 dark:text-white">{e.ordersConfirmed}</p>
                       </div>
                       <div>
-                        <span className="text-surface-700 dark:text-surface-500">Calls</span>
+                        <span className="text-surface-700 dark:text-surface-300">Calls</span>
                         <p className="font-medium text-surface-900 dark:text-white">{e.callsMade}</p>
                       </div>
                       <div>
-                        <span className="text-surface-700 dark:text-surface-500">Conf. Rate</span>
+                        <span className="text-surface-700 dark:text-surface-300">Conf. Rate</span>
                         <p className="font-medium text-surface-900 dark:text-white">{e.confirmationRate.toFixed(1)}%</p>
                       </div>
                     </div>
@@ -477,7 +478,7 @@ export function CSDashboardPage({
                     <td className="table-cell text-right font-medium">
                       {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-400">
+                    <td className="table-cell text-surface-800 dark:text-surface-200">
                       {new Date(order.createdAt).toLocaleDateString('en-NG', {
                         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                       })}
@@ -498,20 +499,23 @@ export function CSDashboardPage({
                               </option>
                             ))}
                         </select>
-                        <button
+                        <Button
                           onClick={() => handleAssign(order.id)}
                           disabled={!assignAgent[order.id] || fetcher.state === 'submitting'}
-                          className="btn-primary btn-sm"
+                          variant="primary"
+                          size="sm"
+                          loading={fetcher.state === 'submitting'}
+                          loadingText="Assigning..."
                         >
                           Assign
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 ))}
                 {unassignedOrders.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                    <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                       No unassigned orders in queue
                     </td>
                   </tr>
@@ -550,18 +554,21 @@ export function CSDashboardPage({
                         </option>
                       ))}
                   </select>
-                  <button
+                  <Button
                     onClick={() => handleAssign(order.id)}
                     disabled={!assignAgent[order.id] || fetcher.state === 'submitting'}
-                    className="btn-primary btn-sm"
+                    variant="primary"
+                    size="sm"
+                    loading={fetcher.state === 'submitting'}
+                    loadingText="Assigning..."
                   >
                     Assign
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
             {unassignedOrders.length === 0 && (
-              <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+              <div className="p-8 text-center text-surface-700 dark:text-surface-300">
                 No unassigned orders
               </div>
             )}
@@ -611,10 +618,10 @@ export function CSDashboardPage({
                         {agent ? (
                           <span className="text-sm text-surface-900 dark:text-surface-100">{agent.agentName}</span>
                         ) : (
-                          <span className="text-sm text-surface-700 dark:text-surface-500">Unassigned</span>
+                          <span className="text-sm text-surface-700 dark:text-surface-300">Unassigned</span>
                         )}
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-400">
+                      <td className="table-cell text-surface-800 dark:text-surface-200">
                         {new Date(order.createdAt).toLocaleDateString('en-NG', {
                           month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                         })}
@@ -624,7 +631,7 @@ export function CSDashboardPage({
                 })}
                 {activeOrders.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                    <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                       No active CS-engaged orders
                     </td>
                   </tr>
@@ -647,7 +654,7 @@ export function CSDashboardPage({
                     <span className="font-medium text-surface-900 dark:text-surface-100">{order.customerName}</span>
                     <span className={STATUS_COLORS[order.status] ?? 'badge'}>{formatStatus(order.status)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-sm text-surface-800 dark:text-surface-400">
+                  <div className="flex items-center justify-between text-sm text-surface-800 dark:text-surface-200">
                     <span>{agent?.agentName ?? 'Unassigned'}</span>
                     <span className="font-medium text-surface-900 dark:text-surface-100">
                       {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
@@ -657,7 +664,7 @@ export function CSDashboardPage({
               );
             })}
             {activeOrders.length === 0 && (
-              <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+              <div className="p-8 text-center text-surface-700 dark:text-surface-300">
                 No active orders
               </div>
             )}
@@ -669,7 +676,7 @@ export function CSDashboardPage({
         <div className="space-y-4">
           <div className="card">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Hot Swap</h2>
-            <p className="text-sm text-surface-800 dark:text-surface-400 mb-4">
+            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
               Select orders from one agent and bulk-reassign them to another agent.
             </p>
 
@@ -750,7 +757,7 @@ export function CSDashboardPage({
                             {formatStatus(order.status)}
                           </span>
                         </div>
-                        <span className="text-xs text-surface-700 dark:text-surface-500">
+                        <span className="text-xs text-surface-700 dark:text-surface-300">
                           {order.id.slice(0, 8)}... &middot; {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                         </span>
                       </div>
@@ -761,7 +768,7 @@ export function CSDashboardPage({
             )}
 
             {hotSwapFrom && hotSwapSourceOrders.length === 0 && (
-              <p className="text-sm text-surface-700 dark:text-surface-500 text-center py-4">
+              <p className="text-sm text-surface-700 dark:text-surface-300 text-center py-4">
                 No active orders for this agent
               </p>
             )}
@@ -770,21 +777,18 @@ export function CSDashboardPage({
           {/* Hot Swap action */}
           {hotSwapOrderIds.length > 0 && hotSwapTo && (
             <div className="flex items-center justify-end gap-3">
-              <button
-                onClick={() => setHotSwapOrderIds([])}
-                className="btn-secondary"
-              >
+              <Button variant="secondary" onClick={() => setHotSwapOrderIds([])}>
                 Clear Selection
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleHotSwap}
                 disabled={fetcher.state === 'submitting'}
-                className="btn-primary"
+                loading={fetcher.state === 'submitting'}
+                loadingText="Reassigning..."
               >
-                {fetcher.state === 'submitting'
-                  ? 'Reassigning...'
-                  : `Reassign ${hotSwapOrderIds.length} Order${hotSwapOrderIds.length > 1 ? 's' : ''}`}
-              </button>
+                {`Reassign ${hotSwapOrderIds.length} Order${hotSwapOrderIds.length > 1 ? 's' : ''}`}
+              </Button>
             </div>
           )}
         </div>
@@ -799,14 +803,14 @@ export function CSDashboardPage({
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Callback Queue</h2>
-                    <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+                    <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
                       Orders awaiting callback retry after &ldquo;No Answer&rdquo;
                     </p>
                   </div>
                 </div>
 
                 {resolvedCallbacks.length === 0 ? (
-                  <div className="text-center py-12 text-surface-700 dark:text-surface-500">
+                  <div className="text-center py-12 text-surface-700 dark:text-surface-300">
                     No callbacks scheduled
                   </div>
                 ) : (
@@ -844,20 +848,20 @@ export function CSDashboardPage({
                               <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
                                 {order.customerName}
                               </p>
-                              <p className="text-xs text-surface-800 dark:text-surface-400">
+                              <p className="text-xs text-surface-800 dark:text-surface-200">
                                 {order.customerPhoneDisplay}
                                 {agent ? ` \u00b7 Assigned: ${agent.agentName}` : ''}
                                 {order.totalAmount ? ` \u00b7 \u20A6${Number(order.totalAmount).toLocaleString()}` : ''}
                               </p>
                               {order.callbackScheduledAt && (
-                                <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                                   Scheduled: {new Date(order.callbackScheduledAt).toLocaleString('en-NG', {
                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                                   })}
                                 </p>
                               )}
                               {order.callbackNotes && (
-                                <p className="text-xs text-surface-800 dark:text-surface-400 mt-1 italic">
+                                <p className="text-xs text-surface-800 dark:text-surface-200 mt-1 italic">
                                   Note: {order.callbackNotes}
                                 </p>
                               )}
@@ -890,13 +894,13 @@ export function CSDashboardPage({
               <div className="card">
                 <div className="mb-4">
                   <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Duplicate Review</h2>
-                  <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+                  <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
                     Potential duplicate orders flagged for review. Compare and merge, dismiss, or cancel.
                   </p>
                 </div>
 
                 {resolvedDuplicates.length === 0 ? (
-                  <div className="text-center py-12 text-surface-700 dark:text-surface-500">
+                  <div className="text-center py-12 text-surface-700 dark:text-surface-300">
                     No flagged duplicates
                   </div>
                 ) : (
@@ -911,7 +915,7 @@ export function CSDashboardPage({
                         <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-surface-200 dark:divide-surface-700">
                           {/* Original Order */}
                           <div className="p-4">
-                            <p className="text-xs font-semibold text-surface-800 dark:text-surface-400 uppercase tracking-wider mb-2">
+                            <p className="text-xs font-semibold text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-2">
                               Original Order
                             </p>
                             {pair.original ? (
@@ -920,19 +924,19 @@ export function CSDashboardPage({
                                   {pair.original.id.slice(0, 8)}...
                                 </Link>
                                 <p className="text-sm text-surface-900 dark:text-surface-100">{pair.original.customerName}</p>
-                                <p className="text-xs text-surface-800 dark:text-surface-400">{pair.original.customerPhoneDisplay}</p>
-                                <p className="text-xs text-surface-800 dark:text-surface-400">
+                                <p className="text-xs text-surface-800 dark:text-surface-200">{pair.original.customerPhoneDisplay}</p>
+                                <p className="text-xs text-surface-800 dark:text-surface-200">
                                   Amount: {pair.original.totalAmount ? `\u20A6${Number(pair.original.totalAmount).toLocaleString()}` : '\u2014'}
                                 </p>
-                                <p className="text-xs text-surface-800 dark:text-surface-400">
+                                <p className="text-xs text-surface-800 dark:text-surface-200">
                                   Status: <span className={STATUS_COLORS[pair.original.status] ?? 'badge'}>{formatStatus(pair.original.status)}</span>
                                 </p>
-                                <p className="text-xs text-surface-700 dark:text-surface-500">
+                                <p className="text-xs text-surface-700 dark:text-surface-300">
                                   Created: {new Date(pair.original.createdAt).toLocaleString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                 </p>
                               </div>
                             ) : (
-                              <p className="text-sm text-surface-700 dark:text-surface-500 italic">Original order not found</p>
+                              <p className="text-sm text-surface-700 dark:text-surface-300 italic">Original order not found</p>
                             )}
                           </div>
 
@@ -946,14 +950,14 @@ export function CSDashboardPage({
                                 {pair.duplicate.id.slice(0, 8)}...
                               </Link>
                               <p className="text-sm text-surface-900 dark:text-surface-100">{pair.duplicate.customerName}</p>
-                              <p className="text-xs text-surface-800 dark:text-surface-400">{pair.duplicate.customerPhoneDisplay}</p>
-                              <p className="text-xs text-surface-800 dark:text-surface-400">
+                              <p className="text-xs text-surface-800 dark:text-surface-200">{pair.duplicate.customerPhoneDisplay}</p>
+                              <p className="text-xs text-surface-800 dark:text-surface-200">
                                 Amount: {pair.duplicate.totalAmount ? `\u20A6${Number(pair.duplicate.totalAmount).toLocaleString()}` : '\u2014'}
                               </p>
-                              <p className="text-xs text-surface-800 dark:text-surface-400">
+                              <p className="text-xs text-surface-800 dark:text-surface-200">
                                 Status: <span className={STATUS_COLORS[pair.duplicate.status] ?? 'badge'}>{formatStatus(pair.duplicate.status)}</span>
                               </p>
-                              <p className="text-xs text-surface-700 dark:text-surface-500">
+                              <p className="text-xs text-surface-700 dark:text-surface-300">
                                 Created: {new Date(pair.duplicate.createdAt).toLocaleString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                               </p>
                             </div>
@@ -963,7 +967,7 @@ export function CSDashboardPage({
                         {/* Actions */}
                         <div className="px-4 py-3 bg-surface-50 dark:bg-surface-800/50 border-t border-surface-200 dark:border-surface-700 flex items-center gap-3 flex-wrap">
                           {pair.original && (
-                            <button
+                            <Button
                               onClick={() => {
                                 fetcher.submit(
                                   { intent: 'mergeDuplicate', duplicateId: pair.duplicate.id, originalId: pair.original!.id },
@@ -971,12 +975,15 @@ export function CSDashboardPage({
                                 );
                               }}
                               disabled={fetcher.state === 'submitting'}
-                              className="btn-primary btn-sm"
+                              variant="primary"
+                              size="sm"
+                              loading={fetcher.state === 'submitting'}
+                              loadingText="Merging..."
                             >
                               Merge into Original
-                            </button>
+                            </Button>
                           )}
-                          <button
+                          <Button
                             onClick={() => {
                               fetcher.submit(
                                 { intent: 'dismissDuplicate', orderId: pair.duplicate.id },
@@ -984,11 +991,14 @@ export function CSDashboardPage({
                               );
                             }}
                             disabled={fetcher.state === 'submitting'}
-                            className="btn-secondary btn-sm"
+                            variant="secondary"
+                            size="sm"
+                            loading={fetcher.state === 'submitting'}
+                            loadingText="Dismissing..."
                           >
                             Dismiss (Legitimate Order)
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             onClick={() => {
                               fetcher.submit(
                                 { intent: 'transition', orderId: pair.duplicate.id, newStatus: 'CANCELLED', reason: 'Confirmed duplicate order' },
@@ -996,10 +1006,14 @@ export function CSDashboardPage({
                               );
                             }}
                             disabled={fetcher.state === 'submitting'}
-                            className="text-sm text-danger-600 hover:text-danger-700 dark:text-danger-400 dark:hover:text-danger-300 font-medium"
+                            variant="danger"
+                            size="sm"
+                            loading={fetcher.state === 'submitting'}
+                            loadingText="Cancelling..."
+                            className="font-medium"
                           >
                             Cancel Duplicate
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     ))}
@@ -1018,7 +1032,7 @@ export function CSDashboardPage({
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">
               Schedule Callback
             </h3>
-            <p className="text-sm text-surface-800 dark:text-surface-400 mb-4">
+            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
               For: {callbackModal.customerName} ({callbackModal.orderId.slice(0, 8)}...)
             </p>
 
@@ -1056,17 +1070,18 @@ export function CSDashboardPage({
             </div>
 
             <div className="flex items-center justify-end gap-3 mt-6">
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setCallbackModal(null);
                   setCallbackDelay('120');
                   setCallbackNotes('');
                 }}
-                className="btn-secondary"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
                 onClick={() => {
                   fetcher.submit(
                     {
@@ -1082,10 +1097,11 @@ export function CSDashboardPage({
                   setCallbackNotes('');
                 }}
                 disabled={fetcher.state === 'submitting'}
-                className="btn-primary"
+                loading={fetcher.state === 'submitting'}
+                loadingText="Scheduling..."
               >
                 Schedule Callback
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1099,7 +1115,7 @@ export function CSDashboardPage({
             const count = (statusCounts as Record<string, number>)[status] ?? 0;
             return (
               <div key={status} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-                <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">
+                <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
                   {formatStatus(status)}
                 </p>
                 <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">{count}</p>

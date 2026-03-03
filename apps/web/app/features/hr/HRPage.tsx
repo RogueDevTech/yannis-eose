@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { exportToCsv } from '~/lib/csv-export';
+import { AmountInput } from '~/components/ui/amount-input';
+import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import type { CommissionPlan, Payout, Adjustment, HRUser, HRStreamData, PayoutSummary, SettlementConfig, SettlementPeriod } from './types';
@@ -66,12 +68,14 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">HR & Payroll</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Commission plans, payout management, and staff earnings
           </p>
         </div>
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => exportToCsv(
               payouts.map((p: Payout) => ({
                 staff: p.staffId.slice(0, 8) + '...',
@@ -95,19 +99,18 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
               ],
               `payouts-${new Date().toISOString().split('T')[0]}.csv`,
             )}
-            className="btn-secondary btn-sm"
           >
             Export CSV
-          </button>
-          <button onClick={() => setShowGenerate(!showGenerate)} className="btn-secondary btn-sm">
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setShowGenerate(!showGenerate)}>
             Generate Payouts
-          </button>
-          <button onClick={() => { setShowAddAdjustment(!showAddAdjustment); setActiveTab('adjustments'); }} className="btn-secondary btn-sm">
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => { setShowAddAdjustment(!showAddAdjustment); setActiveTab('adjustments'); }}>
             + Add-on
-          </button>
-          <button onClick={() => { setShowAddPlan(!showAddPlan); setActiveTab('plans'); }} className="btn-primary btn-sm">
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => { setShowAddPlan(!showAddPlan); setActiveTab('plans'); }}>
             + Commission Plan
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -157,24 +160,24 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="card">
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Draft Payouts</p>
+                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Draft Payouts</p>
                       <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">&#8358;{draftTotal.toLocaleString()}</p>
-                      <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">{summary['DRAFT']?.count ?? 0} staff</p>
+                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['DRAFT']?.count ?? 0} staff</p>
                     </div>
                     <div className="card">
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Approved</p>
+                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Approved</p>
                       <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">&#8358;{approvedTotal.toLocaleString()}</p>
-                      <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">{summary['APPROVED']?.count ?? 0} staff</p>
+                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['APPROVED']?.count ?? 0} staff</p>
                     </div>
                     <div className="card">
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Paid</p>
+                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Paid</p>
                       <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">&#8358;{paidTotal.toLocaleString()}</p>
-                      <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">{summary['PAID']?.count ?? 0} staff</p>
+                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['PAID']?.count ?? 0} staff</p>
                     </div>
                     <div className="card">
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Active Plans</p>
+                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Active Plans</p>
                       <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{totalPlans}</p>
-                      <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">{clawbacks.length} clawback{clawbacks.length !== 1 ? 's' : ''}</p>
+                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{clawbacks.length} clawback{clawbacks.length !== 1 ? 's' : ''}</p>
                     </div>
                   </div>
                 );
@@ -193,7 +196,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
-          <p className="text-sm text-surface-800 dark:text-surface-400">
+          <p className="text-sm text-surface-800 dark:text-surface-200">
             Generates DRAFT payouts for all active staff based on delivered orders within the settlement period.
             Commission is based on DELIVERED_AT timestamp, not order creation date.
           </p>
@@ -209,10 +212,12 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </div>
           </div>
           <div className="flex gap-2">
-            <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-              {fetcher.state === 'submitting' ? 'Generating...' : 'Generate'}
-            </button>
-            <button type="button" onClick={() => setShowGenerate(false)} className="btn-secondary btn-sm">Cancel</button>
+            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Generating...">
+              Generate
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowGenerate(false)}>
+              Cancel
+            </Button>
           </div>
         </fetcher.Form>
       )}
@@ -243,7 +248,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </div>
             <div>
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Base Salary (&#8358;)</label>
-              <input name="baseSalary" type="number" min="0" placeholder="0" className="input" />
+              <AmountInput name="baseSalary" placeholder="0" className="input" />
               <p className="text-xs text-surface-700 mt-0.5">Earned when orders &ge; threshold</p>
             </div>
             <div>
@@ -253,17 +258,17 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </div>
             <div>
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Per Order Rate (&#8358;)</label>
-              <input name="perOrderRate" type="number" min="0" step="0.01" placeholder="0" className="input" />
+              <AmountInput name="perOrderRate" placeholder="0" className="input" />
               <p className="text-xs text-surface-700 mt-0.5">Commission per delivered order</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Bonus Per Extra Order (&#8358;)</label>
-              <input name="bonusPerExtraOrder" type="number" min="0" step="0.01" placeholder="0" className="input" />
+              <AmountInput name="bonusPerExtraOrder" placeholder="0" className="input" />
               <p className="text-xs text-surface-700 mt-0.5">Extra bonus above threshold</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Penalty Per Return (&#8358;)</label>
-              <input name="penaltyPerReturn" type="number" min="0" step="0.01" placeholder="0" className="input" />
+              <AmountInput name="penaltyPerReturn" placeholder="0" className="input" />
               <p className="text-xs text-surface-700 mt-0.5">Deducted per returned order</p>
             </div>
             <div>
@@ -281,10 +286,12 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </div>
           </div>
           <div className="flex gap-2">
-            <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-              {fetcher.state === 'submitting' ? 'Creating...' : 'Create Plan'}
-            </button>
-            <button type="button" onClick={() => setShowAddPlan(false)} className="btn-secondary btn-sm">Cancel</button>
+            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
+              Create Plan
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddPlan(false)}>
+              Cancel
+            </Button>
           </div>
         </fetcher.Form>
       )}
@@ -324,7 +331,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </div>
             <div>
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Amount (&#8358;)</label>
-              <input name="amount" type="text" required placeholder="e.g. 5000.00" pattern="^\d+(\.\d{1,2})?$" className="input" />
+              <AmountInput name="amount" required placeholder="e.g. 5,000.00 or -500 for deduction" className="input" allowNegative />
             </div>
             <div>
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Reason</label>
@@ -332,10 +339,12 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </div>
           </div>
           <div className="flex gap-2">
-            <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-              {fetcher.state === 'submitting' ? 'Creating...' : 'Create Adjustment'}
-            </button>
-            <button type="button" onClick={() => setShowAddAdjustment(false)} className="btn-secondary btn-sm">Cancel</button>
+            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
+              Create Adjustment
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddAdjustment(false)}>
+              Cancel
+            </Button>
           </div>
         </fetcher.Form>
       )}
@@ -382,10 +391,10 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                             <td className="table-cell">
                               <div>
                                 <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{getStaffName(p.staffId)}</p>
-                                <p className="text-xs text-surface-700 dark:text-surface-500">{getStaffRole(p.staffId)}</p>
+                                <p className="text-xs text-surface-700 dark:text-surface-300">{getStaffRole(p.staffId)}</p>
                               </div>
                             </td>
-                            <td className="table-cell text-sm text-surface-800 dark:text-surface-400">
+                            <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
                               {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })} — {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                             </td>
                             <td className="table-cell text-right text-sm">&#8358;{Number(p.baseSalary).toLocaleString()}</td>
@@ -405,17 +414,17 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                                     <input type="hidden" name="intent" value="approvePayout" />
                                     <input type="hidden" name="payoutId" value={p.id} />
                                     <input type="hidden" name="status" value="APPROVED" />
-                                    <button type="submit" className="btn-primary btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                                    <Button type="submit" variant="primary" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Processing...">
                                       Approve
-                                    </button>
+                                    </Button>
                                   </fetcher.Form>
                                   <fetcher.Form method="post" className="inline" onClick={(e) => e.stopPropagation()}>
                                     <input type="hidden" name="intent" value="approvePayout" />
                                     <input type="hidden" name="payoutId" value={p.id} />
                                     <input type="hidden" name="status" value="REJECTED" />
-                                    <button type="submit" className="btn-danger btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                                    <Button type="submit" variant="danger" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Processing...">
                                       Reject
-                                    </button>
+                                    </Button>
                                   </fetcher.Form>
                                 </div>
                               )}
@@ -424,9 +433,9 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                                   <input type="hidden" name="intent" value="approvePayout" />
                                   <input type="hidden" name="payoutId" value={p.id} />
                                   <input type="hidden" name="status" value="PAID" />
-                                  <button type="submit" className="btn-success btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                                  <Button type="submit" variant="success" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                                     Mark Paid
-                                  </button>
+                                  </Button>
                                 </fetcher.Form>
                               )}
                             </td>
@@ -437,19 +446,19 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                               <td colSpan={9} className="px-6 py-4 bg-surface-50 dark:bg-surface-900/50">
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                                   <div>
-                                    <p className="text-xs text-surface-700 dark:text-surface-500 uppercase">Base Salary</p>
+                                    <p className="text-xs text-surface-700 dark:text-surface-300 uppercase">Base Salary</p>
                                     <p className="font-medium text-surface-900 dark:text-white">&#8358;{Number(p.baseSalary).toLocaleString()}</p>
                                   </div>
                                   <div>
-                                    <p className="text-xs text-surface-700 dark:text-surface-500 uppercase">Performance Bonus</p>
+                                    <p className="text-xs text-surface-700 dark:text-surface-300 uppercase">Performance Bonus</p>
                                     <p className="font-medium text-success-600 dark:text-success-400">+&#8358;{Number(p.performanceBonus).toLocaleString()}</p>
                                   </div>
                                   <div>
-                                    <p className="text-xs text-surface-700 dark:text-surface-500 uppercase">Add-ons (Bonuses, OT)</p>
+                                    <p className="text-xs text-surface-700 dark:text-surface-300 uppercase">Add-ons (Bonuses, OT)</p>
                                     <p className="font-medium text-brand-600 dark:text-brand-400">+&#8358;{Number(p.addOnsTotal).toLocaleString()}</p>
                                   </div>
                                   <div>
-                                    <p className="text-xs text-surface-700 dark:text-surface-500 uppercase">Deductions (Clawbacks)</p>
+                                    <p className="text-xs text-surface-700 dark:text-surface-300 uppercase">Deductions (Clawbacks)</p>
                                     <p className="font-medium text-danger-600 dark:text-danger-400">-&#8358;{Number(p.deductionsTotal).toLocaleString()}</p>
                                   </div>
                                 </div>
@@ -463,7 +472,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                         </>
                       ))}
                       {payouts.length === 0 && (
-                        <tr><td colSpan={9} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">No payouts yet. Generate payouts for a settlement period.</td></tr>
+                        <tr><td colSpan={9} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No payouts yet. Generate payouts for a settlement period.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -476,21 +485,21 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="font-medium text-surface-900 dark:text-white text-sm">{getStaffName(p.staffId)}</p>
-                          <p className="text-xs text-surface-700 dark:text-surface-500">{getStaffRole(p.staffId)}</p>
+                          <p className="text-xs text-surface-700 dark:text-surface-300">{getStaffRole(p.staffId)}</p>
                         </div>
                         <span className={PAYOUT_COLORS[p.status] ?? 'badge'}>{p.status}</span>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         <div>
-                          <span className="text-surface-700 dark:text-surface-500">Base</span>
+                          <span className="text-surface-700 dark:text-surface-300">Base</span>
                           <p className="font-medium text-surface-900 dark:text-white">&#8358;{Number(p.baseSalary).toLocaleString()}</p>
                         </div>
                         <div>
-                          <span className="text-surface-700 dark:text-surface-500">Bonus</span>
+                          <span className="text-surface-700 dark:text-surface-300">Bonus</span>
                           <p className="font-medium text-success-600 dark:text-success-400">&#8358;{Number(p.performanceBonus).toLocaleString()}</p>
                         </div>
                         <div>
-                          <span className="text-surface-700 dark:text-surface-500">Total</span>
+                          <span className="text-surface-700 dark:text-surface-300">Total</span>
                           <p className="font-bold text-surface-900 dark:text-white">&#8358;{Number(p.totalPayout).toLocaleString()}</p>
                         </div>
                       </div>
@@ -499,7 +508,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                           Deductions: -&#8358;{Number(p.deductionsTotal).toLocaleString()}
                         </p>
                       )}
-                      <p className="text-xs text-surface-700 dark:text-surface-500">
+                      <p className="text-xs text-surface-700 dark:text-surface-300">
                         {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })} — {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                       </p>
                       {p.status === 'DRAFT' && (
@@ -508,13 +517,13 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                             <input type="hidden" name="intent" value="approvePayout" />
                             <input type="hidden" name="payoutId" value={p.id} />
                             <input type="hidden" name="status" value="APPROVED" />
-                            <button type="submit" className="btn-primary btn-sm text-xs w-full">Approve</button>
+                            <Button type="submit" variant="primary" size="sm" className="text-xs w-full">Approve</Button>
                           </fetcher.Form>
                           <fetcher.Form method="post" className="flex-1">
                             <input type="hidden" name="intent" value="approvePayout" />
                             <input type="hidden" name="payoutId" value={p.id} />
                             <input type="hidden" name="status" value="REJECTED" />
-                            <button type="submit" className="btn-danger btn-sm text-xs w-full">Reject</button>
+                            <Button type="submit" variant="danger" size="sm" className="text-xs w-full">Reject</Button>
                           </fetcher.Form>
                         </div>
                       )}
@@ -523,13 +532,13 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                           <input type="hidden" name="intent" value="approvePayout" />
                           <input type="hidden" name="payoutId" value={p.id} />
                           <input type="hidden" name="status" value="PAID" />
-                          <button type="submit" className="btn-success btn-sm text-xs w-full">Mark Paid</button>
+                          <Button type="submit" variant="success" size="sm" className="text-xs w-full">Mark Paid</Button>
                         </fetcher.Form>
                       )}
                     </div>
                   ))}
                   {payouts.length === 0 && (
-                    <div className="p-8 text-center text-surface-700 dark:text-surface-500">No payouts yet</div>
+                    <div className="p-8 text-center text-surface-700 dark:text-surface-300">No payouts yet</div>
                   )}
                 </div>
               </div>
@@ -558,17 +567,17 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                     <td className="table-cell">
                       <span className="badge-info">{plan.role.replace(/_/g, ' ')}</span>
                     </td>
-                    <td className="table-cell text-sm text-surface-800 dark:text-surface-400">
+                    <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
                       {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       {plan.effectiveTo ? ` — ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}` : ' — Ongoing'}
                     </td>
-                    <td className="table-cell text-xs text-surface-800 dark:text-surface-400 max-w-[300px]">
+                    <td className="table-cell text-xs text-surface-800 dark:text-surface-200 max-w-[300px]">
                       {formatRules(plan.rules)}
                     </td>
                   </tr>
                 ))}
                 {plans.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">No commission plans yet</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No commission plans yet</td></tr>
                 )}
               </tbody>
             </table>
@@ -582,15 +591,15 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                   <span className="font-medium text-surface-900 dark:text-white text-sm">{plan.planName}</span>
                   <span className="badge-info text-xs">{plan.role.replace(/_/g, ' ')}</span>
                 </div>
-                <p className="text-xs text-surface-700 dark:text-surface-500">{formatRules(plan.rules)}</p>
-                <p className="text-xs text-surface-700 dark:text-surface-500">
+                <p className="text-xs text-surface-700 dark:text-surface-300">{formatRules(plan.rules)}</p>
+                <p className="text-xs text-surface-700 dark:text-surface-300">
                   From {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                   {plan.effectiveTo ? ` to ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}` : ' — Ongoing'}
                 </p>
               </div>
             ))}
             {plans.length === 0 && (
-              <div className="p-8 text-center text-surface-700 dark:text-surface-500">No commission plans yet</div>
+              <div className="p-8 text-center text-surface-700 dark:text-surface-300">No commission plans yet</div>
             )}
           </div>
         </div>
@@ -631,7 +640,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                               <td className={`table-cell text-right font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : ''}`}>
                                 {Number(adj.amount) < 0 ? '-' : ''}&#8358;{Math.abs(Number(adj.amount)).toLocaleString()}
                               </td>
-                              <td className="table-cell text-sm text-surface-800 dark:text-surface-400 max-w-[200px] truncate">{adj.reason}</td>
+                              <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-[200px] truncate">{adj.reason}</td>
                               <td className="table-cell">
                                 {adj.approvedBy ? (
                                   <span className="badge-success">Approved</span>
@@ -639,7 +648,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                                   <span className="badge-warning">Pending</span>
                                 )}
                               </td>
-                              <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                              <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                                 {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                               </td>
                               <td className="table-cell">
@@ -647,16 +656,16 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                                   <fetcher.Form method="post" className="inline">
                                     <input type="hidden" name="intent" value="approveAdjustment" />
                                     <input type="hidden" name="adjustmentId" value={adj.id} />
-                                    <button type="submit" className="btn-primary btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                                    <Button type="submit" variant="primary" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Processing...">
                                       Approve
-                                    </button>
+                                    </Button>
                                   </fetcher.Form>
                                 )}
                               </td>
                             </tr>
                           ))}
                           {resolvedAdjustments.length === 0 && (
-                            <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">No earnings adjustments yet</td></tr>
+                            <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No earnings adjustments yet</td></tr>
                           )}
                         </tbody>
                       </table>
@@ -680,18 +689,18 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                               <span className="badge-warning text-xs">Pending</span>
                             )}
                           </div>
-                          <p className="text-xs text-surface-700 dark:text-surface-500">{adj.reason}</p>
+                          <p className="text-xs text-surface-700 dark:text-surface-300">{adj.reason}</p>
                           {!adj.approvedBy && adj.category !== 'CLAWBACK' && (
                             <fetcher.Form method="post">
                               <input type="hidden" name="intent" value="approveAdjustment" />
                               <input type="hidden" name="adjustmentId" value={adj.id} />
-                              <button type="submit" className="btn-primary btn-sm text-xs w-full">Approve</button>
+                              <Button type="submit" variant="primary" size="sm" className="text-xs w-full">Approve</Button>
                             </fetcher.Form>
                           )}
                         </div>
                       ))}
                       {resolvedAdjustments.length === 0 && (
-                        <div className="p-8 text-center text-surface-700 dark:text-surface-500">No adjustments yet</div>
+                        <div className="p-8 text-center text-surface-700 dark:text-surface-300">No adjustments yet</div>
                       )}
                     </div>
                   </div>
@@ -713,11 +722,11 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                 {resolvedConfig ? (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wide">Window Type</p>
+                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wide">Window Type</p>
                       <p className="text-sm font-semibold text-surface-900 dark:text-white mt-0.5">{resolvedConfig.windowType}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wide">
+                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wide">
                         {resolvedConfig.windowType === 'MONTHLY' ? 'Start Day of Month' : 'Start Day of Week'}
                       </p>
                       <p className="text-sm font-semibold text-surface-900 dark:text-white mt-0.5">
@@ -728,14 +737,14 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wide">Last Updated</p>
+                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wide">Last Updated</p>
                       <p className="text-sm font-semibold text-surface-900 dark:text-white mt-0.5">
                         {new Date(resolvedConfig.createdAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-surface-800 dark:text-surface-400">No settlement window configured. Set one below to enable automated payout periods.</p>
+                  <p className="text-sm text-surface-800 dark:text-surface-200">No settlement window configured. Set one below to enable automated payout periods.</p>
                 )}
               </div>
             )}
@@ -750,15 +759,15 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                   <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-2">Current Settlement Period</h3>
                   <div className="flex flex-wrap gap-4">
                     <div>
-                      <p className="text-xs text-surface-800 dark:text-surface-400">Start</p>
+                      <p className="text-xs text-surface-800 dark:text-surface-200">Start</p>
                       <p className="text-sm font-medium text-surface-900 dark:text-white">{resolvedPeriod.periodStart}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-surface-800 dark:text-surface-400">End</p>
+                      <p className="text-xs text-surface-800 dark:text-surface-200">End</p>
                       <p className="text-sm font-medium text-surface-900 dark:text-white">{resolvedPeriod.periodEnd}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-surface-800 dark:text-surface-400">Type</p>
+                      <p className="text-xs text-surface-800 dark:text-surface-200">Type</p>
                       <p className="text-sm font-medium text-surface-900 dark:text-white">{resolvedPeriod.windowType}</p>
                     </div>
                   </div>
@@ -776,7 +785,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                   <input type="hidden" name="intent" value="setSettlementConfig" />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Window Type</label>
+                      <label className="block text-xs font-medium text-surface-600 dark:text-surface-200 mb-1">Window Type</label>
                       <select name="windowType" defaultValue={resolvedConfig?.windowType ?? 'MONTHLY'} className="input w-full">
                         <option value="WEEKLY">Weekly</option>
                         <option value="BIWEEKLY">Bi-Weekly</option>
@@ -784,7 +793,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Start Day</label>
+                      <label className="block text-xs font-medium text-surface-600 dark:text-surface-200 mb-1">Start Day</label>
                       <input
                         name="startDay"
                         type="number"
@@ -798,9 +807,9 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                       </p>
                     </div>
                   </div>
-                  <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state !== 'idle'}>
-                    {fetcher.state !== 'idle' ? 'Saving...' : 'Save Settlement Config'}
-                  </button>
+                  <Button type="submit" variant="primary" size="sm" loading={fetcher.state !== 'idle'} loadingText="Saving...">
+                    Save Settlement Config
+                  </Button>
                 </fetcher.Form>
               </div>
             )}

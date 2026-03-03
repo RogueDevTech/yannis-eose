@@ -1,4 +1,3 @@
-import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
@@ -23,16 +22,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   if (!res.ok) {
-    return json({ users: [] as User[], total: 0 });
+    return { users: [] as User[], total: 0 };
   }
 
   const trpcData = res.data as unknown as { result?: { data?: { users: User[]; pagination: { total: number } } } };
   const data = trpcData?.result?.data;
 
-  return json({
+  return {
     users: data?.users ?? [],
     total: data?.pagination?.total ?? 0,
-  });
+  };
 }
 
 export default function UsersRoute() {

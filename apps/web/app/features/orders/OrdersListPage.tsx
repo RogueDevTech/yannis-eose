@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { STATUS_COLORS, STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
 import type { Order } from './types';
@@ -195,11 +196,13 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Orders</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Manage and track all customer orders
           </p>
         </div>
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => exportToCsv(
             filteredOrders.map((o) => ({
               id: o.id,
@@ -219,28 +222,27 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
             ],
             `orders-${new Date().toISOString().split('T')[0]}.csv`,
           )}
-          className="btn-secondary btn-sm"
         >
           Export CSV
-        </button>
+        </Button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Unprocessed</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Unprocessed</p>
           <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{unprocessedCount}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Confirmed</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Confirmed</p>
           <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{confirmedCount}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Delivered</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivered</p>
           <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{deliveredCount}</p>
         </div>
       </div>
@@ -260,27 +262,27 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
             <div className="flex flex-wrap items-center gap-2">
               {/* Bulk Transition buttons */}
               {availableTransitions.map((status) => (
-                <button
+                <Button
                   key={status}
+                  variant="primary"
+                  size="sm"
                   onClick={() => submitBulkTransition(status)}
                   disabled={isSubmitting}
-                  className="btn-primary btn-sm"
+                  loading={isSubmitting}
+                  loadingText="Processing..."
                 >
-                  {isSubmitting ? 'Processing...' : `Transition to ${formatStatus(status)}`}
-                </button>
+                  {`Transition to ${formatStatus(status)}`}
+                </Button>
               ))}
               {selectedStatuses.length > 1 && (
-                <span className="text-xs text-surface-800 dark:text-surface-400 italic">
+                <span className="text-xs text-surface-800 dark:text-surface-200 italic">
                   Select orders with same status for bulk transition
                 </span>
               )}
               {/* Export selected */}
-              <button
-                onClick={submitBulkExport}
-                className="btn-secondary btn-sm"
-              >
+              <Button variant="secondary" size="sm" onClick={submitBulkExport}>
                 Export Selected
-              </button>
+              </Button>
             </div>
           </div>
           {/* Bulk result summary */}
@@ -435,7 +437,7 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
                   <td className="table-cell text-right font-medium">
                     {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-400">
+                  <td className="table-cell text-surface-800 dark:text-surface-200">
                     {new Date(order.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
                       day: 'numeric',
@@ -447,7 +449,7 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
               ))}
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={canBulkAction ? 7 : 6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                  <td colSpan={canBulkAction ? 7 : 6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                     {orders.length === 0 ? 'No orders yet' : 'No orders found'}
                   </td>
                 </tr>
@@ -482,13 +484,13 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
                     {formatStatus(order.status)}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-sm text-surface-800 dark:text-surface-400">
+                <div className="flex items-center justify-between text-sm text-surface-800 dark:text-surface-200">
                   <span className="font-mono">{order.customerPhoneDisplay}</span>
                   <span className="font-medium text-surface-900 dark:text-surface-100">
                     {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                   </span>
                 </div>
-                <div className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                <div className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                   {new Date(order.createdAt).toLocaleDateString('en-NG', {
                     month: 'short',
                     day: 'numeric',
@@ -500,7 +502,7 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
             </div>
           ))}
           {filteredOrders.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+            <div className="p-8 text-center text-surface-700 dark:text-surface-300">
               {orders.length === 0 ? 'No orders yet' : 'No orders found'}
             </div>
           )}
@@ -509,7 +511,7 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
 
       {/* Pagination */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-surface-800 dark:text-surface-400">
+        <p className="text-sm text-surface-800 dark:text-surface-200">
           {total > 0
             ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
             : 'No orders'}
@@ -523,7 +525,7 @@ export function OrdersListPage({ orders, total, totalPages, page, limit, statusC
           >
             Previous
           </Link>
-          <span className="text-sm text-surface-800 dark:text-surface-400 px-2">
+          <span className="text-sm text-surface-800 dark:text-surface-200 px-2">
             Page {page} of {totalPages || 1}
           </span>
           <Link

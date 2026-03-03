@@ -28,7 +28,7 @@ export function Tabs({ value, onChange, tabs, variant = 'underline', className =
               className={`flex-1 rounded-md py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
                 isActive
                   ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                  : 'text-surface-800 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'
+                  : 'text-surface-800 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
               }`}
             >
               {tab.label}
@@ -53,7 +53,7 @@ export function Tabs({ value, onChange, tabs, variant = 'underline', className =
               className={`whitespace-nowrap pb-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
                 isActive
                   ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-                  : 'border-transparent text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'
+                  : 'border-transparent text-surface-600 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
               }`}
             >
               {tab.label}

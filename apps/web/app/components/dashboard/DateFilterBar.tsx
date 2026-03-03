@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '~/components/ui/button';
 import { useSearchParams } from '@remix-run/react';
 
 export interface DateFilterBarProps {
@@ -98,7 +99,7 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
       <button
         type="button"
         onClick={() => setModalOpen(true)}
-        className="inline-flex items-center gap-1.5 text-xs text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-300 transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs text-surface-500 dark:text-surface-200 hover:text-surface-700 dark:hover:text-surface-300 transition-colors"
       >
         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
@@ -132,19 +133,21 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {(['today', 'this_week', 'this_month', 'this_quarter', 'all_time'] as const).map((preset) => (
-                  <button
+                  <Button
                     key={preset}
                     type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="text-xs"
                     onClick={() => applyPreset(preset)}
-                    className="btn-secondary btn-sm text-xs"
                   >
                     {preset === 'all_time' ? 'All Time' : preset.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-                  </button>
+                  </Button>
                 ))}
               </div>
               <div className="flex flex-col gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-surface-800 dark:text-surface-400 mb-1">From</label>
+                  <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">From</label>
                   <input
                     type="date"
                     value={startDate}
@@ -154,7 +157,7 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-surface-800 dark:text-surface-400 mb-1">To</label>
+                  <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">To</label>
                   <input
                     type="date"
                     value={endDate}
@@ -165,17 +168,13 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
                 </div>
               </div>
               {(hasDates || periodAllTime) && (
-                <button type="button" onClick={clearDates} className="btn-secondary btn-sm text-xs w-full">
+                <Button type="button" variant="secondary" size="sm" className="text-xs w-full" onClick={clearDates}>
                   Clear
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
-                onClick={() => setModalOpen(false)}
-                className="btn-primary btn-sm w-full"
-              >
+              <Button type="button" variant="primary" size="sm" className="w-full" onClick={() => setModalOpen(false)}>
                 Done
-              </button>
+              </Button>
             </div>
           </div>
         </>

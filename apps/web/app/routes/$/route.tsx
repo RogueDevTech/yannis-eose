@@ -22,7 +22,7 @@ export default function CatchAll() {
       <div className="text-center max-w-md">
         <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
         <h1 className="text-xl font-bold text-surface-900 dark:text-white">Page Not Found</h1>
-        <p className="mt-2 text-sm text-surface-800 dark:text-surface-400">
+        <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
           The page you're looking for doesn't exist or has been moved.
         </p>
         <div className="mt-6 flex gap-3 justify-center">

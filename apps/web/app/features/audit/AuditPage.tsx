@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { exportToCsv } from '~/lib/csv-export';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -138,6 +139,10 @@ const FIELD_LABELS: Record<string, string> = {
   slug: 'Slug',
   deployment_type: 'Deployment Type',
   form_config: 'Form Config',
+  offers: 'Offers',
+  qty: 'Quantity',
+  label: 'Label',
+  price: 'Price',
 };
 
 // Fields to hide from the detail modal (sensitive/internal)
@@ -230,13 +235,41 @@ const CURRENCY_FIELDS = new Set([
   'cost_price', 'selling_price', 'landing_cost', 'unit_price', 'total_price',
   'delivery_fee', 'tpl_handling_fee', 'factory_cost', 'freight_duty',
   'amount', 'daily_spend', 'base_salary', 'commission_total', 'deductions',
-  'net_amount',
+  'net_amount', 'base_sale_price',
 ]);
 
 function formatCurrency(val: unknown): string {
   const num = Number(val);
   if (isNaN(num)) return String(val);
   return `\u20A6${num.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function parseOffersArray(val: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(val)) return val.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object');
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val) as unknown;
+      return Array.isArray(parsed) ? parsed.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object') : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/** Product offers: [{ qty, label, price }] — format as human-readable list */
+function formatOffers(val: unknown): string {
+  const arr = parseOffersArray(val);
+  if (arr.length === 0) return '-';
+  return arr.map((obj, i) => {
+    const qty = obj.qty ?? '?';
+    const label = typeof obj.label === 'string' ? obj.label : String(obj.label ?? 'Offer');
+    const priceVal = obj.price;
+    const price = (typeof priceVal === 'number' || (typeof priceVal === 'string' && !isNaN(Number(priceVal))))
+      ? formatCurrency(priceVal)
+      : String(priceVal ?? '—');
+    return `  • ${label} — ${qty} qty — ${price}`;
+  }).join('\n');
 }
 
 function formatValue(key: string, val: unknown, actorNames: Record<string, { name: string; role: string }>): string {
@@ -262,6 +295,9 @@ function formatValue(key: string, val: unknown, actorNames: Record<string, { nam
 
   // Timestamps
   if (isISODate(val)) return formatDate(strVal);
+
+  // Product offers — human-readable list
+  if (key === 'offers') return formatOffers(val);
 
   // JSON objects
   if (typeof val === 'object') {
@@ -361,24 +397,42 @@ function UnknownActorModal({
           )}
         </div>
         <div className="px-6 py-4 border-t border-surface-200 dark:border-surface-700">
-          <button onClick={onClose} className="btn-primary w-full sm:w-auto">
+          <Button variant="primary" className="w-full sm:w-auto" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </div>
       </div>
     </div>
   );
 }
 
-function generateDescription(
+function getEntityLink(tableName: string, recordId: string): string | null {
+  switch (tableName) {
+    case 'users':
+      return `/hr/users/${recordId}`;
+    case 'orders':
+      return `/admin/orders/${recordId}`;
+    case 'products':
+      return `/admin/products/${recordId}`;
+    default:
+      return null;
+  }
+}
+
+interface DescriptionParts {
+  prefix: string;
+  entityLabel: string | null;
+  suffix: string;
+}
+
+function getDescriptionParts(
   entry: AuditEntry,
   actorNames: Record<string, { name: string; role: string }>,
-): string {
+): DescriptionParts {
   const data = entry.data;
   const table = entry.tableName;
   const actor = getActorDisplay(entry.changedBy, actorNames);
 
-  // Try to get a recognizable label for the record
   const recordLabel =
     (data.name as string) ||
     (data.customer_name as string) ||
@@ -386,72 +440,79 @@ function generateDescription(
     (data.campaign_name as string) ||
     (data.reference_number as string) ||
     (data.batch_number as string) ||
-    (data.name as string) ||
     (data.email as string) ||
     null;
-
-  const label = recordLabel ? `"${recordLabel}"` : '';
 
   // ── Per-table descriptions ──────────────────────────────────
   if (table === 'users') {
     const role = data.role ? (ROLE_LABELS[data.role as string] ?? data.role) : '';
     const status = data.status as string | undefined;
-    if (entry.action === 'INSERT') return `${actor} created user ${label}${role ? ` (${role})` : ''}`;
-    if (status === 'INACTIVE') return `${actor} deactivated user ${label}`;
-    if (status === 'ARCHIVED') return `${actor} archived user ${label}`;
-    if (role) return `${actor} updated user ${label} (${role})`;
-    return `${actor} updated user ${label}`;
+    const suffix = role ? ` (${role})` : '';
+    if (entry.action === 'INSERT') return { prefix: `${actor} created user `, entityLabel: recordLabel, suffix };
+    if (status === 'INACTIVE') return { prefix: `${actor} deactivated user `, entityLabel: recordLabel, suffix: '' };
+    if (status === 'ARCHIVED') return { prefix: `${actor} archived user `, entityLabel: recordLabel, suffix: '' };
+    return { prefix: `${actor} updated user `, entityLabel: recordLabel, suffix };
   }
 
   if (table === 'orders') {
     const status = data.order_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const customer = data.customer_name ? ` for ${data.customer_name}` : '';
-    if (status === 'UNPROCESSED') return `New order created${customer}`;
-    if (status === 'CS_ENGAGED') return `${actor} engaged CS call on order${customer}`;
-    if (status === 'CONFIRMED') return `${actor} confirmed order${customer}`;
+    const entityLabel = data.reference_number
+      ? String(data.reference_number)
+      : data.customer_name
+        ? `for ${data.customer_name}`
+        : 'order';
+    if (status === 'UNPROCESSED') return { prefix: 'New order created', entityLabel: data.customer_name ? `for ${data.customer_name}` : null, suffix: '' };
+    if (status === 'CS_ENGAGED') return { prefix: `${actor} engaged CS call on `, entityLabel: `order${customer}`, suffix: '' };
+    if (status === 'CONFIRMED') return { prefix: `${actor} confirmed order `, entityLabel, suffix: '' };
     if (status === 'CANCELLED') {
       const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';
-      return `${actor} cancelled order${customer}${reason}`;
+      return { prefix: `${actor} cancelled order `, entityLabel, suffix: reason };
     }
-    if (status === 'ALLOCATED') return `${actor} allocated order${customer} to 3PL`;
-    if (status === 'DISPATCHED') return `${actor} dispatched order${customer}`;
-    if (status === 'IN_TRANSIT') return `Order${customer} is in transit`;
-    if (status === 'DELIVERED') return `${actor} marked order${customer} as delivered`;
-    if (status === 'PARTIALLY_DELIVERED') return `${actor} marked order${customer} as partially delivered`;
-    if (status === 'RETURNED') return `${actor} marked order${customer} as returned`;
-    if (status === 'RESTOCKED') return `${actor} restocked returned order${customer}`;
-    if (status === 'WRITTEN_OFF') return `${actor} wrote off order${customer}`;
-    if (status === 'COMPLETED') return `Order${customer} marked as completed`;
-    if (statusLabel) return `${actor} updated order${customer} to ${statusLabel}`;
-    return `${actor} updated order${customer}`;
+    if (status === 'ALLOCATED') return { prefix: `${actor} allocated order `, entityLabel, suffix: ' to 3PL' };
+    if (status === 'DISPATCHED') return { prefix: `${actor} dispatched order `, entityLabel, suffix: '' };
+    if (status === 'IN_TRANSIT') return { prefix: 'Order', entityLabel: customer ? customer.slice(1) : null, suffix: ' is in transit' };
+    if (status === 'DELIVERED') return { prefix: `${actor} marked order `, entityLabel, suffix: ' as delivered' };
+    if (status === 'PARTIALLY_DELIVERED') return { prefix: `${actor} marked order `, entityLabel, suffix: ' as partially delivered' };
+    if (status === 'RETURNED') return { prefix: `${actor} marked order `, entityLabel, suffix: ' as returned' };
+    if (status === 'RESTOCKED') return { prefix: `${actor} restocked returned order `, entityLabel, suffix: '' };
+    if (status === 'WRITTEN_OFF') return { prefix: `${actor} wrote off order `, entityLabel, suffix: '' };
+    if (status === 'COMPLETED') return { prefix: 'Order', entityLabel: customer ? customer.slice(1) : null, suffix: ' marked as completed' };
+    if (statusLabel) return { prefix: `${actor} updated order `, entityLabel, suffix: ` to ${statusLabel}` };
+    return { prefix: `${actor} updated order `, entityLabel, suffix: '' };
   }
 
   if (table === 'order_items') {
     const qty = data.quantity ?? '';
     const price = data.unit_price ? formatCurrency(data.unit_price) : '';
-    if (qty && price) return `${actor} updated order item — ${qty} units at ${price}`;
-    return `${actor} updated order item`;
+    const full = qty && price
+      ? `${actor} updated order item — ${qty} units at ${price}`
+      : `${actor} updated order item`;
+    return { prefix: full, entityLabel: null, suffix: '' };
   }
 
   if (table === 'product_categories') {
     const brand = data.brand_name ? ` (brand: ${data.brand_name})` : '';
-    if (entry.action === 'INSERT') return `${actor} created product category ${label}${brand}`;
-    return `${actor} updated product category ${label}${brand}`;
+    const prefix = entry.action === 'INSERT'
+      ? `${actor} created product category `
+      : `${actor} updated product category `;
+    return { prefix, entityLabel: recordLabel, suffix: brand };
   }
 
   if (table === 'products') {
-    const price = data.selling_price ? ` (${formatCurrency(data.selling_price)})` : '';
-    if (entry.action === 'INSERT') return `${actor} created product ${label}${price}`;
-    if (data.is_active === false) return `${actor} deactivated product ${label}${price}`;
-    return `${actor} updated product ${label}${price}`;
+    const priceVal = data.baseSalePrice ?? data.base_sale_price;
+    const price = priceVal ? ` (${formatCurrency(priceVal)})` : '';
+    if (entry.action === 'INSERT') return { prefix: `${actor} created product `, entityLabel: recordLabel, suffix: price };
+    if (data.status === 'INACTIVE' || data.is_active === false) return { prefix: `${actor} deactivated product `, entityLabel: recordLabel, suffix: price };
+    return { prefix: `${actor} updated product `, entityLabel: recordLabel, suffix: price };
   }
 
   if (table === 'stock_batches') {
     const units = data.total_units ?? '';
     const cost = data.factory_cost ? ` at ${formatCurrency(data.factory_cost)}/unit` : '';
-    if (units) return `${actor} updated stock batch ${label} — ${units} units${cost}`;
-    return `${actor} updated stock batch ${label}`;
+    const suffix = units ? ` — ${units} units${cost}` : '';
+    return { prefix: `${actor} updated stock batch `, entityLabel: recordLabel, suffix };
   }
 
   if (table === 'stock_transfers') {
@@ -460,70 +521,263 @@ function generateDescription(
     const qty = data.sent_quantity ? `${data.sent_quantity} units` : '';
     if (status === 'RECEIVED') {
       const received = data.received_quantity ?? data.sent_quantity ?? '';
-      return `${actor} received transfer — ${received} units`;
+      return { prefix: `${actor} received transfer — `, entityLabel: null, suffix: `${received} units` };
     }
-    if (status === 'DISPUTED') return `${actor} disputed transfer — ${qty}`;
-    if (statusLabel) return `${actor} updated stock transfer to ${statusLabel} — ${qty}`;
-    return `${actor} updated stock transfer — ${qty}`;
+    if (status === 'DISPUTED') return { prefix: `${actor} disputed transfer — `, entityLabel: null, suffix: qty };
+    const full = statusLabel ? `${actor} updated stock transfer to ${statusLabel} — ${qty}` : `${actor} updated stock transfer — ${qty}`;
+    return { prefix: full, entityLabel: null, suffix: '' };
   }
 
   if (table === 'inventory_levels') {
     const qty = data.available_units ?? data.quantity ?? '';
-    return `${actor} updated inventory level${qty ? ` — ${qty} units` : ''}`;
+    const full = `${actor} updated inventory level${qty ? ` — ${qty} units` : ''}`;
+    return { prefix: full, entityLabel: null, suffix: '' };
   }
 
   if (table === 'logistics_providers') {
-    return `${actor} updated logistics provider ${label}`;
+    return { prefix: `${actor} updated logistics provider `, entityLabel: recordLabel, suffix: '' };
   }
 
   if (table === 'logistics_locations') {
-    return `${actor} updated logistics location ${label}`;
+    return { prefix: `${actor} updated logistics location `, entityLabel: recordLabel, suffix: '' };
   }
 
   if (table === 'invoices') {
     const status = data.invoice_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` for ${formatCurrency(data.amount)}` : '';
-    if (statusLabel) return `${actor} updated invoice ${label}${amount} — ${statusLabel}`;
-    return `${actor} updated invoice ${label}${amount}`;
+    const suffix = amount + (statusLabel ? ` — ${statusLabel}` : '');
+    return { prefix: `${actor} updated invoice `, entityLabel: recordLabel, suffix };
   }
 
   if (table === 'marketing_funding') {
     const status = data.funding_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    if (status === 'COMPLETED') return `${actor} confirmed funding received${amount}`;
-    if (status === 'DISPUTED') return `${actor} disputed funding${amount}`;
-    if (statusLabel) return `${actor} updated marketing funding${amount} — ${statusLabel}`;
-    return `${actor} updated marketing funding${amount}`;
+    if (status === 'COMPLETED') return { prefix: `${actor} confirmed funding received`, entityLabel: null, suffix: amount };
+    if (status === 'DISPUTED') return { prefix: `${actor} disputed funding`, entityLabel: null, suffix: amount };
+    const full = statusLabel ? `${actor} updated marketing funding${amount} — ${statusLabel}` : `${actor} updated marketing funding${amount}`;
+    return { prefix: full, entityLabel: null, suffix: '' };
   }
 
   if (table === 'campaigns' || table === 'offer_templates') {
-    return `${actor} updated ${formatTableName(table).toLowerCase()} ${label}`;
+    return { prefix: `${actor} updated ${formatTableName(table).toLowerCase()} `, entityLabel: recordLabel, suffix: '' };
   }
 
   if (table === 'commission_plans') {
-    return `${actor} updated commission plan ${label}`;
+    return { prefix: `${actor} updated commission plan `, entityLabel: recordLabel, suffix: '' };
   }
 
   if (table === 'payout_records') {
     const status = data.payout_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.net_amount ? ` — ${formatCurrency(data.net_amount)}` : '';
-    if (statusLabel) return `${actor} updated payout${amount} — ${statusLabel}`;
-    return `${actor} updated payout record${amount}`;
+    const suffix = amount + (statusLabel ? ` — ${statusLabel}` : '');
+    return { prefix: `${actor} updated payout`, entityLabel: null, suffix };
   }
 
   if (table === 'earnings_adjustments') {
     const cat = data.category as string | undefined;
     const catLabel = cat ? cat.charAt(0) + cat.slice(1).toLowerCase() : '';
     const amount = data.amount ? ` of ${formatCurrency(data.amount)}` : '';
-    if (catLabel) return `${actor} added ${catLabel} adjustment${amount}`;
-    return `${actor} updated earnings adjustment${amount}`;
+    if (catLabel) return { prefix: `${actor} added ${catLabel} adjustment`, entityLabel: null, suffix: amount };
+    return { prefix: `${actor} updated earnings adjustment`, entityLabel: null, suffix: amount };
   }
 
-  // Generic fallback
-  return `${actor} updated ${formatTableName(table).toLowerCase()} record`;
+  const full = `${actor} updated ${formatTableName(table).toLowerCase()} record`;
+  return { prefix: full, entityLabel: null, suffix: '' };
+}
+
+function generateDescription(
+  entry: AuditEntry,
+  actorNames: Record<string, { name: string; role: string }>,
+): string {
+  const { prefix, entityLabel, suffix } = getDescriptionParts(entry, actorNames);
+  const label = entityLabel ? `"${entityLabel}"` : '';
+  return prefix + label + suffix;
+}
+
+function AuditDescription({
+  entry,
+  actorNames,
+}: {
+  entry: AuditEntry;
+  actorNames: Record<string, { name: string; role: string }>;
+}) {
+  const { prefix, entityLabel, suffix } = getDescriptionParts(entry, actorNames);
+  const href = getEntityLink(entry.tableName, entry.recordId);
+
+  if (href && entityLabel) {
+    return (
+      <>
+        {prefix}
+        <Link
+          to={href}
+          className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2"
+        >
+          {entityLabel}
+        </Link>
+        {suffix}
+      </>
+    );
+  }
+
+  const label = entityLabel ? `"${entityLabel}"` : '';
+  return <>{prefix}{label}{suffix}</>;
+}
+
+// ── Structured display for deep objects/arrays (no raw JSON) ──────
+
+type StructuredValueProps = {
+  value: unknown;
+  fieldKey?: string;
+  actorNames: Record<string, { name: string; role: string }>;
+  depth?: number;
+};
+
+function formatLeafValue(
+  key: string,
+  val: unknown,
+  actorNames: Record<string, { name: string; role: string }>,
+): React.ReactNode {
+  if (val === null || val === undefined) return <span className="text-surface-500">-</span>;
+  if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+  if (CURRENCY_FIELDS.has(key) && (typeof val === 'number' || (typeof val === 'string' && !isNaN(Number(val))))) {
+    return formatCurrency(val);
+  }
+  const strVal = String(val);
+  if (STATUS_LABELS[strVal]) return STATUS_LABELS[strVal];
+  if (ROLE_LABELS[strVal]) return ROLE_LABELS[strVal];
+  if (isUUID(val) && (key.endsWith('_id') || key === 'created_by' || key === 'approved_by' || key === 'locked_by')) {
+    const actor = actorNames[strVal];
+    if (actor) return `${actor.name} (${ROLE_LABELS[actor.role] ?? actor.role})`;
+    return `${strVal.slice(0, 8)}...`;
+  }
+  if (isISODate(val)) return formatDate(strVal);
+  if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://'))) return 'Uploaded file';
+  return strVal;
+}
+
+const MAX_STRUCTURED_DEPTH = 10;
+
+function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }: StructuredValueProps): React.ReactNode {
+  if (depth > MAX_STRUCTURED_DEPTH) {
+    return <span className="text-surface-500 italic">(nested too deep)</span>;
+  }
+  // Parse JSON strings
+  let resolved = value;
+  if (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) {
+    try {
+      resolved = JSON.parse(value) as unknown;
+    } catch {
+      return value;
+    }
+  }
+
+  if (resolved === null || resolved === undefined) {
+    return <span className="text-surface-500">-</span>;
+  }
+
+  if (typeof resolved === 'boolean') {
+    return resolved ? 'Yes' : 'No';
+  }
+
+  if (typeof resolved === 'number') {
+    return CURRENCY_FIELDS.has(fieldKey) ? formatCurrency(resolved) : resolved.toLocaleString('en-NG');
+  }
+
+  if (typeof resolved === 'string') {
+    return formatLeafValue(fieldKey, resolved, actorNames);
+  }
+
+  if (Array.isArray(resolved)) {
+    if (resolved.length === 0) return <span className="text-surface-500">(empty)</span>;
+    return (
+      <ul className="list-none space-y-2 pl-0 mt-1">
+        {resolved.map((item, i) => (
+          <li key={i} className="flex flex-col gap-0.5 pl-3 border-l-2 border-surface-200 dark:border-surface-600">
+            {item !== null && typeof item === 'object' && !Array.isArray(item) ? (
+              <dl className="space-y-1 text-sm">
+                {Object.entries(item as Record<string, unknown>).map(([k, v]) => (
+                  <div key={k} className="flex flex-wrap gap-x-2 gap-y-0.5">
+                    <dt className="font-medium text-surface-600 dark:text-surface-400 shrink-0">
+                      {formatFieldName(k)}:
+                    </dt>
+                    <dd className="text-surface-900 dark:text-surface-100">
+                      {typeof v === 'object' && v !== null ? (
+                        <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} depth={depth + 1} />
+                      ) : (
+                        formatLeafValue(k, v, actorNames)
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <span className="text-surface-800 dark:text-surface-200">
+                {typeof item === 'object' && item !== null ? (
+                  <StructuredValueDisplay value={item} fieldKey={String(i)} actorNames={actorNames} depth={depth + 1} />
+                ) : (
+                  formatLeafValue(String(i), item, actorNames)
+                )}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (typeof resolved === 'object') {
+    const entries = Object.entries(resolved as Record<string, unknown>);
+    if (entries.length === 0) return <span className="text-surface-500">(empty)</span>;
+    return (
+      <dl className="space-y-1.5 text-sm mt-1">
+        {entries.map(([k, v]) => (
+          <div key={k}>
+            <dt className="font-medium text-surface-600 dark:text-surface-400 text-xs uppercase tracking-wide">
+              {formatFieldName(k)}
+            </dt>
+            <dd className="mt-0.5 pl-2 border-l-2 border-surface-100 dark:border-surface-700">
+              {typeof v === 'object' && v !== null ? (
+                <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} depth={depth + 1} />
+              ) : (
+                formatLeafValue(k, v, actorNames)
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+
+  return String(resolved);
+}
+
+// ── Offers display (product bundle pricing) ──────────────────────
+
+function OffersDisplay({ value }: { value: unknown }) {
+  const offers = parseOffersArray(value);
+  if (offers.length === 0) return <span className="text-surface-600 dark:text-surface-400">-</span>;
+  return (
+    <div className="text-sm space-y-1.5 py-1">
+      {offers.map((obj, i) => {
+        const qty = obj.qty ?? '?';
+        const label = typeof obj.label === 'string' ? obj.label : String(obj.label ?? 'Offer');
+        const priceVal = obj.price;
+        const price = (typeof priceVal === 'number' || (typeof priceVal === 'string' && !isNaN(Number(priceVal))))
+          ? formatCurrency(priceVal)
+          : String(priceVal ?? '—');
+        return (
+          <div key={i} className="flex flex-wrap gap-x-2 gap-y-0.5 text-surface-800 dark:text-surface-200">
+            <span className="font-medium">{label}</span>
+            <span className="text-surface-600 dark:text-surface-400">— {String(qty)} qty</span>
+            <span className="text-success-600 dark:text-success-400 font-medium">{price}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // ── Detail Modal ────────────────────────────────────────────────
@@ -557,7 +811,7 @@ function DetailModal({
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
               Record Detail
             </h3>
-            <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+            <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
               {formatTableName(entry.tableName)} &middot; {entry.recordId.slice(0, 8)}...
             </p>
           </div>
@@ -575,10 +829,10 @@ function DetailModal({
         <div className="px-6 py-3 bg-surface-50 dark:bg-surface-800/50 border-b border-surface-200 dark:border-surface-700">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
             <div>
-              <span className="text-surface-800 dark:text-surface-400">Changed By</span>
+              <span className="text-surface-800 dark:text-surface-200">Changed By</span>
               {actorKnown && entry.changedBy ? (
                 <Link
-                  to={`/admin/users/${entry.changedBy}`}
+                  to={`/hr/users/${entry.changedBy}`}
                   className="block font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 text-xs mt-0.5 underline underline-offset-2"
                 >
                   {actorDisplay}
@@ -587,7 +841,7 @@ function DetailModal({
                 <button
                   type="button"
                   onClick={() => onUnknownActorClick(entry.changedBy, actorDisplay)}
-                  className="block font-medium text-surface-600 hover:text-surface-900 dark:text-surface-400 dark:hover:text-surface-100 text-xs mt-0.5 underline underline-offset-2 cursor-pointer text-left"
+                  className="block font-medium text-surface-600 hover:text-surface-900 dark:text-surface-200 dark:hover:text-surface-100 text-xs mt-0.5 underline underline-offset-2 cursor-pointer text-left"
                 >
                   {actorDisplay}
                 </button>
@@ -597,19 +851,19 @@ function DetailModal({
                 </p>
               )}
               {actorInfo && (
-                <p className="text-xs text-surface-700 dark:text-surface-500">
+                <p className="text-xs text-surface-700 dark:text-surface-300">
                   {ROLE_LABELS[actorInfo.role] ?? actorInfo.role}
                 </p>
               )}
             </div>
             <div>
-              <span className="text-surface-800 dark:text-surface-400">Valid From</span>
+              <span className="text-surface-800 dark:text-surface-200">Valid From</span>
               <p className="text-surface-900 dark:text-surface-100 text-xs mt-0.5">
                 {formatDate(entry.validFrom)}
               </p>
             </div>
             <div>
-              <span className="text-surface-800 dark:text-surface-400">Valid To</span>
+              <span className="text-surface-800 dark:text-surface-200">Valid To</span>
               <p className="text-surface-900 dark:text-surface-100 text-xs mt-0.5">
                 {entry.validTo ? formatDate(entry.validTo) : 'Current'}
               </p>
@@ -633,10 +887,12 @@ function DetailModal({
                     {formatFieldName(key)}
                   </td>
                   <td className="table-cell text-surface-900 dark:text-surface-100 break-all">
-                    {(key === 'rules' || (typeof value === 'object' && value !== null)) ? (
-                      <pre className="text-xs font-mono bg-surface-50 dark:bg-surface-800 rounded p-2 overflow-x-auto max-w-sm whitespace-pre-wrap">
-                        {formatValue(key, value, actorNames)}
-                      </pre>
+                    {key === 'offers' ? (
+                      <OffersDisplay value={value} />
+                    ) : (typeof value === 'object' && value !== null) || (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) ? (
+                      <div className="py-1.5 min-w-0">
+                        <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} />
+                      </div>
                     ) : (
                       formatValue(key, value, actorNames)
                     )}
@@ -679,7 +935,7 @@ function PollingStatusIndicator({
             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
           />
         </svg>
-        <span className="text-surface-700 dark:text-surface-400">Update</span>
+        <span className="text-surface-700 dark:text-surface-200">Update</span>
       </span>
     );
   }
@@ -700,7 +956,7 @@ function PollingStatusIndicator({
         className="h-3 w-3 rounded-full bg-warning-500"
         title={`Next refresh in ${countdown}s`}
       />
-      <span className="text-surface-700 dark:text-surface-400">
+      <span className="text-surface-700 dark:text-surface-200">
         Next refresh in {countdown}s
       </span>
     </span>
@@ -729,7 +985,7 @@ function TimeTravelPanel({
       <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">
         Time Travel
       </h2>
-      <p className="text-sm text-surface-800 dark:text-surface-400 mb-4">
+      <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
         View the state of any record at a specific point in time.
       </p>
       <fetcher.Form method="post">
@@ -760,13 +1016,16 @@ function TimeTravelPanel({
             onChange={(e) => setTtTimestamp(e.target.value)}
             className="input text-sm"
           />
-          <button
+          <Button
             type="submit"
+            variant="primary"
+            size="sm"
             disabled={ttLoading || !ttRecordId || !ttTimestamp}
-            className="btn-primary text-sm"
+            loading={ttLoading}
+            loadingText="Loading..."
           >
-            {ttLoading ? 'Loading...' : 'View State'}
-          </button>
+            View State
+          </Button>
         </div>
       </fetcher.Form>
 
@@ -794,7 +1053,15 @@ function TimeTravelPanel({
                     {formatFieldName(key)}
                   </td>
                   <td className="table-cell text-surface-900 dark:text-surface-100 break-all">
-                    {formatValue(key, value, actorNames)}
+                    {key === 'offers' ? (
+                      <OffersDisplay value={value} />
+                    ) : (typeof value === 'object' && value !== null) || (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) ? (
+                      <div className="py-1.5 min-w-0">
+                        <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} />
+                      </div>
+                    ) : (
+                      formatValue(key, value, actorNames)
+                    )}
                   </td>
                 </tr>
               ))}
@@ -887,7 +1154,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Audit Trail</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-1">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
             Complete history of all data changes. Every mutation is permanently recorded.
           </p>
         </div>
@@ -906,7 +1173,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
       <div className="card">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-400 mb-1">
+            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
               Table
             </label>
             <select
@@ -921,7 +1188,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-400 mb-1">
+            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
               Actor
             </label>
             <DeferredSection resolve={actorNames} skeleton="inline">
@@ -957,7 +1224,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             </DeferredSection>
           </div>
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-400 mb-1">
+            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
               Start Date
             </label>
             <input
@@ -968,7 +1235,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-400 mb-1">
+            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
               End Date
             </label>
             <input
@@ -983,13 +1250,15 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
 
       {/* Results count + Export */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-surface-800 dark:text-surface-400">
+        <p className="text-sm text-surface-800 dark:text-surface-200">
           {total} {total === 1 ? 'entry' : 'entries'} found
         </p>
         {rows.length > 0 && (
           <DeferredSection resolve={actorNames} skeleton="inline">
             {(resolvedActorNames) => (
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => exportToCsv(
                   rows.map((entry) => ({
                     timestamp: formatDate(entry.validFrom),
@@ -1011,10 +1280,9 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                   ],
                   `audit-log-${new Date().toISOString().split('T')[0]}.csv`,
                 )}
-                className="btn-secondary btn-sm"
               >
                 Export CSV
-              </button>
+              </Button>
             )}
           </DeferredSection>
         )}
@@ -1037,7 +1305,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
                     No audit entries found. Try adjusting your filters.
                   </td>
                 </tr>
@@ -1055,7 +1323,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                   <td className="table-cell text-xs text-surface-700 dark:text-surface-300 max-w-xs">
                     <DeferredSection resolve={actorNames} skeleton="inline">
                       {(resolvedActorNames) => (
-                        <>{generateDescription(entry, resolvedActorNames)}</>
+                        <AuditDescription entry={entry} actorNames={resolvedActorNames} />
                       )}
                     </DeferredSection>
                   </td>
@@ -1067,7 +1335,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                         if (known && entry.changedBy) {
                           return (
                             <Link
-                              to={`/admin/users/${entry.changedBy}`}
+                              to={`/hr/users/${entry.changedBy}`}
                               className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2"
                             >
                               {display}
@@ -1078,7 +1346,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                           <button
                             type="button"
                             onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
-                            className="text-surface-600 hover:text-surface-900 dark:text-surface-400 dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer"
+                            className="text-surface-600 hover:text-surface-900 dark:text-surface-200 dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer"
                           >
                             {display}
                           </button>
@@ -1098,12 +1366,14 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                     </span>
                   </td>
                   <td className="table-cell text-right">
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setSelectedEntry(entry)}
-                      className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 text-sm font-medium"
+                      className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium h-auto py-0"
                     >
                       View
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -1115,23 +1385,25 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => goToPage(filters.page - 1)}
             disabled={filters.page <= 1}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 hover:bg-surface-200 dark:hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Previous
-          </button>
-          <span className="text-sm text-surface-800 dark:text-surface-400">
+          </Button>
+          <span className="text-sm text-surface-800 dark:text-surface-200">
             Page {filters.page} of {totalPages}
           </span>
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => goToPage(filters.page + 1)}
             disabled={filters.page >= totalPages}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 hover:bg-surface-200 dark:hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Next
-          </button>
+          </Button>
         </div>
       )}
 

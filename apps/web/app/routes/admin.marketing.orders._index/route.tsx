@@ -1,4 +1,3 @@
-import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
@@ -53,7 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const total = trpcData?.pagination?.total ?? 0;
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
-  return json({
+  return {
     orders: trpcData?.orders ?? [],
     total,
     totalPages,
@@ -63,7 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusFilter: status,
     searchFilter: search,
     isMediaBuyer,
-  });
+  };
 }
 
 export default function MarketingOrdersRoute() {

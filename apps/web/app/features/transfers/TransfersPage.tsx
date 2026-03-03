@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '~/components/ui/button';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -49,16 +50,13 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Stock Transfers</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Dual-entry stock transfers between warehouse and 3PL locations
           </p>
         </div>
-        <button
-          onClick={() => setShowInitiateForm(!showInitiateForm)}
-          className="btn-primary btn-sm"
-        >
+        <Button variant="primary" size="sm" onClick={() => setShowInitiateForm(!showInitiateForm)}>
           + Initiate Transfer
-        </button>
+        </Button>
       </div>
 
       {/* Error banner */}
@@ -71,19 +69,19 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Transfers</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Transfers</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{transfers.length}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">In Transit</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">In Transit</p>
           <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{inTransitCount}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Received</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Received</p>
           <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{receivedCount}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
             Disputed / Shrinkage
           </p>
           <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
@@ -170,7 +168,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                         <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
                           Quantity
                           {selectedProductId && selectedFromLocation && (
-                            <span className="text-surface-700 dark:text-surface-500 font-normal ml-1">
+                            <span className="text-surface-700 dark:text-surface-300 font-normal ml-1">
                               (max: {getAvailableStock(selectedProductId, selectedFromLocation)})
                             </span>
                           )}
@@ -189,14 +187,14 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
 
                     {/* Visual transfer flow */}
                     {selectedProductId && selectedFromLocation && (
-                      <div className="flex items-center justify-center gap-3 py-2 text-sm text-surface-800 dark:text-surface-400">
+                      <div className="flex items-center justify-center gap-3 py-2 text-sm text-surface-800 dark:text-surface-200">
                         <span className="font-medium text-surface-700 dark:text-surface-200">
                           {getLocationName(selectedFromLocation)}
                         </span>
                         <svg className="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                         </svg>
-                        <span className="text-surface-700 dark:text-surface-500">3PL Location</span>
+                        <span className="text-surface-700 dark:text-surface-300">3PL Location</span>
                       </div>
                     )}
 
@@ -208,16 +206,12 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                     </div>
 
                     <div className="flex gap-2">
-                      <button
-                        type="submit"
-                        className="btn-primary btn-sm"
-                        disabled={fetcher.state === 'submitting'}
-                      >
-                        {fetcher.state === 'submitting' ? 'Initiating...' : 'Initiate Transfer'}
-                      </button>
-                      <button type="button" onClick={() => setShowInitiateForm(false)} className="btn-secondary btn-sm">
+                      <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Initiating...">
+                        Initiate Transfer
+                      </Button>
+                      <Button type="button" variant="secondary" size="sm" onClick={() => setShowInitiateForm(false)}>
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </fetcher.Form>
                 );
@@ -244,7 +238,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
             {/* Transfer details — product name deferred */}
             <div className="bg-surface-50 dark:bg-surface-700/50 rounded-lg p-3 space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-surface-800 dark:text-surface-400">Product</span>
+                <span className="text-surface-800 dark:text-surface-200">Product</span>
                 <span className="font-medium text-surface-900 dark:text-white">
                   <DeferredSection resolve={products} skeleton="inline">
                     {(resolvedProducts) => {
@@ -255,19 +249,19 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-surface-800 dark:text-surface-400">From</span>
+                <span className="text-surface-800 dark:text-surface-200">From</span>
                 <span className="font-medium text-surface-900 dark:text-white">
                   {getLocationName(verifyingTransfer.fromLocationId)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-surface-800 dark:text-surface-400">To</span>
+                <span className="text-surface-800 dark:text-surface-200">To</span>
                 <span className="font-medium text-surface-900 dark:text-white">
                   {getLocationName(verifyingTransfer.toLocationId)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-surface-800 dark:text-surface-400">Quantity Sent</span>
+                <span className="text-surface-800 dark:text-surface-200">Quantity Sent</span>
                 <span className="font-bold text-surface-900 dark:text-white">{verifyingTransfer.quantitySent} units</span>
               </div>
             </div>
@@ -289,7 +283,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                   defaultValue={verifyingTransfer.quantitySent}
                   className="input"
                 />
-                <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                   If less than {verifyingTransfer.quantitySent}, a shrinkage alert will be sent to the CEO and Head of Logistics
                 </p>
               </div>
@@ -310,16 +304,12 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
               </div>
 
               <div className="flex gap-2 pt-2">
-                <button
-                  type="submit"
-                  className="btn-primary btn-sm"
-                  disabled={fetcher.state === 'submitting'}
-                >
-                  {fetcher.state === 'submitting' ? 'Verifying...' : 'Confirm Receipt'}
-                </button>
-                <button type="button" onClick={() => setVerifyingTransfer(null)} className="btn-secondary btn-sm">
+                <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Verifying...">
+                  Confirm Receipt
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setVerifyingTransfer(null)}>
                   Cancel
-                </button>
+                </Button>
               </div>
             </fetcher.Form>
           </div>
@@ -366,10 +356,10 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                         }}
                       </DeferredSection>
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-400">
+                    <td className="table-cell text-surface-800 dark:text-surface-200">
                       {getLocationName(t.fromLocationId)}
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-400">
+                    <td className="table-cell text-surface-800 dark:text-surface-200">
                       {getLocationName(t.toLocationId)}
                     </td>
                     <td className="table-cell text-right font-medium">{t.quantitySent}</td>
@@ -382,7 +372,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                           )}
                         </span>
                       ) : (
-                        <span className="text-surface-700 dark:text-surface-500">{'\u2014'}</span>
+                        <span className="text-surface-700 dark:text-surface-300">{'\u2014'}</span>
                       )}
                     </td>
                     <td className="table-cell">
@@ -390,19 +380,16 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                         {t.transferStatus.replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                    <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                       {new Date(t.createdAt).toLocaleDateString('en-NG', {
                         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                       })}
                     </td>
                     <td className="table-cell">
                       {t.transferStatus === 'IN_TRANSIT' && (
-                        <button
-                          onClick={() => setVerifyingTransfer(t)}
-                          className="btn-primary btn-sm text-xs"
-                        >
+                        <Button variant="primary" size="sm" className="text-xs" onClick={() => setVerifyingTransfer(t)}>
                           Verify Receipt
-                        </button>
+                        </Button>
                       )}
                       {t.transferStatus === 'DISPUTED' && t.shrinkageReason && (
                         <span className="text-xs text-danger-600 dark:text-danger-400" title={t.shrinkageReason}>
@@ -415,7 +402,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
               })}
               {filteredTransfers.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                     {activeTab === 'all'
                       ? 'No transfers yet. Initiate a transfer to move stock between locations.'
                       : `No ${activeTab.replace('_', ' ')} transfers.`}
@@ -446,7 +433,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-surface-800 dark:text-surface-400">
+                <div className="flex items-center gap-2 text-xs text-surface-800 dark:text-surface-200">
                   <span>{getLocationName(t.fromLocationId)}</span>
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
@@ -469,16 +456,13 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
                     )}
                   </div>
                   {t.transferStatus === 'IN_TRANSIT' && (
-                    <button
-                      onClick={() => setVerifyingTransfer(t)}
-                      className="btn-primary btn-sm text-xs"
-                    >
+                    <Button variant="primary" size="sm" className="text-xs" onClick={() => setVerifyingTransfer(t)}>
                       Verify
-                    </button>
+                    </Button>
                   )}
                 </div>
 
-                <p className="text-xs text-surface-700 dark:text-surface-500">
+                <p className="text-xs text-surface-700 dark:text-surface-300">
                   {new Date(t.createdAt).toLocaleDateString('en-NG', {
                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                   })}
@@ -492,7 +476,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
             );
           })}
           {filteredTransfers.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+            <div className="p-8 text-center text-surface-700 dark:text-surface-300">
               No transfers found
             </div>
           )}

@@ -1,6 +1,7 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { apiRequest, getCurrentUser } from '~/lib/api.server';
 
 export const meta: MetaFunction = () => {
@@ -13,7 +14,7 @@ export const meta: MetaFunction = () => {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (user) return redirect('/admin');
-  return json({});
+  return {};
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -82,7 +83,7 @@ export default function ForgotPasswordRoute() {
             <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
               Reset your password
             </h2>
-            <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-400">
+            <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
               Enter your email address and we'll send you a reset link.
             </p>
           </div>
@@ -127,17 +128,15 @@ export default function ForgotPasswordRoute() {
                 />
               </div>
 
-              <button
+              <Button
                 type="submit"
-                className="btn-primary w-full flex items-center justify-center gap-2"
-                disabled={isSubmitting}
+                variant="primary"
+                className="w-full flex items-center justify-center gap-2"
+                loading={isSubmitting}
+                loadingText="Sending..."
               >
-                {isSubmitting ? (
-                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                ) : (
-                  'Send reset link'
-                )}
-              </button>
+                Send reset link
+              </Button>
 
               <div className="text-center">
                 <Link

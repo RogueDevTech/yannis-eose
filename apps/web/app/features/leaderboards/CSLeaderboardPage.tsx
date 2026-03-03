@@ -19,7 +19,7 @@ export function CSLeaderboardPage({
         className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
           leaderboardPeriod === 'this_month'
             ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-            : 'text-surface-700 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'
+            : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
         }`}
       >
         This month
@@ -29,7 +29,7 @@ export function CSLeaderboardPage({
         className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
           leaderboardPeriod === 'all_time'
             ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-            : 'text-surface-700 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'
+            : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
         }`}
       >
         All time
@@ -41,7 +41,7 @@ export function CSLeaderboardPage({
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-surface-900 dark:text-white">CS Leaderboard</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-400 mt-1">
+        <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
           CS agent performance ranked by delivery rate ({periodLabel}).
         </p>
       </div>
@@ -51,7 +51,7 @@ export function CSLeaderboardPage({
           if (lb.length === 0) {
             return (
               <div className="card p-8 text-center">
-                <p className="text-sm text-surface-700 dark:text-surface-400">No CS agent data for {periodLabel}.</p>
+                <p className="text-sm text-surface-700 dark:text-surface-200">No CS agent data for {periodLabel}.</p>
               </div>
             );
           }
@@ -61,7 +61,7 @@ export function CSLeaderboardPage({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold text-surface-900 dark:text-white">CS Agent Performance</h2>
-                    <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+                    <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                       Ranked by delivery rate ({periodLabel})
                     </p>
                   </div>
@@ -86,7 +86,7 @@ export function CSLeaderboardPage({
                   <tbody>
                     {lb.map((e, idx) => (
                       <tr key={e.agentId} className="table-row">
-                        <td className="table-cell text-surface-700 dark:text-surface-500 font-mono text-sm">{idx + 1}</td>
+                        <td className="table-cell text-surface-700 dark:text-surface-300 font-mono text-sm">{idx + 1}</td>
                         <td className="table-cell">
                           <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{e.agentName}</p>
                         </td>
@@ -100,7 +100,7 @@ export function CSLeaderboardPage({
                             {e.deliveryRate.toFixed(1)}%
                           </span>
                         </td>
-                        <td className="table-cell text-right text-sm text-surface-700 dark:text-surface-500">
+                        <td className="table-cell text-right text-sm text-surface-700 dark:text-surface-300">
                           {e.avgCallDurationSeconds >= 60
                             ? `${Math.floor(e.avgCallDurationSeconds / 60)}m ${e.avgCallDurationSeconds % 60}s`
                             : `${e.avgCallDurationSeconds}s`}
@@ -115,7 +115,7 @@ export function CSLeaderboardPage({
                   <div key={e.agentId} className="p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono text-surface-700 dark:text-surface-500">#{idx + 1}</span>
+                        <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
                         <span className="font-medium text-surface-900 dark:text-white text-sm">{e.agentName}</span>
                       </div>
                       <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-surface-900 dark:text-white'}`}>
@@ -124,15 +124,15 @@ export function CSLeaderboardPage({
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div>
-                        <span className="text-surface-700 dark:text-surface-500">Confirmed</span>
+                        <span className="text-surface-700 dark:text-surface-300">Confirmed</span>
                         <p className="font-medium text-surface-900 dark:text-white">{e.ordersConfirmed}</p>
                       </div>
                       <div>
-                        <span className="text-surface-700 dark:text-surface-500">Calls</span>
+                        <span className="text-surface-700 dark:text-surface-300">Calls</span>
                         <p className="font-medium text-surface-900 dark:text-white">{e.callsMade}</p>
                       </div>
                       <div>
-                        <span className="text-surface-700 dark:text-surface-500">Delivered</span>
+                        <span className="text-surface-700 dark:text-surface-300">Delivered</span>
                         <p className="font-medium text-brand-600 dark:text-brand-400">{e.ordersDelivered}</p>
                       </div>
                     </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useFetcher } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { Tabs } from '~/components/ui/tabs';
 import { ROLE_LABELS } from './types';
 
@@ -67,7 +68,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Settings</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
           Manage your account and system preferences
         </p>
       </div>
@@ -109,17 +110,17 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                 </div>
                 <div>
                   <p className="text-lg font-semibold text-surface-900 dark:text-white">{user?.name ?? 'Unknown'}</p>
-                  <p className="text-sm text-surface-800 dark:text-surface-400">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</p>
+                  <p className="text-sm text-surface-800 dark:text-surface-200">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</p>
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Email</label>
+                <label className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Email</label>
                 <p className="text-sm text-surface-900 dark:text-surface-100 mt-1">{user?.email ?? '—'}</p>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Role</label>
+                <label className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Role</label>
                 <p className="text-sm text-surface-900 dark:text-surface-100 mt-1">{ROLE_LABELS[user?.role ?? ''] ?? user?.role ?? '—'}</p>
               </div>
             </div>
@@ -130,7 +131,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             <input type="hidden" name="intent" value="updateProfile" />
             <div className="space-y-4">
               <div>
-                <label htmlFor="name" className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">
+                <label htmlFor="name" className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
                   Display Name
                 </label>
                 <input
@@ -143,13 +144,9 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   required
                 />
               </div>
-              <button
-                type="submit"
-                className="btn-primary btn-sm"
-                disabled={fetcher.state === 'submitting'}
-              >
-                {fetcher.state === 'submitting' ? 'Saving...' : 'Save Changes'}
-              </button>
+              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
+                Save Changes
+              </Button>
             </div>
           </fetcher.Form>
         </div>
@@ -163,26 +160,26 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             <input type="hidden" name="intent" value="changePassword" />
             <div className="space-y-4">
               <div>
-                <label htmlFor="currentPassword" className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">
+                <label htmlFor="currentPassword" className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
                   Current Password
                 </label>
                 <input id="currentPassword" name="currentPassword" type="password" className="input mt-1" required autoComplete="current-password" />
               </div>
               <div>
-                <label htmlFor="newPassword" className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">
+                <label htmlFor="newPassword" className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
                   New Password
                 </label>
                 <input id="newPassword" name="newPassword" type="password" className="input mt-1" required minLength={8} autoComplete="new-password" />
               </div>
               <div>
-                <label htmlFor="confirmPassword" className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">
+                <label htmlFor="confirmPassword" className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
                   Confirm New Password
                 </label>
                 <input id="confirmPassword" name="confirmPassword" type="password" className="input mt-1" required minLength={8} autoComplete="new-password" />
               </div>
-              <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-                {fetcher.state === 'submitting' ? 'Updating...' : 'Change Password'}
-              </button>
+              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Updating...">
+                Change Password
+              </Button>
             </div>
           </fetcher.Form>
 
@@ -190,15 +187,15 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Session Information</h3>
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Authentication</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Authentication</span>
                 <span className="badge-success">Active</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Session Type</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Session Type</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">Redis-backed</span>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Security Level</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Security Level</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">HTTP-only Cookie</span>
               </div>
             </div>
@@ -219,7 +216,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Data Security</h3>
-                <p className="text-sm text-surface-800 dark:text-surface-400">
+                <p className="text-sm text-surface-800 dark:text-surface-200">
                   Control how CS agents communicate with customers
                 </p>
               </div>
@@ -244,7 +241,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-400 leading-relaxed">
+                  <p className="text-xs text-surface-800 dark:text-surface-200 leading-relaxed">
                     {isStrictMode
                       ? 'CS agents connect via secure VOIP bridge (Twilio). Customer phone numbers are never visible. Call duration is tracked and the 15-second confirm gate is enforced.'
                       : 'CS agents can reveal customer phone numbers for manual calling. Call duration is not tracked by the system. Confirm is enabled after clicking Call.'}
@@ -307,7 +304,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">VOIP Integration</h3>
-                <p className="text-sm text-surface-800 dark:text-surface-400">
+                <p className="text-sm text-surface-800 dark:text-surface-200">
                   Twilio-powered voice calls for CS agents
                 </p>
               </div>
@@ -326,13 +323,13 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                         Enabled
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-0.5 text-xs font-medium text-surface-600 dark:text-surface-400">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-0.5 text-xs font-medium text-surface-600 dark:text-surface-200">
                         <span className="w-1.5 h-1.5 rounded-full bg-surface-400" />
                         Disabled
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-400 leading-relaxed">
+                  <p className="text-xs text-surface-800 dark:text-surface-200 leading-relaxed">
                     {isVoipEnabled
                       ? 'Agents use Twilio WebRTC to call customers. Calls are tracked, recorded, and the 15-second confirm gate is enforced. Orders are locked for 15 minutes during calls.'
                       : 'VOIP is off. Agents will log manual calls. Less control over the call process.'}
@@ -389,23 +386,23 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Application</h3>
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Platform</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Platform</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">Yannis EOSE v1.0</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Frontend</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Frontend</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">Remix + React</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Backend</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Backend</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">NestJS + tRPC</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Database</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Database</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">PostgreSQL 18 + Drizzle</span>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Cache</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Cache</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">Redis</span>
               </div>
             </div>
@@ -415,31 +412,31 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Business Configuration</h3>
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Virtual Stock Buffer</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Virtual Stock Buffer</span>
                 <span className="text-sm font-medium text-brand-600 dark:text-brand-400">10%</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Dedup Window</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Dedup Window</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">6 hours</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">CS Confirm Gate</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">CS Confirm Gate</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">
                   {isStrictMode ? 'Call > 15s (VOIP)' : 'Click to Call (Manual)'}
                 </span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">VOIP Integration</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">VOIP Integration</span>
                 <span className={isVoipEnabled ? 'badge-success' : 'badge'}>
                   {isVoipEnabled ? 'Twilio Active' : 'Disabled'}
                 </span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Rate Limit</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Rate Limit</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">5 attempts / 15 min</span>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Circuit Breaker Timeout</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Circuit Breaker Timeout</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">2000ms</span>
               </div>
             </div>
@@ -449,21 +446,21 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Audit &amp; Compliance</h3>
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Temporal Audit</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Temporal Audit</span>
                 <span className="badge-success">Enabled</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Row-Level Security</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Row-Level Security</span>
                 <span className="badge-success">Enforced</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Phone Masking</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Phone Masking</span>
                 <span className={isStrictMode ? 'badge-success' : 'badge-warning'}>
                   {isStrictMode ? 'Always Masked' : 'Revealable'}
                 </span>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-400">FIFO Batch Costing</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">FIFO Batch Costing</span>
                 <span className="badge-success">Active</span>
               </div>
             </div>
@@ -473,23 +470,23 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Performance Targets</h3>
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Edge Form Load</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Edge Form Load</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 400ms</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">VOIP Connection</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">VOIP Connection</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 1.5s</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">Dashboard Staleness</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">Dashboard Staleness</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 60s</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-400">State Transition</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">State Transition</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 500ms</span>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-400">P/L Report (100k)</span>
+                <span className="text-sm text-surface-800 dark:text-surface-200">P/L Report (100k)</span>
                 <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 3s</span>
               </div>
             </div>
@@ -502,7 +499,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
         <div className="space-y-6">
           {!isSuperAdmin ? (
             <div className="card">
-              <p className="text-sm text-surface-800 dark:text-surface-400">
+              <p className="text-sm text-surface-800 dark:text-surface-200">
                 Only Super Admin can configure notification email settings.
               </p>
             </div>
@@ -520,7 +517,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Notification Emails</h3>
-                    <p className="text-sm text-surface-800 dark:text-surface-400">
+                    <p className="text-sm text-surface-800 dark:text-surface-200">
                       Choose which notification types also send email. Mandatory types always send email.
                     </p>
                   </div>
@@ -537,7 +534,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                       >
                         <div>
                           <p className="text-sm font-medium text-surface-900 dark:text-white">{item.label}</p>
-                          <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">{item.description}</p>
+                          <p className="text-xs text-surface-600 dark:text-surface-200 mt-0.5">{item.description}</p>
                         </div>
                         <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
                           Always on
@@ -558,7 +555,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                       >
                         <div className="flex-1">
                           <p className="text-sm font-medium text-surface-900 dark:text-white">{item.label}</p>
-                          <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">{item.description}</p>
+                          <p className="text-xs text-surface-600 dark:text-surface-200 mt-0.5">{item.description}</p>
                         </div>
                         <button
                           type="button"
@@ -587,19 +584,15 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                 </div>
 
                 <div className="mt-6 pt-4 border-t border-surface-200 dark:border-surface-700">
-                  <button
-                    type="submit"
-                    className="btn-primary btn-sm"
-                    disabled={fetcher.state === 'submitting'}
-                  >
-                    {fetcher.state === 'submitting' ? 'Saving...' : 'Save notification email settings'}
-                  </button>
+                  <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
+                    Save notification email settings
+                  </Button>
                 </div>
               </div>
             </fetcher.Form>
           ) : (
             <div className="card">
-              <p className="text-sm text-surface-800 dark:text-surface-400">
+              <p className="text-sm text-surface-800 dark:text-surface-200">
                 Loading notification settings...
               </p>
             </div>

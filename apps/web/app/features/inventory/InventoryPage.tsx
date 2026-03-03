@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
+import { AmountInput } from '~/components/ui/amount-input';
+import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { InlineNotification } from '~/components/ui/inline-notification';
 import { Tabs } from '~/components/ui/tabs';
 import { useFetcherToast } from '~/components/ui/toast';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption } from './types';
@@ -9,6 +12,9 @@ import { MOVEMENT_COLORS, formatMovementType } from './types';
 
 export function InventoryPage({ levels, totalLevels, movements, totalMovements, products, locations }: InventoryStreamData) {
   const [activeTab, setActiveTab] = useState<'levels' | 'movements'>('levels');
+
+  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
+  const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…') : '—';
   const [showIntakeForm, setShowIntakeForm] = useState(false);
   const fetcher = useFetcher();
 
@@ -34,25 +40,28 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Inventory</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Track stock levels, movements, and transfers across all locations
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={() => setShowIntakeForm(!showIntakeForm)}
-            className="btn-primary btn-sm"
           >
-            <svg className="w-4 h-4 mr-1.5 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
             Stock Intake
-          </button>
-          <button
+          </Button>
+          <Button
+          variant="secondary"
+          size="sm"
           onClick={() => exportToCsv(
             levels.map((inv) => ({
-              productId: inv.productId,
-              locationId: inv.locationId,
+              product: productName(inv.productId),
+              location: locationName(inv.locationId),
               stock: inv.stockCount,
               reserved: inv.reservedCount,
               available: inv.stockCount - inv.reservedCount,
@@ -60,8 +69,8 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
               updated: new Date(inv.updatedAt).toLocaleDateString(),
             })),
             [
-              { key: 'productId', label: 'Product ID' },
-              { key: 'locationId', label: 'Location ID' },
+              { key: 'product', label: 'Product' },
+              { key: 'location', label: 'Location' },
               { key: 'stock', label: 'Stock Count' },
               { key: 'reserved', label: 'Reserved' },
               { key: 'available', label: 'Available' },
@@ -70,10 +79,9 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
             ],
             `inventory-${new Date().toISOString().split('T')[0]}.csv`,
           )}
-          className="btn-secondary btn-sm"
         >
           Export CSV
-        </button>
+        </Button>
         </div>
       </div>
 
@@ -85,14 +93,14 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
             <button
               type="button"
               onClick={() => setShowIntakeForm(false)}
-              className="p-1.5 rounded-lg text-surface-600 hover:bg-surface-100 dark:text-surface-400 dark:hover:bg-surface-700 transition-colors"
+              className="p-1.5 rounded-lg text-surface-600 hover:bg-surface-100 dark:text-surface-200 dark:hover:bg-surface-700 transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
-          <p className="text-sm text-surface-700 dark:text-surface-400">
+          <p className="text-sm text-surface-700 dark:text-surface-200">
             Add a new FIFO batch. Each intake creates a batch with its own factory and landing cost. Requires Warehouse Manager or SuperAdmin role.
           </p>
           {intakeError && (
@@ -101,15 +109,26 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
             </div>
           )}
           {(products.length === 0 || locations.length === 0) ? (
-            <div className="rounded-lg bg-warning-50 dark:bg-warning-700/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3">
-              <p className="text-sm text-warning-800 dark:text-warning-200">
-                {products.length === 0 && locations.length === 0
+            <InlineNotification
+              variant="warning"
+              message={
+                products.length === 0 && locations.length === 0
                   ? 'Create products and logistics locations first.'
                   : products.length === 0
                     ? 'Create products first via Products → Add Product.'
-                    : 'Create logistics locations first via Logistics.'}
-              </p>
-            </div>
+                    : 'Create logistics locations first via Logistics.'
+              }
+              actions={
+                products.length === 0 && locations.length === 0
+                  ? [
+                      { label: 'Add Product', href: '/admin/products/new' },
+                      { label: 'Go to Logistics', href: '/admin/logistics' },
+                    ]
+                  : products.length === 0
+                    ? [{ label: 'Add Product', href: '/admin/products/new' }]
+                    : [{ label: 'Go to Logistics', href: '/admin/logistics' }]
+              }
+            />
           ) : (
           <fetcher.Form method="post" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <input type="hidden" name="intent" value="stockIntake" />
@@ -163,12 +182,10 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
               <label htmlFor="intake-factoryCost" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
                 Factory Cost (&#8358;)
               </label>
-              <input
+              <AmountInput
                 id="intake-factoryCost"
                 name="factoryCost"
-                type="text"
                 required
-                pattern="^\d+(\.\d{1,2})?$"
                 className="input"
                 placeholder="0.00"
               />
@@ -177,27 +194,26 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
               <label htmlFor="intake-landingCost" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
                 Landing Cost (&#8358;)
               </label>
-              <input
+              <AmountInput
                 id="intake-landingCost"
                 name="landingCost"
-                type="text"
-                pattern="^\d+(\.\d{1,2})?$"
                 className="input"
                 placeholder="0.00"
                 defaultValue="0"
               />
-              <p className="text-xs text-surface-600 dark:text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-600 dark:text-surface-300 mt-0.5">
                 Freight, duty, etc. Default 0.
               </p>
             </div>
             <div className="sm:col-span-2 lg:col-span-5 flex justify-end">
-              <button
+              <Button
                 type="submit"
-                disabled={fetcher.state !== 'idle'}
-                className="btn-primary"
+                variant="primary"
+                loading={fetcher.state !== 'idle'}
+                loadingText="Adding..."
               >
-                {fetcher.state !== 'idle' ? 'Adding...' : 'Add Stock'}
-              </button>
+                Add Stock
+              </Button>
             </div>
           </fetcher.Form>
           )}
@@ -207,21 +223,21 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Stock</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Stock</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{totalStock.toLocaleString()}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Reserved</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Reserved</p>
           <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{totalReserved.toLocaleString()}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Available</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Available</p>
           <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{(totalStock - totalReserved).toLocaleString()}</p>
         </div>
         <DeferredSection resolve={totalMovements} skeleton="stat">
           {(count) => (
             <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Movements</p>
+              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Movements</p>
               <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{count}</p>
             </div>
           )}
@@ -244,8 +260,8 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
             <table className="w-full">
               <thead>
                 <tr>
-                  <th className="table-header">Product ID</th>
-                  <th className="table-header">Location ID</th>
+                  <th className="table-header">Product</th>
+                  <th className="table-header">Location</th>
                   <th className="table-header text-right">Stock</th>
                   <th className="table-header text-right">Reserved</th>
                   <th className="table-header text-right">Available</th>
@@ -256,8 +272,8 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
               <tbody>
                 {levels.map((level) => (
                   <tr key={level.id} className="table-row">
-                    <td className="table-cell font-mono text-sm">{level.productId.slice(0, 8)}...</td>
-                    <td className="table-cell font-mono text-sm">{level.locationId.slice(0, 8)}...</td>
+                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{productName(level.productId)}</td>
+                    <td className="table-cell text-surface-800 dark:text-surface-200">{locationName(level.locationId)}</td>
                     <td className="table-cell text-right font-medium">{level.stockCount}</td>
                     <td className="table-cell text-right text-warning-600 dark:text-warning-400">{level.reservedCount}</td>
                     <td className="table-cell text-right font-medium text-success-600 dark:text-success-400">
@@ -266,7 +282,7 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
                     <td className="table-cell">
                       <span className="badge-success">{level.status}</span>
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-400">
+                    <td className="table-cell text-surface-800 dark:text-surface-200">
                       {new Date(level.updatedAt).toLocaleDateString('en-NG', {
                         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                       })}
@@ -275,7 +291,7 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
                 ))}
                 {levels.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                    <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                       No inventory data yet. Add products and receive stock to get started.
                     </td>
                   </tr>
@@ -289,29 +305,30 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
             {levels.map((level) => (
               <div key={level.id} className="p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono text-sm text-surface-800 dark:text-surface-400">
-                    {level.productId.slice(0, 8)}...
-                  </span>
+                  <div>
+                    <p className="font-medium text-sm text-surface-900 dark:text-white">{productName(level.productId)}</p>
+                    <p className="text-xs text-surface-600 dark:text-surface-400">{locationName(level.locationId)}</p>
+                  </div>
                   <span className="badge-success">{level.status}</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-sm">
                   <div>
-                    <p className="text-xs text-surface-700 dark:text-surface-500">Stock</p>
+                    <p className="text-xs text-surface-700 dark:text-surface-300">Stock</p>
                     <p className="font-medium text-surface-900 dark:text-white">{level.stockCount}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-surface-700 dark:text-surface-500">Reserved</p>
+                    <p className="text-xs text-surface-700 dark:text-surface-300">Reserved</p>
                     <p className="font-medium text-warning-600 dark:text-warning-400">{level.reservedCount}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-surface-700 dark:text-surface-500">Available</p>
+                    <p className="text-xs text-surface-700 dark:text-surface-300">Available</p>
                     <p className="font-medium text-success-600 dark:text-success-400">{level.stockCount - level.reservedCount}</p>
                   </div>
                 </div>
               </div>
             ))}
             {levels.length === 0 && (
-              <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+              <div className="p-8 text-center text-surface-700 dark:text-surface-300">
                 No inventory data yet
               </div>
             )}
@@ -326,7 +343,7 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
                   <thead>
                     <tr>
                       <th className="table-header">Type</th>
-                      <th className="table-header">Product ID</th>
+                      <th className="table-header">Product</th>
                       <th className="table-header text-right">Quantity</th>
                       <th className="table-header">From</th>
                       <th className="table-header">To</th>
@@ -342,22 +359,22 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
                             {formatMovementType(m.movementType)}
                           </span>
                         </td>
-                        <td className="table-cell font-mono text-sm">{m.productId.slice(0, 8)}...</td>
+                        <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{productName(m.productId)}</td>
                         <td className="table-cell text-right font-medium">
                           <span className={m.quantity > 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}>
                             {m.quantity > 0 ? '+' : ''}{m.quantity}
                           </span>
                         </td>
-                        <td className="table-cell font-mono text-sm text-surface-800 dark:text-surface-400">
-                          {m.fromLocationId ? `${m.fromLocationId.slice(0, 8)}...` : '\u2014'}
+                        <td className="table-cell text-surface-800 dark:text-surface-200">
+                          {locationName(m.fromLocationId)}
                         </td>
-                        <td className="table-cell font-mono text-sm text-surface-800 dark:text-surface-400">
-                          {m.toLocationId ? `${m.toLocationId.slice(0, 8)}...` : '\u2014'}
+                        <td className="table-cell text-surface-800 dark:text-surface-200">
+                          {locationName(m.toLocationId)}
                         </td>
-                        <td className="table-cell text-sm text-surface-800 dark:text-surface-400 max-w-[200px] truncate">
+                        <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-[200px] truncate">
                           {m.reason ?? '\u2014'}
                         </td>
-                        <td className="table-cell text-surface-800 dark:text-surface-400">
+                        <td className="table-cell text-surface-800 dark:text-surface-200">
                           {new Date(m.createdAt).toLocaleDateString('en-NG', {
                             month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                           })}
@@ -366,7 +383,7 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
                     ))}
                     {resolvedMovements.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                        <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                           No stock movements recorded yet
                         </td>
                       </tr>
@@ -379,7 +396,7 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
               <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
                 {resolvedMovements.map((m: StockMovement) => (
                   <div key={m.id} className="p-4">
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-1">
                       <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
                         {formatMovementType(m.movementType)}
                       </span>
@@ -387,16 +404,20 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
                         {m.quantity > 0 ? '+' : ''}{m.quantity} units
                       </span>
                     </div>
-                    <p className="text-xs text-surface-700 dark:text-surface-500">
+                    <p className="text-sm font-medium text-surface-900 dark:text-white mb-0.5">{productName(m.productId)}</p>
+                    <p className="text-xs text-surface-600 dark:text-surface-400">
+                      {locationName(m.fromLocationId)} {m.fromLocationId && m.toLocationId ? '→' : ''} {locationName(m.toLocationId)}
+                    </p>
+                    <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                       {new Date(m.createdAt).toLocaleDateString('en-NG', {
                         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                       })}
-                      {m.reason && ` \u2014 ${m.reason}`}
+                      {m.reason && ` — ${m.reason}`}
                     </p>
                   </div>
                 ))}
                 {resolvedMovements.length === 0 && (
-                  <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+                  <div className="p-8 text-center text-surface-700 dark:text-surface-300">
                     No stock movements yet
                   </div>
                 )}

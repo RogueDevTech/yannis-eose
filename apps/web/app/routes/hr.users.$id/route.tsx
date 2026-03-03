@@ -1,7 +1,8 @@
 import { useLoaderData } from '@remix-run/react';
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, getCurrentUser } from '~/lib/api.server';
+import { DeferredSection } from '~/components/ui/deferred-section';
 import { UserDetailPage } from '~/features/users/UserDetailPage';
 import type {
   UserDetail,
@@ -34,32 +35,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('User ID required', { status: 400 });
   }
 
-  // Critical: await user (404 check required)
-  const userRes = await apiRequest<unknown>(
-    `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
-    { method: 'GET', cookie },
-  );
+  const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true }> => {
+    const userRes = await apiRequest<unknown>(
+      `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
+      { method: 'GET', cookie },
+    );
 
-  if (!userRes.ok) {
-    throw new Response('User not found', { status: 404 });
-  }
+    if (!userRes.ok) return { notFound: true };
 
-  const trpcData = userRes.data as { result?: { data?: UserDetail } };
-  const user = trpcData?.result?.data;
+    const trpcData = userRes.data as { result?: { data?: UserDetail } };
+    const user = trpcData?.result?.data;
 
-  if (!user) {
-    throw new Response('User not found', { status: 404 });
-  }
+    if (!user) return { notFound: true };
 
-  const currentUser = await getCurrentUser(request);
-  const perms = currentUser?.permissions ?? [];
-  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
-  const canDisburseToThisUser =
-    (user.role === 'HEAD_OF_MARKETING' && (isSuperAdmin || perms.includes('finance.disburse'))) ||
-    (user.role === 'MEDIA_BUYER' && (isSuperAdmin || perms.includes('marketing.funding')));
+    const currentUser = await getCurrentUser(request);
+    const perms = currentUser?.permissions ?? [];
+    const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+    const canDisburseToThisUser =
+      (user.role === 'HEAD_OF_MARKETING' && (isSuperAdmin || perms.includes('finance.disburse'))) ||
+      (user.role === 'MEDIA_BUYER' && (isSuperAdmin || perms.includes('marketing.funding')));
 
-  // ── Build role-specific order filter ───────────────────
-  const orderFilter: Record<string, unknown> = { limit: 10 };
+    // ── Build role-specific order filter ───────────────────
+    const orderFilter: Record<string, unknown> = { limit: 10 };
   if (['CS_AGENT', 'HEAD_OF_CS'].includes(user.role)) {
     orderFilter.csAgentId = userId;
   } else if (['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role)) {
@@ -158,8 +155,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   )
     .then((res) => {
       if (!res.ok) return [];
-      const d = res.data as { result?: { data?: { rows: UserAuditEntry[] } } };
-      return d?.result?.data?.rows ?? [];
+      const d = res.data as {
+        result?: { data?: { rows: Array<{ id: string; action: string; tableName: string; recordId: string; data: Record<string, unknown>; validFrom: string }> } };
+      };
+      const rows = d?.result?.data?.rows ?? [];
+      return rows.map((r) => ({
+        id: r.id,
+        action: r.action,
+        tableName: r.tableName,
+        recordId: r.recordId,
+        oldValues: null,
+        newValues: r.data,
+        createdAt: r.validFrom,
+        data: r.data,
+      })) as UserAuditEntry[];
     })
     .catch(() => []);
 
@@ -234,7 +243,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => ({ approvals: [], total: 0 }))
     : null;
 
-  return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, pendingEmailChange, stockMovements, financeActivity, canDisburseToThisUser };
+    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, pendingEmailChange, stockMovements, financeActivity, canDisburseToThisUser };
+  })();
+
+  return defer({ userDetail: userDetailPromise });
 }
 
 // ─── Action ─────────────────────────────────────────────
@@ -336,7 +348,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: errorData?.error?.message ?? 'Failed to deactivate user' }, { status: res.status });
     }
 
-    return redirect('/admin/users');
+    return redirect('/hr/users');
   }
 
   if (intent === 'reactivate') {
@@ -416,6 +428,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
 // ─── Component ──────────────────────────────────────────
 
 export default function UserDetailRoute() {
-  const data = useLoaderData<typeof loader>() as UserDetailLoaderData;
-  return <UserDetailPage {...data} />;
+  const { userDetail } = useLoaderData<typeof loader>();
+  return (
+    <DeferredSection resolve={userDetail} skeleton="card">
+      {(data) =>
+        'notFound' in data && data.notFound ? (
+          <div className="card text-center py-12">
+            <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
+            <h2 className="text-xl font-bold text-surface-900 dark:text-white">User not found</h2>
+            <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
+              The user you're looking for doesn't exist or has been removed.
+            </p>
+            <a href="/hr/users" className="btn-primary mt-4 inline-block">
+              Back to Users
+            </a>
+          </div>
+        ) : (
+          <UserDetailPage {...(data as UserDetailLoaderData)} />
+        )
+      }
+    </DeferredSection>
+  );
 }

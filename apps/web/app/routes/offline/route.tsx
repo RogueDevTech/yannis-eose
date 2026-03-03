@@ -14,7 +14,7 @@ export default function OfflinePage() {
         <h1 className="text-2xl font-bold text-surface-900 dark:text-white mb-2">
           You are offline
         </h1>
-        <p className="text-surface-800 dark:text-surface-400 mb-6">
+        <p className="text-surface-800 dark:text-surface-200 mb-6">
           Your internet connection is currently unavailable. Any pending actions will be synced automatically when you reconnect.
         </p>
         <div className="space-y-3">
@@ -31,7 +31,7 @@ export default function OfflinePage() {
             Go back
           </a>
         </div>
-        <p className="mt-6 text-xs text-surface-700 dark:text-surface-500">
+        <p className="mt-6 text-xs text-surface-700 dark:text-surface-300">
           Delivery confirmations and order updates saved offline will sync within 30 seconds of reconnection.
         </p>
       </div>

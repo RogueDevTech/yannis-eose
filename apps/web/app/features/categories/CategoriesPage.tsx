@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Form, useNavigation, useSearchParams } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 
 interface Category {
   id: string;
@@ -81,7 +82,7 @@ function CategoryModal({
           <div>
             <label htmlFor="brandName" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
               Brand Name
-              <span className="text-surface-700 dark:text-surface-500 font-normal ml-1">(shown on invoices)</span>
+              <span className="text-surface-700 dark:text-surface-300 font-normal ml-1">(shown on invoices)</span>
             </label>
             <input
               id="brandName"
@@ -92,7 +93,7 @@ function CategoryModal({
               className="input"
               placeholder="e.g. Prosma"
             />
-            <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+            <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
               All products under this category will carry this brand name.
             </p>
           </div>
@@ -101,7 +102,7 @@ function CategoryModal({
             <div>
               <label htmlFor="brandPhone" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                 Brand Phone
-                <span className="text-surface-700 dark:text-surface-500 font-normal ml-1">(invoices)</span>
+                <span className="text-surface-700 dark:text-surface-300 font-normal ml-1">(invoices)</span>
               </label>
               <input
                 id="brandPhone"
@@ -115,7 +116,7 @@ function CategoryModal({
             <div>
               <label htmlFor="brandEmail" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                 Brand Email
-                <span className="text-surface-700 dark:text-surface-500 font-normal ml-1">(invoices)</span>
+                <span className="text-surface-700 dark:text-surface-300 font-normal ml-1">(invoices)</span>
               </label>
               <input
                 id="brandEmail"
@@ -141,7 +142,7 @@ function CategoryModal({
                 className="input"
                 placeholder="+2348000000000"
               />
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                 For automatic messaging.
               </p>
             </div>
@@ -157,7 +158,7 @@ function CategoryModal({
                 className="input"
                 placeholder="e.g. Prosma"
               />
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                 Used as sender ID when sending SMS to customers.
               </p>
             </div>
@@ -183,12 +184,17 @@ function CategoryModal({
 
           {/* Actions */}
           <div className="flex items-center justify-end gap-3 pt-2 border-t border-surface-200 dark:border-surface-700">
-            <button type="button" onClick={onClose} className="btn-secondary">
+            <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
-            </button>
-            <button type="submit" className="btn-primary" disabled={isSubmitting}>
-              {isSubmitting ? (isEdit ? 'Updating...' : 'Creating...') : (isEdit ? 'Update' : 'Create Category')}
-            </button>
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={isSubmitting}
+              loadingText={isEdit ? 'Updating...' : 'Creating...'}
+            >
+              {isEdit ? 'Update' : 'Create Category'}
+            </Button>
           </div>
         </Form>
       </div>
@@ -228,19 +234,16 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Product Categories</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-1">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
             Manage brand categories for products. Brand info appears on invoices and SMS.
           </p>
         </div>
-        <button
-          onClick={() => setModalCategory(null)}
-          className="btn-primary flex items-center gap-2"
-        >
+        <Button variant="primary" className="flex items-center gap-2" onClick={() => setModalCategory(null)}>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
           New Category
-        </button>
+        </Button>
       </div>
 
       {actionData?.error && (
@@ -252,11 +255,11 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       {/* Stats */}
       <div className="grid grid-cols-2 gap-4">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400">Total Categories</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200">Total Categories</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400">Active</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200">Active</p>
           <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{activeCount}</p>
         </div>
       </div>
@@ -291,32 +294,32 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
             <tbody>
               {categories.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-400">
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
                     No categories found. Create one to get started.
                   </td>
                 </tr>
               )}
               {categories.map((cat, idx) => (
                 <tr key={cat.id} className="table-row">
-                  <td className="table-cell text-xs text-surface-800 dark:text-surface-400">{idx + 1}</td>
+                  <td className="table-cell text-xs text-surface-800 dark:text-surface-200">{idx + 1}</td>
                   <td className="table-cell font-medium text-surface-900 dark:text-white">{cat.name}</td>
                   <td className="table-cell text-surface-700 dark:text-surface-300">{cat.brandName}</td>
-                  <td className="table-cell hidden md:table-cell text-xs text-surface-600 dark:text-surface-400">
+                  <td className="table-cell hidden md:table-cell text-xs text-surface-600 dark:text-surface-200">
                     {cat.brandPhone && <div>{cat.brandPhone}</div>}
                     {cat.brandEmail && <div className="text-brand-500 dark:text-brand-400">{cat.brandEmail}</div>}
                     {!cat.brandPhone && !cat.brandEmail && '—'}
                   </td>
-                  <td className="table-cell hidden lg:table-cell text-xs text-surface-600 dark:text-surface-400">
+                  <td className="table-cell hidden lg:table-cell text-xs text-surface-600 dark:text-surface-200">
                     {cat.brandWhatsapp || '—'}
                   </td>
-                  <td className="table-cell hidden lg:table-cell text-xs text-surface-600 dark:text-surface-400">
+                  <td className="table-cell hidden lg:table-cell text-xs text-surface-600 dark:text-surface-200">
                     {cat.smsSenderId || '—'}
                   </td>
                   <td className="table-cell">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
                       cat.status === 'ACTIVE'
                         ? 'bg-success-50 dark:bg-success-700/20 text-success-700 dark:text-success-400'
-                        : 'bg-surface-100 dark:bg-surface-700 text-surface-800 dark:text-surface-400'
+                        : 'bg-surface-100 dark:bg-surface-700 text-surface-800 dark:text-surface-200'
                     }`}>
                       {cat.status === 'ACTIVE' ? 'Active' : cat.status === 'INACTIVE' ? 'Inactive' : 'Archived'}
                     </span>

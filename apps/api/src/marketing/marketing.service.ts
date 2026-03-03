@@ -527,26 +527,11 @@ export class MarketingService {
   async createCampaign(input: CreateCampaignInput, mediaBuyerId: string) {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${mediaBuyerId}, true)`;
 
-    // Verify offer template exists and is active
-    const templateRows = await this.db
-      .select()
-      .from(schema.offerTemplates)
-      .where(and(
-        eq(schema.offerTemplates.id, input.offerTemplateId),
-        eq(schema.offerTemplates.status, 'ACTIVE'),
-      ))
-      .limit(1);
-
-    if (templateRows.length === 0) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Offer template not found or inactive' });
-    }
-
     const rows = await this.db
       .insert(schema.campaigns)
       .values({
         mediaBuyerId,
         name: input.name,
-        offerTemplateId: input.offerTemplateId,
         productIds: input.productIds,
         deploymentType: input.deploymentType,
         formConfig: input.formConfig ?? null,
@@ -621,71 +606,36 @@ export class MarketingService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Campaign not found or inactive' });
     }
 
-    // Load the offer template to get product/price info
-    let products: Array<{
+    // Load products directly from productIds
+    const products: Array<{
       id: string;
       name: string;
       price: string;
       offers: Array<{ label: string; qty: number; price: string }>;
-      variants?: unknown;
     }> = [];
 
-    if (campaign.offerTemplateId) {
-      const templateRows = await this.db
-        .select()
-        .from(schema.offerTemplates)
-        .where(eq(schema.offerTemplates.id, campaign.offerTemplateId))
+    const pIds = (campaign.productIds ?? []) as string[];
+    for (const pid of pIds) {
+      const pRows = await this.db
+        .select({
+          id: schema.products.id,
+          name: schema.products.name,
+          baseSalePrice: schema.products.baseSalePrice,
+          offers: schema.products.offers,
+        })
+        .from(schema.products)
+        .where(eq(schema.products.id, pid))
         .limit(1);
 
-      const template = templateRows[0];
-      if (template) {
-        // Get the product with offers
-        const productRows = await this.db
-          .select({
-            id: schema.products.id,
-            name: schema.products.name,
-            baseSalePrice: schema.products.baseSalePrice,
-            offers: schema.products.offers,
-          })
-          .from(schema.products)
-          .where(eq(schema.products.id, template.productId))
-          .limit(1);
-
-        const product = productRows[0];
-        const productOffers = (product?.offers ?? []) as Array<{ label: string; qty: number; price: string }>;
-        products = [{
-          id: template.productId,
-          name: product?.name ?? 'Product',
-          price: template.price,
-          offers: productOffers.length > 0 ? productOffers : [{ label: 'Standard', qty: 1, price: template.price }],
-          variants: template.variants,
-        }];
-      }
-    } else if (campaign.productIds && Array.isArray(campaign.productIds)) {
-      // Load products directly from productIds
-      const pIds = campaign.productIds as string[];
-      for (const pid of pIds) {
-        const pRows = await this.db
-          .select({
-            id: schema.products.id,
-            name: schema.products.name,
-            baseSalePrice: schema.products.baseSalePrice,
-            offers: schema.products.offers,
-          })
-          .from(schema.products)
-          .where(eq(schema.products.id, pid))
-          .limit(1);
-
-        const p = pRows[0];
-        if (p) {
-          const productOffers = (p.offers ?? []) as Array<{ label: string; qty: number; price: string }>;
-          products.push({
-            id: p.id,
-            name: p.name,
-            price: p.baseSalePrice,
-            offers: productOffers.length > 0 ? productOffers : [{ label: 'Standard', qty: 1, price: p.baseSalePrice }],
-          });
-        }
+      const p = pRows[0];
+      if (p) {
+        const productOffers = (p.offers ?? []) as Array<{ label: string; qty: number; price: string }>;
+        products.push({
+          id: p.id,
+          name: p.name,
+          price: p.baseSalePrice,
+          offers: productOffers.length > 0 ? productOffers : [{ label: 'Standard', qty: 1, price: p.baseSalePrice }],
+        });
       }
     }
 

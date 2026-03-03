@@ -1,11 +1,13 @@
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs } from '@remix-run/node';
+import { defer } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { DeferredSection } from '~/components/ui/deferred-section';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
-import type { DashboardData, DashboardLoaderData } from '~/features/dashboard/types';
+import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
 import type { CEODashboardData } from '~/features/ceo/types';
 
 const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
@@ -61,19 +63,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const metricsInput = JSON.stringify({ startDate, endDate });
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 
-  // SuperAdmin: single command-centre view (CEO Executive Overview)
+  // SuperAdmin: CEO Executive Overview — deferred for navigate-first
   if (role === 'SUPER_ADMIN') {
-    const res = await apiRequest<{ result?: { data?: CEODashboardData } }>(
+    const ceoPromise = apiRequest<{ result?: { data?: CEODashboardData } }>(
       `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(ceoInput)}`,
       { method: 'GET', cookie },
-    );
-    const data: CEODashboardData = res.ok && res.data?.result?.data
-      ? res.data.result.data
-      : defaultCEOData;
-    return { variant: 'ceo' as const, data, filters };
+    ).then((res) =>
+      res.ok && res.data?.result?.data ? res.data.result.data : defaultCEOData
+    ).catch(() => defaultCEOData);
+    return defer({ variant: 'ceo' as const, data: ceoPromise, filters });
   }
 
-  // All other roles: role-specific dashboard
+  // All other roles: role-specific dashboard — all deferred for navigate-first
   const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 10 })), { method: 'GET', cookie });
   const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, { method: 'GET', cookie });
 
@@ -99,23 +100,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? apiRequest<unknown>('/trpc/hr.payoutSummary', { method: 'GET', cookie })
     : Promise.resolve({ ok: false, data: {} });
 
-  const [ordersRes, countsRes] = await Promise.all([ordersP, countsP]);
-
-  const ordersData = ordersRes.ok
-    ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
-    : null;
-
-  const countsData = countsRes.ok
-    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-    : {};
-
-  return {
-    variant: 'dashboard' as const,
-    filters,
-    data: {
+  const ordersAndCountsPromise = Promise.all([ordersP, countsP]).then(([ordersRes, countsRes]): OrdersAndCounts => {
+    const ordersData = ordersRes.ok
+      ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
+      : null;
+    const countsData = countsRes.ok
+      ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+      : {};
+    return {
       orderCounts: countsData,
       totalOrders: ordersData?.pagination?.total ?? 0,
       recentOrders: ordersData?.orders ?? [],
+    };
+  }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [] }));
+
+  return defer({
+    variant: 'dashboard' as const,
+    filters,
+    data: {
+      ordersAndCounts: ordersAndCountsPromise,
       metrics: metricsP.then(r => extractTrpc(r, defaultMetrics)).catch(() => defaultMetrics),
       profit: profitP.then(r => extractTrpc(r, defaultProfit)).catch(() => defaultProfit),
       totalUsers: usersP.then(r => {
@@ -130,7 +133,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return r.ok ? (r.data as { result?: { data?: Record<string, { count: number; total: string }> } })?.result?.data ?? {} : {};
       }).catch(() => ({})),
     } satisfies DashboardLoaderData,
-  };
+  });
 }
 
 export default function AdminDashboard() {
@@ -142,19 +145,28 @@ export default function AdminDashboard() {
 
   if (loaderData.variant === 'ceo') {
     return (
-      <CEODashboardPage
-        data={loaderData.data}
-        filters={loaderData.filters}
-        showBackToDashboard={false}
-      />
+      <DeferredSection resolve={loaderData.data} skeleton="card">
+        {(data) => (
+          <CEODashboardPage
+            data={data}
+            filters={loaderData.filters}
+            showBackToDashboard={false}
+          />
+        )}
+      </DeferredSection>
     );
   }
+  const { ordersAndCounts: _ordersPromise, ...restData } = loaderData.data;
   return (
-    <DashboardPage
-      data={loaderData.data}
-      role={role}
-      userName={userName}
-      filters={loaderData.filters}
-    />
+    <DeferredSection resolve={_ordersPromise} skeleton="card">
+      {(ordersAndCounts) => (
+        <DashboardPage
+          data={{ ...restData, ...ordersAndCounts }}
+          role={role}
+          userName={userName}
+          filters={loaderData.filters}
+        />
+      )}
+    </DeferredSection>
   );
 }

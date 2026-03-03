@@ -43,16 +43,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   if (!res.ok) {
-    return json({ categories: [], total: 0 } satisfies LoaderData);
+    return { categories: [], total: 0 } satisfies LoaderData;
   }
 
   const trpcData = res.data as { result?: { data?: { categories: Category[]; pagination: { total: number } } } };
   const result = trpcData?.result?.data;
 
-  return json({
+  return {
     categories: result?.categories ?? [],
     total: result?.pagination?.total ?? 0,
-  } satisfies LoaderData);
+  } satisfies LoaderData;
 }
 
 export async function action({ request }: ActionFunctionArgs) {

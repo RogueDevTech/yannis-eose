@@ -35,13 +35,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const dispatched = parseOrders(dispatchedRes);
   const inTransit = parseOrders(inTransitRes);
 
-  return json({
+  return {
     orders: inTransit.orders,
     dispatchedOrders: dispatched.orders,
     total: inTransit.total,
     dispatchedTotal: dispatched.total,
     userId: user.id,
-  });
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {

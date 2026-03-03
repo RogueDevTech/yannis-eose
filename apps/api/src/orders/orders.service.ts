@@ -713,14 +713,13 @@ export class OrdersService {
    * Orders locked for > 15 min are auto-released.
    */
   async releaseExpiredLocks() {
-    const now = new Date();
     const released = await this.db
       .update(schema.orders)
-      .set({ lockedUntil: null, lockedBy: null, updatedAt: now })
+      .set({ lockedUntil: null, lockedBy: null, updatedAt: new Date() })
       .where(
         and(
           sql`${schema.orders.lockedUntil} IS NOT NULL`,
-          sql`${schema.orders.lockedUntil} < ${now}`,
+          sql`${schema.orders.lockedUntil} < NOW()`,
         ),
       )
       .returning();
@@ -1437,15 +1436,13 @@ export class OrdersService {
    * Get orders due for callback (callbackScheduledAt <= now).
    */
   async getCallbackQueue() {
-    const now = new Date();
-
     const orders = await this.db
       .select()
       .from(schema.orders)
       .where(
         and(
           sql`${schema.orders.callbackScheduledAt} IS NOT NULL`,
-          sql`${schema.orders.callbackScheduledAt} <= ${now}`,
+          sql`${schema.orders.callbackScheduledAt} <= NOW()`,
           or(
             eq(schema.orders.status, 'UNPROCESSED'),
             eq(schema.orders.status, 'CS_ENGAGED'),
@@ -1638,15 +1635,13 @@ export class OrdersService {
    * Checks for orders with the same phone hash + product within 6 hours.
    */
   async detectDuplicates(phoneHash: string, _productIds: string[]) {
-    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
-
     const potential = await this.db
       .select()
       .from(schema.orders)
       .where(
         and(
           eq(schema.orders.customerPhoneHash, phoneHash),
-          sql`${schema.orders.createdAt} >= ${sixHoursAgo}`,
+          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '6 hours'`,
           sql`${schema.orders.isDuplicate} IS NULL OR ${schema.orders.isDuplicate} = 'DISMISSED'`,
           sql`${schema.orders.status} != 'CANCELLED'`,
         ),

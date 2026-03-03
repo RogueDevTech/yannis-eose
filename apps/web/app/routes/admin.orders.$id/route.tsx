@@ -1,7 +1,8 @@
 import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import type { CallLogEntry, OrderDetail, OrderDetailStreamData, HistoryEntry } from '~/features/orders/types';
 
@@ -18,66 +19,54 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Order ID required', { status: 400 });
   }
 
-  // ── Critical: await order (404 check requires it) ──────────
-  const [orderRes, strictModeRes, voipRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+  const orderDetailPromise = (async (): Promise<OrderDetailStreamData | { notFound: true }> => {
+    const [orderRes, strictModeRes, voipRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>('/trpc/settings.isStrictDataMode', { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/voip.isEnabled', { method: 'GET', cookie }),
+    ]);
+
+    if (!orderRes.ok) return { notFound: true };
+
+    const trpcData = orderRes.data as { result?: { data?: OrderDetail } };
+    const order = trpcData?.result?.data;
+
+    if (!order) return { notFound: true };
+
+    const strictData = strictModeRes.data as { result?: { data?: { enabled: boolean } } };
+    const strictDataMode = strictData?.result?.data?.enabled ?? false;
+    const voipData = voipRes.data as { result?: { data?: { enabled: boolean } } };
+    const voipEnabled = voipData?.result?.data?.enabled ?? false;
+
+    const latestCall: Promise<CallLogEntry | null> = apiRequest<unknown>(
+      `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
       { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      '/trpc/settings.isStrictDataMode',
+    )
+      .then((callRes) => {
+        if (!callRes.ok) return null;
+        const callData = callRes.data as { result?: { data?: CallLogEntry | null } };
+        return callData?.result?.data ?? null;
+      })
+      .catch(() => null);
+
+    const history: Promise<HistoryEntry[]> = apiRequest<unknown>(
+      `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 50 }))}`,
       { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      '/trpc/voip.isEnabled',
-      { method: 'GET', cookie },
-    ),
-  ]);
+    )
+      .then((historyRes) => {
+        if (!historyRes.ok) return [];
+        const historyData = historyRes.data as { result?: { data?: { rows: HistoryEntry[] } } };
+        return historyData?.result?.data?.rows ?? [];
+      })
+      .catch(() => [] as HistoryEntry[]);
 
-  if (!orderRes.ok) {
-    throw new Response('Order not found', { status: 404 });
-  }
+    return { order, latestCall, history, strictDataMode, voipEnabled };
+  })();
 
-  const trpcData = orderRes.data as { result?: { data?: OrderDetail } };
-  const order = trpcData?.result?.data;
-
-  if (!order) {
-    throw new Response('Order not found', { status: 404 });
-  }
-
-  // Extract strict mode flag
-  const strictData = strictModeRes.data as { result?: { data?: { enabled: boolean } } };
-  const strictDataMode = strictData?.result?.data?.enabled ?? false;
-
-  // Extract VOIP enabled flag
-  const voipData = voipRes.data as { result?: { data?: { enabled: boolean } } };
-  const voipEnabled = voipData?.result?.data?.enabled ?? false;
-
-  // ── Deferred: start both in parallel but DON'T await ───────
-  const latestCall: Promise<CallLogEntry | null> = apiRequest<unknown>(
-    `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-    { method: 'GET', cookie },
-  )
-    .then((callRes) => {
-      if (!callRes.ok) return null;
-      const callData = callRes.data as { result?: { data?: CallLogEntry | null } };
-      return callData?.result?.data ?? null;
-    })
-    .catch(() => null);
-
-  const history: Promise<HistoryEntry[]> = apiRequest<unknown>(
-    `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 50 }))}`,
-    { method: 'GET', cookie },
-  )
-    .then((historyRes) => {
-      if (!historyRes.ok) return [];
-      const historyData = historyRes.data as { result?: { data?: { rows: HistoryEntry[] } } };
-      return historyData?.result?.data?.rows ?? [];
-    })
-    .catch(() => [] as HistoryEntry[]);
-
-  // v3_singleFetch: return plain object — un-awaited promises stream automatically
-  return { order, latestCall, history, strictDataMode, voipEnabled };
+  return defer({ orderDetail: orderDetailPromise });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -165,14 +154,31 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function OrderDetailRoute() {
-  const data = useLoaderData<typeof loader>() as unknown as OrderDetailStreamData;
+  const { orderDetail } = useLoaderData<typeof loader>();
   return (
-    <OrderDetailPage
-      order={data.order}
-      latestCall={data.latestCall}
-      history={data.history}
-      strictDataMode={data.strictDataMode}
-      voipEnabled={data.voipEnabled}
-    />
+    <DeferredSection resolve={orderDetail} skeleton="card">
+      {(data) =>
+        'notFound' in data && data.notFound ? (
+          <div className="card text-center py-12">
+            <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
+            <h2 className="text-xl font-bold text-surface-900 dark:text-white">Order not found</h2>
+            <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
+              The order you're looking for doesn't exist or has been removed.
+            </p>
+            <a href="/admin/cs/orders" className="btn-primary mt-4 inline-block">
+              Back to Orders
+            </a>
+          </div>
+        ) : (
+          <OrderDetailPage
+            order={(data as OrderDetailStreamData).order}
+            latestCall={(data as OrderDetailStreamData).latestCall}
+            history={(data as OrderDetailStreamData).history}
+            strictDataMode={(data as OrderDetailStreamData).strictDataMode}
+            voipEnabled={(data as OrderDetailStreamData).voipEnabled}
+          />
+        )
+      }
+    </DeferredSection>
   );
 }

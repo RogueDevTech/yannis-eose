@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { AmountInput } from '~/components/ui/amount-input';
+import { Button } from '~/components/ui/button';
 import { FileUpload } from '~/components/ui/file-upload';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
@@ -61,17 +63,17 @@ export function MarketingPage({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Marketing</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Funding ledger, ad spend tracking, and performance metrics
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => { setShowFundingForm(!showFundingForm); setActiveTab('funding'); }} className="btn-primary btn-sm">
+          <Button variant="primary" size="sm" onClick={() => { setShowFundingForm(!showFundingForm); setActiveTab('funding'); }}>
             + Send Funding
-          </button>
-          <button onClick={() => { setShowAdSpendForm(!showAdSpendForm); setActiveTab('adspend'); }} className="btn-secondary btn-sm">
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => { setShowAdSpendForm(!showAdSpendForm); setActiveTab('adspend'); }}>
             + Log Ad Spend
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -109,38 +111,38 @@ export function MarketingPage({
         {(m: Metrics) => (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">CPA</p>
+              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">CPA</p>
               <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
                 {'\u20A6'}{Math.round(m.cpa).toLocaleString()}
               </p>
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                 Spend / All Orders
               </p>
             </div>
             <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">True ROAS</p>
+              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">True ROAS</p>
               <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">
                 {m.trueRoas.toFixed(2)}x
               </p>
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                 Delivered Revenue / Spend
               </p>
             </div>
             <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Delivery Rate</p>
+              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivery Rate</p>
               <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">
                 {m.deliveryRate.toFixed(1)}%
               </p>
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                 Delivered / Total Orders
               </p>
             </div>
             <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Spend</p>
+              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Spend</p>
               <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
                 {'\u20A6'}{Math.round(m.totalSpend).toLocaleString()}
               </p>
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                 {m.totalOrders} orders, {m.deliveredOrders} delivered
               </p>
             </div>
@@ -169,19 +171,19 @@ export function MarketingPage({
                   <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Campaign Performance</h3>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-surface-800 dark:text-surface-400">Total Orders</span>
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Total Orders</span>
                       <span className="text-sm font-medium text-surface-900 dark:text-white">{m.totalOrders}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-surface-800 dark:text-surface-400">Delivered Orders</span>
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Delivered Orders</span>
                       <span className="text-sm font-medium text-success-600 dark:text-success-400">{m.deliveredOrders}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-surface-800 dark:text-surface-400">Delivered Revenue</span>
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Delivered Revenue</span>
                       <span className="text-sm font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(m.deliveredRevenue).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-surface-800 dark:text-surface-400">Cost Per Acquisition</span>
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Cost Per Acquisition</span>
                       <span className="text-sm font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(m.cpa).toLocaleString()}</span>
                     </div>
                   </div>
@@ -196,15 +198,15 @@ export function MarketingPage({
                   <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Funding Overview</h3>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-surface-800 dark:text-surface-400">Pending</span>
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Pending</span>
                       <span className="text-sm font-medium text-warning-600 dark:text-warning-400">{'\u20A6'}{Number(summary.totalSent).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-surface-800 dark:text-surface-400">Confirmed</span>
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Confirmed</span>
                       <span className="text-sm font-medium text-success-600 dark:text-success-400">{'\u20A6'}{Number(summary.totalCompleted).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-surface-800 dark:text-surface-400">Disputed</span>
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Disputed</span>
                       <span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Number(summary.totalDisputed).toLocaleString()}</span>
                     </div>
                   </div>
@@ -223,7 +225,7 @@ export function MarketingPage({
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Media Buyer Performance</h3>
-                        <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+                        <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
                           Ranked by True ROAS ({leaderboardPeriod === 'all_time' ? 'all time' : 'this month'})
                         </p>
                       </div>
@@ -233,7 +235,7 @@ export function MarketingPage({
                           className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                             leaderboardPeriod === 'this_month'
                               ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                              : 'text-surface-700 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'
+                              : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
                           }`}
                         >
                           This month
@@ -243,7 +245,7 @@ export function MarketingPage({
                           className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                             leaderboardPeriod === 'all_time'
                               ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                              : 'text-surface-700 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'
+                              : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
                           }`}
                         >
                           All time
@@ -271,11 +273,11 @@ export function MarketingPage({
                           const isHighCpa = b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0;
                           return (
                             <tr key={b.mediaBuyerId} className={`table-row ${isHighCpa ? 'bg-warning-50/50 dark:bg-warning-900/10' : ''}`}>
-                              <td className="table-cell text-surface-700 dark:text-surface-500 font-mono text-sm">{idx + 1}</td>
+                              <td className="table-cell text-surface-700 dark:text-surface-300 font-mono text-sm">{idx + 1}</td>
                               <td className="table-cell">
                                 <div>
                                   <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{b.name}</p>
-                                  <p className="text-xs text-surface-700 dark:text-surface-500">{b.email}</p>
+                                  <p className="text-xs text-surface-700 dark:text-surface-300">{b.email}</p>
                                 </div>
                               </td>
                               <td className="table-cell text-right text-sm font-medium">{'\u20A6'}{Math.round(b.totalSpend).toLocaleString()}</td>
@@ -313,7 +315,7 @@ export function MarketingPage({
                         <div key={b.mediaBuyerId} className={`p-4 space-y-2 ${isHighCpa ? 'bg-warning-50/50 dark:bg-warning-900/10' : ''}`}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-mono text-surface-700 dark:text-surface-500">#{idx + 1}</span>
+                              <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
                               <span className="font-medium text-surface-900 dark:text-white text-sm">{b.name}</span>
                             </div>
                             <span className={`text-sm font-bold ${b.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : b.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'}`}>
@@ -322,17 +324,17 @@ export function MarketingPage({
                           </div>
                           <div className="grid grid-cols-3 gap-2 text-xs">
                             <div>
-                              <span className="text-surface-700 dark:text-surface-500">Spend</span>
+                              <span className="text-surface-700 dark:text-surface-300">Spend</span>
                               <p className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(b.totalSpend).toLocaleString()}</p>
                             </div>
                             <div>
-                              <span className="text-surface-700 dark:text-surface-500">CPA</span>
+                              <span className="text-surface-700 dark:text-surface-300">CPA</span>
                               <p className={`font-medium ${isHighCpa ? 'text-danger-600 dark:text-danger-400' : 'text-surface-900 dark:text-white'}`}>
                                 {'\u20A6'}{Math.round(b.cpa).toLocaleString()}
                               </p>
                             </div>
                             <div>
-                              <span className="text-surface-700 dark:text-surface-500">Del. Rate</span>
+                              <span className="text-surface-700 dark:text-surface-300">Del. Rate</span>
                               <p className="font-medium text-surface-900 dark:text-white">{b.deliveryRate.toFixed(1)}%</p>
                             </div>
                           </div>
@@ -379,7 +381,7 @@ export function MarketingPage({
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Amount ({'\u20A6'})</label>
-                  <input name="amount" type="text" required placeholder="e.g. 50000.00" pattern="^\d+(\.\d{1,2})?$" className="input" />
+                  <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input" />
                 </div>
                 <div>
                   <FileUpload
@@ -392,10 +394,12 @@ export function MarketingPage({
                 </div>
               </div>
               <div className="flex gap-2">
-                <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-                  {fetcher.state === 'submitting' ? 'Sending...' : 'Send Funding'}
-                </button>
-                <button type="button" onClick={() => setShowFundingForm(false)} className="btn-secondary btn-sm">Cancel</button>
+                <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Sending...">
+                  Send Funding
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowFundingForm(false)}>
+                  Cancel
+                </Button>
               </div>
             </fetcher.Form>
           )}
@@ -406,7 +410,7 @@ export function MarketingPage({
               <div className="fixed inset-0 bg-black/50" onClick={() => setDisputingFundingId(null)} />
               <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Dispute Funding</h3>
-                <p className="text-sm text-surface-800 dark:text-surface-400">
+                <p className="text-sm text-surface-800 dark:text-surface-200">
                   This will alert the CEO and Head of Marketing.
                 </p>
                 <fetcher.Form method="post" className="space-y-3">
@@ -420,10 +424,12 @@ export function MarketingPage({
                     <textarea name="disputeReason" required minLength={10} rows={3} placeholder="Explain why (min 10 chars)..." className="input" />
                   </div>
                   <div className="flex gap-2">
-                    <button type="submit" className="btn-danger btn-sm" disabled={fetcher.state === 'submitting'}>
-                      {fetcher.state === 'submitting' ? 'Submitting...' : 'Submit Dispute'}
-                    </button>
-                    <button type="button" onClick={() => setDisputingFundingId(null)} className="btn-secondary btn-sm">Cancel</button>
+                    <Button type="submit" variant="danger" size="sm" loading={fetcher.state === 'submitting'} loadingText="Submitting...">
+                      Submit Dispute
+                    </Button>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setDisputingFundingId(null)}>
+                      Cancel
+                    </Button>
                   </div>
                 </fetcher.Form>
               </div>
@@ -467,7 +473,7 @@ export function MarketingPage({
                       <td className="table-cell">
                         <span className={FUNDING_COLORS[f.status] ?? 'badge'}>{f.status}</span>
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                         {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                       </td>
                       <td className="table-cell">
@@ -477,20 +483,20 @@ export function MarketingPage({
                               <input type="hidden" name="intent" value="verifyFunding" />
                               <input type="hidden" name="fundingId" value={f.id} />
                               <input type="hidden" name="action" value="COMPLETED" />
-                              <button type="submit" className="btn-success btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                              <Button type="submit" variant="success" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Processing...">
                                 Received
-                              </button>
+                              </Button>
                             </fetcher.Form>
-                            <button onClick={() => setDisputingFundingId(f.id)} className="btn-danger btn-sm text-xs">
+                            <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => setDisputingFundingId(f.id)}>
                               Not Received
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </td>
                     </tr>
                   ))}
                   {funding.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">No funding records yet</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No funding records yet</td></tr>
                   )}
                 </tbody>
               </table>
@@ -504,7 +510,7 @@ export function MarketingPage({
                     <span className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Number(f.amount).toLocaleString()}</span>
                     <span className={FUNDING_COLORS[f.status] ?? 'badge'}>{f.status}</span>
                   </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-400">
+                  <p className="text-xs text-surface-800 dark:text-surface-200">
                     <DeferredSection resolve={users} skeleton="inline">
                       {(resolvedUsers: User[]) => (
                         <>
@@ -521,15 +527,17 @@ export function MarketingPage({
                         <input type="hidden" name="intent" value="verifyFunding" />
                         <input type="hidden" name="fundingId" value={f.id} />
                         <input type="hidden" name="action" value="COMPLETED" />
-                        <button type="submit" className="btn-success btn-sm text-xs">Received</button>
+                        <Button type="submit" variant="success" size="sm" className="text-xs">Received</Button>
                       </fetcher.Form>
-                      <button onClick={() => setDisputingFundingId(f.id)} className="btn-danger btn-sm text-xs">Not Received</button>
+                      <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => setDisputingFundingId(f.id)}>
+                        Not Received
+                      </Button>
                     </div>
                   )}
                 </div>
               ))}
               {funding.length === 0 && (
-                <div className="p-8 text-center text-surface-700 dark:text-surface-500">No funding records</div>
+                <div className="p-8 text-center text-surface-700 dark:text-surface-300">No funding records</div>
               )}
             </div>
           </div>
@@ -574,7 +582,7 @@ export function MarketingPage({
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Spend Amount ({'\u20A6'})</label>
-                  <input name="spendAmount" type="text" required placeholder="e.g. 15000.00" pattern="^\d+(\.\d{1,2})?$" className="input" />
+                  <AmountInput name="spendAmount" required placeholder="e.g. 15,000.00" className="input" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Spend Date</label>
@@ -588,16 +596,18 @@ export function MarketingPage({
                     required
                     onUpload={() => {}}
                   />
-                  <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                     Mandatory — no screenshot, no log entry accepted
                   </p>
                 </div>
               </div>
               <div className="flex gap-2">
-                <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-                  {fetcher.state === 'submitting' ? 'Logging...' : 'Log Ad Spend'}
-                </button>
-                <button type="button" onClick={() => setShowAdSpendForm(false)} className="btn-secondary btn-sm">Cancel</button>
+                <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Logging...">
+                  Log Ad Spend
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowAdSpendForm(false)}>
+                  Cancel
+                </Button>
               </div>
             </fetcher.Form>
           )}
@@ -618,7 +628,7 @@ export function MarketingPage({
                 <tbody>
                   {adSpend.map((s: AdSpendRecord) => (
                     <tr key={s.id} className="table-row">
-                      <td className="table-cell text-surface-800 dark:text-surface-400">
+                      <td className="table-cell text-surface-800 dark:text-surface-200">
                         {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </td>
                       <td className="table-cell text-sm text-surface-900 dark:text-surface-100">
@@ -632,20 +642,20 @@ export function MarketingPage({
                           View
                         </a>
                       </td>
-                      <td className="table-cell text-sm text-surface-800 dark:text-surface-400">
+                      <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
                         {s.productId ? (
                           <DeferredSection resolve={products} skeleton="inline">
                             {(resolvedProducts: Product[]) => <>{resolvedProducts.find((p) => p.id === s.productId)?.name ?? truncateId(s.productId)}</>}
                           </DeferredSection>
                         ) : '\u2014'}
                       </td>
-                      <td className="table-cell text-sm text-surface-800 dark:text-surface-400">
+                      <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
                         {s.campaignId ? (campaigns.find((c: Campaign) => c.id === s.campaignId)?.name ?? truncateId(s.campaignId)) : '\u2014'}
                       </td>
                     </tr>
                   ))}
                   {adSpend.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">No ad spend records yet</td></tr>
+                    <tr><td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No ad spend records yet</td></tr>
                   )}
                 </tbody>
               </table>
@@ -659,7 +669,7 @@ export function MarketingPage({
                     <span className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Number(s.spendAmount).toLocaleString()}</span>
                     <a href={s.screenshotUrl} target="_blank" rel="noopener noreferrer" className="text-brand-500 text-xs">Screenshot</a>
                   </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-400">
+                  <p className="text-xs text-surface-800 dark:text-surface-200">
                     <DeferredSection resolve={users} skeleton="inline">
                       {(resolvedUsers: User[]) => (
                         <>
@@ -673,7 +683,7 @@ export function MarketingPage({
                 </div>
               ))}
               {adSpend.length === 0 && (
-                <div className="p-8 text-center text-surface-700 dark:text-surface-500">No ad spend records</div>
+                <div className="p-8 text-center text-surface-700 dark:text-surface-300">No ad spend records</div>
               )}
             </div>
           </div>

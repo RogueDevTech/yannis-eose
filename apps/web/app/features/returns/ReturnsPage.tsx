@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import type {
@@ -63,16 +64,13 @@ export function ReturnsPage({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Returns & Restock</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Process returned items and manage stock reconciliation
           </p>
         </div>
-        <button
-          onClick={() => { setShowReconciliationForm(!showReconciliationForm); setActiveTab('reconciliation'); }}
-          className="btn-secondary btn-sm"
-        >
+        <Button variant="secondary" size="sm" onClick={() => { setShowReconciliationForm(!showReconciliationForm); setActiveTab('reconciliation'); }}>
           + Stock Reconciliation
-        </button>
+        </Button>
       </div>
 
       {actionError && (
@@ -100,13 +98,13 @@ export function ReturnsPage({
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Returns Queue</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Returns Queue</p>
           <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{returnedOrders.length}</p>
         </div>
         <DeferredSection resolve={reconciliations} skeleton="stat">
           {(resolvedReconciliations) => (
             <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Pending Recon.</p>
+              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Pending Recon.</p>
               <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
                 {resolvedReconciliations.filter((r: Reconciliation) => r.reconciliationStatus === 'PENDING').length}
               </p>
@@ -114,13 +112,13 @@ export function ReturnsPage({
           )}
         </DeferredSection>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Locked Locations</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Locked Locations</p>
           <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">{lockedLocations.length}</p>
         </div>
         <DeferredSection resolve={reconciliations} skeleton="stat">
           {(resolvedReconciliations) => (
             <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Recon.</p>
+              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Recon.</p>
               <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{resolvedReconciliations.length}</p>
             </div>
           )}
@@ -144,7 +142,7 @@ export function ReturnsPage({
               <div className="fixed inset-0 bg-black/50" onClick={() => setWriteOffOrderId(null)} />
               <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Write Off — Damaged Item</h3>
-                <p className="text-sm text-surface-800 dark:text-surface-400">
+                <p className="text-sm text-surface-800 dark:text-surface-200">
                   This will permanently mark the item as damaged and log it as an Operational Loss.
                 </p>
                 <fetcher.Form method="post" className="space-y-3">
@@ -164,12 +162,12 @@ export function ReturnsPage({
                     />
                   </div>
                   <div className="flex gap-2">
-                    <button type="submit" className="btn-danger btn-sm" disabled={fetcher.state === 'submitting'}>
-                      {fetcher.state === 'submitting' ? 'Writing off...' : 'Write Off'}
-                    </button>
-                    <button type="button" onClick={() => setWriteOffOrderId(null)} className="btn-secondary btn-sm">
+                    <Button type="submit" variant="danger" size="sm" loading={fetcher.state === 'submitting'} loadingText="Writing off...">
+                      Write Off
+                    </Button>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setWriteOffOrderId(null)}>
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </fetcher.Form>
               </div>
@@ -197,13 +195,13 @@ export function ReturnsPage({
                       <td className="table-cell font-medium text-surface-900 dark:text-surface-100">
                         {order.customerName}
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-400">
+                      <td className="table-cell text-surface-800 dark:text-surface-200">
                         {getLocationName(order.logisticsLocationId)}
                       </td>
-                      <td className="table-cell text-sm text-surface-800 dark:text-surface-400 max-w-[200px] truncate">
+                      <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-[200px] truncate">
                         {order.deliveryNotes ?? '\u2014'}
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                         {new Date(order.updatedAt).toLocaleDateString('en-NG', {
                           month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                         })}
@@ -213,29 +211,35 @@ export function ReturnsPage({
                           <fetcher.Form method="post" className="inline">
                             <input type="hidden" name="intent" value="restock" />
                             <input type="hidden" name="orderId" value={order.id} />
-                            <button
+                            <Button
                               type="submit"
-                              className="btn-success btn-sm text-xs"
+                              variant="success"
+                              size="sm"
+                              className="text-xs"
                               disabled={fetcher.state === 'submitting'}
+                              loading={fetcher.state === 'submitting'}
+                              loadingText="Restocking..."
                               title="Mark as sellable — add to local 3PL stock"
                             >
                               Sellable
-                            </button>
+                            </Button>
                           </fetcher.Form>
-                          <button
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            className="text-xs"
                             onClick={() => setWriteOffOrderId(order.id)}
-                            className="btn-danger btn-sm text-xs"
                             title="Mark as damaged — write off as operational loss"
                           >
                             Damaged
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
                   ))}
                   {returnedOrders.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                      <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                         No returned items pending assessment
                       </td>
                     </tr>
@@ -254,7 +258,7 @@ export function ReturnsPage({
                     </span>
                     <span className="badge-warning">RETURNED</span>
                   </div>
-                  <p className="text-xs text-surface-700 dark:text-surface-500">
+                  <p className="text-xs text-surface-700 dark:text-surface-300">
                     {getLocationName(order.logisticsLocationId)} · {new Date(order.updatedAt).toLocaleDateString('en-NG', {
                       month: 'short', day: 'numeric',
                     })}
@@ -263,18 +267,18 @@ export function ReturnsPage({
                     <fetcher.Form method="post" className="inline">
                       <input type="hidden" name="intent" value="restock" />
                       <input type="hidden" name="orderId" value={order.id} />
-                      <button type="submit" className="btn-success btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                      <Button type="submit" variant="success" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                         Sellable
-                      </button>
+                      </Button>
                     </fetcher.Form>
-                    <button onClick={() => setWriteOffOrderId(order.id)} className="btn-danger btn-sm text-xs">
+                    <Button variant="danger" size="sm" className="text-xs" onClick={() => setWriteOffOrderId(order.id)}>
                       Damaged
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
               {returnedOrders.length === 0 && (
-                <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+                <div className="p-8 text-center text-surface-700 dark:text-surface-300">
                   No returned items pending assessment
                 </div>
               )}
@@ -357,12 +361,12 @@ export function ReturnsPage({
                   </div>
 
                   <div className="flex gap-2">
-                    <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-                      {fetcher.state === 'submitting' ? 'Submitting...' : 'Submit Reconciliation'}
-                    </button>
-                    <button type="button" onClick={() => setShowReconciliationForm(false)} className="btn-secondary btn-sm">
+                    <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Submitting...">
+                      Submit Reconciliation
+                    </Button>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setShowReconciliationForm(false)}>
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </fetcher.Form>
               )}
@@ -426,7 +430,7 @@ function ReconciliationTable({
                 <td className="table-cell font-medium text-surface-900 dark:text-surface-100">
                   {getLocationName(r.locationId)}
                 </td>
-                <td className="table-cell text-surface-800 dark:text-surface-400">
+                <td className="table-cell text-surface-800 dark:text-surface-200">
                   <DeferredSection resolve={products} skeleton="inline">
                     {(resolvedProducts) => {
                       const prod = (resolvedProducts as Product[]).find((p: Product) => p.id === r.productId);
@@ -449,7 +453,7 @@ function ReconciliationTable({
                     {r.reconciliationStatus}
                   </span>
                 </td>
-                <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                   {new Date(r.createdAt).toLocaleDateString('en-NG', {
                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                   })}
@@ -461,17 +465,17 @@ function ReconciliationTable({
                         <input type="hidden" name="intent" value="resolveReconciliation" />
                         <input type="hidden" name="reconciliationId" value={r.id} />
                         <input type="hidden" name="approved" value="true" />
-                        <button type="submit" className="btn-success btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                        <Button type="submit" variant="success" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Processing...">
                           Approve
-                        </button>
+                        </Button>
                       </fetcher.Form>
                       <fetcher.Form method="post" className="inline">
                         <input type="hidden" name="intent" value="resolveReconciliation" />
                         <input type="hidden" name="reconciliationId" value={r.id} />
                         <input type="hidden" name="approved" value="false" />
-                        <button type="submit" className="btn-danger btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                        <Button type="submit" variant="danger" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Processing...">
                           Reject
-                        </button>
+                        </Button>
                       </fetcher.Form>
                     </div>
                   )}
@@ -480,7 +484,7 @@ function ReconciliationTable({
             ))}
             {reconciliations.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                <td colSpan={9} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                   No reconciliation records. Submit a report when physical stock differs from system records.
                 </td>
               </tr>
@@ -501,7 +505,7 @@ function ReconciliationTable({
                 {r.reconciliationStatus}
               </span>
             </div>
-            <p className="text-xs text-surface-800 dark:text-surface-400">
+            <p className="text-xs text-surface-800 dark:text-surface-200">
               <DeferredSection resolve={products} skeleton="inline">
                 {(resolvedProducts) => {
                   const prod = (resolvedProducts as Product[]).find((p: Product) => p.id === r.productId);
@@ -523,20 +527,20 @@ function ReconciliationTable({
                   <input type="hidden" name="intent" value="resolveReconciliation" />
                   <input type="hidden" name="reconciliationId" value={r.id} />
                   <input type="hidden" name="approved" value="true" />
-                  <button type="submit" className="btn-success btn-sm text-xs">Approve</button>
+                  <Button type="submit" variant="success" size="sm" className="text-xs">Approve</Button>
                 </fetcher.Form>
                 <fetcher.Form method="post" className="inline">
                   <input type="hidden" name="intent" value="resolveReconciliation" />
                   <input type="hidden" name="reconciliationId" value={r.id} />
                   <input type="hidden" name="approved" value="false" />
-                  <button type="submit" className="btn-danger btn-sm text-xs">Reject</button>
+                  <Button type="submit" variant="danger" size="sm" className="text-xs">Reject</Button>
                 </fetcher.Form>
               </div>
             )}
           </div>
         ))}
         {reconciliations.length === 0 && (
-          <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+          <div className="p-8 text-center text-surface-700 dark:text-surface-300">
             No reconciliation records
           </div>
         )}

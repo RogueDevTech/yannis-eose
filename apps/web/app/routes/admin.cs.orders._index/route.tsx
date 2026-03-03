@@ -1,8 +1,9 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrdersListPage } from '~/features/orders/OrdersListPage';
 import type { Order } from '~/features/orders/types';
 
@@ -22,32 +23,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const search = url.searchParams.get('search') || undefined;
   const input = encodeURIComponent(JSON.stringify({ page, limit: ORDERS_PER_PAGE, status: status || undefined, search: search || undefined }));
 
-  const [res, countsRes] = await Promise.all([
+  const ordersPromise = Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/orders.statusCounts?input=%7B%7D', { method: 'GET', cookie }),
-  ]);
-
-  const trpcData = res.ok
-    ? (res.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
-    : null;
-
-  const countsData = countsRes.ok
-    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-    : {};
-
-  const total = trpcData?.pagination?.total ?? 0;
-  const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
-
-  return json({
-    orders: trpcData?.orders ?? [],
-    total,
-    totalPages,
+  ]).then(([res, countsRes]) => {
+    const trpcData = res.ok
+      ? (res.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
+      : null;
+    const countsData = countsRes.ok
+      ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+      : {};
+    const total = trpcData?.pagination?.total ?? 0;
+    const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+    return {
+      orders: trpcData?.orders ?? [],
+      total,
+      totalPages,
+      page,
+      limit: ORDERS_PER_PAGE,
+      statusCounts: countsData,
+      statusFilter: status,
+      searchFilter: search,
+    };
+  }).catch(() => ({
+    orders: [] as Order[],
+    total: 0,
+    totalPages: 0,
     page,
     limit: ORDERS_PER_PAGE,
-    statusCounts: countsData,
+    statusCounts: {} as Record<string, number>,
     statusFilter: status,
     searchFilter: search,
-  });
+  }));
+
+  return defer({ orders: ordersPromise });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -112,9 +121,13 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CSOrdersRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { orders } = useLoaderData<typeof loader>();
   const parentData = useRouteLoaderData('routes/admin') as { user: { role: string } } | undefined;
   const userRole = parentData?.user?.role;
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
-  return <OrdersListPage {...data} userRole={userRole} />;
+  return (
+    <DeferredSection resolve={orders} skeleton="table">
+      {(data) => <OrdersListPage {...data} userRole={userRole} />}
+    </DeferredSection>
+  );
 }

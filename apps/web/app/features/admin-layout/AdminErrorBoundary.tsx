@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Link } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import type { AdminErrorBoundaryProps } from './types';
 
 /** Sync theme from localStorage when error boundary mounts (DashboardLayout may not have run) */
@@ -35,7 +36,7 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
             </svg>
           </div>
           <h1 className="text-xl font-bold text-surface-900 dark:text-white">Session Expired</h1>
-          <p className="mt-2 text-sm text-surface-800 dark:text-surface-400">
+          <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
             Your session has expired. Please sign in again to continue.
           </p>
           <Link to="/auth" className="mt-4 inline-block btn-primary">Sign In</Link>
@@ -55,7 +56,7 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
             </svg>
           </div>
           <h1 className="text-xl font-bold text-surface-900 dark:text-white">Access Denied</h1>
-          <p className="mt-2 text-sm text-surface-800 dark:text-surface-400">
+          <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
             You don't have permission to access this page.
           </p>
           <Link to="/admin" className="mt-4 inline-block btn-primary">Back to Dashboard</Link>
@@ -70,12 +71,12 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
       <div className="min-h-screen flex items-center justify-center bg-surface-50 dark:bg-surface-950 p-6">
         <div className="text-center max-w-md">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface-100 dark:bg-surface-800 flex items-center justify-center">
-            <svg className="w-8 h-8 text-surface-700 dark:text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-8 h-8 text-surface-700 dark:text-surface-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
             </svg>
           </div>
           <h1 className="text-xl font-bold text-surface-900 dark:text-white">Page Not Found</h1>
-          <p className="mt-2 text-sm text-surface-800 dark:text-surface-400">
+          <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
             The page you're looking for doesn't exist or has been moved.
           </p>
           <Link to="/admin" className="mt-4 inline-block btn-primary">Back to Dashboard</Link>
@@ -94,21 +95,18 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
           </svg>
         </div>
         <h1 className="text-xl font-bold text-surface-900 dark:text-white">Something Went Wrong</h1>
-        <p className="mt-2 text-sm text-surface-800 dark:text-surface-400">
+        <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
           An unexpected error occurred. Please try refreshing the page.
         </p>
         {isResponse && errorData != null ? (
-          <p className="mt-2 text-xs text-surface-700 dark:text-surface-500 font-mono bg-surface-100 dark:bg-surface-800 rounded p-2">
+          <p className="mt-2 text-xs text-surface-700 dark:text-surface-300 font-mono bg-surface-100 dark:bg-surface-800 rounded p-2">
             {typeof errorData === 'string' ? errorData : JSON.stringify(errorData)}
           </p>
         ) : null}
         <div className="mt-4 flex gap-2 justify-center">
-          <button
-            onClick={() => window.location.reload()}
-            className="btn-primary"
-          >
+          <Button variant="primary" onClick={() => window.location.reload()}>
             Refresh Page
-          </button>
+          </Button>
           <Link to="/admin" className="btn-secondary">
             Back to Dashboard
           </Link>

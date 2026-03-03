@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast } from '~/components/ui/toast';
+import { AmountInput } from '~/components/ui/amount-input';
+import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import { useVoipDevice } from '~/hooks/useVoipDevice';
@@ -103,7 +105,7 @@ function CallStatusIndicator({ call }: { call: CallLogEntry }) {
               {call.callStatus === 'BUSY' && 'Line busy'}
             </p>
             {call.durationSeconds != null && call.durationSeconds > 0 && (
-              <p className="text-xs text-surface-800 dark:text-surface-400">
+              <p className="text-xs text-surface-800 dark:text-surface-200">
                 Duration: {call.durationSeconds}s
                 {call.durationSeconds >= 15 && (
                   <span className="ml-1 text-success-600 dark:text-success-400 font-medium">
@@ -139,7 +141,7 @@ function OrderHistoryTimeline({ history }: { history: HistoryEntry[] }) {
   if (history.length === 0) {
     return (
       <div className="card">
-        <p className="text-sm text-surface-800 dark:text-surface-400 text-center py-8">
+        <p className="text-sm text-surface-800 dark:text-surface-200 text-center py-8">
           No audit history available. This may require SuperAdmin access.
         </p>
       </div>
@@ -193,7 +195,7 @@ function OrderHistoryTimeline({ history }: { history: HistoryEntry[] }) {
                       <p className="text-sm font-medium text-surface-900 dark:text-white">
                         {isFirst ? 'Record Created' : `${diffs.length} field${diffs.length !== 1 ? 's' : ''} changed`}
                       </p>
-                      <p className="text-xs text-surface-800 dark:text-surface-400 mt-0.5">
+                      <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
                         {formatDate(entry.validFrom)}
                         {entry.changedBy && (
                           <span className="ml-2">
@@ -219,7 +221,7 @@ function OrderHistoryTimeline({ history }: { history: HistoryEntry[] }) {
                             .filter(([key]) => !['valid_from', 'valid_to', 'valid_period', 'changed_by', '_table_name', '_row_data'].includes(key))
                             .map(([key, value]) => (
                               <div key={key} className="flex gap-2 text-xs">
-                                <span className="font-medium text-surface-800 dark:text-surface-400 min-w-[120px]">{key}:</span>
+                                <span className="font-medium text-surface-800 dark:text-surface-200 min-w-[120px]">{key}:</span>
                                 <span className="font-mono text-surface-900 dark:text-surface-100 break-all">{formatValue(value)}</span>
                               </div>
                             ))}
@@ -228,9 +230,9 @@ function OrderHistoryTimeline({ history }: { history: HistoryEntry[] }) {
                         <table className="w-full text-xs">
                           <thead>
                             <tr>
-                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-400">Field</th>
-                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-400">Old Value</th>
-                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-400">New Value</th>
+                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">Field</th>
+                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">Old Value</th>
+                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">New Value</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -248,7 +250,7 @@ function OrderHistoryTimeline({ history }: { history: HistoryEntry[] }) {
                           </tbody>
                         </table>
                       ) : (
-                        <p className="text-xs text-surface-800 dark:text-surface-400">No field changes detected.</p>
+                        <p className="text-xs text-surface-800 dark:text-surface-200">No field changes detected.</p>
                       )}
                     </div>
                   )}
@@ -288,22 +290,24 @@ function ManualCallPanel({
 
       {!phoneRevealed ? (
         <>
-          <p className="text-xs text-surface-800 dark:text-surface-400 mb-3">
+          <p className="text-xs text-surface-800 dark:text-surface-200 mb-3">
             Click below to reveal the customer phone number for manual calling.
             This action is logged in the audit trail.
           </p>
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="revealPhone" />
-            <button
+            <Button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={fetcher.state === 'submitting'}
+              variant="primary"
+              className="w-full"
+              loading={fetcher.state === 'submitting'}
+              loadingText="Revealing..."
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
               </svg>
-              {fetcher.state === 'submitting' ? 'Revealing...' : 'Call Customer'}
-            </button>
+              Call Customer
+            </Button>
           </fetcher.Form>
         </>
       ) : (
@@ -314,7 +318,7 @@ function ManualCallPanel({
               {revealedPhone}
             </p>
           </div>
-          <p className="text-xs text-surface-800 dark:text-surface-400 text-center">
+          <p className="text-xs text-surface-800 dark:text-surface-200 text-center">
             Call this number manually, then confirm the order below.
           </p>
           <p className="text-xs text-success-600 dark:text-success-400 mt-2 text-center">
@@ -508,17 +512,20 @@ function VoipCallPanel({
       {!showInCallUI && (
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="initiateCall" />
-          <button
+          <Button
             type="submit"
-            className="w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={hasActiveCall || !voip.ready || fetcher.state === 'submitting'}
+            variant="primary"
+            className="w-full"
+            disabled={hasActiveCall || !voip.ready}
+            loading={fetcher.state === 'submitting'}
+            loadingText="Connecting..."
             title={!voip.ready ? 'VOIP device is initializing...' : undefined}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
             </svg>
-            {hasActiveCall ? 'Call in progress...' : fetcher.state === 'submitting' ? 'Connecting...' : 'Call Customer'}
-          </button>
+            {hasActiveCall ? 'Call in progress...' : 'Call Customer'}
+          </Button>
         </fetcher.Form>
       )}
 
@@ -596,7 +603,7 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
     <div className="space-y-4">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <Link to="/admin/cs/orders" className="text-surface-800 dark:text-surface-400 hover:text-brand-500">
+        <Link to="/admin/cs/orders" className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
           Orders
         </Link>
         <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -609,7 +616,7 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">{order.customerName}</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 font-mono mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 font-mono mt-0.5">
             {order.customerPhoneDisplay}
           </p>
         </div>
@@ -655,7 +662,7 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                             ? 'bg-brand-500 text-white ring-4 ring-brand-100 dark:ring-brand-900'
                             : isPast
                             ? 'bg-success-500 text-white'
-                            : 'bg-surface-200 dark:bg-surface-700 text-surface-700 dark:text-surface-500'
+                            : 'bg-surface-200 dark:bg-surface-700 text-surface-700 dark:text-surface-300'
                         }`}>
                           {isPast ? (
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -666,7 +673,7 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                           )}
                         </div>
                         <span className={`text-2xs mt-1 whitespace-nowrap ${
-                          isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-surface-700 dark:text-surface-500'
+                          isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-surface-700 dark:text-surface-300'
                         }`}>
                           {status.replace(/_/g, ' ')}
                         </span>
@@ -751,7 +758,7 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                               </span>
                             )}
                           </p>
-                          <p className="text-xs text-surface-800 dark:text-surface-400">
+                          <p className="text-xs text-surface-800 dark:text-surface-200">
                             {new Date(call.startedAt).toLocaleString('en-NG')}
                           </p>
                         </div>
@@ -802,19 +809,22 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="CS_ENGAGED" />
-                    <button type="submit" className="btn-primary w-full" disabled={fetcher.state === 'submitting'}>
+                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Engaging...">
                       Engage Customer
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('CONFIRMED') && (
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="CONFIRMED" />
-                    <button
+                    <Button
                       type="submit"
-                      className="btn-primary w-full"
-                      disabled={!canConfirm || fetcher.state === 'submitting'}
+                      variant="primary"
+                      className="w-full"
+                      disabled={!canConfirm}
+                      loading={fetcher.state === 'submitting'}
+                      loadingText="Confirming..."
                       title={!canConfirm
                         ? voipEnabled
                           ? 'A VOIP call of at least 15 seconds is required before confirming'
@@ -826,7 +836,7 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                       {!canConfirm && (
                         <span className="ml-1 text-xs opacity-70">(call required)</span>
                       )}
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('CANCELLED') && order.status === 'CS_ENGAGED' && (
@@ -841,21 +851,20 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                       className="input text-sm mb-2"
                       rows={2}
                     />
-                    <button
+                    <Button
                       type="submit"
-                      className="btn-danger w-full"
-                      disabled={
-                        cancelReason.length < 10
-                        || (!anyCallAttempted)
-                        || fetcher.state === 'submitting'
-                      }
+                      variant="danger"
+                      className="w-full"
+                      disabled={cancelReason.length < 10 || !anyCallAttempted}
+                      loading={fetcher.state === 'submitting'}
+                      loadingText="Cancelling..."
                       title={!anyCallAttempted ? 'At least one call attempt is required' : undefined}
                     >
                       No Answer / Cancel
                       {!anyCallAttempted && (
                         <span className="ml-1 text-xs opacity-70">(call required)</span>
                       )}
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {/* Non-CS_ENGAGED cancel */}
@@ -871,13 +880,16 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                       className="input text-sm mb-2"
                       rows={2}
                     />
-                    <button
+                    <Button
                       type="submit"
-                      className="btn-danger w-full"
-                      disabled={cancelReason.length < 10 || fetcher.state === 'submitting'}
+                      variant="danger"
+                      className="w-full"
+                      disabled={cancelReason.length < 10}
+                      loading={fetcher.state === 'submitting'}
+                      loadingText="Cancelling..."
                     >
                       Cancel Order
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('ALLOCATED') && (
@@ -885,9 +897,9 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="ALLOCATED" />
                     <input name="logisticsLocationId" type="text" placeholder="Logistics Location ID" className="input text-sm mb-2" required />
-                    <button type="submit" className="btn-primary w-full" disabled={fetcher.state === 'submitting'}>
+                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Allocating...">
                       Allocate to 3PL
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('DISPATCHED') && (
@@ -895,28 +907,28 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="DISPATCHED" />
                     <input name="riderId" type="text" placeholder="Rider ID" className="input text-sm mb-2" required />
-                    <button type="submit" className="btn-primary w-full" disabled={fetcher.state === 'submitting'}>
+                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Dispatching...">
                       Dispatch to Rider
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('IN_TRANSIT') && (
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="IN_TRANSIT" />
-                    <button type="submit" className="btn-primary w-full" disabled={fetcher.state === 'submitting'}>
+                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                       Mark In Transit
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('DELIVERED') && (
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="DELIVERED" />
-                    <input name="deliveryFeeAddOn" type="number" min="0" step="0.01" placeholder="Delivery add-on (&#8358;) — optional" className="input text-sm mb-2" />
-                    <button type="submit" className="btn-primary w-full" disabled={fetcher.state === 'submitting'}>
+                    <AmountInput name="deliveryFeeAddOn" placeholder="Delivery add-on (₦) — optional" className="input text-sm mb-2" />
+                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                       Mark Delivered
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('PARTIALLY_DELIVERED') && (
@@ -927,19 +939,19 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                       <input name="deliveredQuantity" type="number" min="0" placeholder="Delivered qty" className="input text-sm" required />
                       <input name="returnedQuantity" type="number" min="0" placeholder="Returned qty" className="input text-sm" required />
                     </div>
-                    <input name="deliveryFeeAddOn" type="number" min="0" step="0.01" placeholder="Delivery add-on (&#8358;) — optional" className="input text-sm mb-2" />
-                    <button type="submit" className="btn-warning w-full" disabled={fetcher.state === 'submitting'}>
+                    <AmountInput name="deliveryFeeAddOn" placeholder="Delivery add-on (₦) — optional" className="input text-sm mb-2" />
+                    <Button type="submit" variant="warning" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                       Partial Delivery
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('COMPLETED') && (
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="COMPLETED" />
-                    <button type="submit" className="btn-primary w-full" disabled={fetcher.state === 'submitting'}>
+                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Completing...">
                       Complete Order
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('RETURNED') && (
@@ -954,22 +966,25 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                       className="input text-sm mb-2"
                       rows={2}
                     />
-                    <button
+                    <Button
                       type="submit"
-                      className="btn-danger w-full"
-                      disabled={returnReason.length < 10 || fetcher.state === 'submitting'}
+                      variant="danger"
+                      className="w-full"
+                      disabled={returnReason.length < 10}
+                      loading={fetcher.state === 'submitting'}
+                      loadingText="Updating..."
                     >
                       Mark Returned
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('RESTOCKED') && (
                   <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="RESTOCKED" />
-                    <button type="submit" className="btn-primary w-full" disabled={fetcher.state === 'submitting'}>
+                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                       Restock (Sellable)
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.includes('WRITTEN_OFF') && (
@@ -984,17 +999,20 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                       className="input text-sm mb-2"
                       rows={2}
                     />
-                    <button
+                    <Button
                       type="submit"
-                      className="btn-danger w-full"
-                      disabled={writeOffReason.length < 10 || fetcher.state === 'submitting'}
+                      variant="danger"
+                      className="w-full"
+                      disabled={writeOffReason.length < 10}
+                      loading={fetcher.state === 'submitting'}
+                      loadingText="Updating..."
                     >
                       Write Off (Damaged)
-                    </button>
+                    </Button>
                   </fetcher.Form>
                 )}
                 {order.allowedTransitions.length === 0 && (
-                  <p className="text-sm text-surface-800 dark:text-surface-400 text-center py-2">
+                  <p className="text-sm text-surface-800 dark:text-surface-200 text-center py-2">
                     No actions available
                   </p>
                 )}
@@ -1007,31 +1025,31 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
               <dl className="space-y-3 text-sm">
                 {order.customerAddress && (
                   <div>
-                    <dt className="text-surface-800 dark:text-surface-400">Customer Address</dt>
+                    <dt className="text-surface-800 dark:text-surface-200">Customer Address</dt>
                     <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{order.customerAddress}</dd>
                   </div>
                 )}
                 {order.deliveryAddress && (
                   <div>
-                    <dt className="text-surface-800 dark:text-surface-400">Delivery Address</dt>
+                    <dt className="text-surface-800 dark:text-surface-200">Delivery Address</dt>
                     <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{order.deliveryAddress}</dd>
                   </div>
                 )}
                 {order.deliveryNotes && (
                   <div>
-                    <dt className="text-surface-800 dark:text-surface-400">Delivery Notes</dt>
+                    <dt className="text-surface-800 dark:text-surface-200">Delivery Notes</dt>
                     <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{order.deliveryNotes}</dd>
                   </div>
                 )}
                 <div>
-                  <dt className="text-surface-800 dark:text-surface-400">Created</dt>
+                  <dt className="text-surface-800 dark:text-surface-200">Created</dt>
                   <dd className="text-surface-900 dark:text-surface-100 mt-0.5">
                     {new Date(order.createdAt).toLocaleString('en-NG')}
                   </dd>
                 </div>
                 {order.confirmedAt && (
                   <div>
-                    <dt className="text-surface-800 dark:text-surface-400">Confirmed</dt>
+                    <dt className="text-surface-800 dark:text-surface-200">Confirmed</dt>
                     <dd className="text-surface-900 dark:text-surface-100 mt-0.5">
                       {new Date(order.confirmedAt).toLocaleString('en-NG')}
                     </dd>
@@ -1039,14 +1057,14 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                 )}
                 {order.deliveredAt && (
                   <div>
-                    <dt className="text-surface-800 dark:text-surface-400">Delivered</dt>
+                    <dt className="text-surface-800 dark:text-surface-200">Delivered</dt>
                     <dd className="text-surface-900 dark:text-surface-100 mt-0.5">
                       {new Date(order.deliveredAt).toLocaleString('en-NG')}
                     </dd>
                   </div>
                 )}
                 <div>
-                  <dt className="text-surface-800 dark:text-surface-400">Order ID</dt>
+                  <dt className="text-surface-800 dark:text-surface-200">Order ID</dt>
                   <dd className="text-surface-900 dark:text-surface-100 mt-0.5 font-mono text-xs break-all">{order.id}</dd>
                 </div>
               </dl>
@@ -1058,7 +1076,7 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
         <div>
           <div className="mb-4">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Change History</h2>
-            <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+            <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
               Every change to this order is permanently recorded in the audit trail.
             </p>
           </div>

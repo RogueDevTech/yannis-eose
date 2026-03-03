@@ -1,5 +1,6 @@
 import type { LinksFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { Button } from '~/components/ui/button';
 import {
   Links,
   Meta,
@@ -16,6 +17,7 @@ declare global {
   interface Window {
     __ENV: {
       API_URL: string;
+      EDGE_WORKER_URL: string;
       S3_BUCKET: string;
       S3_REGION: string;
       S3_ACCESS_KEY_ID: string;
@@ -30,6 +32,7 @@ export async function loader() {
   return json({
     ENV: {
       API_URL: process.env.API_URL ?? 'http://localhost:4000',
+      EDGE_WORKER_URL: process.env.EDGE_WORKER_URL ?? '',
       S3_BUCKET: process.env.S3_BUCKET ?? '',
       S3_REGION: process.env.S3_REGION ?? 'us-east-1',
       S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID ?? '',
@@ -137,18 +140,15 @@ export function ErrorBoundary() {
             {status}
           </p>
           <h1 className="text-xl font-bold text-surface-900 dark:text-white">{title}</h1>
-          <p className="mt-2 text-sm text-surface-800 dark:text-surface-400">{description}</p>
+          <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">{description}</p>
           <div className="mt-6 flex gap-3 justify-center">
             {is401 ? (
               <a href="/auth" className="btn-primary">Sign In</a>
             ) : (
               <>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="btn-primary"
-                >
+                <Button variant="primary" onClick={() => window.location.reload()}>
                   Refresh Page
-                </button>
+                </Button>
                 <a href="/admin" className="btn-secondary">Back to Dashboard</a>
               </>
             )}

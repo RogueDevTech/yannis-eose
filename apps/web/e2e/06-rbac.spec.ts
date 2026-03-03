@@ -82,7 +82,7 @@ test.describe('RBAC — Access Control', () => {
       '/admin/marketing',
       '/admin/finance',
       '/admin/hr',
-      '/admin/campaigns',
+      '/admin/forms',
       '/admin/users',
       '/admin/settings',
     ];

@@ -38,11 +38,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return (data?.[key] as unknown[]) ?? [];
   };
 
-  return json({
+  return {
     products: extractData(productsRes, 'products') as UserCreateProduct[],
     locations: extractData(locationsRes, 'locations') as UserCreateLocation[],
     plans: extractData(plansRes, 'plans') as UserCreateCommissionPlan[],
-  });
+  };
 }
 
 // ─── Action ─────────────────────────────────────────────
@@ -139,7 +139,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  return redirect('/admin/users');
+  return redirect('/hr/users');
 }
 
 // ─── Component ──────────────────────────────────────────

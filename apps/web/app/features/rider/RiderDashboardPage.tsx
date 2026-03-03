@@ -161,7 +161,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125h-.752a2.25 2.25 0 0 0-1.342.447L13.5 12l-2.654-1.94A2.25 2.25 0 0 0 9.504 9.56H3.375c-.621 0-1.125.504-1.125 1.125v4.5c0 .621.504 1.125 1.125 1.125H6.75" />
             </svg>
           </div>
-          <p className="text-surface-800 dark:text-surface-400">No deliveries in transit</p>
+          <p className="text-surface-800 dark:text-surface-200">No deliveries in transit</p>
         </div>
       )}
       {activeTab === 'pickup' && dispatchedOrders.length === 0 && (
@@ -171,7 +171,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-2.25-1.313M21 7.5v2.25m0-2.25l-2.25 1.313M3 7.5l2.25-1.313M3 7.5l2.25 1.313M3 7.5v2.25m9 3l2.25-1.313M12 12.75l-2.25-1.313M12 12.75V15m0 6.75l2.25-1.313M12 21.75V19.5m0 2.25l-2.25-1.313m0-16.875L12 2.25l2.25 1.313M21 14.25v2.25l-2.25 1.313m-13.5 0L3 16.5v-2.25" />
             </svg>
           </div>
-          <p className="text-surface-800 dark:text-surface-400">No orders waiting for pickup</p>
+          <p className="text-surface-800 dark:text-surface-200">No orders waiting for pickup</p>
         </div>
       )}
 
@@ -186,7 +186,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
               <div className="flex items-start justify-between">
                 <div>
                   <p className="font-semibold text-surface-900 dark:text-white">{order.customerName}</p>
-                  <p className="mt-0.5 text-xs text-surface-800 dark:text-surface-400">{order.id.slice(0, 8)}...</p>
+                  <p className="mt-0.5 text-xs text-surface-800 dark:text-surface-200">{order.id.slice(0, 8)}...</p>
                 </div>
                 {order.totalAmount && (
                   <span className="text-sm font-semibold text-surface-700 dark:text-surface-300">
@@ -195,10 +195,10 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
                 )}
               </div>
               {order.deliveryAddress && (
-                <p className="mt-2 text-sm text-surface-600 dark:text-surface-400">{order.deliveryAddress}</p>
+                <p className="mt-2 text-sm text-surface-600 dark:text-surface-200">{order.deliveryAddress}</p>
               )}
               {order.deliveryNotes && (
-                <p className="mt-1 text-xs italic text-surface-700 dark:text-surface-500">Note: {order.deliveryNotes}</p>
+                <p className="mt-1 text-xs italic text-surface-700 dark:text-surface-300">Note: {order.deliveryNotes}</p>
               )}
               <fetcher.Form method="POST" className="mt-3">
                 <input type="hidden" name="orderId" value={order.id} />
@@ -245,7 +245,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
                 <p className="font-semibold text-surface-900 dark:text-white">
                   {order.customerName}
                 </p>
-                <p className="mt-0.5 text-xs text-surface-800 dark:text-surface-400">
+                <p className="mt-0.5 text-xs text-surface-800 dark:text-surface-200">
                   {order.id.slice(0, 8)}...
                 </p>
               </div>
@@ -257,12 +257,12 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
             </div>
 
             {order.deliveryAddress && (
-              <p className="mt-2 text-sm text-surface-600 dark:text-surface-400">
+              <p className="mt-2 text-sm text-surface-600 dark:text-surface-200">
                 {order.deliveryAddress}
               </p>
             )}
             {order.deliveryNotes && (
-              <p className="mt-1 text-xs italic text-surface-700 dark:text-surface-500">
+              <p className="mt-1 text-xs italic text-surface-700 dark:text-surface-300">
                 Note: {order.deliveryNotes}
               </p>
             )}

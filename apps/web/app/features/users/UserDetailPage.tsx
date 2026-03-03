@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
-import { Spinner } from '~/components/ui/spinner';
+import { Button } from '~/components/ui/button';
+import { InlineNotification } from '~/components/ui/inline-notification';
 import { Tabs } from '~/components/ui/tabs';
+import { formatActivityDescription } from '~/lib/format-activity';
 import type {
   UserDetailLoaderData,
   UserCreateProduct,
@@ -216,7 +218,7 @@ export function UserDetailPage({
     <div className="w-full space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <Link to="/admin/users" prefetch="intent" className="text-surface-800 dark:text-surface-400 hover:text-brand-500 transition-colors">
+        <Link to="/hr/users" prefetch="intent" className="text-surface-800 dark:text-surface-200 hover:text-brand-500 transition-colors">
           Users
         </Link>
         <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -262,7 +264,7 @@ export function UserDetailPage({
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                   <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-white">{user.name}</h1>
-                  <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">{user.email}</p>
+                  <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{user.email}</p>
                 </div>
                 {(canDisburseToThisUser || !isSuperAdminProfile) && (
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -276,35 +278,35 @@ export function UserDetailPage({
                     )}
                     {!isSuperAdminProfile && (
                       <>
-                        <button
+                        <Button
                           type="button"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => setShowResetPassword(true)}
-                          className="btn-secondary btn-sm"
+                          className="flex items-center gap-1.5"
                         >
-                          <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
                           </svg>
                           Reset Password
-                        </button>
+                        </Button>
                         {user.status === 'ACTIVE' && (
-                          <button
+                          <Button
                             type="button"
+                            variant="secondary"
+                            size="sm"
                             onClick={() => setShowDeactivateConfirm(true)}
-                            className="btn-secondary btn-sm text-danger-600 dark:text-danger-400 hover:text-danger-700 border-danger-200 dark:border-danger-700 hover:border-danger-300"
+                            className="text-danger-600 dark:text-danger-400 hover:text-danger-700 border-danger-200 dark:border-danger-700 hover:border-danger-300"
                           >
                             Deactivate
-                          </button>
+                          </Button>
                         )}
                         {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
                           <Form method="post">
                             <input type="hidden" name="intent" value="reactivate" />
-                            <button
-                              type="submit"
-                              className="btn-secondary btn-sm text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
-                              disabled={isReactivating}
-                            >
-                              {isReactivating ? <><Spinner size="sm" /> Reactivating</> : 'Reactivate'}
-                            </button>
+                            <Button type="submit" variant="secondary" size="sm" loading={isReactivating} loadingText="Reactivating..." className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5">
+                              Reactivate
+                            </Button>
                           </Form>
                         )}
                       </>
@@ -344,7 +346,7 @@ export function UserDetailPage({
           </div>
 
           {/* Role description */}
-          <p className="text-xs text-surface-600 dark:text-surface-500 mt-3">
+          <p className="text-xs text-surface-600 dark:text-surface-300 mt-3">
             {ROLE_DESCRIPTIONS[user.role] ?? ''}
           </p>
         </div>
@@ -378,20 +380,24 @@ export function UserDetailPage({
                       Pending email change to <strong>{pending.requestedNewEmail}</strong> — requires SuperAdmin approval
                     </p>
                     <div className="flex gap-2 mt-2">
-                      <button
+                      <Button
                         type="button"
+                        variant="success"
+                        size="sm"
+                        className="text-xs"
                         onClick={() => { setShowEmailChangeModal({ requestId: pending.id, action: 'APPROVED' }); setEmailChangeReason(''); }}
-                        className="btn-success btn-sm text-xs"
                       >
                         Approve
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
+                        variant="danger"
+                        size="sm"
+                        className="text-xs"
                         onClick={() => { setShowEmailChangeModal({ requestId: pending.id, action: 'REJECTED' }); setEmailChangeReason(''); }}
-                        className="btn-danger btn-sm text-xs"
                       >
                         Reject
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -423,7 +429,7 @@ export function UserDetailPage({
 
                 {user.visibleOrderStatuses && user.visibleOrderStatuses.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider mb-2">Visible Order Tabs</p>
+                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-2">Visible Order Tabs</p>
                     <div className="flex flex-wrap gap-1.5">
                       {user.visibleOrderStatuses.map((s) => {
                         const def = ORDER_STATUSES.find((os) => os.value === s);
@@ -439,7 +445,7 @@ export function UserDetailPage({
 
                 {user.logisticsLocationId && (
                   <div>
-                    <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider mb-1">Assigned Location</p>
+                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-1">Assigned Location</p>
                     <p className="text-xs font-mono text-surface-900 dark:text-surface-100 bg-surface-50 dark:bg-surface-800 px-2 py-1 rounded inline-block">{user.logisticsLocationId}</p>
                   </div>
                 )}
@@ -455,7 +461,7 @@ export function UserDetailPage({
 
                 {user.commissionPlanId && (
                   <div>
-                    <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider mb-1">Commission Plan ID</p>
+                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-1">Commission Plan ID</p>
                     <p className="text-xs font-mono bg-surface-50 dark:bg-surface-800 px-2 py-1 rounded inline-block text-surface-900 dark:text-surface-100">{user.commissionPlanId}</p>
                   </div>
                 )}
@@ -496,7 +502,7 @@ export function UserDetailPage({
                       </button>
                     </div>
                     <p className="text-3xl font-bold text-surface-900 dark:text-white">{data.total}</p>
-                    <p className="text-xs text-surface-600 dark:text-surface-500">
+                    <p className="text-xs text-surface-600 dark:text-surface-300">
                       {isCSRole ? 'Orders handled as CS agent' : isMarketingRole ? 'Orders from campaigns' : isLogisticsRole ? 'Deliveries assigned' : 'Total orders in system'}
                     </p>
                     {data.orders.length > 0 && (
@@ -526,12 +532,12 @@ export function UserDetailPage({
                     </button>
                   </div>
                   <p className="text-3xl font-bold text-surface-900 dark:text-white">{payoutList.length}</p>
-                  <p className="text-xs text-surface-600 dark:text-surface-500">Payout records</p>
+                  <p className="text-xs text-surface-600 dark:text-surface-300">Payout records</p>
                   {payoutList.length > 0 && (
                     <div className="border-t border-surface-100 dark:border-surface-800 pt-3 space-y-2">
                       {payoutList.slice(0, 3).map((p) => (
                         <div key={p.id} className="flex items-center justify-between text-xs">
-                          <span className="text-surface-700 dark:text-surface-400">
+                          <span className="text-surface-700 dark:text-surface-200">
                             {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                             {' — '}
                             {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
@@ -561,13 +567,11 @@ export function UserDetailPage({
                       {entries.slice(0, 5).map((entry) => (
                         <div key={entry.id} className="flex items-start gap-2 text-xs">
                           <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="text-surface-900 dark:text-surface-200 truncate">
-                              <span className="font-medium capitalize">{entry.action}</span>
-                              {' '}
-                              <span className="text-surface-600 dark:text-surface-400">{entry.tableName}</span>
+                              {formatActivityDescription(entry)}
                             </p>
-                            <p className="text-surface-500 dark:text-surface-600 text-[11px]">
+                            <p className="text-surface-500 dark:text-surface-600 text-[11px] mt-0.5">
                               {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </p>
                           </div>
@@ -592,7 +596,7 @@ export function UserDetailPage({
               <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-surface-900 dark:text-white">
                   {isCSRole ? 'Orders Handled' : isMarketingRole ? 'Campaign Orders' : isLogisticsRole ? 'Delivery Orders' : 'All Orders'}
-                  <span className="text-surface-500 dark:text-surface-400 font-normal ml-2">({data.total})</span>
+                  <span className="text-surface-500 dark:text-surface-200 font-normal ml-2">({data.total})</span>
                 </h2>
               </div>
               {data.orders.length > 0 ? (
@@ -622,7 +626,7 @@ export function UserDetailPage({
                           <td className="table-cell text-right text-sm font-medium text-surface-900 dark:text-surface-100">
                             {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
                           </td>
-                          <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                          <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
                             {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                           </td>
                         </tr>
@@ -718,11 +722,11 @@ export function UserDetailPage({
                             <td className={`table-cell text-right text-sm font-medium ${adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
                               {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? '-' : '+'}₦{Number(adj.amount).toLocaleString()}
                             </td>
-                            <td className="table-cell text-sm text-surface-700 dark:text-surface-400 max-w-[200px] truncate">{adj.reason || '—'}</td>
+                            <td className="table-cell text-sm text-surface-700 dark:text-surface-200 max-w-[200px] truncate">{adj.reason || '—'}</td>
                             <td className="table-cell">
                               <span className={adj.status === 'APPROVED' ? 'badge-success' : adj.status === 'PENDING' ? 'badge-warning' : 'badge'}>{adj.status}</span>
                             </td>
-                            <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                            <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
                               {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                             </td>
                           </tr>
@@ -747,7 +751,7 @@ export function UserDetailPage({
               <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
                 <h2 className="text-sm font-semibold text-surface-900 dark:text-white">
                   Stock Activity
-                  <span className="text-surface-500 dark:text-surface-400 font-normal ml-2">({data.total})</span>
+                  <span className="text-surface-500 dark:text-surface-200 font-normal ml-2">({data.total})</span>
                 </h2>
                 <p className="text-xs text-surface-500 dark:text-surface-600 mt-0.5">
                   Intakes, transfers, adjustments, and reconciliations performed by this user
@@ -772,13 +776,13 @@ export function UserDetailPage({
                             <span className="badge">{MOVEMENT_TYPE_LABELS[m.movementType] ?? m.movementType}</span>
                           </td>
                           <td className="table-cell text-right text-sm font-medium">{m.quantity > 0 ? `+${m.quantity}` : m.quantity}</td>
-                          <td className="table-cell text-xs text-surface-600 dark:text-surface-400">
+                          <td className="table-cell text-xs text-surface-600 dark:text-surface-200">
                             {m.fromLocationId ? m.fromLocationId.slice(0, 8) : '—'}
                             {' → '}
                             {m.toLocationId ? m.toLocationId.slice(0, 8) : '—'}
                           </td>
                           <td className="table-cell text-sm text-surface-700 dark:text-surface-300 max-w-[200px] truncate">{m.reason ?? '—'}</td>
-                          <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                          <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
                             {new Date(m.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </td>
                         </tr>
@@ -802,7 +806,7 @@ export function UserDetailPage({
               <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
                 <h2 className="text-sm font-semibold text-surface-900 dark:text-white">
                   Approvals Processed
-                  <span className="text-surface-500 dark:text-surface-400 font-normal ml-2">({data.total})</span>
+                  <span className="text-surface-500 dark:text-surface-200 font-normal ml-2">({data.total})</span>
                 </h2>
                 <p className="text-xs text-surface-500 dark:text-surface-600 mt-0.5">
                   Approval requests processed by this Finance Officer
@@ -831,7 +835,7 @@ export function UserDetailPage({
                           <td className="table-cell">
                             <span className={a.status === 'APPROVED' ? 'badge-success' : a.status === 'REJECTED' ? 'badge-danger' : 'badge'}>{a.status}</span>
                           </td>
-                          <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                          <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
                             {a.approvedAt
                               ? new Date(a.approvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                               : new Date(a.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
@@ -851,61 +855,31 @@ export function UserDetailPage({
 
       {/* ─── Activity / Audit Tab ────────────────────────── */}
       {activeTab === 'audit' && (
-        <DeferredSection resolve={auditLog} skeleton="table">
+        <DeferredSection resolve={auditLog} skeleton="stat">
           {(entries) => (
-            <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                <h2 className="text-sm font-semibold text-surface-900 dark:text-white">
-                  Activity Log
-                  <span className="text-surface-500 dark:text-surface-400 font-normal ml-2">({entries.length})</span>
-                </h2>
-                <p className="text-xs text-surface-500 dark:text-surface-600 mt-0.5">All actions performed by this user</p>
+            <div className="card space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Activity</h3>
+                <span className="text-xs text-surface-500 dark:text-surface-600">{entries.length} entries</span>
               </div>
               {entries.length > 0 ? (
-                <div className="divide-y divide-surface-100 dark:divide-surface-800">
+                <div className="space-y-2">
                   {entries.map((entry) => (
-                    <div key={entry.id} className="px-4 py-3 flex items-start gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                        entry.action === 'INSERT' ? 'bg-success-100 dark:bg-success-900/30 text-success-600 dark:text-success-400' :
-                        entry.action === 'UPDATE' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' :
-                        entry.action === 'DELETE' ? 'bg-danger-100 dark:bg-danger-900/30 text-danger-600 dark:text-danger-400' :
-                        'bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400'
-                      }`}>
-                        {entry.action === 'INSERT' ? (
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                        ) : entry.action === 'UPDATE' ? (
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" /></svg>
-                        ) : (
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                        )}
-                      </div>
+                    <div key={entry.id} className="flex items-start gap-2 text-xs">
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-surface-900 dark:text-surface-100">
-                          <span className="font-medium capitalize">{entry.action.toLowerCase()}</span>
-                          {' on '}
-                          <span className="font-medium text-brand-600 dark:text-brand-400">{entry.tableName}</span>
+                        <p className="text-surface-900 dark:text-surface-200 truncate">
+                          {formatActivityDescription(entry)}
                         </p>
-                        {entry.newValues && Object.keys(entry.newValues).length > 0 && (
-                          <div className="mt-1.5 text-xs bg-surface-50 dark:bg-surface-800 rounded px-2 py-1.5 font-mono max-h-20 overflow-y-auto">
-                            {Object.entries(entry.newValues).slice(0, 4).map(([key, val]) => (
-                              <div key={key} className="text-surface-600 dark:text-surface-400">
-                                <span className="text-surface-500">{key}:</span> {String(val)}
-                              </div>
-                            ))}
-                            {Object.keys(entry.newValues).length > 4 && (
-                              <div className="text-surface-400">... +{Object.keys(entry.newValues).length - 4} more fields</div>
-                            )}
-                          </div>
-                        )}
-                        <p className="text-[11px] text-surface-500 dark:text-surface-600 mt-1">
-                          {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        <p className="text-surface-500 dark:text-surface-600 text-[11px] mt-0.5">
+                          {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="px-4 py-12 text-center text-surface-500">No activity recorded yet</div>
+                <p className="text-xs text-surface-500">No activity recorded yet</p>
               )}
             </div>
           )}
@@ -958,7 +932,7 @@ export function UserDetailPage({
               <div>
                 <label htmlFor="phone" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Phone</label>
                 <input id="phone" name="phone" type="tel" defaultValue="" placeholder="Enter new phone (current is masked)" className="input" />
-                <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">Current: {user.phone ?? 'Not set'}. Leave blank to keep unchanged.</p>
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">Current: {user.phone ?? 'Not set'}. Leave blank to keep unchanged.</p>
               </div>
             </div>
           </div>
@@ -982,7 +956,7 @@ export function UserDetailPage({
                     {ORDER_STATUSES.map((status) => {
                       const isActive = selectedStatuses.includes(status.value);
                       return (
-                        <button key={status.value} type="button" onClick={() => toggleStatus(status.value)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 ${isActive ? `${status.color} text-white shadow-sm` : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-500'}`}>
+                        <button key={status.value} type="button" onClick={() => toggleStatus(status.value)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 ${isActive ? `${status.color} text-white shadow-sm` : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300'}`}>
                           {status.label}
                           {isActive && (
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1005,6 +979,14 @@ export function UserDetailPage({
                           <option key={loc.id} value={loc.id}>{loc.name} — {loc.address}</option>
                         ))}
                       </select>
+                      {locs.length === 0 && (
+                        <InlineNotification
+                          variant="warning"
+                          message="No logistics locations found. Create one first."
+                          action={{ label: 'Go to Logistics', href: '/admin/logistics' }}
+                          className="mt-2"
+                        />
+                      )}
                     </div>
                   )}
                 </DeferredSection>
@@ -1015,14 +997,14 @@ export function UserDetailPage({
                   {(prods) => (
                     <div>
                       <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Assign Products</label>
-                      <p className="text-xs text-surface-700 dark:text-surface-500 mb-2">Leave blank to assign all products.</p>
+                      <p className="text-xs text-surface-700 dark:text-surface-300 mb-2">Leave blank to assign all products.</p>
                       {prods.length > 0 ? (
                         <div className="border border-surface-200 dark:border-surface-700 rounded-lg max-h-48 overflow-y-auto">
                           {prods.map((product: UserCreateProduct) => (
                             <label key={product.id} className="flex items-center gap-3 px-3 py-2 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer border-b border-surface-100 dark:border-surface-800 last:border-b-0">
                               <input type="checkbox" checked={selectedProductIds.includes(product.id)} onChange={() => toggleProduct(product.id)} className="rounded border-surface-300 dark:border-surface-600 text-brand-500 focus:ring-brand-500" />
                               <span className="text-sm text-surface-900 dark:text-surface-100">{product.name}</span>
-                              <span className="text-xs text-surface-700 dark:text-surface-500 ml-auto">{product.category ?? ''}</span>
+                              <span className="text-xs text-surface-700 dark:text-surface-300 ml-auto">{product.category ?? ''}</span>
                             </label>
                           ))}
                         </div>
@@ -1045,10 +1027,10 @@ export function UserDetailPage({
           )}
 
           <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
-            <button type="button" onClick={() => setActiveTab('overview')} className="btn-secondary w-full sm:w-auto">Cancel</button>
-            <button type="submit" className="btn-primary w-full sm:w-auto flex items-center justify-center gap-2" disabled={isUpdating}>
-              {isUpdating ? <><Spinner size="sm" /> Saving</> : 'Save Changes'}
-            </button>
+            <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={() => setActiveTab('overview')}>Cancel</Button>
+            <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isUpdating} loadingText="Saving...">
+              Save Changes
+            </Button>
           </div>
         </Form>
       )}
@@ -1058,7 +1040,7 @@ export function UserDetailPage({
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="card w-full max-w-md space-y-4">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Reset Password</h3>
-            <p className="text-sm text-surface-700 dark:text-surface-400">
+            <p className="text-sm text-surface-700 dark:text-surface-200">
               Set a new password for <strong>{user.name}</strong>. This will log them out of all sessions.
             </p>
             <Form method="post">
@@ -1069,10 +1051,10 @@ export function UserDetailPage({
                   <input id="newPassword" name="newPassword" type="password" required minLength={8} className="input" placeholder="Minimum 8 characters" />
                 </div>
                 <div className="flex items-center justify-end gap-3">
-                  <button type="button" onClick={() => setShowResetPassword(false)} className="btn-secondary">Cancel</button>
-                  <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={isResetting}>
-                    {isResetting ? <><Spinner size="sm" /> Resetting</> : 'Reset Password'}
-                  </button>
+                  <Button type="button" variant="secondary" onClick={() => setShowResetPassword(false)}>Cancel</Button>
+                  <Button type="submit" variant="primary" loading={isResetting} loadingText="Resetting...">
+                    Reset Password
+                  </Button>
                 </div>
               </div>
             </Form>
@@ -1087,7 +1069,7 @@ export function UserDetailPage({
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
               {showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'} Email Change
             </h3>
-            <p className="text-sm text-surface-700 dark:text-surface-400">
+            <p className="text-sm text-surface-700 dark:text-surface-200">
               {showEmailChangeModal.action === 'APPROVED'
                 ? 'This will update the user\'s email address. Please provide a reason for the approval.'
                 : 'This will reject the pending email change. Please provide a reason.'}
@@ -1111,14 +1093,16 @@ export function UserDetailPage({
                   />
                 </div>
                 <div className="flex items-center justify-end gap-3">
-                  <button type="button" onClick={() => { setShowEmailChangeModal(null); setEmailChangeReason(''); }} className="btn-secondary">Cancel</button>
-                  <button
+                  <Button type="button" variant="secondary" onClick={() => { setShowEmailChangeModal(null); setEmailChangeReason(''); }}>Cancel</Button>
+                  <Button
                     type="submit"
-                    className={showEmailChangeModal.action === 'APPROVED' ? 'btn-success' : 'btn-danger'}
+                    variant={showEmailChangeModal.action === 'APPROVED' ? 'success' : 'danger'}
                     disabled={isProcessingEmailChange || emailChangeReason.length < 10}
+                    loading={isProcessingEmailChange}
+                    loadingText="Processing..."
                   >
-                    {isProcessingEmailChange ? <><Spinner size="sm" /> Processing</> : showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'}
-                  </button>
+                    {showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'}
+                  </Button>
                 </div>
               </div>
             </Form>
@@ -1131,7 +1115,7 @@ export function UserDetailPage({
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="card w-full max-w-md space-y-4">
             <h3 className="text-lg font-semibold text-danger-600 dark:text-danger-400">Deactivate User</h3>
-            <p className="text-sm text-surface-700 dark:text-surface-400">
+            <p className="text-sm text-surface-700 dark:text-surface-200">
               Are you sure you want to deactivate <strong>{user.name}</strong>? This will immediately
               terminate all their active sessions and prevent them from logging in.
             </p>
@@ -1141,12 +1125,12 @@ export function UserDetailPage({
               </div>
             )}
             <div className="flex items-center justify-end gap-3">
-              <button type="button" onClick={() => setShowDeactivateConfirm(false)} className="btn-secondary" disabled={isDeactivating}>Cancel</button>
+              <Button type="button" variant="secondary" onClick={() => setShowDeactivateConfirm(false)} disabled={isDeactivating}>Cancel</Button>
               <Form method="post">
                 <input type="hidden" name="intent" value="deactivate" />
-                <button type="submit" className="btn-primary bg-danger-600 hover:bg-danger-700 border-danger-600 flex items-center justify-center gap-2" disabled={isDeactivating}>
-                  {isDeactivating ? <><Spinner size="sm" /> Deactivating</> : 'Deactivate'}
-                </button>
+                <Button type="submit" variant="danger" loading={isDeactivating} loadingText="Deactivating...">
+                  Deactivate
+                </Button>
               </Form>
             </div>
           </div>
@@ -1163,7 +1147,7 @@ function InfoField({ label, value, icon }: { label: string; value: string; icon?
     <div className="flex items-start gap-2.5">
       {icon && <div className="mt-0.5 text-surface-400 dark:text-surface-600 flex-shrink-0">{icon}</div>}
       <div>
-        <p className="text-[11px] font-medium text-surface-500 dark:text-surface-500 uppercase tracking-wider">{label}</p>
+        <p className="text-[11px] font-medium text-surface-500 dark:text-surface-300 uppercase tracking-wider">{label}</p>
         <p className="text-sm text-surface-900 dark:text-surface-100 mt-0.5">{value}</p>
       </div>
     </div>
@@ -1178,7 +1162,7 @@ function MetricCard({ label, value, accent }: { label: string; value: string; ac
 
   return (
     <div className="p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
-      <p className="text-[11px] font-medium text-surface-500 dark:text-surface-500 uppercase tracking-wider">{label}</p>
+      <p className="text-[11px] font-medium text-surface-500 dark:text-surface-300 uppercase tracking-wider">{label}</p>
       <p className={`text-lg font-bold mt-0.5 ${color}`}>{value}</p>
     </div>
   );

@@ -1,4 +1,4 @@
-import { json, redirect } from '@remix-run/node';
+import { redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { Outlet, useLoaderData, Form } from '@remix-run/react';
 import { getCurrentUser } from '~/lib/api.server';
@@ -21,7 +21,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect('/admin');
   }
 
-  return json({ user });
+  return { user };
 }
 
 /**
@@ -62,7 +62,7 @@ export default function RiderLayout() {
             <p className="text-sm font-semibold text-surface-900 dark:text-white leading-tight">{user.name}</p>
             <div className="flex items-center gap-1.5">
               <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-success-500' : 'bg-danger-500'}`} />
-              <p className="text-2xs text-surface-800 dark:text-surface-400">
+              <p className="text-2xs text-surface-800 dark:text-surface-200">
                 Rider {isOnline ? '' : '(Offline)'}
               </p>
             </div>

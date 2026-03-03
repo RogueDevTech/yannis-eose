@@ -57,7 +57,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  return json({ user, systemSettings, notificationEmailConfig });
+  return { user, systemSettings, notificationEmailConfig };
 }
 
 export async function action({ request }: ActionFunctionArgs) {

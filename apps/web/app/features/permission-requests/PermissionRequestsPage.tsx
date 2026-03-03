@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import type { PermissionRequest } from './types';
@@ -21,7 +22,7 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Permission Requests</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
           HR requests for sensitive roles (Super Admin, Finance Officer) require your approval.
         </p>
       </div>
@@ -56,20 +57,20 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
                   </td>
                   <td className="table-cell text-sm">
                     <span className="font-medium text-surface-900 dark:text-white">{req.requesterName}</span>
-                    <span className="block text-xs text-surface-600 dark:text-surface-400">{req.requesterEmail}</span>
+                    <span className="block text-xs text-surface-600 dark:text-surface-200">{req.requesterEmail}</span>
                   </td>
                   <td className="table-cell text-sm">
                     {req.type === 'USER_CREATION' && req.payload ? (
                       <span>
                         {(req.payload as { name?: string }).name ?? '—'}
-                        <span className="block text-xs text-surface-600 dark:text-surface-400">
+                        <span className="block text-xs text-surface-600 dark:text-surface-200">
                           {(req.payload as { email?: string }).email ?? ''}
                         </span>
                       </span>
                     ) : req.targetUserName ? (
                       <span>
                         {req.targetUserName}
-                        <span className="block text-xs text-surface-600 dark:text-surface-400">{req.targetUserEmail ?? ''}</span>
+                        <span className="block text-xs text-surface-600 dark:text-surface-200">{req.targetUserEmail ?? ''}</span>
                       </span>
                     ) : (
                       '—'
@@ -80,39 +81,43 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
                       <span className="font-medium text-surface-900 dark:text-white">{req.requestedRole.replace(/_/g, ' ')}</span>
                     )}
                     {req.permissionCode && (
-                      <span className="font-mono text-xs text-surface-600 dark:text-surface-400">{req.permissionCode}</span>
+                      <span className="font-mono text-xs text-surface-600 dark:text-surface-200">{req.permissionCode}</span>
                     )}
                     {!req.requestedRole && !req.permissionCode && '—'}
                   </td>
-                  <td className="table-cell text-sm text-surface-800 dark:text-surface-400 max-w-xs truncate">
+                  <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-xs truncate">
                     {req.reason}
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                  <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                     {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </td>
                   <td className="table-cell">
                     <div className="flex gap-1.5">
-                      <button
+                      <Button
                         type="button"
+                        variant="success"
+                        size="sm"
+                        className="text-xs"
                         onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
-                        className="btn-success btn-sm text-xs"
                       >
                         Approve
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
+                        variant="danger"
+                        size="sm"
+                        className="text-xs"
                         onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
-                        className="btn-danger btn-sm text-xs"
                       >
                         Reject
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
               ))}
               {requests.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                  <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                     No pending permission requests
                   </td>
                 </tr>
@@ -133,27 +138,31 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
               <p className="text-sm font-medium text-surface-900 dark:text-white">
                 {req.requesterName} → {req.requestedRole?.replace(/_/g, ' ') ?? req.permissionCode ?? '—'}
               </p>
-              <p className="text-xs text-surface-600 dark:text-surface-400">{req.reason}</p>
+              <p className="text-xs text-surface-600 dark:text-surface-200">{req.reason}</p>
               <div className="flex gap-2 pt-1">
-                <button
+                <Button
                   type="button"
+                  variant="success"
+                  size="sm"
+                  className="text-xs flex-1"
                   onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
-                  className="btn-success btn-sm text-xs flex-1"
                 >
                   Approve
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="danger"
+                  size="sm"
+                  className="text-xs flex-1"
                   onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
-                  className="btn-danger btn-sm text-xs flex-1"
                 >
                   Reject
-                </button>
+                </Button>
               </div>
             </div>
           ))}
           {requests.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-500">No pending permission requests</div>
+            <div className="p-8 text-center text-surface-700 dark:text-surface-300">No pending permission requests</div>
           )}
         </div>
       </div>
@@ -181,20 +190,23 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <button type="button" onClick={() => setModal(null)} className="btn-secondary btn-sm">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setModal(null)}>
                   Cancel
-                </button>
+                </Button>
                 <fetcher.Form method="post" onSubmit={() => setModal(null)}>
                   <input type="hidden" name="intent" value={modal.action === 'APPROVED' ? 'approve' : 'reject'} />
                   <input type="hidden" name="requestId" value={modal.requestId} />
                   <input type="hidden" name="reason" value={reason} />
-                  <button
+                  <Button
                     type="submit"
+                    variant={modal.action === 'APPROVED' ? 'success' : 'danger'}
+                    size="sm"
                     disabled={reason.length < 10 || fetcher.state === 'submitting'}
-                    className={`btn-sm ${modal.action === 'APPROVED' ? 'btn-success' : 'btn-danger'}`}
+                    loading={fetcher.state === 'submitting'}
+                    loadingText="Processing..."
                   >
-                    {fetcher.state === 'submitting' ? 'Processing...' : 'Confirm'}
-                  </button>
+                    Confirm
+                  </Button>
                 </fetcher.Form>
               </div>
             </div>

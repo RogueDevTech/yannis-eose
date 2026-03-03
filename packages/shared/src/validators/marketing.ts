@@ -89,7 +89,6 @@ export type ListOfferTemplatesInput = z.infer<typeof listOfferTemplatesSchema>;
 
 export const createCampaignSchema = z.object({
   name: z.string().min(1, 'Campaign name is required').max(200),
-  offerTemplateId: z.string().uuid(),
   productIds: z.array(z.string().uuid()).min(1, 'At least one product is required'),
   deploymentType: z.enum(['SNIPPET', 'IFRAME', 'HOSTED']).default('HOSTED'),
   formConfig: z.object({

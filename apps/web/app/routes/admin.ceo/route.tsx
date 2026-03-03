@@ -1,6 +1,5 @@
-import { useLoaderData } from '@remix-run/react';
-import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs } from '@remix-run/node';
+import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
@@ -47,7 +46,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         invoiceSummary: {},
       };
 
-  return json({ data, filters });
+  return { data, filters };
 }
 
 export default function CEODashboardRoute() {

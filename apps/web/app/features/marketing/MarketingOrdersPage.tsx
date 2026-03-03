@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { STATUS_COLORS, STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
 import type { Order } from '~/features/orders/types';
@@ -73,13 +74,13 @@ export function MarketingOrdersPage({
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
             {isMediaBuyer ? 'My Orders' : 'Marketing Orders'}
           </h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             {isMediaBuyer
               ? 'Track your campaign orders and conversion funnel'
               : 'View orders across all media buyers'}
           </p>
         </div>
-        <button
+        <Button
           onClick={() =>
             exportToCsv(
               orders.map((o) => ({
@@ -101,31 +102,32 @@ export function MarketingOrdersPage({
               `marketing-orders-${new Date().toISOString().split('T')[0]}.csv`,
             )
           }
-          className="btn-secondary btn-sm"
+          variant="secondary"
+          size="sm"
         >
           Export CSV
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Unprocessed</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Unprocessed</p>
           <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{unprocessedCount}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Confirmed</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Confirmed</p>
           <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{confirmedCount}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Delivered</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivered</p>
           <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{deliveredCount}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Delivery Rate</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivery Rate</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{deliveryRate}%</p>
         </div>
       </div>
@@ -139,9 +141,9 @@ export function MarketingOrdersPage({
             onChange={(e) => setSearchQuery(e.target.value)}
             className="input flex-1"
           />
-          <button type="submit" className="btn-secondary btn-sm">
+          <Button type="submit" variant="secondary" size="sm">
             Search
-          </button>
+          </Button>
         </form>
         <select
           value={selectedStatus}
@@ -192,7 +194,7 @@ export function MarketingOrdersPage({
                       {formatStatus(order.status)}
                     </span>
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-400">
+                  <td className="table-cell text-surface-800 dark:text-surface-200">
                     {new Date(order.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
                       day: 'numeric',
@@ -206,7 +208,7 @@ export function MarketingOrdersPage({
           </table>
         </div>
         {orders.length === 0 && (
-          <div className="py-12 text-center text-surface-700 dark:text-surface-500">
+          <div className="py-12 text-center text-surface-700 dark:text-surface-300">
             No orders found
           </div>
         )}
@@ -220,7 +222,7 @@ export function MarketingOrdersPage({
           >
             Previous
           </Link>
-          <span className="text-sm text-surface-700 dark:text-surface-500">
+          <span className="text-sm text-surface-700 dark:text-surface-300">
             Page {page} of {totalPages}
           </span>
           <Link

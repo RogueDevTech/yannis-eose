@@ -22,7 +22,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? ((res.data as { result?: { data?: PermissionRequest[] } })?.result?.data ?? [])
     : [];
 
-  return json({ requests });
+  return { requests };
 }
 
 export async function action({ request }: ActionFunctionArgs) {

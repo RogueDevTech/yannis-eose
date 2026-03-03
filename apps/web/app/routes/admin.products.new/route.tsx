@@ -30,7 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     categories = trpcData?.result?.data ?? [];
   }
 
-  return json({ categories } satisfies LoaderData);
+  return { categories } satisfies LoaderData;
 }
 
 export async function action({ request }: ActionFunctionArgs) {

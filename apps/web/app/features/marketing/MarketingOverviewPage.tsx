@@ -30,7 +30,7 @@ export function MarketingOverviewPage({
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Team Overview</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
           Manage media buyers, monitor team performance, and track funding
         </p>
       </div>
@@ -56,27 +56,27 @@ export function MarketingOverviewPage({
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Media Buyers</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Media Buyers</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{leaderboard.length}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Spend</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Spend</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
             ₦{Math.round(metrics.totalSpend).toLocaleString()}
           </p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Orders</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Orders</p>
           <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{metrics.totalOrders}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Avg CPA</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Avg CPA</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
             ₦{Math.round(avgCpa).toLocaleString()}
           </p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Delivery Rate</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivery Rate</p>
           <p className={`text-2xl font-bold mt-1 ${metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400'}`}>
             {metrics.deliveryRate.toFixed(1)}%
           </p>
@@ -88,19 +88,19 @@ export function MarketingOverviewPage({
         <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Funding Summary</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Sent</p>
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Sent</p>
             <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
               ₦{parseFloat(fundingSummary.totalSent).toLocaleString()}
             </p>
           </div>
           <div>
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Completed</p>
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Completed</p>
             <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">
               ₦{parseFloat(fundingSummary.totalCompleted).toLocaleString()}
             </p>
           </div>
           <div>
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Disputed</p>
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Disputed</p>
             <p className={`text-xl font-bold mt-1 ${parseFloat(fundingSummary.totalDisputed) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-surface-900 dark:text-white'}`}>
               ₦{parseFloat(fundingSummary.totalDisputed).toLocaleString()}
             </p>
@@ -113,8 +113,8 @@ export function MarketingOverviewPage({
         <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Media Buyer Performance</h2>
         {leaderboard.length === 0 ? (
           <div className="card text-center py-8">
-            <p className="text-surface-700 dark:text-surface-500">No media buyer data for {periodLabel}.</p>
-            <Link to="/admin/users/new" className="btn-primary inline-block mt-3">Add Media Buyer</Link>
+            <p className="text-surface-700 dark:text-surface-300">No media buyer data for {periodLabel}.</p>
+            <Link to="/hr/users/new" className="btn-primary inline-block mt-3">Add Media Buyer</Link>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -141,36 +141,36 @@ export function MarketingOverviewPage({
                       <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
                         {buyer.name}
                       </p>
-                      <p className="text-xs text-surface-800 dark:text-surface-400 truncate">
+                      <p className="text-xs text-surface-800 dark:text-surface-200 truncate">
                         {buyer.email}
                       </p>
                     </div>
                   </div>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-surface-700 dark:text-surface-500">Spend</span>
+                      <span className="text-surface-700 dark:text-surface-300">Spend</span>
                       <span className="font-medium">₦{Math.round(buyer.totalSpend).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-surface-700 dark:text-surface-500">Orders</span>
+                      <span className="text-surface-700 dark:text-surface-300">Orders</span>
                       <span>{buyer.totalOrders}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-surface-700 dark:text-surface-500">Delivered</span>
+                      <span className="text-surface-700 dark:text-surface-300">Delivered</span>
                       <span className="text-success-600 dark:text-success-400">{buyer.deliveredOrders}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-surface-700 dark:text-surface-500">CPA</span>
+                      <span className="text-surface-700 dark:text-surface-300">CPA</span>
                       <span className={isHighCpa ? 'font-medium text-danger-600 dark:text-danger-400' : ''}>
                         ₦{Math.round(buyer.cpa).toLocaleString()}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-surface-700 dark:text-surface-500">ROAS</span>
+                      <span className="text-surface-700 dark:text-surface-300">ROAS</span>
                       <span className={`font-bold ${roasColor}`}>{buyer.trueRoas.toFixed(2)}x</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-surface-700 dark:text-surface-500">Del. Rate</span>
+                      <span className="text-surface-700 dark:text-surface-300">Del. Rate</span>
                       <span>{buyer.deliveryRate.toFixed(1)}%</span>
                     </div>
                   </div>
@@ -184,7 +184,7 @@ export function MarketingOverviewPage({
       {/* Team Management / Quick links */}
       <div className="card">
         <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Team Management</h2>
-        <p className="text-sm text-surface-800 dark:text-surface-400 mb-4">
+        <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
           Send funding, manage campaigns, and view detailed performance.
         </p>
         <div className="flex flex-wrap gap-2">
@@ -194,8 +194,8 @@ export function MarketingOverviewPage({
           <Link to="/admin/marketing-leaderboard" prefetch="intent" className="btn-secondary btn-sm">
             Marketing Leaderboard
           </Link>
-          <Link to="/admin/campaigns" prefetch="intent" className="btn-secondary btn-sm">
-            Campaigns
+          <Link to="/admin/forms" prefetch="intent" className="btn-secondary btn-sm">
+            Forms
           </Link>
         </div>
       </div>

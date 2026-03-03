@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '~/components/ui/button';
 import { Link } from '@remix-run/react';
 import type { User } from './types';
 import { ROLE_COLORS, USER_STATUS_COLORS, ROLE_OPTIONS, formatRole } from './types';
@@ -10,10 +11,12 @@ interface UsersListPageProps {
 
 export function UsersListPage({ users, total }: UsersListPageProps) {
   const [selectedRole, setSelectedRole] = useState('ALL');
+  const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredUsers = users.filter((user) => {
     if (selectedRole !== 'ALL' && user.role !== selectedRole) return false;
+    if (selectedStatus !== 'ALL' && user.status !== selectedStatus) return false;
     if (
       searchQuery &&
       !user.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
@@ -29,11 +32,11 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Users</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Manage team members and their roles
           </p>
         </div>
-        <Link to="/admin/users/new" className="btn-primary">
+        <Link to="/hr/users/new" className="btn-primary">
           <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
@@ -44,23 +47,23 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Users</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Users</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Active</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Active</p>
           <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">
             {users.filter((u) => u.status === 'ACTIVE').length}
           </p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Inactive</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Inactive</p>
           <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
             {users.filter((u) => u.status === 'INACTIVE').length}
           </p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Roles</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Roles</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
             {new Set(users.map((u) => u.role)).size}
           </p>
@@ -88,6 +91,16 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
               className="input pl-10 py-1.5"
             />
           </div>
+          <select
+            value={selectedStatus}
+            onChange={(e) => setSelectedStatus(e.target.value)}
+            className="input w-full sm:w-40 py-1.5"
+          >
+            <option value="ALL">All Status</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+            <option value="ARCHIVED">Archived</option>
+          </select>
           <select
             value={selectedRole}
             onChange={(e) => setSelectedRole(e.target.value)}
@@ -130,7 +143,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
                       <span className="font-medium text-surface-900 dark:text-surface-100">{user.name}</span>
                     </div>
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-400">{user.email}</td>
+                  <td className="table-cell text-surface-800 dark:text-surface-200">{user.email}</td>
                   <td className="table-cell">
                     <span className={ROLE_COLORS[user.role] ?? 'badge'}>
                       {formatRole(user.role)}
@@ -142,7 +155,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
                     </span>
                   </td>
                   <td className="table-cell text-center">{user.capacity}</td>
-                  <td className="table-cell text-surface-800 dark:text-surface-400">
+                  <td className="table-cell text-surface-800 dark:text-surface-200">
                     {new Date(user.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
                       day: 'numeric',
@@ -151,7 +164,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
                   </td>
                   <td className="table-cell text-right">
                     <Link
-                      to={`/admin/users/${user.id}`}
+                      to={`/hr/users/${user.id}`}
                       className="text-brand-500 hover:text-brand-600 text-sm font-medium"
                     >
                       View
@@ -161,7 +174,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
               ))}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">
+                  <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                     {users.length === 0 ? 'No users yet. Add your first team member.' : 'No matching users found'}
                   </td>
                 </tr>
@@ -175,7 +188,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
           {filteredUsers.map((user) => (
             <Link
               key={user.id}
-              to={`/admin/users/${user.id}`}
+              to={`/hr/users/${user.id}`}
               className="block p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
             >
               <div className="flex items-center gap-3 mb-2">
@@ -186,7 +199,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-surface-900 dark:text-surface-100 truncate">{user.name}</p>
-                  <p className="text-sm text-surface-800 dark:text-surface-400 truncate">{user.email}</p>
+                  <p className="text-sm text-surface-800 dark:text-surface-200 truncate">{user.email}</p>
                 </div>
                 <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
               </div>
@@ -194,7 +207,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
                 <span className={ROLE_COLORS[user.role] ?? 'badge'}>
                   {formatRole(user.role)}
                 </span>
-                <span className="text-xs text-surface-700 dark:text-surface-500">
+                <span className="text-xs text-surface-700 dark:text-surface-300">
                   {new Date(user.createdAt).toLocaleDateString('en-NG', {
                     month: 'short',
                     day: 'numeric',
@@ -205,7 +218,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
             </Link>
           ))}
           {filteredUsers.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-500">
+            <div className="p-8 text-center text-surface-700 dark:text-surface-300">
               {users.length === 0 ? 'No users yet' : 'No matching users found'}
             </div>
           )}
@@ -214,17 +227,17 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
 
       {/* Pagination */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-surface-800 dark:text-surface-400">
+        <p className="text-sm text-surface-800 dark:text-surface-200">
           Showing {filteredUsers.length} of {total} users
         </p>
         <div className="flex items-center gap-2">
-          <button className="btn-secondary btn-sm" disabled>
+          <Button variant="secondary" size="sm" disabled>
             Previous
-          </button>
-          <span className="text-sm text-surface-800 dark:text-surface-400 px-2">Page 1 of 1</span>
-          <button className="btn-secondary btn-sm" disabled>
+          </Button>
+          <span className="text-sm text-surface-800 dark:text-surface-200 px-2">Page 1 of 1</span>
+          <Button variant="secondary" size="sm" disabled>
             Next
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -3,6 +3,8 @@ import { useFetcher, useSearchParams } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { useFetcherToast } from '~/components/ui/toast';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
+import { AmountInput } from '~/components/ui/amount-input';
+import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import type { FinanceStreamData, Invoice, ApprovalRequest } from './types';
@@ -106,12 +108,14 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Finance</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-0.5">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             True profit tracking, invoicing, and financial overview
           </p>
         </div>
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => exportToCsv(
               invoices.map((inv: Invoice) => ({
                 reference: inv.referenceFormatted ?? `INV-${inv.referenceNumber}`,
@@ -129,13 +133,12 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
               ],
               `invoices-${new Date().toISOString().split('T')[0]}.csv`,
             )}
-            className="btn-secondary btn-sm"
           >
             Export CSV
-          </button>
-          <button onClick={() => { setShowInvoiceForm(!showInvoiceForm); setActiveTab('invoices'); }} className="btn-primary btn-sm">
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => { setShowInvoiceForm(!showInvoiceForm); setActiveTab('invoices'); }}>
             + Create Invoice
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -149,7 +152,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
       <div className="card">
         <div className="flex flex-col sm:flex-row sm:items-end gap-3">
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-400 mb-1">From</label>
+            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">From</label>
             <input
               type="date"
               defaultValue={filters.startDate}
@@ -158,7 +161,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-400 mb-1">To</label>
+            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">To</label>
             <input
               type="date"
               defaultValue={filters.endDate}
@@ -167,12 +170,14 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             />
           </div>
           {(filters.startDate || filters.endDate) && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
+              className="text-xs"
               onClick={() => handleDateFilter('', '')}
-              className="btn-secondary btn-sm text-xs"
             >
               Clear Dates
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -180,38 +185,38 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Revenue</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Revenue</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
             &#8358;{Math.round(profit.revenue).toLocaleString()}
           </p>
-          <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+          <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
             {profit.orderCount} delivered orders
           </p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">True Profit</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">True Profit</p>
           <p className={`text-2xl font-bold mt-1 ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
             &#8358;{Math.round(profit.trueProfit).toLocaleString()}
           </p>
-          <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+          <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
             After all costs
           </p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Net Margin</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Net Margin</p>
           <p className={`text-2xl font-bold mt-1 ${profit.margin >= 20 ? 'text-success-600 dark:text-success-400' : profit.margin >= 10 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'}`}>
             {profit.margin.toFixed(1)}%
           </p>
-          <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+          <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
             Profit / Revenue
           </p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">Total Costs</p>
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Costs</p>
           <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
             &#8358;{Math.round(totalCosts).toLocaleString()}
           </p>
-          <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">
+          <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
             All cost layers
           </p>
         </div>
@@ -246,14 +251,14 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
           {/* Cost Waterfall */}
           <div className="card">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Waterfall</h3>
-            <p className="text-xs text-surface-700 dark:text-surface-500 mb-4">
+            <p className="text-xs text-surface-700 dark:text-surface-300 mb-4">
               Revenue - (COGS + Delivery + Ads + Commission + Fulfillment + Loss) = True Profit
             </p>
             <div className="space-y-3">
               {costWaterfall.map((item) => (
                 <div key={item.label}>
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm text-surface-800 dark:text-surface-400">{item.label}</span>
+                    <span className="text-sm text-surface-800 dark:text-surface-200">{item.label}</span>
                     <span className={`text-sm font-medium ${item.type === 'revenue' ? 'text-surface-900 dark:text-white' : 'text-danger-600 dark:text-danger-400'}`}>
                       {item.type === 'cost' ? '-' : ''}&#8358;{Math.round(item.value).toLocaleString()}
                     </span>
@@ -302,11 +307,11 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                       <div key={item.label} className="flex items-center justify-between py-1.5">
                         <div className="flex items-center gap-2">
                           <div className={`w-3 h-3 rounded-sm ${item.color}`} />
-                          <span className="text-sm text-surface-800 dark:text-surface-400">{item.label}</span>
+                          <span className="text-sm text-surface-800 dark:text-surface-200">{item.label}</span>
                         </div>
                         <div className="text-right">
                           <span className="text-sm font-medium text-surface-900 dark:text-white">&#8358;{Math.round(item.value).toLocaleString()}</span>
-                          <span className="text-xs text-surface-700 dark:text-surface-500 ml-2">({item.pct.toFixed(1)}%)</span>
+                          <span className="text-xs text-surface-700 dark:text-surface-300 ml-2">({item.pct.toFixed(1)}%)</span>
                         </div>
                       </div>
                     ))}
@@ -321,7 +326,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     </div>
                   </>
                 ) : (
-                  <p className="text-sm text-surface-700 dark:text-surface-500">No cost data available</p>
+                  <p className="text-sm text-surface-700 dark:text-surface-300">No cost data available</p>
                 )}
               </div>
             </div>
@@ -340,25 +345,25 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Invoice Summary</h3>
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-surface-800 dark:text-surface-400">Draft</span>
-                        <span className="text-sm font-medium text-surface-800 dark:text-surface-400">
+                        <span className="text-sm text-surface-800 dark:text-surface-200">Draft</span>
+                        <span className="text-sm font-medium text-surface-800 dark:text-surface-200">
                           &#8358;{draftTotal.toLocaleString()} ({summary['DRAFT']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-surface-800 dark:text-surface-400">Paid</span>
+                        <span className="text-sm text-surface-800 dark:text-surface-200">Paid</span>
                         <span className="text-sm font-medium text-success-600 dark:text-success-400">
                           &#8358;{paidTotal.toLocaleString()} ({summary['PAID']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-surface-800 dark:text-surface-400">Outstanding</span>
+                        <span className="text-sm text-surface-800 dark:text-surface-200">Outstanding</span>
                         <span className="text-sm font-medium text-warning-600 dark:text-warning-400">
                           &#8358;{outstandingTotal.toLocaleString()} ({summary['SENT']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-surface-800 dark:text-surface-400">Overdue</span>
+                        <span className="text-sm text-surface-800 dark:text-surface-200">Overdue</span>
                         <span className="text-sm font-medium text-danger-600 dark:text-danger-400">
                           &#8358;{overdueTotal.toLocaleString()} ({summary['OVERDUE']?.count ?? 0})
                         </span>
@@ -391,15 +396,15 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                 <p className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Recipient</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Name *</label>
+                    <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Name *</label>
                     <input name="recipientName" required className="input" placeholder="Customer name" />
                   </div>
                   <div>
-                    <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Email</label>
+                    <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Email</label>
                     <input name="recipientEmail" type="email" className="input" placeholder="email@example.com" />
                   </div>
                   <div>
-                    <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Address</label>
+                    <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Address</label>
                     <input name="recipientAddress" className="input" placeholder="Address" />
                   </div>
                 </div>
@@ -409,15 +414,15 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-sm font-medium text-surface-700 dark:text-surface-300">Line Items</p>
-                  <button type="button" onClick={addLineItem} className="btn-secondary btn-sm text-xs">
+                  <Button type="button" variant="secondary" size="sm" className="text-xs" onClick={addLineItem}>
                     + Add Item
-                  </button>
+                  </Button>
                 </div>
                 <div className="space-y-2">
                   {lineItems.map((item, idx) => (
                     <div key={idx} className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-5">
-                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Description</label>}
+                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Description</label>}
                         <input
                           value={item.description}
                           onChange={(e) => updateLineItem(idx, 'description', e.target.value)}
@@ -426,7 +431,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                         />
                       </div>
                       <div className="col-span-2">
-                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Qty</label>}
+                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Qty</label>}
                         <input
                           type="number"
                           min={1}
@@ -436,18 +441,17 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                         />
                       </div>
                       <div className="col-span-3">
-                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Unit Price</label>}
-                        <input
+                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Unit Price</label>}
+                        <AmountInput
                           value={item.unitPrice}
-                          onChange={(e) => updateLineItem(idx, 'unitPrice', e.target.value)}
+                          onChange={(v) => updateLineItem(idx, 'unitPrice', v)}
                           className="input"
                           placeholder="0.00"
-                          pattern="^\d+(\.\d{1,2})?$"
                         />
                       </div>
                       <div className="col-span-2 flex items-center justify-between">
-                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1 invisible">Del</label>}
-                        <span className="text-xs font-medium text-surface-800 dark:text-surface-400">
+                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1 invisible">Del</label>}
+                        <span className="text-xs font-medium text-surface-800 dark:text-surface-200">
                           &#8358;{(item.quantity * Number(item.unitPrice || 0)).toLocaleString()}
                         </span>
                         {lineItems.length > 1 && (
@@ -469,24 +473,26 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
               {/* Tax & Due Date */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Tax Rate (decimal)</label>
+                  <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Tax Rate (decimal)</label>
                   <input name="taxRate" className="input" placeholder="e.g. 0.075 for 7.5%" pattern="^\d+(\.\d{1,4})?$" />
                 </div>
                 <div>
-                  <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Due Date</label>
+                  <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Due Date</label>
                   <input name="dueDate" type="date" className="input" />
                 </div>
                 <div>
-                  <label className="block text-xs text-surface-800 dark:text-surface-400 mb-1">Order ID (optional)</label>
+                  <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Order ID (optional)</label>
                   <input name="orderId" className="input" placeholder="Link to order..." />
                 </div>
               </div>
 
               <div className="flex gap-2">
-                <button type="submit" className="btn-primary btn-sm" disabled={fetcher.state === 'submitting'}>
-                  {fetcher.state === 'submitting' ? 'Creating...' : 'Create Invoice'}
-                </button>
-                <button type="button" onClick={() => setShowInvoiceForm(false)} className="btn-secondary btn-sm">Cancel</button>
+                <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
+                  Create Invoice
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowInvoiceForm(false)}>
+                  Cancel
+                </Button>
               </div>
             </fetcher.Form>
           )}
@@ -510,17 +516,17 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   {invoices.map((inv: Invoice) => (
                     <tr key={inv.id} className="table-row">
                       <td className="table-cell font-mono font-medium text-surface-900 dark:text-surface-100 text-sm">{inv.referenceFormatted}</td>
-                      <td className="table-cell text-sm text-surface-800 dark:text-surface-400">
+                      <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
                         {inv.recipientInfo?.name ?? '\u2014'}
                       </td>
                       <td className="table-cell text-right font-medium">&#8358;{Number(inv.totalAmount).toLocaleString()}</td>
                       <td className="table-cell">
                         <span className={INVOICE_COLORS[inv.status] ?? 'badge'}>{inv.status}</span>
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                         {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '\u2014'}
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                         {new Date(inv.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                       </td>
                       <td className="table-cell">
@@ -539,9 +545,9 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                               <input type="hidden" name="intent" value="updateInvoiceStatus" />
                               <input type="hidden" name="invoiceId" value={inv.id} />
                               <input type="hidden" name="status" value="SENT" />
-                              <button type="submit" className="btn-primary btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                              <Button type="submit" variant="primary" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Sending...">
                                 Send
-                              </button>
+                              </Button>
                             </fetcher.Form>
                           )}
                           {inv.status === 'SENT' && (
@@ -550,17 +556,17 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                                 <input type="hidden" name="intent" value="updateInvoiceStatus" />
                                 <input type="hidden" name="invoiceId" value={inv.id} />
                                 <input type="hidden" name="status" value="PAID" />
-                                <button type="submit" className="btn-success btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                                <Button type="submit" variant="success" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                                   Paid
-                                </button>
+                                </Button>
                               </fetcher.Form>
                               <fetcher.Form method="post" className="inline">
                                 <input type="hidden" name="intent" value="updateInvoiceStatus" />
                                 <input type="hidden" name="invoiceId" value={inv.id} />
                                 <input type="hidden" name="status" value="OVERDUE" />
-                                <button type="submit" className="btn-danger btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                                <Button type="submit" variant="danger" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                                   Overdue
-                                </button>
+                                </Button>
                               </fetcher.Form>
                             </>
                           )}
@@ -569,9 +575,9 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                               <input type="hidden" name="intent" value="updateInvoiceStatus" />
                               <input type="hidden" name="invoiceId" value={inv.id} />
                               <input type="hidden" name="status" value="PAID" />
-                              <button type="submit" className="btn-success btn-sm text-xs" disabled={fetcher.state === 'submitting'}>
+                              <Button type="submit" variant="success" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                                 Mark Paid
-                              </button>
+                              </Button>
                             </fetcher.Form>
                           )}
                         </div>
@@ -579,7 +585,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     </tr>
                   ))}
                   {invoices.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">No invoices yet</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No invoices yet</td></tr>
                   )}
                 </tbody>
               </table>
@@ -605,7 +611,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-surface-800 dark:text-surface-400">{inv.recipientInfo?.name ?? '\u2014'}</span>
+                    <span className="text-sm text-surface-800 dark:text-surface-200">{inv.recipientInfo?.name ?? '\u2014'}</span>
                     <span className="font-medium text-surface-900 dark:text-white">&#8358;{Number(inv.totalAmount).toLocaleString()}</span>
                   </div>
                   {inv.status === 'DRAFT' && (
@@ -613,7 +619,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                       <input type="hidden" name="intent" value="updateInvoiceStatus" />
                       <input type="hidden" name="invoiceId" value={inv.id} />
                       <input type="hidden" name="status" value="SENT" />
-                      <button type="submit" className="btn-primary btn-sm text-xs w-full">Send Invoice</button>
+                      <Button type="submit" variant="primary" size="sm" className="text-xs w-full">Send Invoice</Button>
                     </fetcher.Form>
                   )}
                   {inv.status === 'SENT' && (
@@ -622,20 +628,20 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                         <input type="hidden" name="intent" value="updateInvoiceStatus" />
                         <input type="hidden" name="invoiceId" value={inv.id} />
                         <input type="hidden" name="status" value="PAID" />
-                        <button type="submit" className="btn-success btn-sm text-xs w-full">Mark Paid</button>
+                        <Button type="submit" variant="success" size="sm" className="text-xs w-full">Mark Paid</Button>
                       </fetcher.Form>
                       <fetcher.Form method="post" className="flex-1">
                         <input type="hidden" name="intent" value="updateInvoiceStatus" />
                         <input type="hidden" name="invoiceId" value={inv.id} />
                         <input type="hidden" name="status" value="OVERDUE" />
-                        <button type="submit" className="btn-danger btn-sm text-xs w-full">Overdue</button>
+                        <Button type="submit" variant="danger" size="sm" className="text-xs w-full">Overdue</Button>
                       </fetcher.Form>
                     </div>
                   )}
                 </div>
               ))}
               {invoices.length === 0 && (
-                <div className="p-8 text-center text-surface-700 dark:text-surface-500">No invoices yet</div>
+                <div className="p-8 text-center text-surface-700 dark:text-surface-300">No invoices yet</div>
               )}
             </div>
           </div>
@@ -660,7 +666,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
                       filters.approvalStatus === status
                         ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-400'
-                        : 'bg-white dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-800 dark:text-surface-400 hover:border-surface-300 dark:hover:border-surface-600'
+                        : 'bg-white dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-800 dark:text-surface-200 hover:border-surface-300 dark:hover:border-surface-600'
                     }`}
                   >
                     {status || 'All'}
@@ -690,7 +696,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                               {APPROVAL_TYPE_LABELS[req.type] ?? req.type}
                             </span>
                           </td>
-                          <td className="table-cell text-sm text-surface-800 dark:text-surface-400 max-w-xs truncate">
+                          <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-xs truncate">
                             {req.description}
                           </td>
                           <td className="table-cell text-right font-medium text-surface-900 dark:text-white">
@@ -699,37 +705,43 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                           <td className="table-cell">
                             <span className={APPROVAL_STATUS_COLORS[req.status] ?? 'badge'}>{req.status}</span>
                           </td>
-                          <td className="table-cell text-surface-800 dark:text-surface-400 text-sm">
+                          <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                             {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                           </td>
                           <td className="table-cell">
                             {(req.status === 'PENDING' || req.status === 'QUERIED') && (
                               <div className="flex gap-1.5">
-                                <button
+                                <Button
                                   type="button"
+                                  variant="success"
+                                  size="sm"
+                                  className="text-xs"
                                   onClick={() => { setApprovalModal({ requestId: req.id, action: 'APPROVED' }); setApprovalReason(''); }}
-                                  className="btn-success btn-sm text-xs"
                                 >
                                   Approve
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                   type="button"
+                                  variant="danger"
+                                  size="sm"
+                                  className="text-xs"
                                   onClick={() => { setApprovalModal({ requestId: req.id, action: 'REJECTED' }); setApprovalReason(''); }}
-                                  className="btn-danger btn-sm text-xs"
                                 >
                                   Reject
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                   type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="text-xs"
                                   onClick={() => { setApprovalModal({ requestId: req.id, action: 'QUERIED' }); setApprovalReason(''); }}
-                                  className="btn-secondary btn-sm text-xs"
                                 >
                                   Query
-                                </button>
+                                </Button>
                               </div>
                             )}
                             {req.status === 'APPROVED' && req.approvalReason && (
-                              <span className="text-xs text-surface-700 dark:text-surface-500 italic truncate max-w-[150px] block">{req.approvalReason}</span>
+                              <span className="text-xs text-surface-700 dark:text-surface-300 italic truncate max-w-[150px] block">{req.approvalReason}</span>
                             )}
                             {req.status === 'REJECTED' && req.approvalReason && (
                               <span className="text-xs text-danger-500 dark:text-danger-400 italic truncate max-w-[150px] block">{req.approvalReason}</span>
@@ -738,7 +750,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                         </tr>
                       ))}
                       {(approvals as ApprovalRequest[]).length === 0 && (
-                        <tr><td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-500">No approval requests</td></tr>
+                        <tr><td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No approval requests</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -754,42 +766,48 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                         </span>
                         <span className={APPROVAL_STATUS_COLORS[req.status] ?? 'badge'}>{req.status}</span>
                       </div>
-                      <p className="text-sm text-surface-800 dark:text-surface-400">{req.description}</p>
+                      <p className="text-sm text-surface-800 dark:text-surface-200">{req.description}</p>
                       <div className="flex items-center justify-between">
-                        <span className="text-xs text-surface-700 dark:text-surface-500">
+                        <span className="text-xs text-surface-700 dark:text-surface-300">
                           {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                         </span>
                         <span className="font-medium text-surface-900 dark:text-white">&#8358;{Number(req.amount).toLocaleString()}</span>
                       </div>
                       {(req.status === 'PENDING' || req.status === 'QUERIED') && (
                         <div className="flex gap-2 pt-1">
-                          <button
+                          <Button
                             type="button"
+                            variant="success"
+                            size="sm"
+                            className="text-xs flex-1"
                             onClick={() => { setApprovalModal({ requestId: req.id, action: 'APPROVED' }); setApprovalReason(''); }}
-                            className="btn-success btn-sm text-xs flex-1"
                           >
                             Approve
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
+                            variant="danger"
+                            size="sm"
+                            className="text-xs flex-1"
                             onClick={() => { setApprovalModal({ requestId: req.id, action: 'REJECTED' }); setApprovalReason(''); }}
-                            className="btn-danger btn-sm text-xs flex-1"
                           >
                             Reject
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="text-xs flex-1"
                             onClick={() => { setApprovalModal({ requestId: req.id, action: 'QUERIED' }); setApprovalReason(''); }}
-                            className="btn-secondary btn-sm text-xs flex-1"
                           >
                             Query
-                          </button>
+                          </Button>
                         </div>
                       )}
                     </div>
                   ))}
                   {(approvals as ApprovalRequest[]).length === 0 && (
-                    <div className="p-8 text-center text-surface-700 dark:text-surface-500">No approval requests</div>
+                    <div className="p-8 text-center text-surface-700 dark:text-surface-300">No approval requests</div>
                   )}
                 </div>
               </div>
@@ -823,25 +841,24 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <button type="button" onClick={() => setApprovalModal(null)} className="btn-secondary btn-sm">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setApprovalModal(null)}>
                   Cancel
-                </button>
+                </Button>
                 <approvalFetcher.Form method="post" onSubmit={() => setApprovalModal(null)}>
                   <input type="hidden" name="intent" value="processApproval" />
                   <input type="hidden" name="requestId" value={approvalModal.requestId} />
                   <input type="hidden" name="action" value={approvalModal.action} />
                   <input type="hidden" name="reason" value={approvalReason} />
-                  <button
+                  <Button
                     type="submit"
-                    disabled={approvalReason.length < 5 || approvalFetcher.state === 'submitting'}
-                    className={`btn-sm ${
-                      approvalModal.action === 'APPROVED' ? 'btn-success'
-                      : approvalModal.action === 'REJECTED' ? 'btn-danger'
-                      : 'btn-primary'
-                    }`}
+                    variant={approvalModal.action === 'APPROVED' ? 'success' : approvalModal.action === 'REJECTED' ? 'danger' : 'primary'}
+                    size="sm"
+                    disabled={approvalReason.length < 5}
+                    loading={approvalFetcher.state === 'submitting'}
+                    loadingText="Processing..."
                   >
-                    {approvalFetcher.state === 'submitting' ? 'Processing...' : 'Confirm'}
-                  </button>
+                    Confirm
+                  </Button>
                 </approvalFetcher.Form>
               </div>
             </div>

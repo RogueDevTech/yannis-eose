@@ -16,6 +16,8 @@ interface Notification {
   data?: Record<string, unknown> | null;
 }
 
+export type NotificationsPromise = Promise<{ notifications: Notification[]; unreadCount: number }>;
+
 interface DashboardLayoutProps {
   user: {
     name: string;
@@ -23,8 +25,7 @@ interface DashboardLayoutProps {
     email: string;
     permissions?: string[];
   } | null;
-  notifications?: Notification[];
-  unreadCount?: number;
+  notificationsPromise: NotificationsPromise;
 }
 
 interface NavItemDef {
@@ -60,7 +61,7 @@ const navStructure: NavGroupDef[] = [
       { label: 'Marketing Orders', href: '/admin/marketing/orders', icon: SidebarIcons.orders, permission: 'marketing.orders' },
       { label: 'Team Overview', href: '/admin/marketing-overview', icon: SidebarIcons.marketing, permission: 'marketing.teamOverview' },
       { label: 'Funding & Ad Spend', href: '/admin/marketing', icon: SidebarIcons.marketing, permission: 'marketing.read' },
-      { label: 'Campaigns', href: '/admin/campaigns', icon: SidebarIcons.campaigns, permission: 'marketing.campaigns' },
+      { label: 'Forms', href: '/admin/forms', icon: SidebarIcons.campaigns, permission: 'marketing.campaigns' },
       { label: 'Marketing Leaderboard', href: '/admin/marketing-leaderboard', icon: SidebarIcons.leaderboards, permission: 'marketing.leaderboard' },
     ],
   },
@@ -90,14 +91,14 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'HR',
     items: [
-      { label: 'HR & Payroll', href: '/admin/hr', icon: SidebarIcons.hr, permission: 'hr.read' },
+      { label: 'Payroll', href: '/hr/payroll', icon: SidebarIcons.hr, permission: 'hr.read' },
+      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'users.read' },
     ],
   },
   {
     group: 'Admin',
     items: [
       { label: 'Settings', href: '/admin/settings', icon: SidebarIcons.settings },
-      { label: 'Users', href: '/admin/users', icon: SidebarIcons.users, permission: 'users.read' },
       { label: 'Audit Trail', href: '/admin/audit', icon: SidebarIcons.audit, permission: 'audit.read' },
       { label: 'Permission Requests', href: '/admin/permission-requests', icon: SidebarIcons.audit, permission: 'audit.read' },
     ],
@@ -126,15 +127,12 @@ function getNavGroupsForUser(user: { role: string; permissions?: string[] } | nu
   return result;
 }
 
-export function DashboardLayout({ user, notifications = [], unreadCount = 0 }: DashboardLayoutProps) {
+export function DashboardLayout({ user, notificationsPromise }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const { isConnected } = useSocket();
   const { realtimeNotifications, realtimeCount } = useRealtimeNotifications();
-
-  const mergedNotifications = [...realtimeNotifications, ...notifications];
-  const mergedUnreadCount = unreadCount + realtimeCount;
 
   // Initialize dark mode and sidebar collapse from localStorage
   useEffect(() => {
@@ -193,8 +191,9 @@ export function DashboardLayout({ user, notifications = [], unreadCount = 0 }: D
           user={user}
           sidebarCollapsed={collapsed}
           darkMode={darkMode}
-          notifications={mergedNotifications}
-          unreadCount={mergedUnreadCount}
+          notificationsPromise={notificationsPromise}
+          realtimeNotifications={realtimeNotifications}
+          realtimeCount={realtimeCount}
           socketConnected={isConnected}
           onToggleDarkMode={toggleDarkMode}
           onMobileMenuToggle={() => setMobileOpen(!mobileOpen)}

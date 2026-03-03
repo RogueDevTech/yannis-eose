@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Form, useActionData, useNavigation, Link } from '@remix-run/react';
+import { AmountInput } from '~/components/ui/amount-input';
+import { Button } from '~/components/ui/button';
+import { InlineNotification } from '~/components/ui/inline-notification';
 import type { UserCreateLoaderData, UserCreateProduct, UserCreateLocation, UserCreateCommissionPlan } from './types';
 
 // ─── Constants ──────────────────────────────────────────
@@ -80,7 +83,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
     <div className="w-full space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <Link to="/admin/users" className="text-surface-800 dark:text-surface-400 hover:text-brand-500">
+        <Link to="/hr/users" className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
           Users
         </Link>
         <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -92,7 +95,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Add User</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-400 mt-1">
+        <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
           Create a new account for a team member with role-specific settings.
         </p>
       </div>
@@ -149,7 +152,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                 ))}
               </select>
               {selectedRole && (
-                <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                   {ROLES.find((r) => r.value === selectedRole)?.description}
                 </p>
               )}
@@ -167,7 +170,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                 Email Address *
               </label>
               <input id="email" name="email" type="email" required className="input" placeholder="john@company.com" />
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                 A password will be auto-generated and sent to this email.
               </p>
             </div>
@@ -210,7 +213,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                   defaultValue={10}
                   className="input w-full sm:w-32"
                 />
-                <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                   Maximum concurrent orders this agent can handle.
                 </p>
               </div>
@@ -222,7 +225,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                 <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                   Active Tabs
                 </label>
-                <p className="text-xs text-surface-700 dark:text-surface-500 mb-2">
+                <p className="text-xs text-surface-700 dark:text-surface-300 mb-2">
                   Select which order statuses this user can see. Click to toggle.
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -236,7 +239,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 ${
                           isActive
                             ? `${status.color} text-white shadow-sm`
-                            : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-500'
+                            : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300'
                         }`}
                       >
                         {status.label}
@@ -267,7 +270,12 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                   ))}
                 </select>
                 {locations.length === 0 && (
-                  <p className="text-xs text-warning-500 mt-1">No logistics locations found. Create one first.</p>
+                  <InlineNotification
+                    variant="warning"
+                    message="No logistics locations found. Create one first."
+                    action={{ label: 'Go to Logistics', href: '/admin/logistics' }}
+                    className="mt-2"
+                  />
                 )}
               </div>
             )}
@@ -278,7 +286,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                 <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                   Assign Products
                 </label>
-                <p className="text-xs text-surface-700 dark:text-surface-500 mb-2">
+                <p className="text-xs text-surface-700 dark:text-surface-300 mb-2">
                   Leave blank to assign all products. Select specific products to restrict.
                 </p>
                 {products.length > 0 ? (
@@ -295,7 +303,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                           className="rounded border-surface-300 dark:border-surface-600 text-brand-500 focus:ring-brand-500"
                         />
                         <span className="text-sm text-surface-900 dark:text-surface-100">{product.name}</span>
-                        <span className="text-xs text-surface-700 dark:text-surface-500 ml-auto">{product.category ?? ''}</span>
+                        <span className="text-xs text-surface-700 dark:text-surface-300 ml-auto">{product.category ?? ''}</span>
                       </label>
                     ))}
                   </div>
@@ -378,18 +386,13 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                     <label htmlFor="fixedSalary" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                       Fixed Salary
                     </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-800 dark:text-surface-400">NGN</span>
-                      <input
-                        id="fixedSalary"
-                        name="fixedSalary"
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        className="input pl-12"
-                        placeholder="0.00"
-                      />
-                    </div>
+                    <AmountInput
+                      id="fixedSalary"
+                      name="fixedSalary"
+                      prefix="NGN"
+                      className="input"
+                      placeholder="0.00"
+                    />
                   </div>
 
                   {/* Bonus */}
@@ -397,18 +400,13 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                     <label htmlFor="bonus" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
                       Bonus
                     </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-800 dark:text-surface-400">NGN</span>
-                      <input
-                        id="bonus"
-                        name="bonus"
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        className="input pl-12"
-                        placeholder="0.00"
-                      />
-                    </div>
+                    <AmountInput
+                      id="bonus"
+                      name="bonus"
+                      prefix="NGN"
+                      className="input"
+                      placeholder="0.00"
+                    />
                   </div>
                 </div>
 
@@ -422,16 +420,13 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                       <option value="FLAT">&#8358; Flat</option>
                       <option value="PERCENTAGE">% Percentage</option>
                     </select>
-                    <input
+                    <AmountInput
                       name="commissionValue"
-                      type="number"
-                      min={0}
-                      step={0.01}
                       className="input flex-1"
                       placeholder="0.00"
                     />
                   </div>
-                  <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                     Per delivered order. Leave blank if none.
                   </p>
                 </div>
@@ -446,16 +441,13 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                       <option value="FLAT">&#8358; Flat</option>
                       <option value="PERCENTAGE">% Percentage</option>
                     </select>
-                    <input
+                    <AmountInput
                       name="upsellCommissionValue"
-                      type="number"
-                      min={0}
-                      step={0.01}
                       className="input flex-1"
                       placeholder="0.00"
                     />
                   </div>
-                  <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                     Leave blank if none.
                   </p>
                 </div>
@@ -484,7 +476,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                 className="input"
                 placeholder="08031234567"
               />
-              <p className="text-xs text-surface-700 dark:text-surface-500 mt-1">
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                 Never displayed publicly. Masked in all views.
               </p>
             </div>
@@ -493,12 +485,12 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
 
         {/* Actions */}
         <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
-          <Link to="/admin/users" className="btn-secondary w-full sm:w-auto">
+          <Link to="/hr/users" className="btn-secondary w-full sm:w-auto">
             Cancel
           </Link>
-          <button type="submit" className="btn-primary w-full sm:w-auto" disabled={isSubmitting || !selectedRole}>
-            {isSubmitting ? 'Creating...' : 'Create User'}
-          </button>
+          <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isSubmitting} loadingText="Creating..." disabled={!selectedRole}>
+            Create User
+          </Button>
         </div>
       </Form>
     </div>
@@ -546,7 +538,7 @@ function SalesTargetSection() {
             Sales Target
           </label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-800 dark:text-surface-400">%</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-800 dark:text-surface-200">%</span>
             <input
               id="salesTargetPercentage"
               name="salesTargetPercentage"

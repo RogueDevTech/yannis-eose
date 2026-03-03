@@ -34,7 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // API unreachable — show login form
   }
 
-  return json({ needsSetup });
+  return { needsSetup };
 }
 
 /**
@@ -60,13 +60,13 @@ function getRoleRedirect(role?: string): string {
     case 'HEAD_OF_CS':
       return '/admin/cs';
     case 'MEDIA_BUYER':
-      return '/admin/campaigns';
+      return '/admin/forms';
     case 'HEAD_OF_MARKETING':
       return '/admin/marketing';
     case 'FINANCE_OFFICER':
       return '/admin/finance';
     case 'HR_MANAGER':
-      return '/admin/hr';
+      return '/hr/payroll';
     case 'WAREHOUSE_MANAGER':
       return '/admin/inventory';
     case 'HEAD_OF_LOGISTICS':

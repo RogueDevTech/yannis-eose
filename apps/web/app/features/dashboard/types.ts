@@ -35,13 +35,16 @@ export interface DashboardData {
   payoutSummary: Record<string, { count: number; total: string }>;
 }
 
-/** What the loader returns — mix of resolved data + streaming promises */
-export interface DashboardLoaderData {
-  // Critical (resolved immediately)
+/** Orders + counts — deferred for navigate-first */
+export interface OrdersAndCounts {
   orderCounts: Record<string, number>;
   totalOrders: number;
   recentOrders: DashboardData['recentOrders'];
-  // Deferred (streaming promises)
+}
+
+/** What the loader returns — all deferred for navigate-first */
+export interface DashboardLoaderData {
+  ordersAndCounts: Promise<OrdersAndCounts>;
   metrics: Promise<DashboardData['metrics']>;
   profit: Promise<DashboardData['profit']>;
   totalUsers: Promise<number>;
@@ -55,8 +58,11 @@ export interface DashboardFilters {
   periodAllTime?: boolean;
 }
 
+/** Data shape passed to DashboardPage (ordersAndCounts resolved, rest deferred) */
+export type DashboardPageData = Omit<DashboardLoaderData, 'ordersAndCounts'> & OrdersAndCounts;
+
 export interface DashboardPageProps {
-  data: DashboardLoaderData;
+  data: DashboardPageData;
   role: string | null;
   userName: string;
   filters?: DashboardFilters;

@@ -1,8 +1,9 @@
 import { useLoaderData } from '@remix-run/react';
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { DeferredSection } from '~/components/ui/deferred-section';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
 import type {
   AgentWorkload,
@@ -53,29 +54,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { method: 'GET', cookie },
   );
 
-  // ── Await only the critical data ───────────────────────────
-  const [workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes] = await Promise.all([
-    workloadsP,
-    unassignedP,
-    statusCountsP,
-    activeOrdersP,
-  ]);
-
-  const workloads = workloadsRes.ok
-    ? (workloadsRes.data as { result?: { data?: AgentWorkload[] } })?.result?.data ?? []
-    : [];
-
-  const unassignedData = unassignedRes.ok
-    ? (unassignedRes.data as { result?: { data?: { orders: CSOrder[]; pagination: { total: number } } } })?.result?.data
-    : null;
-
-  const activeData = activeOrdersRes.ok
-    ? (activeOrdersRes.data as { result?: { data?: { orders: CSOrder[]; pagination: { total: number } } } })?.result?.data
-    : null;
-
-  const statusCounts = statusCountsRes.ok
-    ? (statusCountsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-    : {};
+  // ── All data deferred for navigate-first ──────────────────
+  const criticalData = Promise.all([workloadsP, unassignedP, statusCountsP, activeOrdersP])
+    .then(([workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes]) => {
+      const workloads = workloadsRes.ok
+        ? (workloadsRes.data as { result?: { data?: AgentWorkload[] } })?.result?.data ?? []
+        : [];
+      const unassignedData = unassignedRes.ok
+        ? (unassignedRes.data as { result?: { data?: { orders: CSOrder[]; pagination: { total: number } } } })?.result?.data
+        : null;
+      const activeData = activeOrdersRes.ok
+        ? (activeOrdersRes.data as { result?: { data?: { orders: CSOrder[]; pagination: { total: number } } } })?.result?.data
+        : null;
+      const statusCounts = statusCountsRes.ok
+        ? (statusCountsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+        : {};
+      return {
+        workloads,
+        unassignedOrders: unassignedData?.orders ?? [],
+        unassignedTotal: unassignedData?.pagination?.total ?? 0,
+        activeOrders: activeData?.orders ?? [],
+        activeTotal: activeData?.pagination?.total ?? 0,
+        statusCounts,
+      };
+    })
+    .catch(() => ({
+      workloads: [] as AgentWorkload[],
+      unassignedOrders: [] as CSOrder[],
+      unassignedTotal: 0,
+      activeOrders: [] as CSOrder[],
+      activeTotal: 0,
+      statusCounts: {} as Record<string, number>,
+    }));
 
   // ── Deferred promises (un-awaited, with .catch fallbacks) ──
   const inactiveAgents: Promise<InactiveAgent[]> = inactiveP
@@ -134,14 +144,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     )
     .catch(() => []);
 
-  // v3_singleFetch: return plain object — un-awaited promises stream automatically
-  return {
-    workloads,
-    unassignedOrders: unassignedData?.orders ?? [],
-    unassignedTotal: unassignedData?.pagination?.total ?? 0,
-    activeOrders: activeData?.orders ?? [],
-    activeTotal: activeData?.pagination?.total ?? 0,
-    statusCounts,
+  return defer({
+    criticalData,
     inactiveAgents,
     callbackOrders,
     flaggedDuplicates,
@@ -149,7 +153,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboardPeriod,
     cartStats,
     pendingCarts,
-  };
+  });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -280,7 +284,22 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CSDashboardRoute() {
-  const data = useLoaderData<typeof loader>() as CSDashboardStreamData;
+  const data = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed', 'order:assigned']);
-  return <CSDashboardPage {...data} />;
+  return (
+    <DeferredSection resolve={data.criticalData} skeleton="card">
+      {(critical) => (
+        <CSDashboardPage
+          {...critical}
+          inactiveAgents={data.inactiveAgents}
+          callbackOrders={data.callbackOrders}
+          flaggedDuplicates={data.flaggedDuplicates}
+          leaderboard={data.leaderboard}
+          leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
+          cartStats={data.cartStats}
+          pendingCarts={data.pendingCarts}
+        />
+      )}
+    </DeferredSection>
+  );
 }

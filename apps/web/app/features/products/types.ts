@@ -12,6 +12,9 @@ export interface Product {
   baseSalePrice: string;
   costPrice: string | null;
   category: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  brandName: string | null;
   status: string;
   createdAt: string;
 }

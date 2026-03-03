@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, Link, useActionData, useLoaderData, useNavigation } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { apiRequest, getCurrentUser } from '~/lib/api.server';
 
 export const meta: MetaFunction = () => {
@@ -18,7 +19,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const token = url.searchParams.get('token') ?? '';
 
-  return json({ token });
+  return { token };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -116,7 +117,7 @@ export default function ResetPasswordRoute() {
                 <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
                   Password reset
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-400">
+                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
                   {actionData.success} You can now sign in with your new password.
                 </p>
               </div>
@@ -134,7 +135,7 @@ export default function ResetPasswordRoute() {
                 <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
                   Invalid reset link
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-400">
+                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
                   This password reset link is invalid or has expired. Please request a new one.
                 </p>
               </div>
@@ -161,7 +162,7 @@ export default function ResetPasswordRoute() {
                 <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
                   Set new password
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-400">
+                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
                   Enter your new password below. Must be at least 8 characters.
                 </p>
               </div>
@@ -259,17 +260,15 @@ export default function ResetPasswordRoute() {
                   />
                 </div>
 
-                <button
+                <Button
                   type="submit"
-                  className="btn-primary w-full flex items-center justify-center gap-2"
-                  disabled={isSubmitting}
+                  variant="primary"
+                  className="w-full flex items-center justify-center gap-2"
+                  loading={isSubmitting}
+                  loadingText="Resetting..."
                 >
-                  {isSubmitting ? (
-                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  ) : (
-                    'Reset password'
-                  )}
-                </button>
+                  Reset password
+                </Button>
 
                 <div className="text-center">
                   <Link

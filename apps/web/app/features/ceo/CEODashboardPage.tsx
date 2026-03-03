@@ -74,7 +74,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Executive Overview</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-400 mt-1">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
             Real-time business intelligence across all departments.
           </p>
         </div>
@@ -88,7 +88,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
       {/* ── Section 1: Revenue & Profit KPIs ────────────────── */}
       <div>
-        <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-500 uppercase tracking-wider mb-3">
+        <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
           Revenue & Profit
         </h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -162,7 +162,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
       {/* ── Section 3: Order Pipeline ─────────────────────── */}
       <div>
-        <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-500 uppercase tracking-wider mb-3">
+        <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
           Order Pipeline
         </h2>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
@@ -202,7 +202,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   <p className={`text-2xl font-bold ${STATUS_COLORS[status] ?? 'text-surface-900 dark:text-white'}`}>
                     {count}
                   </p>
-                  <p className="text-xs text-surface-800 dark:text-surface-400 mt-0.5">
+                  <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
                     {STATUS_LABELS[status] ?? status.replace(/_/g, ' ')}
                   </p>
                 </div>
@@ -270,7 +270,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Payroll</h2>
-            <Link to="/admin/hr" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
+            <Link to="/hr/payroll" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
             <MetricRow label="Staff Count" value={payroll.staffCount.toString()} />
@@ -297,7 +297,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             { href: '/admin/finance', label: 'Finance', icon: 'finance' },
             { href: '/admin/marketing', label: 'Marketing', icon: 'marketing' },
             { href: '/admin/inventory', label: 'Inventory', icon: 'inventory' },
-            { href: '/admin/hr', label: 'HR & Payroll', icon: 'hr' },
+            { href: '/hr/payroll', label: 'HR & Payroll', icon: 'hr' },
             { href: '/admin/audit', label: 'Audit Trail', icon: 'audit' },
           ].map((item) => (
             <Link
@@ -343,13 +343,13 @@ function KPICard({
   return (
     <div className="card">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-surface-800 dark:text-surface-400 uppercase tracking-wider">{label}</p>
+        <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">{label}</p>
         <div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}>
           <KPIIcon type={icon} />
         </div>
       </div>
       <p className={`text-2xl font-bold mt-2 ${valueColor}`}>{value}</p>
-      {subtitle && <p className="text-xs text-surface-700 dark:text-surface-500 mt-0.5">{subtitle}</p>}
+      {subtitle && <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{subtitle}</p>}
     </div>
   );
 }
@@ -359,9 +359,9 @@ function CostRow({ label, value, total }: { label: string; value: number; total:
   return (
     <div>
       <div className="flex justify-between mb-1">
-        <span className="text-sm text-surface-800 dark:text-surface-400">{label}</span>
+        <span className="text-sm text-surface-800 dark:text-surface-200">{label}</span>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-surface-700 dark:text-surface-500">{pctOfTotal.toFixed(0)}%</span>
+          <span className="text-xs text-surface-700 dark:text-surface-300">{pctOfTotal.toFixed(0)}%</span>
           <span className="text-sm font-medium text-danger-600 dark:text-danger-400">{fmt(value)}</span>
         </div>
       </div>
@@ -393,7 +393,7 @@ function WaterfallRow({
 
   return (
     <div className="flex justify-between items-center">
-      <span className={`text-sm ${bold ? 'font-semibold text-surface-900 dark:text-white' : 'text-surface-800 dark:text-surface-400'}`}>
+      <span className={`text-sm ${bold ? 'font-semibold text-surface-900 dark:text-white' : 'text-surface-800 dark:text-surface-200'}`}>
         {label}
       </span>
       <span className={`text-sm ${bold ? 'font-bold' : 'font-medium'} ${color}`}>
@@ -418,7 +418,7 @@ function MetricRow({
 
   return (
     <div className="flex justify-between items-center">
-      <span className="text-sm text-surface-800 dark:text-surface-400">{label}</span>
+      <span className="text-sm text-surface-800 dark:text-surface-200">{label}</span>
       <span className={`text-sm font-medium ${valueColor}`}>{value}</span>
     </div>
   );

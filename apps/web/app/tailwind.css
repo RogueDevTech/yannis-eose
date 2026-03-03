@@ -128,6 +128,14 @@
     @apply btn bg-danger-500 text-white hover:bg-danger-600 focus:ring-danger-500;
   }
 
+  .btn-success {
+    @apply btn bg-success-500 text-white hover:bg-success-600 focus:ring-success-500;
+  }
+
+  .btn-warning {
+    @apply btn bg-warning-500 text-white hover:bg-warning-600 focus:ring-warning-500;
+  }
+
   .btn-ghost {
     @apply btn bg-transparent text-surface-600 hover:bg-surface-100 focus:ring-surface-400;
   }
@@ -181,7 +189,7 @@
   }
 
   .dark .table-header {
-    @apply bg-surface-800/50 text-surface-400;
+    @apply bg-surface-800/50 text-surface-300;
   }
 
   .table-cell {

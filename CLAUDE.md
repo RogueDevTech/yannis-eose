@@ -99,6 +99,22 @@ Every NestJS service method that performs a write operation must:
 
 This ensures the PostgreSQL trigger that manages the temporal audit trail knows WHO made the change. Never skip this step. Never hardcode a user ID.
 
+### Numeric Columns, Temporal Triggers, and History Table Sync (Troubleshooting)
+
+**Problem:** Drizzle/Postgres.js can serialize numeric values as text. The `yannis_capture_history_insert` trigger copies new rows into `*_history` tables. When numeric columns arrive as text, PostgreSQL errors: `column "X" is of type numeric but expression is of type text`.
+
+**Three layers to fix:**
+
+| Layer | Cause | Fix |
+|-------|-------|-----|
+| **API insert** | Drizzle sends numbers as strings | Use `sql\`${value}::numeric\`` for numeric columns in `.values()` or `.set()` |
+| **Trigger** | Generic `EXECUTE ... USING NEW` loses numeric types in dynamic SQL | Add table-specific trigger with explicit `(NEW.column_name)::numeric` casts (see `0012_fix_capture_history_insert_numeric.sql` for products example) |
+| **History schema** | `*_history` tables drift when main table is altered | When altering a main table, add migration to sync `*_history` (ADD COLUMN, DROP COLUMN, etc.) |
+
+**Tables with numeric columns using the INSERT trigger:** orders, order_items, invoices, stock_batches, offer_templates, marketing_funding, ad_spend_logs, payout_records, earnings_adjustments, finance tables, hr tables.
+
+**Avoid:** `String(value)` or `value.toFixed(2)` for numeric columns — use `sql\`${value}::numeric\`` or pass numbers and let the trigger cast. Reference: `packages/shared/drizzle/0012_fix_capture_history_insert_numeric.sql`, `apps/api/src/products/products.service.ts`.
+
 ---
 
 ## The Order Lifecycle (The Most Critical State Machine)
@@ -253,6 +269,8 @@ UNPROCESSED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRA
 - Do NOT build a separate mobile app or a separate rider app — use PWA route groups within `apps/web` with offline sync
 - Do NOT store files locally — use Cloudflare R2 or S3 for all uploads (receipts, screenshots, invoices)
 - Do NOT implement the audit trail at the application level — it must be at the PostgreSQL trigger level using temporal tables
+- Do NOT use `String()` or `.toFixed(2)` for Drizzle inserts into `numeric` columns — use `sql\`${value}::numeric\`` to avoid trigger type errors
+- Do NOT alter a main table without syncing its `*_history` table in the same migration (ADD/DROP columns)
 
 ---
 

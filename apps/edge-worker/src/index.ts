@@ -103,7 +103,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 300; // 5 minutes
 const RATE_LIMIT_MAX_REQUESTS = 5;
 const RATE_LIMIT_CAPTCHA_THRESHOLD = 3; // After 3 submissions, require CAPTCHA
 const DEDUP_WINDOW_SECONDS = 21600; // 6 hours
-const CIRCUIT_BREAKER_TIMEOUT_MS = 2000;
+const CIRCUIT_BREAKER_TIMEOUT_MS = 10000; // 10s — relaxed for local dev; tighten to 2000 in production
 const VIRTUAL_BUFFER_PCT = 0.10; // 10% stock buffer
 const CAMPAIGN_CACHE_TTL = 600; // 10 min cache for campaign configs
 
@@ -167,10 +167,19 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
     if (typeof item['quantity'] !== 'number' || item['quantity'] < 1) {
       return { valid: false, error: 'Each item must have a quantity >= 1' };
     }
-    if (!item['unitPrice'] || typeof item['unitPrice'] !== 'string') {
+    const rawPrice = item['unitPrice'];
+    if (rawPrice === undefined || rawPrice === null || rawPrice === '') {
       return { valid: false, error: 'Each item must have a unitPrice' };
     }
+    // coerce number → string so both "40000" and 40000 are accepted
+    item['unitPrice'] = String(rawPrice);
   }
+
+  // normalise items: coerce any numeric unitPrice to string
+  const normalisedItems = (b['items'] as Array<Record<string, unknown>>).map((item) => ({
+    ...item,
+    unitPrice: String(item['unitPrice']),
+  }));
 
   return {
     valid: true,
@@ -182,8 +191,8 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
       customerAddress: typeof b['customerAddress'] === 'string' ? b['customerAddress'] : undefined,
       deliveryAddress: typeof b['deliveryAddress'] === 'string' ? b['deliveryAddress'] : undefined,
       deliveryNotes: typeof b['deliveryNotes'] === 'string' ? b['deliveryNotes'] : undefined,
-      items: b['items'] as SubmissionPayload['items'],
-      totalAmount: typeof b['totalAmount'] === 'string' ? b['totalAmount'] : undefined,
+      items: normalisedItems as SubmissionPayload['items'],
+      totalAmount: typeof b['totalAmount'] === 'string' ? b['totalAmount'] : typeof b['totalAmount'] === 'number' ? String(b['totalAmount']) : undefined,
       cartId: typeof b['cartId'] === 'string' ? b['cartId'] : undefined,
     },
   };
@@ -194,6 +203,7 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
 type RateLimitResult = 'allowed' | 'captcha_required' | 'blocked';
 
 async function checkRateLimit(ip: string, env: Env): Promise<RateLimitResult> {
+  if (!env.RATE_LIMIT_CACHE) return 'allowed'; // KV not bound (local dev)
   const key = `rate:${ip}`;
   const current = await env.RATE_LIMIT_CACHE.get(key);
   const count = current ? parseInt(current, 10) : 0;
@@ -237,6 +247,7 @@ async function verifyTurnstile(token: string, ip: string, env: Env): Promise<boo
 // ── Dedup Check ────────────────────────────────────────────────
 
 async function checkDedup(phone: string, productIds: string[], env: Env): Promise<string | null> {
+  if (!env.DEDUP_CACHE) return null; // KV not bound (local dev)
   for (const productId of productIds) {
     const key = await dedupKey(phone, productId);
     const existing = await env.DEDUP_CACHE.get(key);
@@ -248,6 +259,7 @@ async function checkDedup(phone: string, productIds: string[], env: Env): Promis
 }
 
 async function markDedup(phone: string, productIds: string[], env: Env): Promise<void> {
+  if (!env.DEDUP_CACHE) return; // KV not bound (local dev)
   for (const productId of productIds) {
     const key = await dedupKey(phone, productId);
     await env.DEDUP_CACHE.put(key, new Date().toISOString(), {
@@ -259,6 +271,7 @@ async function markDedup(phone: string, productIds: string[], env: Env): Promise
 // ── Inventory Budget Cap ───────────────────────────────────────
 
 async function checkInventoryCap(productIds: string[], env: Env): Promise<string | null> {
+  if (!env.INVENTORY_CACHE) return null; // KV not bound (local dev)
   for (const productId of productIds) {
     const cacheKey = `stock:${productId}`;
     const stockData = await env.INVENTORY_CACHE.get(cacheKey);
@@ -282,7 +295,7 @@ async function checkInventoryCap(productIds: string[], env: Env): Promise<string
 async function getCampaignConfig(campaignId: string, env: Env): Promise<CampaignConfig | null> {
   // Check KV cache first
   const cacheKey = `campaign:${campaignId}`;
-  const cached = await env.CAMPAIGN_CACHE.get(cacheKey);
+  const cached = env.CAMPAIGN_CACHE ? await env.CAMPAIGN_CACHE.get(cacheKey) : null;
   if (cached) {
     return JSON.parse(cached) as CampaignConfig;
   }
@@ -306,9 +319,11 @@ async function getCampaignConfig(campaignId: string, env: Env): Promise<Campaign
     if (!config) return null;
 
     // Cache for 10 minutes
-    await env.CAMPAIGN_CACHE.put(cacheKey, JSON.stringify(config), {
-      expirationTtl: CAMPAIGN_CACHE_TTL,
-    });
+    if (env.CAMPAIGN_CACHE) {
+      await env.CAMPAIGN_CACHE.put(cacheKey, JSON.stringify(config), {
+        expirationTtl: CAMPAIGN_CACHE_TTL,
+      });
+    }
 
     return config;
   } catch {
@@ -362,9 +377,13 @@ async function forwardToApi(
     clearTimeout(timeoutId);
 
     const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.error('[edge] orders.create failed', response.status, JSON.stringify(data));
+    }
     return { ok: response.ok, status: response.status, data };
-  } catch {
+  } catch (err) {
     clearTimeout(timeoutId);
+    console.error('[edge] orders.create unreachable:', err);
     return { ok: false, status: 503, data: { error: 'API unreachable' } };
   }
 }
@@ -1331,17 +1350,19 @@ async function handleInventoryUpdate(request: Request, env: Env): Promise<Respon
     return corsResponse({ error: 'Expected array of inventory updates' }, 400);
   }
 
-  for (const update of updates) {
-    if (!update.productId) continue;
-    await env.INVENTORY_CACHE.put(
-      `stock:${update.productId}`,
-      JSON.stringify({
-        total: update.total,
-        pending: update.pending,
-        confirmed: update.confirmed,
-      }),
-      { expirationTtl: 300 }, // 5 min cache
-    );
+  if (env.INVENTORY_CACHE) {
+    for (const update of updates) {
+      if (!update.productId) continue;
+      await env.INVENTORY_CACHE.put(
+        `stock:${update.productId}`,
+        JSON.stringify({
+          total: update.total,
+          pending: update.pending,
+          confirmed: update.confirmed,
+        }),
+        { expirationTtl: 300 }, // 5 min cache
+      );
+    }
   }
 
   return corsResponse({ success: true, updated: updates.length });
