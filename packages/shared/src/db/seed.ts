@@ -1,93 +1,118 @@
 /**
  * Database seed script — creates realistic development data.
  *
- * Usage: npx tsx packages/shared/src/db/seed.ts
+ * Usage:
+ *   pnpm db:seed              # Base seed only
+ *   pnpm db:seed -- --heavy   # Base + heavy data (orders, ad spend, etc.)
+ *   pnpm db:seed -- --reset   # Truncate then full base seed
+ *   pnpm db:seed -- --reset --heavy  # Truncate then base + heavy
  *
- * Requires DATABASE_URL environment variable.
- * Idempotent: checks for existing data before inserting.
+ * Env: DATABASE_URL required. SEED_ORDER_COUNT (default 500, max 2000) for --heavy.
+ * All user emails: kbshowkb+<role><index>@gmail.com
  */
 
 import postgres from 'postgres';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
+import { faker } from '@faker-js/faker';
 
 const SALT_ROUNDS = 12;
 
+const argv = process.argv.slice(2);
+const isHeavy = argv.includes('--heavy');
+const isReset = argv.includes('--reset');
+const SEED_ORDER_COUNT = Math.min(
+  2000,
+  Math.max(100, parseInt(process.env['SEED_ORDER_COUNT'] ?? '500', 10) || 500)
+);
+
+const CS_AGENT_COUNT = 12;
+const MEDIA_BUYER_COUNT = 20;
+const RIDER_COUNT = 5;
+const CAMPAIGNS_PER_MB = 3;
+
 // ── Deterministic IDs for foreign key references ────────────────────
 
-const IDS = {
-  // Users
-  superAdmin: randomUUID(),
-  headOfMarketing: randomUUID(),
-  mediaBuyer1: randomUUID(),
-  mediaBuyer2: randomUUID(),
-  headOfCs: randomUUID(),
-  csAgent1: randomUUID(),
-  csAgent2: randomUUID(),
-  csAgent3: randomUUID(),
-  financeOfficer: randomUUID(),
-  headOfLogistics: randomUUID(),
-  warehouseManager: randomUUID(),
-  tplManager1: randomUUID(),
-  tplManager2: randomUUID(),
-  rider1: randomUUID(),
-  rider2: randomUUID(),
-  rider3: randomUUID(),
-  hrManager: randomUUID(),
+function buildIds() {
+  const csAgentIds = Array.from({ length: CS_AGENT_COUNT }, () => randomUUID());
+  const mediaBuyerIds = Array.from({ length: MEDIA_BUYER_COUNT }, () => randomUUID());
+  const riderIds = Array.from({ length: RIDER_COUNT }, () => randomUUID());
 
-  // Products
-  product1: randomUUID(),
-  product2: randomUUID(),
-  product3: randomUUID(),
-  product4: randomUUID(),
-  product5: randomUUID(),
+  return {
+    superAdmin: randomUUID(),
+    headOfMarketing: randomUUID(),
+    headOfCs: randomUUID(),
+    financeOfficer: randomUUID(),
+    headOfLogistics: randomUUID(),
+    warehouseManager: randomUUID(),
+    tplManager1: randomUUID(),
+    tplManager2: randomUUID(),
+    hrManager: randomUUID(),
+    csAgentIds,
+    mediaBuyerIds,
+    riderIds,
 
-  // Logistics
-  provider1: randomUUID(),
-  provider2: randomUUID(),
-  locationMain: randomUUID(),
-  location1: randomUUID(),
-  location2: randomUUID(),
+    product1: randomUUID(),
+    product2: randomUUID(),
+    product3: randomUUID(),
+    product4: randomUUID(),
+    product5: randomUUID(),
 
-  // Stock batches
-  batch1p1: randomUUID(),
-  batch2p1: randomUUID(),
-  batch1p2: randomUUID(),
-  batch1p3: randomUUID(),
-  batch1p4: randomUUID(),
-  batch1p5: randomUUID(),
+    provider1: randomUUID(),
+    provider2: randomUUID(),
+    locationMain: randomUUID(),
+    location1: randomUUID(),
+    location2: randomUUID(),
 
-  // Offer templates
-  offer1: randomUUID(),
-  offer2: randomUUID(),
-  offer3: randomUUID(),
+    batch1p1: randomUUID(),
+    batch2p1: randomUUID(),
+    batch1p2: randomUUID(),
+    batch1p3: randomUUID(),
+    batch1p4: randomUUID(),
+    batch1p5: randomUUID(),
 
-  // Campaigns
-  campaign1: randomUUID(),
-  campaign2: randomUUID(),
-  campaign3: randomUUID(),
+    offer1: randomUUID(),
+    offer2: randomUUID(),
+    offer3: randomUUID(),
 
-  // Orders
-  order1: randomUUID(),
-  order2: randomUUID(),
-  order3: randomUUID(),
-  order4: randomUUID(),
-  order5: randomUUID(),
-  order6: randomUUID(),
-  order7: randomUUID(),
-  order8: randomUUID(),
-  order9: randomUUID(),
-  order10: randomUUID(),
+    campaign1: randomUUID(),
+    campaign2: randomUUID(),
+    campaign3: randomUUID(),
 
-  // Commission plans
-  csPlan: randomUUID(),
-  mbPlan: randomUUID(),
-  riderPlan: randomUUID(),
+    order1: randomUUID(),
+    order2: randomUUID(),
+    order3: randomUUID(),
+    order4: randomUUID(),
+    order5: randomUUID(),
+    order6: randomUUID(),
+    order7: randomUUID(),
+    order8: randomUUID(),
+    order9: randomUUID(),
+    order10: randomUUID(),
 
-  // Budgets
-  budget1: randomUUID(),
-  budget2: randomUUID(),
-};
+    csPlan: randomUUID(),
+    mbPlan: randomUUID(),
+    riderPlan: randomUUID(),
+
+    budget1: randomUUID(),
+    budget2: randomUUID(),
+  };
+}
+
+let IDS: ReturnType<typeof buildIds>;
+
+async function truncateAll(sql: postgres.Sql) {
+  const tables = [
+    'notifications', 'call_logs', 'order_items', 'order_transfer_requests', 'orders', 'invoices',
+    'earnings_adjustments', 'payout_records', 'approval_requests', 'ad_spend_logs', 'marketing_funding',
+    'campaigns', 'user_product_assignments', 'budgets', 'settlement_configs', 'commission_plans',
+    'stock_movements', 'stock_transfers', 'inventory_levels', 'stock_batches', 'offer_templates',
+    'logistics_locations', 'logistics_providers', 'email_change_requests', 'users',
+  ];
+  for (const table of tables) {
+    await sql.unsafe(`TRUNCATE TABLE ${table} RESTART IDENTITY CASCADE`).catch(() => {});
+  }
+}
 
 async function seed() {
   const connectionString = process.env['DATABASE_URL'];
@@ -96,14 +121,22 @@ async function seed() {
     process.exit(1);
   }
 
+  IDS = buildIds();
   const sql = postgres(connectionString, { max: 1 });
 
-  // Check if seed data already exists
-  const existing = await sql`SELECT id FROM users WHERE email = 'admin@yannis.com'`;
-  if (existing.length > 0) {
-    console.log('Seed data already exists. To re-seed, truncate tables first.');
-    await sql.end();
-    return;
+  const seedAdminEmail = 'kbshowkb+admin@gmail.com';
+
+  if (isReset) {
+    console.log('Resetting database (truncating seed tables)...');
+    await truncateAll(sql);
+    console.log('Truncate done.\n');
+  } else {
+    const existing = await sql`SELECT id FROM users WHERE email = ${seedAdminEmail}`;
+    if (existing.length > 0) {
+      console.log('Seed data already exists. Use --reset to truncate and re-seed, or --heavy to add heavy data only.');
+      await sql.end();
+      return;
+    }
   }
 
   console.log('Seeding database...\n');
@@ -111,29 +144,51 @@ async function seed() {
   const password = 'password123';
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
 
+  const csNames = ['Tunde Bello', 'Chisom Nwankwo', 'Yemi Alade', 'Blessing Okoro', 'Ibrahim Musa', 'Chioma Eze', 'Oluwaseun Ade', 'Amina Hassan', 'David Okonkwo', 'Ngozi Nwosu', 'Emeka Okafor', 'Fatima Bello'];
+  const mbNames = ['Chidi Eze', 'Amara Obi', 'Kunle Adeyemi', 'Zainab Ibrahim', 'Obinna Nnamdi', 'Folake Ogun', 'Yusuf Sani', 'Adaeze Okoli', 'Biola Taiwo', 'Ibrahim Musa', 'Chiamaka Nwosu', 'Tunde Bakare', 'Amina Hassan', 'Emeka Okafor', 'Nneka Eze', 'Seyi Ade', 'Halima Umar', 'Chukwuemeka Obi', 'Funke Ola', 'Oluwaseun Balogun'];
+
   // ══════════════════════════════════════════════════════════════════
-  // 1. USERS (17 staff across all roles)
+  // 1. USERS — 12 CS agents, 20 media buyers, all emails kbshowkb+...@gmail.com
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating users...');
 
-  const users = [
-    { id: IDS.superAdmin, name: 'Adewale Okafor', email: 'admin@yannis.com', role: 'SUPER_ADMIN', capacity: 100, locationId: null, phone: '08030001111' },
-    { id: IDS.headOfMarketing, name: 'Funke Adeyemi', email: 'funke@yannis.com', role: 'HEAD_OF_MARKETING', capacity: 50, locationId: null, phone: '08030002222' },
-    { id: IDS.mediaBuyer1, name: 'Chidi Eze', email: 'chidi@yannis.com', role: 'MEDIA_BUYER', capacity: 20, locationId: null, phone: '08030003333' },
-    { id: IDS.mediaBuyer2, name: 'Amara Obi', email: 'amara@yannis.com', role: 'MEDIA_BUYER', capacity: 20, locationId: null, phone: '08030004444' },
-    { id: IDS.headOfCs, name: 'Ngozi Udo', email: 'ngozi@yannis.com', role: 'HEAD_OF_CS', capacity: 50, locationId: null, phone: '08030005555' },
-    { id: IDS.csAgent1, name: 'Tunde Bello', email: 'tunde@yannis.com', role: 'CS_AGENT', capacity: 10, locationId: null, phone: '08030006666' },
-    { id: IDS.csAgent2, name: 'Chisom Nwankwo', email: 'chisom@yannis.com', role: 'CS_AGENT', capacity: 10, locationId: null, phone: '08030007777' },
-    { id: IDS.csAgent3, name: 'Yemi Alade', email: 'yemi@yannis.com', role: 'CS_AGENT', capacity: 10, locationId: null, phone: '08030008888' },
-    { id: IDS.financeOfficer, name: 'Kemi Johnson', email: 'kemi@yannis.com', role: 'FINANCE_OFFICER', capacity: 50, locationId: null, phone: '08030009999' },
-    { id: IDS.headOfLogistics, name: 'Emeka Nwosu', email: 'emeka@yannis.com', role: 'HEAD_OF_LOGISTICS', capacity: 50, locationId: null, phone: '08031001111' },
-    { id: IDS.warehouseManager, name: 'Bola Taiwo', email: 'bola@yannis.com', role: 'WAREHOUSE_MANAGER', capacity: 50, locationId: null, phone: '08031002222' },
-    { id: IDS.tplManager1, name: 'Ife Akin', email: 'ife@yannis.com', role: 'TPL_MANAGER', capacity: 30, locationId: null, phone: '08031003333' },
-    { id: IDS.tplManager2, name: 'Sola Bakare', email: 'sola@yannis.com', role: 'TPL_MANAGER', capacity: 30, locationId: null, phone: '08031004444' },
-    { id: IDS.rider1, name: 'Segun Ola', email: 'segun@yannis.com', role: 'TPL_RIDER', capacity: 15, locationId: null, phone: '08031005555' },
-    { id: IDS.rider2, name: 'Dayo Ige', email: 'dayo@yannis.com', role: 'TPL_RIDER', capacity: 15, locationId: null, phone: '08031006666' },
-    { id: IDS.rider3, name: 'Femi Ogunleye', email: 'femi@yannis.com', role: 'TPL_RIDER', capacity: 15, locationId: null, phone: '08031007777' },
-    { id: IDS.hrManager, name: 'Aisha Bello', email: 'aisha@yannis.com', role: 'HR_MANAGER', capacity: 50, locationId: null, phone: '08031008888' },
+  const users: Array<{ id: string; name: string; email: string; role: string; capacity: number; locationId: string | null; phone: string }> = [
+    { id: IDS.superAdmin, name: 'Adewale Okafor', email: seedAdminEmail, role: 'SUPER_ADMIN', capacity: 100, locationId: null, phone: '08030001111' },
+    { id: IDS.headOfMarketing, name: 'Funke Adeyemi', email: 'kbshowkb+hom@gmail.com', role: 'HEAD_OF_MARKETING', capacity: 50, locationId: null, phone: '08030002222' },
+    ...IDS.mediaBuyerIds.map((id, i) => ({
+      id,
+      name: mbNames[i] ?? `Media Buyer ${i + 1}`,
+      email: `kbshowkb+mb${i + 1}@gmail.com`,
+      role: 'MEDIA_BUYER' as const,
+      capacity: 20,
+      locationId: null as string | null,
+      phone: `0803000${String(i + 3).padStart(4, '0')}`.slice(-11),
+    })),
+    { id: IDS.headOfCs, name: 'Ngozi Udo', email: 'kbshowkb+hocs@gmail.com', role: 'HEAD_OF_CS', capacity: 50, locationId: null, phone: '08030005555' },
+    ...IDS.csAgentIds.map((id, i) => ({
+      id,
+      name: csNames[i] ?? `CS Agent ${i + 1}`,
+      email: `kbshowkb+cs${i + 1}@gmail.com`,
+      role: 'CS_AGENT' as const,
+      capacity: 10,
+      locationId: null as string | null,
+      phone: `0803000${String(i + 6).padStart(4, '0')}`.slice(-11),
+    })),
+    { id: IDS.financeOfficer, name: 'Kemi Johnson', email: 'kbshowkb+finance@gmail.com', role: 'FINANCE_OFFICER', capacity: 50, locationId: null, phone: '08030009999' },
+    { id: IDS.headOfLogistics, name: 'Emeka Nwosu', email: 'kbshowkb+hol@gmail.com', role: 'HEAD_OF_LOGISTICS', capacity: 50, locationId: null, phone: '08031001111' },
+    { id: IDS.warehouseManager, name: 'Bola Taiwo', email: 'kbshowkb+warehouse@gmail.com', role: 'WAREHOUSE_MANAGER', capacity: 50, locationId: null, phone: '08031002222' },
+    { id: IDS.tplManager1, name: 'Ife Akin', email: 'kbshowkb+tpl1@gmail.com', role: 'TPL_MANAGER', capacity: 30, locationId: null, phone: '08031003333' },
+    { id: IDS.tplManager2, name: 'Sola Bakare', email: 'kbshowkb+tpl2@gmail.com', role: 'TPL_MANAGER', capacity: 30, locationId: null, phone: '08031004444' },
+    ...IDS.riderIds.map((id, i) => ({
+      id,
+      name: ['Segun Ola', 'Dayo Ige', 'Femi Ogunleye', 'Tosin Ade', 'Bisi Oka'][i] ?? `Rider ${i + 1}`,
+      email: `kbshowkb+rider${i + 1}@gmail.com`,
+      role: 'TPL_RIDER' as const,
+      capacity: 15,
+      locationId: null as string | null,
+      phone: `0803100${String(i + 5).padStart(4, '0')}`.slice(-11),
+    })),
+    { id: IDS.hrManager, name: 'Aisha Bello', email: 'kbshowkb+hr@gmail.com', role: 'HR_MANAGER', capacity: 50, locationId: null, phone: '08031008888' },
   ];
 
   for (const u of users) {
@@ -188,12 +243,14 @@ async function seed() {
       (${IDS.location2}, ${IDS.provider2}, 'GoRide Wuse Hub', '22 Aminu Kano Crescent, Wuse II, Abuja', '9.0765,7.4898', false, 'ACTIVE')
   `;
 
-  // Assign TPL managers and riders to locations
+  // Assign TPL managers and riders to locations (riders 1,2,4,5 at location1; rider 3 at location2)
   await sql`UPDATE users SET logistics_location_id = ${IDS.location1} WHERE id = ${IDS.tplManager1}`;
   await sql`UPDATE users SET logistics_location_id = ${IDS.location2} WHERE id = ${IDS.tplManager2}`;
-  await sql`UPDATE users SET logistics_location_id = ${IDS.location1} WHERE id = ${IDS.rider1}`;
-  await sql`UPDATE users SET logistics_location_id = ${IDS.location1} WHERE id = ${IDS.rider2}`;
-  await sql`UPDATE users SET logistics_location_id = ${IDS.location2} WHERE id = ${IDS.rider3}`;
+  await sql`UPDATE users SET logistics_location_id = ${IDS.location1} WHERE id = ${IDS.riderIds[0]!}`;
+  await sql`UPDATE users SET logistics_location_id = ${IDS.location1} WHERE id = ${IDS.riderIds[1]!}`;
+  await sql`UPDATE users SET logistics_location_id = ${IDS.location2} WHERE id = ${IDS.riderIds[2]!}`;
+  await sql`UPDATE users SET logistics_location_id = ${IDS.location1} WHERE id = ${IDS.riderIds[3]!}`;
+  await sql`UPDATE users SET logistics_location_id = ${IDS.location1} WHERE id = ${IDS.riderIds[4]!}`;
 
   // ══════════════════════════════════════════════════════════════════
   // 4. STOCK BATCHES (FIFO costing)
@@ -255,7 +312,7 @@ async function seed() {
     { productId: IDS.product1, type: 'TRANSFER_OUT', qty: -60, fromLocationId: IDS.locationMain, toLocationId: IDS.location1, reason: 'Transfer to Lekki hub', actorId: IDS.warehouseManager },
     { productId: IDS.product1, type: 'TRANSFER_IN', qty: 60, fromLocationId: IDS.locationMain, toLocationId: IDS.location1, reason: 'Received from main warehouse', actorId: IDS.tplManager1 },
     { productId: IDS.product2, type: 'INTAKE', qty: 150, toLocationId: IDS.locationMain, reason: 'Batch received from factory', actorId: IDS.warehouseManager },
-    { productId: IDS.product1, type: 'RESERVATION', qty: -10, fromLocationId: IDS.locationMain, reason: 'Reserved for confirmed orders', actorId: IDS.csAgent1 },
+    { productId: IDS.product1, type: 'RESERVATION', qty: -10, fromLocationId: IDS.locationMain, reason: 'Reserved for confirmed orders', actorId: IDS.csAgentIds[0]! },
     { productId: IDS.product3, type: 'INTAKE', qty: 300, toLocationId: IDS.locationMain, reason: 'Full batch intake', actorId: IDS.warehouseManager },
     { productId: IDS.product4, type: 'INTAKE', qty: 100, toLocationId: IDS.locationMain, reason: 'Smart watch batch', actorId: IDS.warehouseManager },
     { productId: IDS.product5, type: 'INTAKE', qty: 250, toLocationId: IDS.locationMain, reason: 'Hair product bundle batch', actorId: IDS.warehouseManager },
@@ -294,93 +351,107 @@ async function seed() {
   `;
 
   // ══════════════════════════════════════════════════════════════════
-  // 9. CAMPAIGNS
+  // 9. CAMPAIGNS — 3 per media buyer (60 total) for heavy seed distribution
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating campaigns...');
 
-  await sql`
-    INSERT INTO campaigns (id, media_buyer_id, name, product_ids, offer_template_id, deployment_type, status)
-    VALUES
-      (${IDS.campaign1}, ${IDS.mediaBuyer1}, 'Q1 Waist Trainer Push', ${JSON.stringify([IDS.product1])}::jsonb, ${IDS.offer1}, 'HOSTED', 'ACTIVE'),
-      (${IDS.campaign2}, ${IDS.mediaBuyer1}, 'Blender Pro Launch', ${JSON.stringify([IDS.product2])}::jsonb, ${IDS.offer2}, 'SNIPPET', 'ACTIVE'),
-      (${IDS.campaign3}, ${IDS.mediaBuyer2}, 'Hair Growth Campaign', ${JSON.stringify([IDS.product5])}::jsonb, ${IDS.offer3}, 'HOSTED', 'ACTIVE')
-  `;
+  const offers = [IDS.offer1, IDS.offer2, IDS.offer3] as const;
+  const productIdLists = [[IDS.product1], [IDS.product2], [IDS.product5]] as const;
+  const campaignRows: Array<{ id: string; mediaBuyerId: string; name: string; productIds: string[]; offerId: string }> = [];
+
+  for (let mb = 0; mb < MEDIA_BUYER_COUNT; mb++) {
+    for (let c = 0; c < CAMPAIGNS_PER_MB; c++) {
+      const id = randomUUID();
+      const offerIdx = (mb * CAMPAIGNS_PER_MB + c) % 3;
+      campaignRows.push({
+        id,
+        mediaBuyerId: IDS.mediaBuyerIds[mb]!,
+        name: `Campaign ${mb + 1}-${c + 1}`,
+        productIds: [...productIdLists[offerIdx]!],
+        offerId: offers[offerIdx]!,
+      });
+    }
+  }
+
+  for (const row of campaignRows) {
+    await sql`
+      INSERT INTO campaigns (id, media_buyer_id, name, product_ids, offer_template_id, deployment_type, status)
+      VALUES (${row.id}, ${row.mediaBuyerId}, ${row.name}, ${JSON.stringify(row.productIds)}::jsonb, ${row.offerId}, 'HOSTED', 'ACTIVE')
+    `;
+  }
+
+  // Keep first 3 campaigns for base orders (same MBs as before)
+  const campaign1 = campaignRows[0]!.id;
+  const campaign2 = campaignRows[1]!.id;
+  const campaign3 = campaignRows[2]!.id;
 
   // ══════════════════════════════════════════════════════════════════
-  // 10. ORDERS (10 orders in various states across the lifecycle)
+  // 10. ORDERS (10 base orders in various states)
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating orders...');
 
   const orders = [
-    // UNPROCESSED — just came in
     {
-      id: IDS.order1, campaignId: IDS.campaign1, mediaBuyerId: IDS.mediaBuyer1,
+      id: IDS.order1, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!,
       status: 'UNPROCESSED', customerName: 'Blessing Okonkwo', customerPhoneHash: 'hash_08012345001',
       customerAddress: '15 Akin Adesola St, Victoria Island, Lagos',
       deliveryAddress: '15 Akin Adesola St, Victoria Island, Lagos',
       totalAmount: '9999.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 9999 }]),
     },
-    // UNPROCESSED
     {
-      id: IDS.order2, campaignId: IDS.campaign3, mediaBuyerId: IDS.mediaBuyer2,
+      id: IDS.order2, campaignId: campaign3, mediaBuyerId: IDS.mediaBuyerIds[1]!,
       status: 'UNPROCESSED', customerName: 'Emeka Uche', customerPhoneHash: 'hash_08012345002',
       customerAddress: '8 Adeola Odeku, Lekki, Lagos',
       deliveryAddress: '8 Adeola Odeku, Lekki, Lagos',
       totalAmount: '8500.00', items: JSON.stringify([{ productId: IDS.product5, quantity: 1, unitPrice: 8500 }]),
     },
-    // CS_ENGAGED — agent is on a call
     {
-      id: IDS.order3, campaignId: IDS.campaign1, mediaBuyerId: IDS.mediaBuyer1,
-      assignedCsId: IDS.csAgent1, status: 'CS_ENGAGED',
+      id: IDS.order3, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!,
+      assignedCsId: IDS.csAgentIds[0], status: 'CS_ENGAGED',
       customerName: 'Fatima Abdullahi', customerPhoneHash: 'hash_08012345003',
       customerAddress: '22 Awolowo Road, Ikoyi, Lagos',
       deliveryAddress: '22 Awolowo Road, Ikoyi, Lagos',
       totalAmount: '10999.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 10999 }]),
     },
-    // CONFIRMED — awaiting allocation
     {
-      id: IDS.order4, campaignId: IDS.campaign2, mediaBuyerId: IDS.mediaBuyer1,
-      assignedCsId: IDS.csAgent2, status: 'CONFIRMED',
+      id: IDS.order4, campaignId: campaign2, mediaBuyerId: IDS.mediaBuyerIds[0]!,
+      assignedCsId: IDS.csAgentIds[1], status: 'CONFIRMED',
       customerName: 'Chidinma Okafor', customerPhoneHash: 'hash_08012345004',
       customerAddress: '5 Allen Avenue, Ikeja, Lagos',
       deliveryAddress: '5 Allen Avenue, Ikeja, Lagos',
       totalAmount: '15500.00', items: JSON.stringify([{ productId: IDS.product2, quantity: 1, unitPrice: 15500 }]),
     },
-    // ALLOCATED — assigned to 3PL
     {
-      id: IDS.order5, campaignId: IDS.campaign1, mediaBuyerId: IDS.mediaBuyer1,
-      assignedCsId: IDS.csAgent1, logisticsProviderId: IDS.provider1, logisticsLocationId: IDS.location1,
+      id: IDS.order5, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!,
+      assignedCsId: IDS.csAgentIds[0], logisticsProviderId: IDS.provider1, logisticsLocationId: IDS.location1,
       status: 'ALLOCATED',
       customerName: 'Adaeze Nnamdi', customerPhoneHash: 'hash_08012345005',
       customerAddress: '10 Ajose Adeogun, VI, Lagos',
       deliveryAddress: '10 Ajose Adeogun, VI, Lagos',
       totalAmount: '9999.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 9999 }]),
     },
-    // DISPATCHED — rider has picked up
     {
-      id: IDS.order6, campaignId: IDS.campaign2, mediaBuyerId: IDS.mediaBuyer1,
-      assignedCsId: IDS.csAgent2, logisticsProviderId: IDS.provider1, logisticsLocationId: IDS.location1,
-      riderId: IDS.rider1, status: 'DISPATCHED', deliveryOtp: '4821',
+      id: IDS.order6, campaignId: campaign2, mediaBuyerId: IDS.mediaBuyerIds[0]!,
+      assignedCsId: IDS.csAgentIds[1], logisticsProviderId: IDS.provider1, logisticsLocationId: IDS.location1,
+      riderId: IDS.riderIds[0], status: 'DISPATCHED', deliveryOtp: '4821',
       customerName: 'Oluwaseun Balogun', customerPhoneHash: 'hash_08012345006',
       customerAddress: '33 Admiralty Way, Lekki Phase 1',
       deliveryAddress: '33 Admiralty Way, Lekki Phase 1',
       totalAmount: '15500.00', items: JSON.stringify([{ productId: IDS.product2, quantity: 1, unitPrice: 15500 }]),
     },
-    // IN_TRANSIT
     {
-      id: IDS.order7, campaignId: IDS.campaign3, mediaBuyerId: IDS.mediaBuyer2,
-      assignedCsId: IDS.csAgent3, logisticsProviderId: IDS.provider2, logisticsLocationId: IDS.location2,
-      riderId: IDS.rider3, status: 'IN_TRANSIT', deliveryOtp: '7293',
+      id: IDS.order7, campaignId: campaign3, mediaBuyerId: IDS.mediaBuyerIds[1]!,
+      assignedCsId: IDS.csAgentIds[2], logisticsProviderId: IDS.provider2, logisticsLocationId: IDS.location2,
+      riderId: IDS.riderIds[2], status: 'IN_TRANSIT', deliveryOtp: '7293',
       customerName: 'Hauwa Ibrahim', customerPhoneHash: 'hash_08012345007',
       customerAddress: '14 Gana Street, Maitama, Abuja',
       deliveryAddress: '14 Gana Street, Maitama, Abuja',
       totalAmount: '8500.00', items: JSON.stringify([{ productId: IDS.product5, quantity: 1, unitPrice: 8500 }]),
     },
-    // DELIVERED
     {
-      id: IDS.order8, campaignId: IDS.campaign1, mediaBuyerId: IDS.mediaBuyer1,
-      assignedCsId: IDS.csAgent1, logisticsProviderId: IDS.provider1, logisticsLocationId: IDS.location1,
-      riderId: IDS.rider2, status: 'DELIVERED',
+      id: IDS.order8, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!,
+      assignedCsId: IDS.csAgentIds[0], logisticsProviderId: IDS.provider1, logisticsLocationId: IDS.location1,
+      riderId: IDS.riderIds[1], status: 'DELIVERED',
       deliveryOtp: '1547', deliveryGpsLat: '6.4541', deliveryGpsLng: '3.4754',
       customerName: 'Grace Okechukwu', customerPhoneHash: 'hash_08012345008',
       customerAddress: '7 Ozumba Mbadiwe, VI, Lagos',
@@ -388,11 +459,10 @@ async function seed() {
       totalAmount: '9999.00', landedCost: '4300.00', deliveryFee: '1500.00',
       items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 9999 }]),
     },
-    // COMPLETED
     {
-      id: IDS.order9, campaignId: IDS.campaign2, mediaBuyerId: IDS.mediaBuyer1,
-      assignedCsId: IDS.csAgent2, logisticsProviderId: IDS.provider1, logisticsLocationId: IDS.location1,
-      riderId: IDS.rider1, status: 'COMPLETED',
+      id: IDS.order9, campaignId: campaign2, mediaBuyerId: IDS.mediaBuyerIds[0]!,
+      assignedCsId: IDS.csAgentIds[1], logisticsProviderId: IDS.provider1, logisticsLocationId: IDS.location1,
+      riderId: IDS.riderIds[0], status: 'COMPLETED',
       deliveryOtp: '3890', deliveryGpsLat: '6.4312', deliveryGpsLng: '3.4521',
       customerName: 'Samuel Taiwo', customerPhoneHash: 'hash_08012345009',
       customerAddress: '20 Ligali Ayorinde, VI, Lagos',
@@ -400,10 +470,9 @@ async function seed() {
       totalAmount: '18000.00', landedCost: '7200.00', deliveryFee: '1500.00',
       items: JSON.stringify([{ productId: IDS.product2, quantity: 1, unitPrice: 18000 }]),
     },
-    // CANCELLED
     {
-      id: IDS.order10, campaignId: IDS.campaign3, mediaBuyerId: IDS.mediaBuyer2,
-      assignedCsId: IDS.csAgent3, status: 'CANCELLED',
+      id: IDS.order10, campaignId: campaign3, mediaBuyerId: IDS.mediaBuyerIds[1]!,
+      assignedCsId: IDS.csAgentIds[2], status: 'CANCELLED',
       customerName: 'Mohammed Yusuf', customerPhoneHash: 'hash_08012345010',
       customerAddress: '3 IBB Boulevard, Abuja',
       deliveryAddress: '3 IBB Boulevard, Abuja',
@@ -461,12 +530,12 @@ async function seed() {
   console.log('  Creating call logs...');
 
   const callLogs = [
-    { orderId: IDS.order3, agentId: IDS.csAgent1, status: 'IN_PROGRESS', duration: null },
-    { orderId: IDS.order4, agentId: IDS.csAgent2, status: 'COMPLETED', duration: 45 },
-    { orderId: IDS.order5, agentId: IDS.csAgent1, status: 'COMPLETED', duration: 32 },
-    { orderId: IDS.order8, agentId: IDS.csAgent1, status: 'COMPLETED', duration: 28 },
-    { orderId: IDS.order9, agentId: IDS.csAgent2, status: 'COMPLETED', duration: 55 },
-    { orderId: IDS.order10, agentId: IDS.csAgent3, status: 'COMPLETED', duration: 18 },
+    { orderId: IDS.order3, agentId: IDS.csAgentIds[0]!, status: 'IN_PROGRESS', duration: null },
+    { orderId: IDS.order4, agentId: IDS.csAgentIds[1]!, status: 'COMPLETED', duration: 45 },
+    { orderId: IDS.order5, agentId: IDS.csAgentIds[0]!, status: 'COMPLETED', duration: 32 },
+    { orderId: IDS.order8, agentId: IDS.csAgentIds[0]!, status: 'COMPLETED', duration: 28 },
+    { orderId: IDS.order9, agentId: IDS.csAgentIds[1]!, status: 'COMPLETED', duration: 55 },
+    { orderId: IDS.order10, agentId: IDS.csAgentIds[2]!, status: 'COMPLETED', duration: 18 },
   ];
 
   for (const cl of callLogs) {
@@ -481,12 +550,20 @@ async function seed() {
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating marketing funding...');
 
+  for (let i = 0; i < MEDIA_BUYER_COUNT; i++) {
+    const daysAgo = 30 - i;
+    await sql`
+      INSERT INTO marketing_funding (id, sender_id, receiver_id, amount, receipt_url, status, sent_at, verified_at)
+      VALUES (
+        gen_random_uuid(), ${IDS.headOfMarketing}, ${IDS.mediaBuyerIds[i]!},
+        ${String(200000 + i * 10000)}.00, 'https://storage.example.com/receipts/funding.jpg', 'COMPLETED',
+        NOW() - (${daysAgo} * INTERVAL '1 day'), NOW() - (${daysAgo - 1} * INTERVAL '1 day')
+      )
+    `;
+  }
   await sql`
     INSERT INTO marketing_funding (id, sender_id, receiver_id, amount, receipt_url, status, sent_at, verified_at)
-    VALUES
-      (gen_random_uuid(), ${IDS.headOfMarketing}, ${IDS.mediaBuyer1}, '500000.00', 'https://storage.example.com/receipts/funding-001.jpg', 'COMPLETED', NOW() - INTERVAL '10 days', NOW() - INTERVAL '9 days'),
-      (gen_random_uuid(), ${IDS.headOfMarketing}, ${IDS.mediaBuyer2}, '300000.00', 'https://storage.example.com/receipts/funding-002.jpg', 'COMPLETED', NOW() - INTERVAL '7 days', NOW() - INTERVAL '6 days'),
-      (gen_random_uuid(), ${IDS.headOfMarketing}, ${IDS.mediaBuyer1}, '200000.00', 'https://storage.example.com/receipts/funding-003.jpg', 'SENT', NOW() - INTERVAL '1 day', null)
+    VALUES (gen_random_uuid(), ${IDS.headOfMarketing}, ${IDS.mediaBuyerIds[0]!}, '200000.00', 'https://storage.example.com/receipts/funding-pending.jpg', 'SENT', NOW() - INTERVAL '1 day', null)
   `;
 
   // ══════════════════════════════════════════════════════════════════
@@ -494,16 +571,19 @@ async function seed() {
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating ad spend logs...');
 
-  const adSpendEntries = [
-    { mbId: IDS.mediaBuyer1, productId: IDS.product1, campaignId: IDS.campaign1, amount: '45000.00', daysAgo: 5 },
-    { mbId: IDS.mediaBuyer1, productId: IDS.product1, campaignId: IDS.campaign1, amount: '52000.00', daysAgo: 4 },
-    { mbId: IDS.mediaBuyer1, productId: IDS.product1, campaignId: IDS.campaign1, amount: '38000.00', daysAgo: 3 },
-    { mbId: IDS.mediaBuyer1, productId: IDS.product2, campaignId: IDS.campaign2, amount: '60000.00', daysAgo: 4 },
-    { mbId: IDS.mediaBuyer1, productId: IDS.product2, campaignId: IDS.campaign2, amount: '55000.00', daysAgo: 3 },
-    { mbId: IDS.mediaBuyer2, productId: IDS.product5, campaignId: IDS.campaign3, amount: '30000.00', daysAgo: 3 },
-    { mbId: IDS.mediaBuyer2, productId: IDS.product5, campaignId: IDS.campaign3, amount: '35000.00', daysAgo: 2 },
-    { mbId: IDS.mediaBuyer2, productId: IDS.product5, campaignId: IDS.campaign3, amount: '28000.00', daysAgo: 1 },
-  ];
+  const adSpendEntries: Array<{ mbId: string; productId: string; campaignId: string; amount: string; daysAgo: number }> = [];
+  for (let i = 0; i < Math.min(20, campaignRows.length); i++) {
+    const row = campaignRows[i]!;
+    for (let d = 1; d <= 5; d++) {
+      adSpendEntries.push({
+        mbId: row.mediaBuyerId,
+        productId: row.productIds[0]!,
+        campaignId: row.id,
+        amount: String(25000 + Math.floor(Math.random() * 20000)) + '.00',
+        daysAgo: d,
+      });
+    }
+  }
 
   for (const as of adSpendEntries) {
     await sql`
@@ -578,12 +658,16 @@ async function seed() {
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating payout records...');
 
-  const payouts = [
-    { staffId: IDS.csAgent1, base: '50000.00', bonus: '5000.00', addOns: '2000.00', deductions: '0.00', total: '57000.00', status: 'APPROVED' },
-    { staffId: IDS.csAgent2, base: '50000.00', bonus: '3000.00', addOns: '0.00', deductions: '500.00', total: '52500.00', status: 'PENDING_APPROVAL' },
-    { staffId: IDS.mediaBuyer1, base: '40000.00', bonus: '10000.00', addOns: '5000.00', deductions: '0.00', total: '55000.00', status: 'PAID' },
-    { staffId: IDS.rider1, base: '30000.00', bonus: '8000.00', addOns: '0.00', deductions: '800.00', total: '37200.00', status: 'APPROVED' },
-  ];
+  const payouts: Array<{ staffId: string; base: string; bonus: string; addOns: string; deductions: string; total: string; status: string }> = [];
+  for (let i = 0; i < CS_AGENT_COUNT; i++) {
+    payouts.push({ staffId: IDS.csAgentIds[i]!, base: '50000.00', bonus: '5000.00', addOns: '0.00', deductions: '0.00', total: '55000.00', status: i % 3 === 0 ? 'APPROVED' : 'PENDING_APPROVAL' });
+  }
+  for (let i = 0; i < MEDIA_BUYER_COUNT; i++) {
+    payouts.push({ staffId: IDS.mediaBuyerIds[i]!, base: '40000.00', bonus: '8000.00', addOns: '0.00', deductions: '0.00', total: '48000.00', status: i % 2 === 0 ? 'PAID' : 'APPROVED' });
+  }
+  for (let i = 0; i < RIDER_COUNT; i++) {
+    payouts.push({ staffId: IDS.riderIds[i]!, base: '30000.00', bonus: '6000.00', addOns: '0.00', deductions: '0.00', total: '36000.00', status: 'APPROVED' });
+  }
 
   for (const p of payouts) {
     await sql`
@@ -604,10 +688,10 @@ async function seed() {
   await sql`
     INSERT INTO earnings_adjustments (id, staff_id, amount, category, reason, approved_by)
     VALUES
-      (gen_random_uuid(), ${IDS.csAgent1}, '2000.00', 'BONUS', 'Employee of the month — January 2026', ${IDS.hrManager}),
-      (gen_random_uuid(), ${IDS.csAgent2}, '-500.00', 'CLAWBACK', 'Order returned: customer rejected delivery', ${IDS.hrManager}),
-      (gen_random_uuid(), ${IDS.mediaBuyer1}, '5000.00', 'PERFORMANCE', 'Exceeded Q1 ROAS target by 40%', ${IDS.hrManager}),
-      (gen_random_uuid(), ${IDS.rider1}, '-800.00', 'DEDUCTION', 'Late delivery penalty — 3 orders', ${IDS.hrManager})
+      (gen_random_uuid(), ${IDS.csAgentIds[0]!}, '2000.00', 'BONUS', 'Employee of the month — January 2026', ${IDS.hrManager}),
+      (gen_random_uuid(), ${IDS.csAgentIds[1]!}, '-500.00', 'CLAWBACK', 'Order returned: customer rejected delivery', ${IDS.hrManager}),
+      (gen_random_uuid(), ${IDS.mediaBuyerIds[0]!}, '5000.00', 'PERFORMANCE', 'Exceeded Q1 ROAS target by 40%', ${IDS.hrManager}),
+      (gen_random_uuid(), ${IDS.riderIds[0]!}, '-800.00', 'DEDUCTION', 'Late delivery penalty — 3 orders', ${IDS.hrManager})
   `;
 
   // ══════════════════════════════════════════════════════════════════
@@ -650,14 +734,17 @@ async function seed() {
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating notifications...');
 
-  const notifications = [
-    { userId: IDS.csAgent1, type: 'order_assigned', title: 'New Order Assigned', body: 'Order from Fatima Abdullahi has been assigned to you.', data: { orderId: IDS.order3 } },
-    { userId: IDS.csAgent2, type: 'order_assigned', title: 'New Order Assigned', body: 'Order from Chidinma Okafor has been assigned to you.', data: { orderId: IDS.order4 } },
+  const notifications: Array<{ userId: string; type: string; title: string; body: string; data: object }> = [
     { userId: IDS.headOfLogistics, type: 'transfer_pending', title: 'Transfer Pending Verification', body: 'Stock transfer of Smart Watch X1 to GoRide Wuse Hub awaiting verification.', data: {} },
-    { userId: IDS.mediaBuyer1, type: 'funding_received', title: 'Funding Received', body: 'You received ₦500,000 from Head of Marketing. Please verify.', data: {} },
     { userId: IDS.financeOfficer, type: 'approval_pending', title: 'Approval Request', body: 'Emergency restock request from Warehouse Manager needs review.', data: {} },
     { userId: IDS.superAdmin, type: 'system', title: 'System Ready', body: 'Yannis EOSE seed data loaded successfully.', data: {} },
   ];
+  for (let i = 0; i < CS_AGENT_COUNT; i++) {
+    notifications.push({ userId: IDS.csAgentIds[i]!, type: 'order_assigned', title: 'New Order Assigned', body: `You have new orders in your queue.`, data: {} });
+  }
+  for (let i = 0; i < MEDIA_BUYER_COUNT; i++) {
+    notifications.push({ userId: IDS.mediaBuyerIds[i]!, type: 'funding_received', title: 'Funding Received', body: 'You received funding from Head of Marketing. Please verify.', data: {} });
+  }
 
   for (const n of notifications) {
     await sql`
@@ -671,18 +758,44 @@ async function seed() {
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating user-product assignments...');
 
-  const assignments = [
-    { userId: IDS.mediaBuyer1, productId: IDS.product1 },
-    { userId: IDS.mediaBuyer1, productId: IDS.product2 },
-    { userId: IDS.mediaBuyer2, productId: IDS.product5 },
-    { userId: IDS.mediaBuyer2, productId: IDS.product4 },
-  ];
+  const assignments: Array<{ userId: string; productId: string }> = [];
+  const productIds = [IDS.product1, IDS.product2, IDS.product3, IDS.product4, IDS.product5];
+  for (let i = 0; i < MEDIA_BUYER_COUNT; i++) {
+    for (const pid of productIds) {
+      assignments.push({ userId: IDS.mediaBuyerIds[i]!, productId: pid });
+    }
+  }
 
   for (const a of assignments) {
     await sql`
       INSERT INTO user_product_assignments (id, user_id, product_id)
       VALUES (gen_random_uuid(), ${a.userId}, ${a.productId})
     `;
+  }
+
+  let heavyOrdersCount = 0;
+  if (isHeavy) {
+    heavyOrdersCount = await seedHeavy(sql, {
+      campaignRows,
+      orderCount: SEED_ORDER_COUNT,
+      csAgentIds: IDS.csAgentIds,
+      mediaBuyerIds: IDS.mediaBuyerIds,
+      riderIds: IDS.riderIds,
+      location1: IDS.location1,
+      location2: IDS.location2,
+      provider1: IDS.provider1,
+      provider2: IDS.provider2,
+      productIds: [IDS.product1, IDS.product2, IDS.product3, IDS.product4, IDS.product5],
+      batchByProduct: {
+        [IDS.product1]: IDS.batch1p1,
+        [IDS.product2]: IDS.batch1p2,
+        [IDS.product3]: IDS.batch1p3,
+        [IDS.product4]: IDS.batch1p4,
+        [IDS.product5]: IDS.batch1p5,
+      },
+      headOfMarketingId: IDS.headOfMarketing,
+      hrManagerId: IDS.hrManager,
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -694,7 +807,7 @@ async function seed() {
   console.log('========================================');
   console.log('\n  Login Credentials (all users):');
   console.log(`  Password: ${password}`);
-  console.log('\n  User Accounts:');
+  console.log('\n  User Accounts (emails: kbshowkb+...@gmail.com):');
   console.log('  ─────────────────────────────────────');
   for (const u of users) {
     console.log(`  ${u.role.padEnd(20)} ${u.name.padEnd(22)} ${u.email}`);
@@ -702,19 +815,227 @@ async function seed() {
   console.log('\n  Data Summary:');
   console.log(`  Users:              ${users.length}`);
   console.log(`  Products:           ${products.length}`);
-  console.log(`  Logistics Providers: 2`);
-  console.log(`  Locations:          3`);
-  console.log(`  Stock Batches:      ${batches.length}`);
-  console.log(`  Inventory Levels:   ${levels.length}`);
-  console.log(`  Orders:             ${orders.length}`);
+  console.log(`  Campaigns:          ${campaignRows.length}`);
+  console.log(`  Orders (base):     ${orders.length}`);
+  if (isHeavy) console.log(`  Orders (heavy):    ${heavyOrdersCount}`);
   console.log(`  Call Logs:          ${callLogs.length}`);
   console.log(`  Ad Spend Entries:   ${adSpendEntries.length}`);
-  console.log(`  Commission Plans:   3`);
   console.log(`  Payout Records:     ${payouts.length}`);
   console.log(`  Notifications:      ${notifications.length}`);
   console.log('');
 
   await sql.end();
+}
+
+const ORDER_STATUSES_FOR_HEAVY = [
+  'DELIVERED', 'DELIVERED', 'DELIVERED', 'COMPLETED', 'COMPLETED', 'COMPLETED',
+  'IN_TRANSIT', 'IN_TRANSIT', 'DISPATCHED', 'DISPATCHED',
+  'CONFIRMED', 'CONFIRMED', 'ALLOCATED', 'ALLOCATED',
+  'UNPROCESSED', 'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED',
+  'CANCELLED', 'CANCELLED',
+] as const;
+
+async function seedHeavy(
+  sql: postgres.Sql,
+  opts: {
+    campaignRows: Array<{ id: string; mediaBuyerId: string; productIds: string[] }>;
+    orderCount: number;
+    csAgentIds: string[];
+    mediaBuyerIds: string[];
+    riderIds: string[];
+    location1: string;
+    location2: string;
+    provider1: string;
+    provider2: string;
+    productIds: string[];
+    batchByProduct: Record<string, string>;
+    headOfMarketingId: string;
+    hrManagerId: string;
+  }
+): Promise<number> {
+  faker.seed(12345);
+
+  const riderIdsByLocation: Record<string, string[]> = {
+    [opts.location1]: [opts.riderIds[0]!, opts.riderIds[1]!, opts.riderIds[3]!, opts.riderIds[4]!],
+    [opts.location2]: [opts.riderIds[2]!],
+  };
+  const providerByLocation: Record<string, string> = {
+    [opts.location1]: opts.provider1,
+    [opts.location2]: opts.provider2,
+  };
+
+  const BATCH_SIZE = 150;
+  let inserted = 0;
+
+  console.log(`\n  [Heavy] Creating ${opts.orderCount} orders...`);
+
+  for (let offset = 0; offset < opts.orderCount; offset += BATCH_SIZE) {
+    const count = Math.min(BATCH_SIZE, opts.orderCount - offset);
+    const orderRows: Array<{
+      id: string;
+      campaignId: string;
+      mediaBuyerId: string;
+      assignedCsId: string | null;
+      logisticsProviderId: string | null;
+      logisticsLocationId: string | null;
+      riderId: string | null;
+      status: string;
+      customerName: string;
+      customerPhoneHash: string;
+      customerAddress: string;
+      deliveryAddress: string;
+      totalAmount: string;
+      landedCost: string | null;
+      deliveryFee: string | null;
+      deliveryOtp: string | null;
+      deliveryGpsLat: string | null;
+      deliveryGpsLng: string | null;
+      items: string;
+      createdAt: Date;
+    }> = [];
+    const orderItemRows: Array<{ orderId: string; productId: string; qty: number; unitPrice: string; batchId: string }> = [];
+    const callLogRows: Array<{ orderId: string; agentId: string; status: string; duration: number | null }> = [];
+
+    for (let i = 0; i < count; i++) {
+      const orderId = randomUUID();
+      const status = faker.helpers.arrayElement(ORDER_STATUSES_FOR_HEAVY);
+      const campaign = faker.helpers.arrayElement(opts.campaignRows);
+      const productId = campaign.productIds[0] ?? opts.productIds[0]!;
+      const batchId = opts.batchByProduct[productId] ?? opts.batchByProduct[opts.productIds[0]!]!;
+      const unitPrice = faker.number.int({ min: 8000, max: 25000 });
+      const totalAmount = String(unitPrice);
+
+      const needsCs = !['UNPROCESSED', 'CANCELLED'].includes(status);
+      const needsRider = ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'COMPLETED'].includes(status);
+      const csIdx = (offset + i) % opts.csAgentIds.length;
+      const assignedCsId = needsCs ? opts.csAgentIds[csIdx]! : null;
+
+      let logisticsLocationId: string | null = null;
+      let logisticsProviderId: string | null = null;
+      let riderId: string | null = null;
+      let deliveryOtp: string | null = null;
+      let deliveryGpsLat: string | null = null;
+      let deliveryGpsLng: string | null = null;
+      let landedCost: string | null = null;
+      let deliveryFee: string | null = null;
+
+      if (needsRider) {
+        const loc = faker.helpers.arrayElement([opts.location1, opts.location2]);
+        const riders = riderIdsByLocation[loc]!;
+        riderId = faker.helpers.arrayElement(riders);
+        logisticsLocationId = loc;
+        logisticsProviderId = providerByLocation[loc]!;
+        deliveryOtp = faker.string.numeric(4);
+        if (status === 'DELIVERED' || status === 'COMPLETED') {
+          deliveryGpsLat = '6.4' + faker.string.numeric(4);
+          deliveryGpsLng = '3.4' + faker.string.numeric(4);
+          landedCost = String(faker.number.int({ min: 3000, max: 8000 }));
+          deliveryFee = '1500.00';
+        }
+      }
+
+      const createdAt = faker.date.recent({ days: 90 });
+
+      orderRows.push({
+        id: orderId,
+        campaignId: campaign.id,
+        mediaBuyerId: campaign.mediaBuyerId,
+        assignedCsId,
+        logisticsProviderId,
+        logisticsLocationId,
+        riderId,
+        status,
+        customerName: faker.person.fullName(),
+        customerPhoneHash: 'hash_' + faker.string.alphanumeric(12),
+        customerAddress: faker.location.streetAddress() + ', ' + faker.location.city() + ', Lagos',
+        deliveryAddress: faker.location.streetAddress() + ', ' + faker.location.city() + ', Lagos',
+        totalAmount,
+        landedCost,
+        deliveryFee,
+        deliveryOtp,
+        deliveryGpsLat,
+        deliveryGpsLng,
+        items: JSON.stringify([{ productId, quantity: 1, unitPrice }]),
+        createdAt,
+      });
+
+      orderItemRows.push({ orderId, productId, qty: 1, unitPrice: totalAmount, batchId });
+
+      if (assignedCsId && status !== 'UNPROCESSED' && status !== 'CANCELLED') {
+        callLogRows.push({
+          orderId,
+          agentId: assignedCsId,
+          status: 'COMPLETED',
+          duration: faker.number.int({ min: 15, max: 120 }),
+        });
+      }
+    }
+
+    for (const o of orderRows) {
+      await sql`
+        INSERT INTO orders (
+          id, campaign_id, media_buyer_id, assigned_cs_id, logistics_provider_id, logistics_location_id,
+          rider_id, status, customer_name, customer_phone_hash, customer_address, delivery_address,
+          total_amount, landed_cost, delivery_fee, delivery_otp, delivery_gps_lat, delivery_gps_lng,
+          items, created_at
+        ) VALUES (
+          ${o.id}, ${o.campaignId}, ${o.mediaBuyerId}, ${o.assignedCsId},
+          ${o.logisticsProviderId}, ${o.logisticsLocationId}, ${o.riderId}, ${o.status},
+          ${o.customerName}, ${o.customerPhoneHash}, ${o.customerAddress}, ${o.deliveryAddress},
+          ${o.totalAmount}, ${o.landedCost}, ${o.deliveryFee}, ${o.deliveryOtp}, ${o.deliveryGpsLat}, ${o.deliveryGpsLng},
+          ${o.items}::jsonb, ${o.createdAt}
+        )
+      `;
+    }
+    for (const oi of orderItemRows) {
+      await sql`
+        INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, batch_id)
+        VALUES (gen_random_uuid(), ${oi.orderId}, ${oi.productId}, ${oi.qty}, ${oi.unitPrice}, ${oi.batchId})
+      `;
+    }
+    for (const cl of callLogRows) {
+      await sql`
+        INSERT INTO call_logs (id, order_id, agent_id, call_token, call_status, duration_seconds)
+        VALUES (gen_random_uuid(), ${cl.orderId}, ${cl.agentId}, ${randomUUID()}, ${cl.status}, ${cl.duration})
+      `;
+    }
+
+    inserted += orderRows.length;
+    if (offset + BATCH_SIZE < opts.orderCount) process.stdout.write(`  [Heavy] ${inserted}/${opts.orderCount} orders...\r`);
+  }
+
+  console.log(`  [Heavy] ${inserted} orders created.`);
+
+  // Extra ad spend for last 60 days across campaigns
+  console.log('  [Heavy] Creating ad spend entries...');
+  for (const row of opts.campaignRows.slice(0, 40)) {
+    for (let d = 0; d < 60; d += 2) {
+      await sql`
+        INSERT INTO ad_spend_logs (id, media_buyer_id, product_id, campaign_id, spend_amount, screenshot_url, spend_date)
+        VALUES (
+          gen_random_uuid(), ${row.mediaBuyerId}, ${row.productIds[0] ?? opts.productIds[0]!}, ${row.id},
+          ${String(faker.number.int({ min: 20000, max: 80000 }))}.00,
+          'https://storage.example.com/screenshots/ads.jpg',
+          NOW() - (${d} * INTERVAL '1 day')
+        )
+      `;
+    }
+  }
+
+  // Extra notifications per user
+  console.log('  [Heavy] Creating notifications...');
+  const allUserIds = [...opts.csAgentIds, ...opts.mediaBuyerIds, ...opts.riderIds];
+  for (const userId of allUserIds) {
+    const n = faker.number.int({ min: 5, max: 12 });
+    for (let i = 0; i < n; i++) {
+      await sql`
+        INSERT INTO notifications (id, user_id, type, title, body, data, read)
+        VALUES (gen_random_uuid(), ${userId}, 'order_assigned', ${faker.lorem.sentence()}, ${faker.lorem.sentence()}, '{}'::jsonb, false)
+      `;
+    }
+  }
+
+  return inserted;
 }
 
 seed().catch((err) => {
