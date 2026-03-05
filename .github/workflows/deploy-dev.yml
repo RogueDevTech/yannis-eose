@@ -50,6 +50,13 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Ensure ECR repositories exist
+        run: |
+          for repo in yannis-eose-api yannis-eose-web; do
+            aws ecr describe-repositories --repository-names "$repo" --region ${{ env.AWS_REGION }} 2>/dev/null || \
+            aws ecr create-repository --repository-name "$repo" --region ${{ env.AWS_REGION }}
+          done
+
       - name: Build & push API image
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
