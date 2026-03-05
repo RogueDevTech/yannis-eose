@@ -2,6 +2,9 @@
   "name": "@yannis/api",
   "version": "0.0.0",
   "private": true,
+  "exports": {
+    "./trpc": "./src/trpc/app-router.d.ts"
+  },
   "scripts": {
     "dev": "nest start --watch",
     "start:dev": "nest start --watch",

@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
-import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
+import { LogisticsOrdersPage, type LogisticsOrderRow } from '~/features/logistics/LogisticsOrdersPage';
 import type { Location } from '~/features/logistics/types';
 
 export const meta: MetaFunction = () => [
@@ -186,5 +186,5 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function TplOrdersRoute() {
   const data = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
-  return <LogisticsOrdersPage {...data} />;
+  return <LogisticsOrdersPage {...data} orders={data.orders as LogisticsOrderRow[]} />;
 }

@@ -58,7 +58,7 @@ export default function MarketingLeaderboardRoute() {
   return (
     <MarketingLeaderboardPage
       mediaBuyerLeaderboard={data.mediaBuyerLeaderboard}
-      leaderboardPeriod={data.leaderboardPeriod}
+      leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
       filters={data.filters}
     />
   );

@@ -6,7 +6,7 @@ import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
 import { RouteLoader } from '~/components/ui/route-loader';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
-import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
+import type { DashboardData, DashboardLoaderData, DashboardPageData, OrdersAndCounts } from '~/features/dashboard/types';
 
 const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
 const defaultProfit: DashboardData['profit'] = { revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0, trueProfit: 0, orderCount: 0, margin: 0 };
@@ -96,7 +96,7 @@ export default function TplDashboard() {
               totalUsers: 0,
               totalProducts: 0,
               payoutSummary: {},
-            }}
+            } as unknown as DashboardPageData}
             role={role}
             userName={userName}
             filters={loaderData.filters}

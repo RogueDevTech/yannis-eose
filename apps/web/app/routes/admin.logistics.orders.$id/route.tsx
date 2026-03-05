@@ -210,7 +210,7 @@ export default function LogisticsOrderDetailRoute() {
   usePageRefreshOnEvent(orderEvents);
 
   return (
-    <DeferredSection resolve={orderDetail} skeleton="card">
+    <DeferredSection resolve={orderDetail as Promise<{ notFound: boolean } | { order: OrderDetail; history: Promise<HistoryEntry[]> }>} skeleton="card">
       {(data) =>
         'notFound' in data && data.notFound ? (
           <div className="card text-center py-12">
@@ -225,8 +225,8 @@ export default function LogisticsOrderDetailRoute() {
           </div>
         ) : (
           <LogisticsOrderDetailPage
-            order={(data as { order: OrderDetail; history: Promise<HistoryEntry[]> }).order}
-            history={(data as { order: OrderDetail; history: Promise<HistoryEntry[]> }).history}
+            order={(data as unknown as { order: OrderDetail; history: Promise<HistoryEntry[]> }).order}
+            history={(data as unknown as { order: OrderDetail; history: Promise<HistoryEntry[]> }).history}
             locations={locations}
             riders={riders}
           />

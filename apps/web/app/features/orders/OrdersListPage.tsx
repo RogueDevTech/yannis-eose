@@ -279,8 +279,9 @@ export function OrdersListPage({
   // Determine what bulk transitions are available based on selected orders
   const selectedOrders = filteredOrders.filter((o) => selectedIds.has(o.id));
   const selectedStatuses = [...new Set(selectedOrders.map((o) => o.status))];
-  const availableTransitions = selectedStatuses.length === 1
-    ? BULK_TRANSITIONS[selectedStatuses[0]] ?? []
+  const singleStatus = selectedStatuses[0];
+  const availableTransitions = selectedStatuses.length === 1 && singleStatus !== undefined
+    ? BULK_TRANSITIONS[singleStatus] ?? []
     : [];
 
   const isSubmitting = fetcher.state !== 'idle';
@@ -548,7 +549,7 @@ export function OrdersListPage({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {/* Bulk Transition buttons */}
-              {availableTransitions.map((status) => (
+              {availableTransitions.map((status: string) => (
                 <Button
                   key={status}
                   variant="primary"

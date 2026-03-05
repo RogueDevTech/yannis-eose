@@ -78,7 +78,7 @@ function SyncNotificationReadIds({ notifications, onPruneServerKnown }: { notifi
   return null;
 }
 
-export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications }: HeaderProps) {
+export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);

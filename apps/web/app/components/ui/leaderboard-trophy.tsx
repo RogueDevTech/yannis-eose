@@ -32,9 +32,9 @@ export function LeaderboardTrophy({ rank, className = 'w-5 h-5' }: LeaderboardTr
       strokeWidth={1.5}
       stroke="currentColor"
       aria-label={label}
-      title={label}
       role="img"
     >
+      <title>{label}</title>
       <path
         strokeLinecap="round"
         strokeLinejoin="round"

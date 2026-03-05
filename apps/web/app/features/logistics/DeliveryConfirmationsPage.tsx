@@ -23,10 +23,7 @@ export function DeliveryConfirmationsPage({
   const [rejectModal, setRejectModal] = useState<{ requestId: string } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
-  useFetcherToast(fetcher.data, {
-    successMessage: 'Action completed',
-    errorMessage: (d) => (d as { error?: string })?.error ?? 'Action failed',
-  });
+  useFetcherToast(fetcher.data, { successMessage: 'Action completed' });
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 

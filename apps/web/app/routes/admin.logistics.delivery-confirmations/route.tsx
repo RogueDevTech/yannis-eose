@@ -30,7 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (!res.ok) {
     return json(
-      { requests: [], pagination: { page: 1, limit, total: 0 }, statusFilter },
+      { requests: [], total: 0, page: 1, limit, statusFilter },
       { status: 200 },
     );
   }

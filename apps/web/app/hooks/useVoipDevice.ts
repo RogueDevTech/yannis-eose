@@ -180,7 +180,8 @@ export function useVoipDevice(opts: {
       const { Device } = await import('@twilio/voice-sdk');
 
       const device = new Device(token, {
-        codecPreferences: ['opus', 'pcmu'] as unknown as Device.Codec[],
+        // @ts-expect-error Twilio types expect Codec[]; opus/pcmu are valid at runtime
+        codecPreferences: ['opus', 'pcmu'],
         closeProtection: true,
         logLevel: 1, // warn
       });

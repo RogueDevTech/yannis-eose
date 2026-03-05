@@ -349,7 +349,7 @@ function parseOffersArray(val: unknown): Array<Record<string, unknown>> {
 function formatOffers(val: unknown): string {
   const arr = parseOffersArray(val);
   if (arr.length === 0) return '-';
-  return arr.map((obj, i) => {
+  return arr.map((obj) => {
     const qty = obj.qty ?? '?';
     const label = typeof obj.label === 'string' ? obj.label : String(obj.label ?? 'Offer');
     const priceVal = obj.price;

@@ -5,6 +5,7 @@ import { Checkbox } from '~/components/ui/checkbox';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { Spinner } from '~/components/ui/spinner';
 import { formatStatus } from '~/features/shared/order-status';
 import type { Order } from '~/features/orders/types';
 import type { Location } from './types';

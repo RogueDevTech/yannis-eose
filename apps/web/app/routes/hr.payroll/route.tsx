@@ -232,11 +232,11 @@ export default function HRRoute() {
       totalPlans={data.totalPlans}
       payouts={data.payouts}
       totalPayouts={data.totalPayouts}
-      adjustments={data.adjustments as Promise<never[]>}
-      payoutSummary={data.payoutSummary as Promise<Record<string, { count: number; total: string }>>}
-      users={data.users as Promise<never[]>}
-      settlementConfig={data.settlementConfig as Promise<null>}
-      currentPeriod={data.currentPeriod as Promise<null>}
+      adjustments={data.adjustments}
+      payoutSummary={data.payoutSummary}
+      users={data.users}
+      settlementConfig={data.settlementConfig}
+      currentPeriod={data.currentPeriod}
     />
   );
 }

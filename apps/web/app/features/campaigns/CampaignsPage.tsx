@@ -115,11 +115,11 @@ const ArchiveIcon = (
 // ── Main Component ───────────────────────────────────
 export function FormsPage({
   forms,
-  totalForms,
+  totalForms: _totalForms,
   products,
   isMediaBuyer = false,
   showMediaBuyerColumn = false,
-  currentUserName,
+  currentUserName: _currentUserName,
   currentUserId,
 }: FormsPageProps) {
   const fetcher = useFetcher();

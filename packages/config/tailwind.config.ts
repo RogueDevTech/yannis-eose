@@ -1,6 +1,11 @@
-import type { Config } from 'tailwindcss';
-
-const config: Config = {
+/** Minimal Tailwind config shape so this package does not depend on tailwindcss */
+interface TailwindConfig {
+  content: string[];
+  darkMode?: string;
+  theme?: { extend?: Record<string, unknown> };
+  plugins?: unknown[];
+}
+const config: TailwindConfig = {
   content: [],
   darkMode: 'class',
   theme: {

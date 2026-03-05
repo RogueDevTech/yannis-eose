@@ -242,8 +242,8 @@ export async function queueDeliveryConfirmation(params: {
   gpsLng?: number;
   deliveryFeeAddOn?: number;
 }): Promise<void> {
-  const API_URL = (typeof window !== 'undefined' && (window as Record<string, unknown>).__ENV_API_URL)
-    ? String((window as Record<string, unknown>).__ENV_API_URL)
+  const API_URL = (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__ENV_API_URL)
+    ? String((window as unknown as Record<string, unknown>).__ENV_API_URL)
     : 'http://localhost:4444';
 
   const metadata: Record<string, unknown> = {
@@ -289,7 +289,7 @@ export async function subscribeToPush(vapidPublicKey: string): Promise<PushSubsc
   // Subscribe
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
   });
 
   return subscription;

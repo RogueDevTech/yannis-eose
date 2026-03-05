@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams, useNavigation } from '@remix-run/react';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import type { CEODashboardData, CEODashboardFilters } from './types';
 
@@ -85,7 +85,7 @@ export interface CEODashboardPageProps {
 
 export function CEODashboardPage({ data, filters = { startDate: '', endDate: '', periodAllTime: false }, showBackToDashboard = true }: CEODashboardPageProps) {
   const [showChartView, setShowChartView] = useState(false);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const topic = filters?.topic ?? 'orders';
   const isLoadingTopic = navigation.state === 'loading';
@@ -195,7 +195,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   paddingAngle={totalCosts > 0 ? 2 : 0}
                   dataKey="value"
                   nameKey="name"
-                  label={({ name, percent }) => (totalCosts > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : name)}
+                  label={({ name, percent }) => (totalCosts > 0 ? `${name} ${((percent ?? 0) * 100).toFixed(0)}%` : name)}
                 >
                   {totalCosts > 0
                     ? [
@@ -213,7 +213,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                     : [<Cell key="empty" fill="#94a3b8" />]}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number) => [totalCosts > 0 ? fmt(value) : '—', 'Amount']}
+                  formatter={(value: number | undefined) => [totalCosts > 0 ? fmt(value ?? 0) : '—', 'Amount']}
                   contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-surface-200)' }}
                 />
                 <Legend />
@@ -293,7 +293,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                 <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                 <YAxis type="category" dataKey="stage" width={96} tick={{ fontSize: 12 }} />
                 <Tooltip
-                  formatter={(value: number) => [value, 'Orders']}
+                  formatter={(value: number | undefined) => [value ?? 0, 'Orders']}
                   contentStyle={{ borderRadius: '8px' }}
                   cursor={{ fill: 'rgba(0,0,0,0.04)' }}
                 />
@@ -373,7 +373,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                     : [<Cell key="empty" fill="#94a3b8" />]}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number) => [orderPipeline.total > 0 ? value : '—', 'Orders']}
+                  formatter={(value: number | undefined) => [orderPipeline.total > 0 ? (value ?? 0) : '—', 'Orders']}
                   contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-surface-200)' }}
                 />
                 <Legend />
@@ -561,10 +561,11 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                     <Tooltip
                       contentStyle={{ borderRadius: '8px' }}
                       labelFormatter={(label) => (typeof label === 'string' ? label : String(label))}
-                      formatter={(value: number, name: string) => [
-                        name === 'Revenue' ? fmt(value) : value,
+                      // Recharts Formatter allows value to be undefined at runtime
+                      formatter={((value: number | undefined, name: string) => [
+                        name === 'Revenue' ? fmt(value ?? 0) : (value ?? 0),
                         name,
-                      ]}
+                      ]) as never}
                       labelStyle={{ fontWeight: 600 }}
                     />
                     <Legend />
@@ -637,7 +638,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                     paddingAngle={totalCosts > 0 ? 2 : 0}
                     dataKey="value"
                     nameKey="name"
-                    label={({ name, percent }) => (totalCosts > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : name)}
+                    label={({ name, percent }) => (totalCosts > 0 ? `${name} ${((percent ?? 0) * 100).toFixed(0)}%` : name)}
                   >
                     {totalCosts > 0
                       ? [
@@ -652,7 +653,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                           .map((_, i) => <Cell key={i} fill={COST_COLORS_HEX[i % COST_COLORS_HEX.length]} />)
                       : [<Cell key="empty" fill="#94a3b8" />]}
                   </Pie>
-                  <Tooltip formatter={(v: number) => [totalCosts > 0 ? fmt(v) : '—', '']} contentStyle={{ borderRadius: '8px' }} />
+                  <Tooltip formatter={(v: number | undefined) => [totalCosts > 0 ? fmt(v ?? 0) : '—', '']} contentStyle={{ borderRadius: '8px' }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -692,7 +693,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                           ))
                       : [<Cell key="empty" fill="#94a3b8" />]}
                   </Pie>
-                  <Tooltip formatter={(value: number) => [orderPipeline.total > 0 ? value : '—', 'Orders']} contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-surface-200)' }} />
+                  <Tooltip formatter={(value: number | undefined) => [orderPipeline.total > 0 ? (value ?? 0) : '—', 'Orders']} contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-surface-200)' }} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
@@ -722,7 +723,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-surface-200 dark:stroke-surface-700" />
                 <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                 <YAxis type="category" dataKey="stage" width={96} tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(value: number) => [value, 'Orders']} contentStyle={{ borderRadius: '8px' }} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+                <Tooltip formatter={(value: number | undefined) => [value ?? 0, 'Orders']} contentStyle={{ borderRadius: '8px' }} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
                 <Bar dataKey="count" name="Orders" radius={[0, 4, 4, 0]} minPointSize={4}>
                   {[0, 1, 2, 3, 4].map((i) => (
                     <Cell key={i} fill={PIPELINE_CHART_COLORS[i]} />
@@ -758,10 +759,10 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
                   <YAxis type="category" dataKey="name" width={112} tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={(value: number, name: string) => [
-                      name === 'roas' ? `${Number(value).toFixed(2)}x` : name === 'spend' ? fmt(value) : value,
+                    formatter={((value: number | undefined, name: string) => [
+                      name === 'roas' ? `${Number(value ?? 0).toFixed(2)}x` : name === 'spend' ? fmt(value ?? 0) : (value ?? 0),
                       name === 'spend' ? 'Ad spend' : name === 'orders' ? 'Delivered' : 'True ROAS',
-                    ]}
+                    ]) as never}
                     contentStyle={{ borderRadius: '8px' }}
                     cursor={{ fill: 'rgba(0,0,0,0.04)' }}
                   />
@@ -799,7 +800,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                   <YAxis type="category" dataKey="name" width={112} tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={(value: number, name: string) => [value, name === 'pending' ? 'Pending orders' : 'Capacity']}
+                    formatter={((value: number | undefined, name: string) => [value ?? 0, name === 'pending' ? 'Pending orders' : 'Capacity']) as never}
                     contentStyle={{ borderRadius: '8px' }}
                     cursor={{ fill: 'rgba(0,0,0,0.04)' }}
                   />

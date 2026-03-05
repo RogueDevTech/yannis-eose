@@ -10,7 +10,7 @@ import { DeferredError } from '~/components/ui/deferred-section';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
 import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
-import type { CEODashboardData } from '~/features/ceo/types';
+import type { CEODashboardData, CEODashboardFilters } from '~/features/ceo/types';
 
 const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
 const defaultProfit: DashboardData['profit'] = { revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0, trueProfit: 0, orderCount: 0, margin: 0 };
@@ -207,7 +207,7 @@ export default function AdminDashboard() {
           {(data) => (
             <CEODashboardPage
               data={data}
-              filters={loaderData.filters}
+              filters={loaderData.filters as CEODashboardFilters}
               showBackToDashboard={false}
             />
           )}

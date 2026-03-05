@@ -169,6 +169,9 @@ importers:
       '@twilio/voice-sdk':
         specifier: ^2.18.0
         version: 2.18.0
+      '@yannis/api':
+        specifier: workspace:*
+        version: link:../api
       '@yannis/shared':
         specifier: workspace:*
         version: link:../../packages/shared

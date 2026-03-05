@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { createStaffSchema } from './users';
 
 export const permissionRequestTypeSchema = z.enum([
   'USER_CREATION',

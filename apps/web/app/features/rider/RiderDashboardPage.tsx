@@ -26,6 +26,10 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [actionType, setActionType] = useState<'RETURNED' | 'IN_TRANSIT' | null>(null);
   const [reason, setReason] = useState('');
+  const [otpInput, setOtpInput] = useState('');
+  const [deliveredQty, setDeliveredQty] = useState('');
+  const [returnedQty, setReturnedQty] = useState('');
+  const [deliveryFeeAddOn, setDeliveryFeeAddOn] = useState('');
 
   // Auto-capture GPS on component mount
   useEffect(() => {

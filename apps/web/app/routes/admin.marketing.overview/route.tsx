@@ -131,5 +131,5 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function MarketingOverviewRoute() {
   const data = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_OVERVIEW_LIVE_EVENTS]);
-  return <MarketingOverviewPage {...data} />;
+  return <MarketingOverviewPage {...data} leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'} />;
 }

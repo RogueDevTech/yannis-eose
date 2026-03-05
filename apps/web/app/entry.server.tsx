@@ -13,7 +13,7 @@ export default function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   remixContext: EntryContext,
-  loadContext: AppLoadContext
+  _loadContext: AppLoadContext
 ) {
   let prohibitOutOfOrderStreaming =
     isBotRequest(request.headers.get("user-agent")) || remixContext.isSpaMode;
@@ -41,14 +41,10 @@ function isBotRequest(userAgent: string | null) {
     return false;
   }
 
-  // isbot >= 3.8.0, >4
-  if ("isbot" in isbotModule && typeof isbotModule.isbot === "function") {
-    return isbotModule.isbot(userAgent);
-  }
-
-  // isbot < 3.8.0
-  if ("default" in isbotModule && typeof isbotModule.default === "function") {
-    return isbotModule.default(userAgent);
+  const mod = isbotModule as unknown as { isbot?: (ua: string) => boolean; default?: (ua: string) => boolean };
+  const isbot = mod.isbot ?? mod.default;
+  if (typeof isbot === "function") {
+    return isbot(userAgent);
   }
 
   return false;

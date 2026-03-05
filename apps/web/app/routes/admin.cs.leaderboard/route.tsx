@@ -58,7 +58,7 @@ export default function CSLeaderboardRoute() {
   return (
     <CSLeaderboardPage
       csLeaderboard={data.csLeaderboard}
-      leaderboardPeriod={data.leaderboardPeriod}
+      leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
       filters={data.filters}
     />
   );

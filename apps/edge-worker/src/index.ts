@@ -73,6 +73,16 @@ interface OrderCreatePayload {
   cartId?: string;
 }
 
+/** Validated cart form data (has raw customerPhone from form) */
+interface CartFormData {
+  campaignId: string;
+  mediaBuyerId?: string;
+  customerName: string;
+  customerPhone: string;
+  productId: string;
+  offerLabel?: string;
+}
+
 interface CartSavePayload {
   campaignId: string;
   mediaBuyerId?: string;
@@ -892,7 +902,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
   ).join('\n');
 
   // Build offer radio buttons for each product
-  const offerGroupsHtml = config.products.map((p, pIdx) => {
+  const offerGroupsHtml = config.products.map((p) => {
     const offers = (p.offers && p.offers.length > 0)
       ? p.offers
       : [{ label: 'Standard', qty: 1, price: p.price }];
@@ -915,7 +925,8 @@ function getFormInnerHTML(config: CampaignConfig): string {
   }).join('\n');
 
   // If single product, auto-set selectedProduct via hidden data attribute
-  const singleProductAttr = hasSingleProduct ? ` data-single-product="${config.products[0].id}"` : '';
+  const firstProduct = config.products[0];
+  const singleProductAttr = hasSingleProduct && firstProduct ? ` data-single-product="${firstProduct.id}"` : '';
 
   return `
     <h2>${escapeHtml(heading)}</h2>
@@ -989,15 +1000,11 @@ function formatPrice(price: string): string {
 
 // ── Fallback Form (no campaign data) ──────────────────────────
 
+const FALLBACK_PRODUCTS: CampaignConfig['products'] = [
+  { id: 'from-campaign', name: 'Product', price: '0', offers: [] },
+];
+
 function renderFallbackForm(campaignId: string, workerUrl: string): Response {
-  const fallbackConfig: CampaignConfig = {
-    id: campaignId,
-    name: 'Order',
-    mediaBuyerId: '',
-    deploymentType: 'HOSTED',
-    products: [],
-    formConfig: { heading: 'Place Your Order', subtitle: 'Fill in your details below' },
-  };
   // Render a simplified form without product selection
   const accentColor = '#6366f1';
   const html = `<!DOCTYPE html>
@@ -1029,7 +1036,7 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
     </form>
   </div>
   <script>
-    ${getFormScript(workerUrl, campaignId, [{ id: 'from-campaign', name: 'Product', price: '0' }])}
+    ${getFormScript(workerUrl, campaignId, FALLBACK_PRODUCTS)}
   </script>
 </body>
 </html>`;
@@ -1262,7 +1269,7 @@ export default {
 
 // ── Cart Save Handler ──────────────────────────────────────────
 
-function validateCart(body: unknown): { valid: true; data: CartSavePayload } | { valid: false; error: string } {
+function validateCart(body: unknown): { valid: true; data: CartFormData } | { valid: false; error: string } {
   if (!body || typeof body !== 'object') {
     return { valid: false, error: 'Request body is required' };
   }

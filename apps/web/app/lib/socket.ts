@@ -9,7 +9,7 @@ let socket: Socket | null = null;
  */
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io(window.ENV?.API_URL ?? 'http://localhost:4444', {
+    socket = io((window as Window & { ENV?: { API_URL?: string } }).ENV?.API_URL ?? 'http://localhost:4444', {
       withCredentials: true,
       autoConnect: true,
       reconnection: true,

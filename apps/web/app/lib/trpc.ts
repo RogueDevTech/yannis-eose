@@ -1,5 +1,5 @@
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
-import type { AppRouter } from '@yannis/shared/trpc';
+import type { AppRouter } from '@yannis/api/trpc';
 
 /**
  * Vanilla tRPC client — used in Remix loaders/actions (server-side).

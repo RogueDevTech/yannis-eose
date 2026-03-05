@@ -17,10 +17,12 @@ function formatPriceRange(product: Product): string {
   if (prices.length === 0) {
     return `\u20A6${Number(product.baseSalePrice).toLocaleString()}`;
   }
-  if (prices.length === 1 || prices[0] === prices[prices.length - 1]) {
-    return `\u20A6${prices[0].toLocaleString()}`;
+  const first = prices[0];
+  const last = prices[prices.length - 1];
+  if (prices.length === 1 || first === last) {
+    return `\u20A6${(first ?? 0).toLocaleString()}`;
   }
-  return `\u20A6${prices[0].toLocaleString()} \u2013 \u20A6${prices[prices.length - 1].toLocaleString()}`;
+  return `\u20A6${(first ?? 0).toLocaleString()} \u2013 \u20A6${(last ?? 0).toLocaleString()}`;
 }
 
 function formatOffersStructure(offers: Product['offers'] | null | undefined): string {

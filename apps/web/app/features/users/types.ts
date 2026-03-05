@@ -58,6 +58,7 @@ export interface UserCreateProduct {
   id: string;
   name: string;
   sku: string;
+  category?: string;
 }
 
 export interface UserCreateLocation {
