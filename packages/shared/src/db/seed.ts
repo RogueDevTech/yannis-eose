@@ -7,9 +7,15 @@
  *   pnpm db:seed -- --reset   # Truncate then full base seed
  *   pnpm db:seed -- --reset --heavy  # Truncate then base + heavy
  *
- * Env: DATABASE_URL required. SEED_ORDER_COUNT (default 500, max 2000) for --heavy.
+ * Env: DATABASE_URL required (loads from repo root .env if present). SEED_ORDER_COUNT (default 500, max 2000) for --heavy.
  * All user emails: kbshowkb+<role><index>@gmail.com
  */
+
+import { config } from 'dotenv';
+import { resolve } from 'path';
+
+// Load .env from monorepo root when run from packages/shared
+config({ path: resolve(__dirname, '../../../../.env') });
 
 import postgres from 'postgres';
 import * as bcrypt from 'bcrypt';
