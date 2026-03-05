@@ -88,6 +88,7 @@ const navStructure: NavGroupDef[] = [
     group: 'Finance',
     items: [
       { label: 'Finance', href: '/admin/finance/overview', icon: SidebarIcons.finance, permission: 'finance.read' },
+      { label: 'Delivery remittances', href: '/admin/finance/delivery-remittances', icon: SidebarIcons.finance, permission: 'finance.read' },
       { label: 'Disbursements', href: '/admin/finance/disbursements', icon: SidebarIcons.finance, permission: 'finance.disburse' },
     ],
   },

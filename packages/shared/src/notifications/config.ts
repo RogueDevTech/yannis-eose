@@ -39,6 +39,8 @@ export const CONFIGURABLE_EMAIL_TYPES = [
   'hr:addon_approved',
   'hr:deduction_applied',
   'transfer:sent',
+  'delivery_remittance:sent',
+  'delivery_remittance:received',
 ] as const;
 
 export const ALL_NOTIFICATION_TYPES = [
@@ -243,6 +245,20 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     type: 'transfer:sent',
     label: 'Stock transfer incoming',
     description: 'TPL Manager — stock transfer on the way to their location',
+    mandatory: false,
+    category: 'logistics',
+  },
+  'delivery_remittance:sent': {
+    type: 'delivery_remittance:sent',
+    label: 'Delivery remittance submitted',
+    description: 'Finance — 3PL submitted a delivery remittance for review',
+    mandatory: false,
+    category: 'finance',
+  },
+  'delivery_remittance:received': {
+    type: 'delivery_remittance:received',
+    label: 'Delivery remittance received',
+    description: '3PL — Finance marked your delivery remittance as received',
     mandatory: false,
     category: 'logistics',
   },

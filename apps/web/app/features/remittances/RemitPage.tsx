@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -21,11 +22,31 @@ export interface RemittanceRecord {
   shrinkageReason: string | null;
 }
 
+export interface DeliveryRemittanceRecord {
+  id: string;
+  logisticsLocationId: string;
+  sentBy: string;
+  receiptUrls: string[];
+  status: string;
+  sentAt: string;
+  locationName: string | null;
+  orderCount: number;
+}
+
+export interface DeliveryRemittanceEligibleOrder {
+  id: string;
+  customerName: string;
+  totalAmount: string | null;
+  deliveredAt: string | null;
+}
+
 export interface RemitPageProps {
   remittances: RemittanceRecord[];
   products: Array<{ id: string; name: string }>;
   locations: Array<{ id: string; name: string }>;
   userLocationId: string | null;
+  deliveryRemittances: DeliveryRemittanceRecord[];
+  eligibleOrders: DeliveryRemittanceEligibleOrder[];
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -34,11 +55,51 @@ const STATUS_LABEL: Record<string, string> = {
   DISPUTED: 'Disputed',
 };
 
-export function RemitPage({ remittances, products, locations, userLocationId }: RemitPageProps) {
+const DELIVERY_REMIT_STATUS: Record<string, string> = {
+  SENT: 'Pending (Finance to confirm)',
+  RECEIVED: 'Received',
+  DISPUTED: 'Disputed',
+};
+
+export function RemitPage({
+  remittances,
+  products,
+  locations,
+  userLocationId,
+  deliveryRemittances,
+  eligibleOrders,
+}: RemitPageProps) {
   const fetcher = useFetcher();
   const [receiptUploaded, setReceiptUploaded] = useState(false);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [deliveryReceiptUrls, setDeliveryReceiptUrls] = useState<string[]>([]);
 
-  useFetcherToast(fetcher.data, { successMessage: 'Remittance submitted' });
+  useFetcherToast(fetcher.data, {
+    successMessage:
+      fetcher.formData?.get('intent') === 'createDeliveryRemittance'
+        ? 'Delivery remittance submitted'
+        : 'Remittance submitted',
+  });
+
+  useEffect(() => {
+    if (fetcher.data && (fetcher.data as { success?: boolean }).success && fetcher.formData?.get('intent') === 'createDeliveryRemittance') {
+      setSelectedOrderIds(new Set());
+      setDeliveryReceiptUrls([]);
+    }
+  }, [fetcher.data, fetcher.formData?.get('intent')]);
+
+  const toggleOrder = (id: string) => {
+    setSelectedOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const addDeliveryReceipt = (url: string) => {
+    setDeliveryReceiptUrls((prev) => (prev.includes(url) ? prev : [...prev, url]));
+  };
 
   const toLocationOptions = userLocationId
     ? locations.filter((l) => l.id !== userLocationId)
@@ -46,17 +107,118 @@ export function RemitPage({ remittances, products, locations, userLocationId }: 
 
   const isSubmitting = fetcher.state === 'submitting';
 
+  const isSubmittingDelivery = fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'createDeliveryRemittance';
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Remit to warehouse</h1>
+        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Remit</h1>
         <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-          Submit a transfer of stock back to the main warehouse. Upload a receipt as proof; Head of Logistics will mark it received.
+          Stock transfer to warehouse, or delivery remittance (batch delivered orders + payment receipts for Finance).
         </p>
       </div>
 
+      {/* Delivery remittance: select orders + payment receipts → Finance marks received */}
+      <div className="card p-6">
+        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Delivery remittance</h2>
+        <p className="text-sm text-surface-600 dark:text-surface-400 mb-4">
+          Select delivered orders and attach payment receipt(s). Finance will review and mark as received (end of day).
+        </p>
+        <fetcher.Form method="post" className="space-y-4">
+          <input type="hidden" name="intent" value="createDeliveryRemittance" />
+          <input type="hidden" name="orderIds" value={JSON.stringify([...selectedOrderIds])} />
+          <input type="hidden" name="receiptUrls" value={JSON.stringify(deliveryReceiptUrls)} />
+          <div>
+            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">
+              Select delivered orders
+            </label>
+            {eligibleOrders.length === 0 ? (
+              <p className="text-sm text-surface-500 dark:text-surface-400">No delivered orders available to remit.</p>
+            ) : (
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-surface-200 dark:border-surface-700 divide-y divide-surface-100 dark:divide-surface-800">
+                {eligibleOrders.map((order) => (
+                  <label
+                    key={order.id}
+                    className="flex items-center gap-3 px-3 py-2 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={selectedOrderIds.has(order.id)}
+                      onChange={() => toggleOrder(order.id)}
+                      disabled={isSubmittingDelivery}
+                    />
+                    <span className="text-sm text-surface-900 dark:text-white truncate">{order.customerName}</span>
+                    <span className="text-xs text-surface-500 dark:text-surface-400 shrink-0">
+                      {order.deliveredAt ? new Date(order.deliveredAt).toLocaleDateString() : '—'}
+                    </span>
+                    {order.totalAmount != null && (
+                      <span className="text-xs font-medium text-surface-700 dark:text-surface-300 shrink-0">
+                        ₦{Number(order.totalAmount).toLocaleString()}
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              Payment receipt(s) (required)
+            </label>
+            <FileUpload
+              folder={S3_FOLDERS.RECEIPTS}
+              label="Upload receipt"
+              required={deliveryReceiptUrls.length === 0}
+              onUpload={addDeliveryReceipt}
+            />
+            {deliveryReceiptUrls.length > 0 && (
+              <p className="text-xs text-success-600 dark:text-success-400 mt-1">
+                {deliveryReceiptUrls.length} receipt(s) attached
+              </p>
+            )}
+          </div>
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            loading={isSubmittingDelivery}
+            loadingText="Submitting..."
+            disabled={
+              isSubmittingDelivery || selectedOrderIds.size === 0 || deliveryReceiptUrls.length === 0
+            }
+          >
+            Submit delivery remittance
+          </Button>
+        </fetcher.Form>
+        {deliveryRemittances.length > 0 && (
+          <div className="mt-6 pt-4 border-t border-surface-200 dark:border-surface-700">
+            <h3 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Your delivery remittances</h3>
+            <ul className="space-y-1 text-sm">
+              {deliveryRemittances.map((r) => (
+                <li key={r.id} className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                      r.status === 'RECEIVED'
+                        ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
+                        : r.status === 'DISPUTED'
+                          ? 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
+                          : 'bg-warning-100 text-warning-800 dark:bg-warning-900/30 dark:text-warning-300'
+                    }`}
+                  >
+                    {DELIVERY_REMIT_STATUS[r.status] ?? r.status}
+                  </span>
+                  <span className="text-surface-600 dark:text-surface-400">
+                    {r.orderCount} order(s) · {new Date(r.sentAt).toLocaleDateString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Stock transfer to warehouse */}
       <div className="card p-6 max-w-lg">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">New remittance</h2>
+        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Stock transfer to warehouse</h2>
         <fetcher.Form method="post" className="space-y-4">
           <input type="hidden" name="intent" value="createRemittance" />
           <div>

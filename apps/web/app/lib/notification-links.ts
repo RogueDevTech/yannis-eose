@@ -31,6 +31,10 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
       if (notif.type === 'funding:rejected') return { link: '/admin/marketing/funding', label: 'View funding' };
     }
     if (data.approvalId) return { link: '/admin/finance/overview', label: 'View finance' };
+    if (data.deliveryRemittanceId) {
+      if (notif.type === 'delivery_remittance:sent') return { link: '/admin/finance/delivery-remittances', label: 'View delivery remittance' };
+      if (notif.type === 'delivery_remittance:received') return { link: '/tpl/remit', label: 'View remittances' };
+    }
     if (data.locationId) return { link: '/admin/logistics', label: 'View logistics' };
     if (data.link && typeof data.link === 'string') return { link: data.link, label: 'View in dashboard' };
   }
