@@ -558,11 +558,12 @@ async function seed() {
 
   for (let i = 0; i < MEDIA_BUYER_COUNT; i++) {
     const daysAgo = 30 - i;
+    const amount = `${200000 + i * 10000}.00`;
     await sql`
       INSERT INTO marketing_funding (id, sender_id, receiver_id, amount, receipt_url, status, sent_at, verified_at)
       VALUES (
         gen_random_uuid(), ${IDS.headOfMarketing}, ${IDS.mediaBuyerIds[i]!},
-        ${String(200000 + i * 10000)}.00, 'https://storage.example.com/receipts/funding.jpg', 'COMPLETED',
+        ${amount}, 'https://storage.example.com/receipts/funding.jpg', 'COMPLETED',
         NOW() - (${daysAgo} * INTERVAL '1 day'), NOW() - (${daysAgo - 1} * INTERVAL '1 day')
       )
     `;
