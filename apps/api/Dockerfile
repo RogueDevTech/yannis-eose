@@ -3,7 +3,7 @@
 # Multi-stage build: install → build → runtime
 # ==============================================================================
 
-# ── Stage 1: Install dependencies ────────────────────────────────────────────
+# ── Stage 1: Install dependencies ──────────────────────
 FROM node:20-alpine AS base
 
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
