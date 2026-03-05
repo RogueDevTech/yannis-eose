@@ -99,19 +99,27 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 15m
           script: |
             set -e
             cd /opt/yannis-eose
+            echo "→ Ensuring .env exists..."
+            touch .env
             export SECRET_NAME=${{ secrets.SECRET_NAME || 'yanis-eose' }}
             export AWS_REGION=${{ env.AWS_REGION }}
             chmod +x ./refresh-env.sh 2>/dev/null || true
-            if [ -x ./refresh-env.sh ]; then ./refresh-env.sh; fi
+            if [ -x ./refresh-env.sh ]; then ./refresh-env.sh || true; fi
+            echo "→ Logging into ECR..."
             aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
             export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
             export IMAGE_TAG=dev-${{ github.sha }}
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            echo "→ Pulling images..."
+            (docker compose -f docker-compose.prod.yml pull 2>/dev/null) || docker-compose -f docker-compose.prod.yml pull
+            echo "→ Starting containers..."
+            (docker compose -f docker-compose.prod.yml up -d 2>/dev/null) || docker-compose -f docker-compose.prod.yml up -d
             sleep 10
+            echo "→ Health checks..."
             curl -sf http://localhost:4444/health || (echo "API health check failed" && exit 1)
             curl -sf http://localhost:3000 || (echo "Web health check failed" && exit 1)
             docker image prune -f
+            echo "→ Deploy done."
