@@ -4,6 +4,8 @@
 
 ## Quick Start
 
+Use pnpm 9.15.4 (e.g. `corepack enable && corepack prepare pnpm@9.15.4 --activate` or install via npm).
+
 ```bash
 pnpm install
 cp apps/api/.env.example apps/api/.env    # Configure database + Redis
