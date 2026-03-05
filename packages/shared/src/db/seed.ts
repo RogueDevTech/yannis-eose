@@ -552,21 +552,50 @@ async function seed() {
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // 13. MARKETING FUNDING
+  // 13. MARKETING FUNDING — each media buyer gets substantial money (multiple tranches)
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating marketing funding...');
 
+  const fundingTranchesPerMb = [
+    [200000, 300000, 250000, 150000],   // MB 1: 900k total
+    [250000, 200000, 300000],           // MB 2: 750k
+    [300000, 350000, 200000],           // MB 3: 850k
+    [150000, 200000, 250000, 200000],   // MB 4: 800k
+    [400000, 250000],                   // MB 5: 650k
+    [200000, 200000, 200000, 250000],   // MB 6: 850k
+    [350000, 300000],                   // MB 7: 650k
+    [180000, 220000, 200000, 200000],   // MB 8: 800k
+    [250000, 250000, 250000],           // MB 9: 750k
+    [300000, 400000],                   // MB 10: 700k
+    [200000, 300000, 150000, 250000],   // MB 11: 900k
+    [275000, 275000, 200000],           // MB 12: 750k
+    [350000, 200000, 300000],           // MB 13: 850k
+    [150000, 250000, 200000, 200000],   // MB 14: 800k
+    [400000, 300000],                   // MB 15: 700k
+    [220000, 230000, 250000],           // MB 16: 700k
+    [300000, 250000, 200000],           // MB 17: 750k
+    [200000, 400000, 150000],           // MB 18: 750k
+    [250000, 250000, 250000, 100000],   // MB 19: 850k
+    [350000, 350000],                   // MB 20: 700k
+  ];
+
   for (let i = 0; i < MEDIA_BUYER_COUNT; i++) {
-    const daysAgo = 30 - i;
-    const amount = `${200000 + i * 10000}.00`;
-    await sql`
-      INSERT INTO marketing_funding (id, sender_id, receiver_id, amount, receipt_url, status, sent_at, verified_at)
-      VALUES (
-        gen_random_uuid(), ${IDS.headOfMarketing}, ${IDS.mediaBuyerIds[i]!},
-        ${amount}, 'https://storage.example.com/receipts/funding.jpg', 'COMPLETED',
-        NOW() - (${daysAgo} * INTERVAL '1 day'), NOW() - (${daysAgo - 1} * INTERVAL '1 day')
-      )
-    `;
+    const tranches = fundingTranchesPerMb[i] ?? [250000, 250000];
+    let daysAgo = 45;
+    for (const amountNum of tranches) {
+      const amount = `${amountNum}.00`;
+      daysAgo -= 10 + (i % 5);
+      if (daysAgo < 1) daysAgo = 5;
+      const verifiedAgo = daysAgo - 1;
+      await sql`
+        INSERT INTO marketing_funding (id, sender_id, receiver_id, amount, receipt_url, status, sent_at, verified_at)
+        VALUES (
+          gen_random_uuid(), ${IDS.headOfMarketing}, ${IDS.mediaBuyerIds[i]!},
+          ${amount}, 'https://storage.example.com/receipts/funding.jpg', 'COMPLETED',
+          NOW() - (${daysAgo} * INTERVAL '1 day'), NOW() - (${verifiedAgo} * INTERVAL '1 day')
+        )
+      `;
+    }
   }
   await sql`
     INSERT INTO marketing_funding (id, sender_id, receiver_id, amount, receipt_url, status, sent_at, verified_at)
@@ -574,31 +603,55 @@ async function seed() {
   `;
 
   // ══════════════════════════════════════════════════════════════════
-  // 14. AD SPEND LOGS (daily spend entries)
+  // 14. AD SPEND LOGS — each media buyer has spent money (approved), balance = funding - spend
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating ad spend logs...');
 
-  const adSpendEntries: Array<{ mbId: string; productId: string; campaignId: string; amount: string; daysAgo: number }> = [];
-  for (let i = 0; i < Math.min(20, campaignRows.length); i++) {
-    const row = campaignRows[i]!;
-    for (let d = 1; d <= 5; d++) {
+  const totalFundingPerMb = fundingTranchesPerMb.map((t) => t.reduce((a, b) => a + b, 0));
+  const adSpendEntries: Array<{
+    mbId: string;
+    productId: string;
+    campaignId: string;
+    amount: string;
+    daysAgo: number;
+    status: string;
+    approvedBy: string | null;
+  }> = [];
+
+  for (let mbIdx = 0; mbIdx < MEDIA_BUYER_COUNT; mbIdx++) {
+    const totalFunding = totalFundingPerMb[mbIdx] ?? 750000;
+    const targetSpend = Math.floor(totalFunding * (0.35 + (mbIdx % 6) * 0.1));
+    const campaignsForMb = campaignRows.filter((c) => c.mediaBuyerId === IDS.mediaBuyerIds[mbIdx]);
+    if (campaignsForMb.length === 0) continue;
+    let remainingSpend = targetSpend;
+    const entriesPerCampaign = 8 + (mbIdx % 5);
+    for (let e = 0; e < entriesPerCampaign && remainingSpend > 5000; e++) {
+      const campaign = campaignsForMb[e % campaignsForMb.length]!;
+      const amountNum = Math.min(
+        remainingSpend,
+        Math.floor(15000 + Math.random() * 35000)
+      );
+      remainingSpend -= amountNum;
       adSpendEntries.push({
-        mbId: row.mediaBuyerId,
-        productId: row.productIds[0]!,
-        campaignId: row.id,
-        amount: String(25000 + Math.floor(Math.random() * 20000)) + '.00',
-        daysAgo: d,
+        mbId: IDS.mediaBuyerIds[mbIdx]!,
+        productId: campaign.productIds[0]!,
+        campaignId: campaign.id,
+        amount: `${amountNum}.00`,
+        daysAgo: 1 + (e % 30),
+        status: 'APPROVED',
+        approvedBy: IDS.headOfMarketing,
       });
     }
   }
 
   for (const as of adSpendEntries) {
     await sql`
-      INSERT INTO ad_spend_logs (id, media_buyer_id, product_id, campaign_id, spend_amount, screenshot_url, spend_date)
+      INSERT INTO ad_spend_logs (id, media_buyer_id, product_id, campaign_id, spend_amount, screenshot_url, spend_date, status, approved_at, approved_by)
       VALUES (
         gen_random_uuid(), ${as.mbId}, ${as.productId}, ${as.campaignId}, ${as.amount},
         'https://storage.example.com/screenshots/ads-screenshot.jpg',
-        NOW() - ${`${as.daysAgo} days`}::interval
+        NOW() - (${as.daysAgo} * INTERVAL '1 day'),
+        ${as.status}, NOW() - (${as.daysAgo} * INTERVAL '1 day'), ${as.approvedBy}
       )
     `;
   }
@@ -1013,17 +1066,19 @@ async function seedHeavy(
 
   console.log(`  [Heavy] ${inserted} orders created.`);
 
-  // Extra ad spend for last 60 days across campaigns
+  // Extra ad spend for last 60 days across campaigns (APPROVED so it counts as spent; balance = funding - spend)
   console.log('  [Heavy] Creating ad spend entries...');
   for (const row of opts.campaignRows.slice(0, 40)) {
     for (let d = 0; d < 60; d += 2) {
+      const spendDate = new Date();
+      spendDate.setDate(spendDate.getDate() - d);
       await sql`
-        INSERT INTO ad_spend_logs (id, media_buyer_id, product_id, campaign_id, spend_amount, screenshot_url, spend_date)
+        INSERT INTO ad_spend_logs (id, media_buyer_id, product_id, campaign_id, spend_amount, screenshot_url, spend_date, status, approved_at)
         VALUES (
           gen_random_uuid(), ${row.mediaBuyerId}, ${row.productIds[0] ?? opts.productIds[0]!}, ${row.id},
           ${String(faker.number.int({ min: 20000, max: 80000 }))}.00,
           'https://storage.example.com/screenshots/ads.jpg',
-          NOW() - (${d} * INTERVAL '1 day')
+          ${spendDate}, 'APPROVED', ${spendDate}
         )
       `;
     }

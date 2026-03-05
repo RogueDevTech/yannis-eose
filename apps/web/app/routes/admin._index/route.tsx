@@ -118,16 +118,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
       orderPipelineChartPromise,
       mediaBuyersPromise,
       csWorkloadsPromise,
-    ]).then(([ceoData, timeSeries, orderPipelineChart, mediaBuyerLeaderboard, csWorkloads]) => {
-      const base = { ...ceoData, timeSeries, orderPipelineChart };
-      if (topic === 'media_buyers') {
-        return { ...base, chartTopicData: { mediaBuyerLeaderboard } };
-      }
-      if (topic === 'cs') {
-        return { ...base, chartTopicData: { csWorkloads } };
-      }
-      return base;
-    });
+    ])
+      .then(([ceoData, timeSeries, orderPipelineChart, mediaBuyerLeaderboard, csWorkloads]) => {
+        try {
+          const base = {
+            ...defaultCEOData,
+            ...ceoData,
+            timeSeries: Array.isArray(timeSeries) ? timeSeries : [],
+            orderPipelineChart:
+              orderPipelineChart && typeof orderPipelineChart === 'object'
+                ? orderPipelineChart
+                : { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 },
+          };
+          if (topic === 'media_buyers') {
+            return { ...base, chartTopicData: { mediaBuyerLeaderboard: Array.isArray(mediaBuyerLeaderboard) ? mediaBuyerLeaderboard : [] } };
+          }
+          if (topic === 'cs') {
+            return { ...base, chartTopicData: { csWorkloads: Array.isArray(csWorkloads) ? csWorkloads : [] } };
+          }
+          return base;
+        } catch {
+          return {
+            ...defaultCEOData,
+            timeSeries: [],
+            orderPipelineChart: { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 },
+          };
+        }
+      })
+      .catch(() => ({
+        ...defaultCEOData,
+        timeSeries: [],
+        orderPipelineChart: { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 },
+      }));
     return defer({ variant: 'ceo' as const, data: dataPromise, filters });
   }
 

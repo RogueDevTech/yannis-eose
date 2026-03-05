@@ -89,7 +89,43 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
   const navigation = useNavigation();
   const topic = filters?.topic ?? 'orders';
   const isLoadingTopic = navigation.state === 'loading';
-  const { costBreakdown, orderPipeline, marketing, csTeam, payroll } = data;
+  const revenue = data?.revenue ?? 0;
+  const trueProfit = data?.trueProfit ?? 0;
+  const margin = data?.margin ?? 0;
+  const { costBreakdown: rawCostBreakdown, orderPipeline: rawOrderPipeline, marketing, csTeam, payroll } = data ?? {};
+  // Defensive: ensure nested objects are always defined (API may return partial data or fail)
+  const costBreakdown = {
+    landedCost: rawCostBreakdown?.landedCost ?? 0,
+    deliveryFee: rawCostBreakdown?.deliveryFee ?? 0,
+    adSpend: rawCostBreakdown?.adSpend ?? 0,
+    commission: rawCostBreakdown?.commission ?? 0,
+    fulfillmentCost: rawCostBreakdown?.fulfillmentCost ?? 0,
+    operationalLoss: rawCostBreakdown?.operationalLoss ?? 0,
+  };
+  const orderPipeline = {
+    total: rawOrderPipeline?.total ?? 0,
+    active: rawOrderPipeline?.active ?? 0,
+    delivered: rawOrderPipeline?.delivered ?? 0,
+    cancelled: rawOrderPipeline?.cancelled ?? 0,
+    returned: rawOrderPipeline?.returned ?? 0,
+    statusCounts: rawOrderPipeline?.statusCounts ?? {},
+  };
+  const marketingSafe = {
+    totalSpend: marketing?.totalSpend ?? 0,
+    cpa: marketing?.cpa ?? 0,
+    roas: marketing?.roas ?? 0,
+    deliveryRate: marketing?.deliveryRate ?? 0,
+  };
+  const csTeamSafe = {
+    agentCount: csTeam?.agentCount ?? 0,
+    pendingOrders: csTeam?.pendingOrders ?? 0,
+    utilization: csTeam?.utilization ?? 0,
+  };
+  const payrollSafe = {
+    staffCount: payroll?.staffCount ?? 0,
+    totalPaid: payroll?.totalPaid ?? 0,
+    totalPending: payroll?.totalPending ?? 0,
+  };
   const totalCosts =
     costBreakdown.landedCost +
     costBreakdown.deliveryFee +
@@ -142,18 +178,18 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           Revenue & Profit
         </h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <KPICard label="Revenue" value={fmt(data.revenue)} icon="revenue" />
+          <KPICard label="Revenue" value={fmt(revenue)} icon="revenue" />
           <KPICard
             label="True Profit"
-            value={fmt(data.trueProfit)}
+            value={fmt(trueProfit)}
             icon="profit"
-            highlight={data.trueProfit >= 0 ? 'success' : 'danger'}
+            highlight={trueProfit >= 0 ? 'success' : 'danger'}
           />
           <KPICard
             label="Net Margin"
-            value={pct(data.margin)}
+            value={pct(margin)}
             icon="margin"
-            highlight={data.margin >= 20 ? 'success' : data.margin >= 10 ? 'warning' : 'danger'}
+            highlight={margin >= 20 ? 'success' : margin >= 10 ? 'warning' : 'danger'}
           />
           <KPICard
             label="Total Costs"
@@ -243,7 +279,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             Profit Waterfall
           </h2>
           <div className="space-y-2">
-            <WaterfallRow label="Revenue" value={data.revenue} type="positive" />
+            <WaterfallRow label="Revenue" value={revenue} type="positive" />
             <WaterfallRow label="Landed COGS" value={-costBreakdown.landedCost} type="negative" />
             <WaterfallRow label="Delivery Fees" value={-costBreakdown.deliveryFee} type="negative" />
             <WaterfallRow label="Ad Spend" value={-costBreakdown.adSpend} type="negative" />
@@ -253,8 +289,8 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             <div className="pt-3 border-t-2 border-surface-300 dark:border-surface-600">
               <WaterfallRow
                 label="True Profit"
-                value={data.trueProfit}
-                type={data.trueProfit >= 0 ? 'positive' : 'negative'}
+                value={trueProfit}
+                type={trueProfit >= 0 ? 'positive' : 'negative'}
                 bold
               />
             </div>
@@ -409,21 +445,21 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             <Link to="/admin/marketing/funding" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
-            <MetricRow label="Total Ad Spend" value={fmt(marketing.totalSpend)} />
+            <MetricRow label="Total Ad Spend" value={fmt(marketingSafe.totalSpend)} />
             <MetricRow
               label="CPA"
-              value={fmt(marketing.cpa)}
-              highlight={marketing.cpa > 0 && marketing.cpa < 5000 ? 'success' : marketing.cpa > 10000 ? 'danger' : undefined}
+              value={fmt(marketingSafe.cpa)}
+              highlight={marketingSafe.cpa > 0 && marketingSafe.cpa < 5000 ? 'success' : marketingSafe.cpa > 10000 ? 'danger' : undefined}
             />
             <MetricRow
               label="True ROAS"
-              value={`${marketing.roas.toFixed(2)}x`}
-              highlight={marketing.roas >= 2 ? 'success' : marketing.roas >= 1 ? 'warning' : 'danger'}
+              value={`${marketingSafe.roas.toFixed(2)}x`}
+              highlight={marketingSafe.roas >= 2 ? 'success' : marketingSafe.roas >= 1 ? 'warning' : 'danger'}
             />
             <MetricRow
               label="Delivery Rate"
-              value={pct(marketing.deliveryRate)}
-              highlight={marketing.deliveryRate >= 70 ? 'success' : marketing.deliveryRate >= 50 ? 'warning' : 'danger'}
+              value={pct(marketingSafe.deliveryRate)}
+              highlight={marketingSafe.deliveryRate >= 70 ? 'success' : marketingSafe.deliveryRate >= 50 ? 'warning' : 'danger'}
             />
           </div>
         </div>
@@ -435,21 +471,21 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             <Link to="/admin/cs/queue" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
-            <MetricRow label="Agents Active" value={csTeam.agentCount.toString()} />
+            <MetricRow label="Agents Active" value={csTeamSafe.agentCount.toString()} />
             <MetricRow
               label="Pending Orders"
-              value={csTeam.pendingOrders.toString()}
-              highlight={csTeam.pendingOrders > 20 ? 'danger' : csTeam.pendingOrders > 10 ? 'warning' : undefined}
+              value={csTeamSafe.pendingOrders.toString()}
+              highlight={csTeamSafe.pendingOrders > 20 ? 'danger' : csTeamSafe.pendingOrders > 10 ? 'warning' : undefined}
             />
             <MetricRow
               label="Utilization"
-              value={`${csTeam.utilization}%`}
-              highlight={csTeam.utilization >= 80 ? 'danger' : csTeam.utilization >= 60 ? 'warning' : 'success'}
+              value={`${csTeamSafe.utilization}%`}
+              highlight={csTeamSafe.utilization >= 80 ? 'danger' : csTeamSafe.utilization >= 60 ? 'warning' : 'success'}
             />
-            {csTeam.agentCount > 0 && (
+            {csTeamSafe.agentCount > 0 && (
               <MetricRow
                 label="Avg per Agent"
-                value={(csTeam.pendingOrders / csTeam.agentCount).toFixed(1)}
+                value={(csTeamSafe.pendingOrders / csTeamSafe.agentCount).toFixed(1)}
               />
             )}
           </div>
@@ -462,16 +498,16 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             <Link to="/hr/payroll" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
-            <MetricRow label="Staff Count" value={payroll.staffCount.toString()} />
-            <MetricRow label="Total Paid" value={fmt(payroll.totalPaid)} highlight="success" />
+            <MetricRow label="Staff Count" value={payrollSafe.staffCount.toString()} />
+            <MetricRow label="Total Paid" value={fmt(payrollSafe.totalPaid)} highlight="success" />
             <MetricRow
               label="Pending Payouts"
-              value={fmt(payroll.totalPending)}
-              highlight={payroll.totalPending > 0 ? 'warning' : undefined}
+              value={fmt(payrollSafe.totalPending)}
+              highlight={payrollSafe.totalPending > 0 ? 'warning' : undefined}
             />
             <MetricRow
               label="Avg per Staff"
-              value={payroll.staffCount > 0 ? fmt((payroll.totalPaid + payroll.totalPending) / payroll.staffCount) : fmt(0)}
+              value={payrollSafe.staffCount > 0 ? fmt((payrollSafe.totalPaid + payrollSafe.totalPending) / payrollSafe.staffCount) : fmt(0)}
             />
           </div>
         </div>

@@ -100,8 +100,9 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           command_timeout: 15m
+          debug: true
           script: |
-            set -e
+            set -ex
             cd /opt/yannis-eose
             echo "→ Ensuring .env exists..."
             touch .env
@@ -114,9 +115,9 @@ jobs:
             export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
             export IMAGE_TAG=dev-${{ github.sha }}
             echo "→ Pulling images..."
-            (docker compose -f docker-compose.prod.yml pull 2>/dev/null) || docker-compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml pull || docker-compose -f docker-compose.prod.yml pull
             echo "→ Starting containers..."
-            (docker compose -f docker-compose.prod.yml up -d 2>/dev/null) || docker-compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml up -d || docker-compose -f docker-compose.prod.yml up -d
             sleep 10
             echo "→ Health checks..."
             curl -sf http://localhost:4444/health || (echo "API health check failed" && exit 1)
