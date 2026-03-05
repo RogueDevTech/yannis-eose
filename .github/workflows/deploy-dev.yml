@@ -85,6 +85,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key ubuntu@${EC2_HOST} "sudo mkdir -p /opt/yannis-eose && sudo chown ubuntu:ubuntu /opt/yannis-eose"
           scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -i ~/.ssh/deploy_key \
             infrastructure/deploy/docker-compose.prod.yml \
