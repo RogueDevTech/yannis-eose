@@ -258,15 +258,18 @@ export async function queueDeliveryConfirmation(params: {
     metadata.deliveryFeeAddOn = params.deliveryFeeAddOn;
   }
 
+  // DELIVERED and PARTIALLY_DELIVERED require HOL approval: submit request instead of direct transition
+  const useSubmitRequest = params.status === 'DELIVERED' || params.status === 'PARTIALLY_DELIVERED';
+
   return queueAction({
     type: 'delivery_confirmation',
-    url: `${API_URL}/trpc/orders.transition`,
+    url: useSubmitRequest
+      ? `${API_URL}/trpc/logistics.submitDeliveryConfirmation`
+      : `${API_URL}/trpc/orders.transition`,
     method: 'POST',
-    body: {
-      orderId: params.orderId,
-      newStatus: params.status,
-      metadata,
-    },
+    body: useSubmitRequest
+      ? { orderId: params.orderId, newStatus: params.status, metadata }
+      : { orderId: params.orderId, newStatus: params.status, metadata },
   });
 }
 

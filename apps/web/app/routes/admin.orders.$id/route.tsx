@@ -1,7 +1,9 @@
+import { useMemo } from 'react';
 import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { defer, json } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import type { CallLogEntry, OrderDetail, OrderDetailStreamData, HistoryEntry } from '~/features/orders/types';
@@ -11,7 +13,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermission(request, ['orders.read', 'marketing.orders']);
+  const user = await requirePermission(request, ['orders.read', 'marketing.orders']);
   const cookie = getSessionCookie(request);
   const orderId = params['id'];
 
@@ -66,7 +68,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return { order, latestCall, history, strictDataMode, voipEnabled };
   })();
 
-  return defer({ orderDetail: orderDetailPromise });
+  let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
+  if (user.permissions?.includes('orders.reassign') || user.permissions?.includes('orders.requestTransfer')) {
+    const agentsRes = await apiRequest<unknown>('/trpc/orders.listCSAgents', { method: 'GET', cookie });
+    if (agentsRes.ok) {
+      const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
+      const list = agentsData?.result?.data ?? [];
+      csAgentsForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
+    }
+  }
+
+  return defer({
+    orderDetail: orderDetailPromise,
+    canEditOrder: user.role !== 'MEDIA_BUYER',
+    userRole: user.role,
+    userId: user.id,
+    permissions: user.permissions ?? [],
+    csAgentsForAssign: csAgentsForAssign,
+  });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -79,6 +98,48 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ error: 'Order ID required' }, { status: 400 });
   }
 
+  const user = await getCurrentUser(request);
+  if (!user) {
+    return json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  if (intent === 'assignToCS') {
+    await requirePermission(request, 'orders.reassign');
+    const toCsAgentId = formData.get('toCsAgentId')?.toString();
+    if (!toCsAgentId) {
+      return json({ error: 'Agent required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
+      method: 'POST',
+      cookie,
+      body: { orderId, csAgentId: toCsAgentId },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Assign failed';
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'requestTransfer') {
+    await requirePermission(request, 'orders.requestTransfer');
+    const toCsAgentId = formData.get('toCsAgentId')?.toString();
+    if (!toCsAgentId) {
+      return json({ error: 'Agent required' }, { status: 400 });
+    }
+    const reason = formData.get('reason')?.toString() || undefined;
+    const res = await apiRequest<unknown>('/trpc/orders.requestTransfer', {
+      method: 'POST',
+      cookie,
+      body: { orderId, toCsAgentId, reason },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Transfer request failed';
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
   if (intent === 'initiateCall') {
     const res = await apiRequest<unknown>('/trpc/orders.initiateCall', {
       method: 'POST',
@@ -88,7 +149,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to initiate call' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to initiate call' }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true, callInitiated: true });
@@ -103,30 +164,122 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reveal phone' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to reveal phone' }, { status: safeStatus(res.status) });
     }
 
-    const data = res.data as { result?: { data?: { phone: string } } };
-    return json({ success: true, phone: data?.result?.data?.phone ?? '', phoneRevealed: true });
+    const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };
+    const payload = data?.result?.data;
+    return json({
+      success: true,
+      phone: payload?.phone ?? '',
+      isDialable: payload?.isDialable ?? false,
+      phoneRevealed: true,
+    });
+  }
+
+  if (intent === 'adjustOrderItems') {
+    const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'];
+    if (!allowedRoles.includes(user.role)) {
+      return json({ error: 'Only CS or Head of CS can adjust order items' }, { status: 403 });
+    }
+    const itemsRaw = formData.get('items')?.toString();
+    const totalAmountStr = formData.get('totalAmount')?.toString();
+    if (!itemsRaw) {
+      return json({ error: 'Items are required' }, { status: 400 });
+    }
+    let parsedItems: Array<{ productId: string; quantity: number; unitPrice: number }>;
+    try {
+      const arr = JSON.parse(itemsRaw) as unknown;
+      if (!Array.isArray(arr) || arr.length === 0) {
+        return json({ error: 'At least one item is required' }, { status: 400 });
+      }
+      parsedItems = arr.map((row: unknown) => {
+        if (row == null || typeof row !== 'object') throw new Error('Invalid item');
+        const o = row as Record<string, unknown>;
+        const productId = typeof o.productId === 'string' ? o.productId : '';
+        const quantity = typeof o.quantity === 'number' ? o.quantity : Number(o.quantity);
+        const unitPrice = typeof o.unitPrice === 'number' ? o.unitPrice : Number(o.unitPrice);
+        if (!productId || Number.isNaN(quantity) || quantity < 1 || Number.isNaN(unitPrice) || unitPrice < 0) {
+          throw new Error('Invalid item fields');
+        }
+        return { productId, quantity, unitPrice };
+      });
+    } catch {
+      return json({ error: 'Invalid items format' }, { status: 400 });
+    }
+    const totalAmount = totalAmountStr != null && totalAmountStr !== ''
+      ? parseFloat(totalAmountStr)
+      : parsedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+    if (Number.isNaN(totalAmount) || totalAmount < 0) {
+      return json({ error: 'Invalid total amount' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.update', {
+      method: 'POST',
+      cookie,
+      body: { orderId, items: parsedItems, totalAmount },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to update order items';
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'scheduleCallback') {
+    const delayMinutesStr = formData.get('delayMinutes')?.toString();
+    const delayMinutes = delayMinutesStr ? parseInt(delayMinutesStr, 10) : 120;
+    const notes = formData.get('notes')?.toString() || undefined;
+    if (Number.isNaN(delayMinutes) || delayMinutes < 5 || delayMinutes > 10080) {
+      return json({ error: 'Invalid delay (5 min to 7 days)' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.scheduleCallback', {
+      method: 'POST',
+      cookie,
+      body: { orderId, delayMinutes, notes },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Schedule failed';
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, scheduled: true });
   }
 
   if (intent === 'transition') {
-    const newStatus = formData.get('newStatus')?.toString() ?? '';
+    const newStatus = (formData.get('newStatus')?.toString() ?? '').trim();
+    if (!newStatus) {
+      return json({ error: 'Status is required' }, { status: 400 });
+    }
+    const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
+    if (csOnlyStatuses.includes(newStatus)) {
+      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'];
+      if (!allowedRoles.includes(user.role)) {
+        return json({ error: 'Only CS or Head of CS can perform this action' }, { status: 403 });
+      }
+    }
     const reason = formData.get('reason')?.toString() || undefined;
     const logisticsLocationId = formData.get('logisticsLocationId')?.toString() || undefined;
     const logisticsProviderId = formData.get('logisticsProviderId')?.toString() || undefined;
     const riderId = formData.get('riderId')?.toString() || undefined;
-    const deliveredQty = formData.get('deliveredQuantity')?.toString();
-    const returnedQty = formData.get('returnedQuantity')?.toString();
+    const deliveredQtyStr = formData.get('deliveredQuantity')?.toString();
+    const returnedQtyStr = formData.get('returnedQuantity')?.toString();
     const deliveryFeeAddOnStr = formData.get('deliveryFeeAddOn')?.toString();
+
+    const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString() || undefined;
 
     const metadata: Record<string, unknown> = {};
     if (reason) metadata['reason'] = reason;
     if (logisticsLocationId) metadata['logisticsLocationId'] = logisticsLocationId;
     if (logisticsProviderId) metadata['logisticsProviderId'] = logisticsProviderId;
     if (riderId) metadata['riderId'] = riderId;
-    if (deliveredQty) metadata['deliveredQuantity'] = parseInt(deliveredQty, 10);
-    if (returnedQty) metadata['returnedQuantity'] = parseInt(returnedQty, 10);
+    if (preferredDeliveryDate) metadata['preferredDeliveryDate'] = preferredDeliveryDate;
+    const deliveredQty = deliveredQtyStr != null ? parseInt(deliveredQtyStr, 10) : NaN;
+    if (!Number.isNaN(deliveredQty) && Number.isInteger(deliveredQty) && deliveredQty >= 0) {
+      metadata['deliveredQuantity'] = deliveredQty;
+    }
+    const returnedQty = returnedQtyStr != null ? parseInt(returnedQtyStr, 10) : NaN;
+    if (!Number.isNaN(returnedQty) && Number.isInteger(returnedQty) && returnedQty >= 0) {
+      metadata['returnedQuantity'] = returnedQty;
+    }
     if (deliveryFeeAddOnStr) {
       const addOn = parseFloat(deliveryFeeAddOnStr);
       if (!Number.isNaN(addOn) && addOn >= 0) metadata['deliveryFeeAddOn'] = addOn;
@@ -144,7 +297,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Transition failed' }, { status: res.status });
+      const message = errorData?.error?.message ?? 'Transition failed';
+      return json({ error: message }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true });
@@ -153,8 +307,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
+const ORDER_DETAIL_EVENTS = ['order:status_changed', 'order:assigned', 'order:transfer_accepted', 'order:transfer_rejected'] as const;
+
 export default function OrderDetailRoute() {
-  const { orderDetail } = useLoaderData<typeof loader>();
+  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign } = useLoaderData<typeof loader>();
+  const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
+  usePageRefreshOnEvent(orderEvents);
   return (
     <DeferredSection resolve={orderDetail} skeleton="card">
       {(data) =>
@@ -176,6 +334,11 @@ export default function OrderDetailRoute() {
             history={(data as OrderDetailStreamData).history}
             strictDataMode={(data as OrderDetailStreamData).strictDataMode}
             voipEnabled={(data as OrderDetailStreamData).voipEnabled}
+            canEditOrder={canEditOrder}
+            userRole={userRole}
+            userId={userId}
+            permissions={permissions}
+            csAgentsForAssign={csAgentsForAssign}
           />
         )
       }

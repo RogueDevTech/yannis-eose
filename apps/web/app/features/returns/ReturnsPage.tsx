@@ -69,7 +69,7 @@ export function ReturnsPage({
           </p>
         </div>
         <Button variant="secondary" size="sm" onClick={() => { setShowReconciliationForm(!showReconciliationForm); setActiveTab('reconciliation'); }}>
-          + Stock Reconciliation
+          {showReconciliationForm ? 'Close' : '+ Stock Reconciliation'}
         </Button>
       </div>
 

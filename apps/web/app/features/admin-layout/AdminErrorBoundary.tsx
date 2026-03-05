@@ -1,7 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import type { AdminErrorBoundaryProps } from './types';
+
+const AUTO_REFRESH_SECONDS = 10;
 
 /** Sync theme from localStorage when error boundary mounts (DashboardLayout may not have run) */
 function useThemeSync() {
@@ -85,10 +87,38 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
     );
   }
 
-  // Generic server error
+  // Generic server error — with countdown progress bar and auto-refresh
+  return (
+    <GenericErrorWithProgressBar
+      errorData={isResponse ? errorData : undefined}
+      onRefresh={() => window.location.reload()}
+    />
+  );
+}
+
+function GenericErrorWithProgressBar({
+  errorData,
+  onRefresh,
+}: {
+  errorData?: unknown;
+  onRefresh: () => void;
+}) {
+  const [countdown, setCountdown] = useState(AUTO_REFRESH_SECONDS);
+
+  useEffect(() => {
+    if (countdown <= 0) {
+      onRefresh();
+      return;
+    }
+    const id = setInterval(() => setCountdown((c) => c - 1), 1000);
+    return () => clearInterval(id);
+  }, [countdown, onRefresh]);
+
+  const progressPercent = (countdown / AUTO_REFRESH_SECONDS) * 100;
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-surface-50 dark:bg-surface-950 p-6">
-      <div className="text-center max-w-md">
+      <div className="text-center max-w-md w-full">
         <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-danger-50 dark:bg-danger-700/20 flex items-center justify-center">
           <svg className="w-8 h-8 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
@@ -96,16 +126,22 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
         </div>
         <h1 className="text-xl font-bold text-surface-900 dark:text-white">Something Went Wrong</h1>
         <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
-          An unexpected error occurred. Please try refreshing the page.
+          An unexpected error occurred. Refreshing automatically in {countdown}s, or use the buttons below.
         </p>
-        {isResponse && errorData != null ? (
-          <p className="mt-2 text-xs text-surface-700 dark:text-surface-300 font-mono bg-surface-100 dark:bg-surface-800 rounded p-2">
+        {errorData != null ? (
+          <p className="mt-2 text-xs text-surface-700 dark:text-surface-300 font-mono bg-surface-100 dark:bg-surface-800 rounded p-2 text-left overflow-auto max-h-24">
             {typeof errorData === 'string' ? errorData : JSON.stringify(errorData)}
           </p>
         ) : null}
+        <div className="mt-4 w-full h-2 bg-surface-200 dark:bg-surface-700 rounded-full overflow-hidden" role="progressbar" aria-valuenow={AUTO_REFRESH_SECONDS - countdown} aria-valuemin={0} aria-valuemax={AUTO_REFRESH_SECONDS} aria-label="Auto-refresh countdown">
+          <div
+            className="h-full bg-brand-500 dark:bg-brand-400 rounded-full transition-all duration-1000 ease-linear origin-left"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
         <div className="mt-4 flex gap-2 justify-center">
-          <Button variant="primary" onClick={() => window.location.reload()}>
-            Refresh Page
+          <Button variant="primary" onClick={onRefresh}>
+            Refresh Now
           </Button>
           <Link to="/admin" className="btn-secondary">
             Back to Dashboard

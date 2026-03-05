@@ -24,6 +24,7 @@ export const userRoleSchema = z.enum([
 
 export const visibleOrderStatusSchema = z.enum([
   'UNPROCESSED',
+  'CS_ASSIGNED',
   'CS_ENGAGED',
   'CONFIRMED',
   'CANCELLED',
@@ -76,7 +77,7 @@ export const createStaffSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
   role: userRoleSchema,
-  status: z.enum(['ACTIVE', 'INACTIVE']).default('ACTIVE'),
+  status: z.enum(['PENDING', 'ACTIVE']).default('PENDING'),
 
   // Role-specific settings
   capacity: z.number().int().min(1).max(100).optional(),
@@ -106,7 +107,7 @@ export const updateStaffSchema = z.object({
   role: userRoleSchema.optional(),
   capacity: z.number().int().min(1).max(100).optional(),
   logisticsLocationId: z.string().uuid().nullable().optional(),
-  status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
+  status: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
   phone: z.string().min(7).max(20).nullable().optional(),
   visibleOrderStatuses: z.array(visibleOrderStatusSchema).nullable().optional(),
   restrictProductAccess: z.boolean().optional(),
@@ -122,7 +123,7 @@ export type UpdateStaffInput = z.infer<typeof updateStaffSchema>;
 export const listUsersSchema = z.object({
   search: z.string().optional(),
   role: userRoleSchema.optional(),
-  status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
+  status: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
   sortBy: z.enum(['name', 'email', 'role', 'createdAt']).default('createdAt'),

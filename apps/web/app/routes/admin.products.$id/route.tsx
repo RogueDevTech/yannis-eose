@@ -1,13 +1,19 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useActionData, useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, redirectIfUnauthorized } from '~/lib/api.server';
+import { useActionData, useLoaderData, useSearchParams } from '@remix-run/react';
+import { apiRequest, getSessionCookie, requirePermission, redirectIfUnauthorized, safeStatus } from '~/lib/api.server';
 import { ProductEditPage } from '~/features/products/ProductEditPage';
+import { ProductViewPage } from '~/features/products/ProductViewPage';
 import type { Product } from '~/features/products/types';
 
-export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: data?.product ? `${data.product.name} — Edit Product` : 'Edit Product — Yannis EOSE' },
-];
+export const meta: MetaFunction<typeof loader> = ({ data, location }) => {
+  if (!data?.product) return [{ title: 'Product — Yannis EOSE' }];
+  const mode = new URLSearchParams(location?.search ?? '').get('mode');
+  const inEditMode = mode === 'edit';
+  return [
+    { title: inEditMode ? `${data.product.name} — Edit Product` : `${data.product.name} — Yannis EOSE` },
+  ];
+};
 
 interface CategoryOption {
   id: string;
@@ -18,6 +24,7 @@ interface CategoryOption {
 interface LoaderData {
   product: Product;
   categories: CategoryOption[];
+  canEditProduct: boolean;
 }
 
 function mapApiProductToProduct(apiProduct: Record<string, unknown>): Product {
@@ -47,7 +54,7 @@ function mapApiProductToProduct(apiProduct: Record<string, unknown>): Product {
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermission(request, ['products.read', 'products.update']);
+  const user = await requirePermission(request, 'products.read');
   const cookie = getSessionCookie(request);
   const productId = params['id'];
 
@@ -81,8 +88,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const product = mapApiProductToProduct(apiProduct);
+  const canEditProduct =
+    user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.update');
 
-  return { product, categories } satisfies LoaderData;
+  return { product, categories, canEditProduct } satisfies LoaderData;
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -141,15 +150,30 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const errorData = res.data as { error?: { message?: string } };
     return json(
       { error: errorData?.error?.message ?? 'Failed to update product' },
-      { status: res.status },
+      { status: safeStatus(res.status) },
     );
   }
 
   return redirect(`/admin/products/${productId}`);
 }
 
-export default function ProductEditRoute() {
-  const { product, categories } = useLoaderData<LoaderData>();
+export default function ProductDetailRoute() {
+  const { product, categories, canEditProduct } = useLoaderData<LoaderData>();
   const actionData = useActionData<typeof action>();
-  return <ProductEditPage product={product} categories={categories} actionData={actionData} />;
+  const [searchParams] = useSearchParams();
+  const mode = searchParams.get('mode');
+  const isEditMode = mode === 'edit' && canEditProduct;
+
+  if (isEditMode) {
+    return (
+      <ProductEditPage
+        product={product}
+        categories={categories}
+        actionData={actionData}
+        productId={product.id}
+      />
+    );
+  }
+
+  return <ProductViewPage product={product} canEditProduct={canEditProduct} />;
 }

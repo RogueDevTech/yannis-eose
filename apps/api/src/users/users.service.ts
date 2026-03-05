@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { randomBytes } from 'crypto';
-import { eq, and, desc, asc, ilike, or, count } from 'drizzle-orm';
+import { eq, and, desc, asc, ilike, or, count, ne } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -223,7 +223,7 @@ export class UsersService {
         email: input.email.toLowerCase(),
         passwordHash,
         role: input.role,
-        status: input.status ?? 'ACTIVE',
+        status: 'PENDING', // New users stay PENDING until first login (then auth sets ACTIVE)
         capacity: input.capacity ?? 10,
         logisticsLocationId: input.logisticsLocationId ?? null,
         phone: input.phone ?? null,
@@ -331,6 +331,11 @@ export class UsersService {
   async list(input: ListUsersInput) {
     const conditions = [];
 
+    // Default: exclude DEACTIVATED (record stays in DB; only visible when filter status=DEACTIVATED)
+    if (!input.status) {
+      conditions.push(ne(schema.users.status, 'DEACTIVATED'));
+    }
+
     if (input.role) {
       conditions.push(eq(schema.users.role, input.role));
     }
@@ -396,6 +401,29 @@ export class UsersService {
   }
 
   /**
+   * List CS team members (HEAD_OF_CS + CS_AGENT) for Team page.
+   * Gated by cs.teamOverview; does not require users.read.
+   */
+  async listCSTeam(): Promise<Array<{ id: string; name: string; role: string }>> {
+    const rows = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        role: schema.users.role,
+      })
+      .from(schema.users)
+      .where(
+        and(
+          or(eq(schema.users.role, 'CS_AGENT'), eq(schema.users.role, 'HEAD_OF_CS')),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      )
+      .orderBy(asc(schema.users.name));
+
+    return rows.map((r) => ({ id: r.id, name: r.name, role: r.role }));
+  }
+
+  /**
    * Update a staff member's details.
    * If actor is HR and requested role is sensitive, creates permission_request instead.
    */
@@ -410,13 +438,26 @@ export class UsersService {
     }
 
     const existingRows = await this.db
-      .select({ id: schema.users.id })
+      .select({ id: schema.users.id, status: schema.users.status })
       .from(schema.users)
       .where(eq(schema.users.id, input.userId))
       .limit(1);
 
     if (!existingRows[0]) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+
+    // DEACTIVATED is permanent: cannot reactivate; admin must re-invite
+    const currentStatus = existingRows[0].status;
+    if (
+      currentStatus === 'DEACTIVATED' &&
+      input.status !== undefined &&
+      input.status !== 'DEACTIVATED'
+    ) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Deactivated accounts cannot be reactivated. Re-invite the user to create a new account.',
+      });
     }
 
     // HR scope check: if HR and role change to sensitive, create request
@@ -578,7 +619,7 @@ export class UsersService {
       }
     }
 
-    if (input.status === 'INACTIVE' || input.status === 'ARCHIVED') {
+    if (input.status === 'INACTIVE' || input.status === 'ARCHIVED' || input.status === 'DEACTIVATED') {
       await this.authService.killUserSessions(input.userId);
     }
 
@@ -590,9 +631,15 @@ export class UsersService {
   }
 
   /**
-   * Deactivate a staff member.
+   * Deactivate a staff member. SuperAdmin only; permanent (no reactivation).
    */
   async deactivate(userId: string, actor: SessionUser) {
+    if (actor.role !== 'SUPER_ADMIN') {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only Super Admins can deactivate users.',
+      });
+    }
     if (userId === actor.id) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -604,7 +651,7 @@ export class UsersService {
 
     const updatedRows = await this.db
       .update(schema.users)
-      .set({ status: 'INACTIVE', updatedAt: new Date() })
+      .set({ status: 'DEACTIVATED', updatedAt: new Date() })
       .where(eq(schema.users.id, userId))
       .returning({
         id: schema.users.id,

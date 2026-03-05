@@ -111,7 +111,7 @@ Navigate to `/admin/inventory` and click on a product to see batch breakdown:
 ### Refresh Materialized Views
 
 If financial reports show stale data:
-1. Navigate to `/admin/finance`
+1. Navigate to `/admin/finance/overview`
 2. Or call the tRPC endpoint:
 ```bash
 curl -X POST http://localhost:4444/trpc/finance.refreshMaterializedViews \
@@ -197,7 +197,7 @@ Transfers not verified within 48 hours trigger automatic alerts:
 
 When CPA exceeds threshold:
 
-1. Check `/admin/marketing` for CPA warnings
+1. Check `/admin/marketing/funding` for CPA warnings
 2. Review the specific campaign/product metrics
 3. Compare actual leads vs ad spend
 4. If fraudulent, freeze the media buyer's campaign
@@ -208,7 +208,7 @@ When CPA exceeds threshold:
 When a media buyer marks funding as "Not Received":
 
 1. Alert is sent to CEO and Head of Marketing automatically
-2. Check `/admin/marketing` funding ledger
+2. Check `/admin/marketing/funding` funding ledger
 3. Verify with the payment provider/bank
 4. If confirmed sent, work with the buyer to resolve
 5. If error, cancel and re-send the funding

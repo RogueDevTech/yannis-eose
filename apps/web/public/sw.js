@@ -73,14 +73,11 @@ self.addEventListener('fetch', (event) => {
 
   // Network-first for HTML pages (always try to get fresh content)
   if (request.headers.get('accept')?.includes('text/html')) {
+    const docRequest = new Request(request, { cache: 'no-store' });
     event.respondWith(
-      fetch(request)
+      fetch(docRequest)
         .then((response) => {
-          // Cache successful HTML responses
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
+          // Don't cache document responses — hard refresh should always refetch
           return response;
         })
         .catch(() => {
@@ -243,7 +240,14 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(payload.title || 'Yannis EOSE', options)
+    self.registration.showNotification(payload.title || 'Yannis EOSE', options).then(() => {
+      // Notify any open tabs to play the notification sound
+      return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        clientList.forEach((client) => {
+          client.postMessage({ type: 'PLAY_NOTIFICATION_SOUND' });
+        });
+      });
+    })
   );
 });
 

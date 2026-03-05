@@ -1,7 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { UserCreatePage } from '~/features/users/UserCreatePage';
 import type {
   UserCreateProduct,
@@ -63,7 +63,6 @@ export async function action({ request }: ActionFunctionArgs) {
   // Section 2: Role-specific
   const capacityStr = formData.get('capacity')?.toString();
   const logisticsLocationId = formData.get('logisticsLocationId')?.toString() || undefined;
-  const visibleOrderStatusesStr = formData.get('visibleOrderStatuses')?.toString();
   const productIdsStr = formData.get('productIds')?.toString();
   const restrictProductAccess = formData.get('restrictProductAccess') === 'true';
 
@@ -91,7 +90,6 @@ export async function action({ request }: ActionFunctionArgs) {
   if (capacityStr) body.capacity = parseInt(capacityStr, 10) || 10;
   if (logisticsLocationId) body.logisticsLocationId = logisticsLocationId;
   try {
-    if (visibleOrderStatusesStr) body.visibleOrderStatuses = JSON.parse(visibleOrderStatusesStr);
     if (productIdsStr) body.productIds = JSON.parse(productIdsStr);
   } catch {
     // ignore invalid JSON
@@ -123,7 +121,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const errObj = errorData?.error as Record<string, unknown> | undefined;
     return json(
       { error: (errObj?.message as string) ?? 'Failed to create user' },
-      { status: res.status ?? 500 },
+      { status: safeStatus(res.status) },
     );
   }
 

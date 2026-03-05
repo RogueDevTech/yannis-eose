@@ -30,7 +30,7 @@ test.describe('State Machine Validation', () => {
     const statusText = await statusEl.textContent().catch(() => '');
 
     if (statusText?.includes('UNPROCESSED')) {
-      // Should only allow: Engage (CS_ENGAGED) or Cancel
+      // Should only allow: Call (transitions to CS_ENGAGED) or Cancel
       const dispatchBtn = page.getByRole('button', { name: /dispatch/i });
       if (await dispatchBtn.isVisible().catch(() => false)) {
         await expect(dispatchBtn).toBeDisabled();

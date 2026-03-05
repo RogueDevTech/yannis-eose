@@ -54,8 +54,10 @@ export interface LocationOption {
 export interface InventoryStreamData {
   levels: InventoryLevel[];
   totalLevels: number;
-  movements: Promise<StockMovement[]>;
-  totalMovements: Promise<number>;
+  movements: StockMovement[];
+  totalMovements: number;
   products: ProductOption[];
   locations: LocationOption[];
+  /** When false, Stock Intake button and form are hidden (view-only). */
+  canIntake?: boolean;
 }

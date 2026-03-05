@@ -9,6 +9,33 @@ export interface FundingRecord {
   verifiedAt: string | null;
 }
 
+export interface FundingBalance {
+  totalReceived: string;
+  totalSpend: string;
+  balance: string;
+}
+
+export interface FundingBalanceRow {
+  userId: string;
+  name: string;
+  role: string;
+  totalReceived: string;
+  totalSpend: string;
+  balance: string;
+}
+
+export interface FundingRequestRecord {
+  id: string;
+  requesterId: string;
+  amount: string;
+  reason: string | null;
+  status: string;
+  receiptUrl: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+}
+
 export interface AdSpendRecord {
   id: string;
   mediaBuyerId: string;
@@ -17,6 +44,9 @@ export interface AdSpendRecord {
   spendAmount: string;
   screenshotUrl: string;
   spendDate: string;
+  status: string;
+  approvedAt: string | null;
+  approvedBy: string | null;
 }
 
 export interface Metrics {
@@ -40,6 +70,16 @@ export interface LeaderboardEntry {
   cpa: number;
   trueRoas: number;
   deliveryRate: number;
+}
+
+/** Minimal order row for Marketing Overview "Live orders" list. */
+export interface MarketingOverviewRecentOrder {
+  id: string;
+  status: string;
+  createdAt: string;
+  totalAmount: string | null;
+  customerName: string;
+  mediaBuyerName?: string | null;
 }
 
 export interface User {
@@ -75,20 +115,35 @@ export interface MarketingPageProps {
   leaderboard: LeaderboardEntry[];
 }
 
+/** Optional date filter — when provided, DateFilterBar is shown and data is filtered by it */
+export interface MarketingDateFilters {
+  startDate: string;
+  endDate: string;
+  periodAllTime: boolean;
+}
+
 /** What the loader returns — mix of resolved data + streaming promises */
 export interface MarketingStreamData {
   // Critical (resolved immediately)
   funding: FundingRecord[];
   totalFunding: number;
+  fundingRequests: FundingRequestRecord[];
   adSpend: AdSpendRecord[];
   totalAdSpend: number;
   adSpendTotal: string;
   campaigns: Campaign[];
-  // Deferred (streaming promises)
-  metrics: Promise<Metrics>;
-  fundingSummary: Promise<{ totalSent: string; totalCompleted: string; totalDisputed: string }>;
-  leaderboard: Promise<LeaderboardEntry[]>;
-  users: Promise<User[]>;
-  products: Promise<Product[]>;
+  metrics: Metrics;
+  fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+  leaderboard: LeaderboardEntry[];
+  users: User[];
+  products: Product[];
   leaderboardPeriod: 'this_month' | 'all_time';
+  myBalance?: FundingBalance;
+  balancesList?: FundingBalanceRow[];
+  /** Optional; when set, date filter bar is shown and loader has applied date filtering */
+  filters?: MarketingDateFilters;
+  /** 'media_buyer' = own data + request funds; 'admin' = full overview + send funding */
+  viewMode?: 'admin' | 'media_buyer';
+  /** True for Head of Marketing, SuperAdmin, Finance Officer — can use Send Funding */
+  canSendFunding?: boolean;
 }

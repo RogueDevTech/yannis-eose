@@ -14,9 +14,15 @@ const AUDITABLE_TABLES = [
   'users', 'products', 'product_categories', 'stock_batches',
   'logistics_providers', 'logistics_locations', 'inventory_levels',
   'offer_templates', 'campaigns',
-  'orders', 'order_items', 'stock_transfers',
-  'marketing_funding', 'invoices',
+  'orders', 'order_items', 'stock_transfers', 'stock_movements',
+  'marketing_funding', 'marketing_funding_requests', 'ad_spend_logs',
+  'call_logs', 'order_transfer_requests',
+  'invoices', 'approval_requests', 'budgets', 'settlement_configs',
   'commission_plans', 'payout_records', 'earnings_adjustments',
+  'stock_reconciliations',
+  'email_change_requests', 'user_product_assignments',
+  'permission_requests', 'system_settings', 'cart_abandonments',
+  'permissions', 'user_permissions',
 ] as const;
 
 type AuditableTable = (typeof AUDITABLE_TABLES)[number];

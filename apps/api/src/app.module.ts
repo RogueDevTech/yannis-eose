@@ -24,6 +24,7 @@ import { VoipModule } from './voip/voip.module';
 import { SettingsModule } from './settings/settings.module';
 import { CartModule } from './cart/cart.module';
 import { PermissionRequestsModule } from './permission-requests/permission-requests.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -34,7 +35,7 @@ import { PermissionRequestsModule } from './permission-requests/permission-reque
     OrdersModule, UsersModule, ProductsModule, InventoryModule,
     LogisticsModule, MarketingModule, FinanceModule, HrModule,
     NotificationsModule, VoipModule, SettingsModule, CartModule,
-    PermissionRequestsModule,
+    PermissionRequestsModule, PaymentsModule,
   ],
   controllers: [AppController],
   providers: [

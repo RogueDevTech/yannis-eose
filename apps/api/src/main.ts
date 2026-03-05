@@ -17,8 +17,14 @@ async function bootstrap() {
   // Strict-Transport-Security, X-XSS-Protection, etc.
   app.use(helmet());
 
+  // CORS: allow comma-separated origins (e.g. for Cloudflare tunnels: web URL + API URL)
+  const corsOrigins = (process.env['CORS_ORIGIN'] ?? 'http://localhost:5173')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: process.env['CORS_ORIGIN'] ?? 'http://localhost:5173',
+    origin: corsOrigins.length > 1 ? corsOrigins : corsOrigins[0] || 'http://localhost:5173',
     credentials: true,
   });
 

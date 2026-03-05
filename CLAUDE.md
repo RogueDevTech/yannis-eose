@@ -122,21 +122,27 @@ This ensures the PostgreSQL trigger that manages the temporal audit trail knows 
 This is the heartbeat of the entire system. Every module connects to this flow. Get this wrong and everything breaks.
 
 ```
-UNPROCESSED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRANSIT → DELIVERED → COMPLETED
-                                                                                    |
-                                                                              PARTIALLY_DELIVERED
-                                                                                    |
-                                                                               RETURNED
-                                                                                    |
-                                                                           RESTOCKED / WRITTEN_OFF
+UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRANSIT → DELIVERED → COMPLETED
+       |            |              |
+       |            |              PARTIALLY_DELIVERED
+       |            |              RETURNED
+       |            |              RESTOCKED / WRITTEN_OFF
+       |            CANCELLED
+       CANCELLED
 ```
+
+- **CS_ASSIGNED**: Set when the algorithm or Head of CS assigns an order to a sales agent; the agent has not yet clicked Engage. Transition to CS_ENGAGED when the agent engages (e.g. clicks Call).
 
 ### State Transition Rules (Enforce as Hard Constraints)
 
 | From | To | Trigger | Gate (Must Pass) | Side Effect |
 |---|---|---|---|---|
 | — | UNPROCESSED | Edge form submission | Dedup check (phone+product, 6hr window) | None — stock not touched yet |
-| UNPROCESSED | CS_ENGAGED | CS agent clicks Call | Agent must have capacity (pending < max) | Order locked to agent for 15 min |
+| UNPROCESSED | CS_ASSIGNED | Algorithm or HoS assigns order to agent | Agent has capacity | None — order in agent queue |
+| UNPROCESSED | CS_ENGAGED | CS agent takes unassigned order | Agent must have capacity (pending < max) | Order locked to agent for 15 min |
+| UNPROCESSED | CANCELLED | CS/HoS cancels | Mandatory reason note (min 10 chars) | None |
+| CS_ASSIGNED | CS_ENGAGED | CS agent clicks Engage / Call | Agent must have capacity (pending < max) | Order locked to agent for 15 min |
+| CS_ASSIGNED | CANCELLED | CS/HoS cancels | Mandatory reason note (min 10 chars) | None — stock was never reserved |
 | CS_ENGAGED | CONFIRMED | CS clicks Confirm | VOIP call_duration > 15 seconds | Stock: Available → Reserved |
 | CS_ENGAGED | CANCELLED | CS clicks Cancel | Mandatory reason note (min 10 chars) | None — stock was never reserved |
 | CONFIRMED | ALLOCATED | Logistics assigns to 3PL | 3PL location must have available stock | Stock: Reserved → Allocated_to_3PL |

@@ -96,6 +96,7 @@ export const dashboardRouter = router({
 
     const activeOrders =
       (counts['UNPROCESSED'] ?? 0) +
+      (counts['CS_ASSIGNED'] ?? 0) +
       (counts['CS_ENGAGED'] ?? 0) +
       (counts['CONFIRMED'] ?? 0) +
       (counts['ALLOCATED'] ?? 0) +
@@ -171,4 +172,75 @@ export const dashboardRouter = router({
       invoiceSummary,
     };
   }),
+
+  /**
+   * CEO Overview time-series — daily revenue, delivered orders, and order volume (created) for chart.
+   * SuperAdmin only. Same permission as ceoOverview.
+   */
+  ceoOverviewTimeSeries: permissionProcedure('ceo.overview')
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }).optional(),
+    )
+    .query(async ({ input }) => {
+      if (!ordersService) {
+        throw new Error('Dashboard services not initialized');
+      }
+      const startDate = input?.startDate;
+      const endDate = input?.endDate;
+
+      const [deliveredBuckets, createdBuckets] = await Promise.all([
+        ordersService.getDeliveredOrdersTimeSeries(startDate, endDate),
+        ordersService.getOrdersTimeSeriesByCreated(startDate, endDate),
+      ]);
+
+      // Merge by date: union of all dates, each bucket has revenue, orderCount (delivered), createdCount
+      const byDate = new Map<string, { date: string; revenue: number; orderCount: number; createdCount: number }>();
+      for (const row of deliveredBuckets) {
+        byDate.set(row.date, {
+          date: row.date,
+          revenue: row.revenue,
+          orderCount: row.orderCount,
+          createdCount: 0,
+        });
+      }
+      for (const row of createdBuckets) {
+        const existing = byDate.get(row.date);
+        if (existing) {
+          existing.createdCount = row.orderCount;
+        } else {
+          byDate.set(row.date, {
+            date: row.date,
+            revenue: 0,
+            orderCount: 0,
+            createdCount: row.orderCount,
+          });
+        }
+      }
+
+      const merged = Array.from(byDate.values()).sort(
+        (a, b) => a.date.localeCompare(b.date),
+      );
+      return merged;
+    }),
+
+  /**
+   * Order pipeline chart — Volume, CS Engaged, Confirmed, Logistics distributed, Delivered.
+   * For the CEO Executive Overview order funnel/bar chart. SuperAdmin only.
+   */
+  orderPipelineChart: permissionProcedure('ceo.overview')
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }).optional(),
+    )
+    .query(async ({ input }) => {
+      if (!ordersService) {
+        throw new Error('Dashboard services not initialized');
+      }
+      return ordersService.getOrderPipelineChart(input?.startDate, input?.endDate);
+    }),
 });

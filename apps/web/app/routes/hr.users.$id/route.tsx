@@ -1,7 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { UserDetailPage } from '~/features/users/UserDetailPage';
 import type {
@@ -27,7 +27,9 @@ export const meta: MetaFunction = () => [
 // ─── Loader ─────────────────────────────────────────────
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermission(request, ['users.read', 'users.update']);
+  const currentUser = await getCurrentUser(request);
+  if (!currentUser) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
+
   const cookie = getSessionCookie(request);
   const userId = params['id'];
 
@@ -35,22 +37,34 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('User ID required', { status: 400 });
   }
 
+  // Fetch profile user first (getById is authed — any logged-in user can call)
+  const userRes = await apiRequest<unknown>(
+    `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
+    { method: 'GET', cookie },
+  );
+  if (!userRes.ok) {
+    return defer({ userDetail: Promise.resolve({ notFound: true as const }) });
+  }
+  const trpcData = userRes.data as { result?: { data?: UserDetail } };
+  const profileUser = trpcData?.result?.data;
+  if (!profileUser) {
+    return defer({ userDetail: Promise.resolve({ notFound: true as const }) });
+  }
+
+  // Head of CS can view CS team members (CS_AGENT, HEAD_OF_CS) without users.read
+  const headOfCSViewingTeam =
+    currentUser.role === 'HEAD_OF_CS' && ['CS_AGENT', 'HEAD_OF_CS'].includes(profileUser.role);
+  if (!headOfCSViewingTeam) {
+    await requirePermission(request, ['users.read', 'users.update']);
+  }
+
+  const user = profileUser;
+
   const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true }> => {
-    const userRes = await apiRequest<unknown>(
-      `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
-      { method: 'GET', cookie },
-    );
-
-    if (!userRes.ok) return { notFound: true };
-
-    const trpcData = userRes.data as { result?: { data?: UserDetail } };
-    const user = trpcData?.result?.data;
-
-    if (!user) return { notFound: true };
-
-    const currentUser = await getCurrentUser(request);
     const perms = currentUser?.permissions ?? [];
     const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+    const isViewerHeadOfMarketing = currentUser?.role === 'HEAD_OF_MARKETING';
+    const isViewerHeadOfCS = currentUser?.role === 'HEAD_OF_CS';
     const canDisburseToThisUser =
       (user.role === 'HEAD_OF_MARKETING' && (isSuperAdmin || perms.includes('finance.disburse'))) ||
       (user.role === 'MEDIA_BUYER' && (isSuperAdmin || perms.includes('marketing.funding')));
@@ -187,6 +201,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => null)
     : Promise.resolve(null);
 
+  // Funding balance (only for HEAD_OF_MARKETING / MEDIA_BUYER — recipients of disbursements)
+  const fundingBalance: Promise<{ totalReceived: string; totalSpend: string; balance: string } | null> = isMarketingRole
+    ? apiRequest<unknown>(
+        `/trpc/marketing.getFundingBalance?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
+        { method: 'GET', cookie },
+      )
+        .then((res) => {
+          if (!res.ok) return null;
+          const d = res.data as { result?: { data?: { totalReceived: string; totalSpend: string; balance: string } } };
+          return d?.result?.data ?? null;
+        })
+        .catch(() => null)
+    : Promise.resolve(null);
+
   const pendingEmailChange: Promise<PendingEmailChange | null> = apiRequest<unknown>(
     `/trpc/users.getPendingEmailChange?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
     { method: 'GET', cookie },
@@ -243,7 +271,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => ({ approvals: [], total: 0 }))
     : null;
 
-    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, pendingEmailChange, stockMovements, financeActivity, canDisburseToThisUser };
+    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS };
   })();
 
   return defer({ userDetail: userDetailPromise });
@@ -291,9 +319,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (capacityStr) body.capacity = parseInt(capacityStr, 10);
     if (logisticsLocationId !== undefined) body.logisticsLocationId = logisticsLocationId || null;
     if (phone !== undefined) body.phone = phone || null;
-    if (visibleOrderStatusesStr) {
-      try { body.visibleOrderStatuses = JSON.parse(visibleOrderStatusesStr); } catch { /* skip */ }
-    }
     if (productIdsStr) {
       try { body.productIds = JSON.parse(productIdsStr); } catch { /* skip */ }
     }
@@ -305,7 +330,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update user' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to update user' }, { status: safeStatus(res.status) });
     }
 
     const result = res.data as { result?: { data?: { emailChangePending?: boolean; requiresApproval?: boolean; requestId?: string; message?: string } } };
@@ -330,6 +355,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'deactivate') {
+    const currentUser = await getCurrentUser(request);
+    if (currentUser?.role !== 'SUPER_ADMIN') {
+      return json({ error: 'Only Super Admins can deactivate users.' }, { status: 403 });
+    }
+
     const targetRes = await apiRequest<unknown>(
       `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
       { method: 'GET', cookie },
@@ -345,7 +375,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to deactivate user' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to deactivate user' }, { status: safeStatus(res.status) });
     }
 
     return redirect('/hr/users');
@@ -367,7 +397,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reactivate user' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to reactivate user' }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true, message: 'User reactivated successfully' });
@@ -388,7 +418,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to process email change' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to process email change' }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true, message: action === 'APPROVED' ? 'Email updated successfully' : 'Email change rejected' });
@@ -416,7 +446,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reset password' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to reset password' }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true, message: 'Password reset successfully' });

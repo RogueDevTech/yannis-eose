@@ -30,6 +30,11 @@ interface SubmissionPayload {
   customerAddress?: string;
   deliveryAddress?: string;
   deliveryNotes?: string;
+  deliveryState?: string;
+  customerGender?: string;
+  preferredDeliveryDate?: string;
+  paymentMethod?: string;
+  customerEmail?: string;
   items: Array<{
     productId: string;
     quantity: number;
@@ -45,9 +50,16 @@ interface OrderCreatePayload {
   mediaBuyerId?: string;
   customerName: string;
   customerPhoneHash: string;
+  /** Raw phone for manual-call reveal when VOIP is off. Sent to API on create only. */
+  customerPhone?: string;
   customerAddress?: string;
   deliveryAddress?: string;
   deliveryNotes?: string;
+  deliveryState?: string;
+  customerGender?: string;
+  preferredDeliveryDate?: string;
+  paymentMethod?: string;
+  customerEmail?: string;
   items: Array<{
     productId: string;
     quantity: number;
@@ -94,6 +106,14 @@ interface CampaignConfig {
     buttonText?: string;
     accentColor?: string;
     successMessage?: string;
+    showDeliveryAddress?: boolean;
+    showDeliveryNotes?: boolean;
+    showDeliveryState?: boolean;
+    showGender?: boolean;
+    showPreferredDeliveryDate?: boolean;
+    showPaymentMethod?: boolean;
+    deliveryStateOptions?: string[];
+    preferredDeliveryDateOptions?: string[];
   };
 }
 
@@ -105,7 +125,7 @@ const RATE_LIMIT_CAPTCHA_THRESHOLD = 3; // After 3 submissions, require CAPTCHA
 const DEDUP_WINDOW_SECONDS = 21600; // 6 hours
 const CIRCUIT_BREAKER_TIMEOUT_MS = 10000; // 10s — relaxed for local dev; tighten to 2000 in production
 const VIRTUAL_BUFFER_PCT = 0.10; // 10% stock buffer
-const CAMPAIGN_CACHE_TTL = 600; // 10 min cache for campaign configs
+const CAMPAIGN_CACHE_TTL = 300; // 5 min cache for campaign configs
 
 // ── CORS Headers ───────────────────────────────────────────────
 
@@ -181,6 +201,19 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
     unitPrice: String(item['unitPrice']),
   }));
 
+  const paymentMethod = typeof b['paymentMethod'] === 'string' && (b['paymentMethod'] === 'PAY_ON_DELIVERY' || b['paymentMethod'] === 'PAY_ONLINE')
+    ? b['paymentMethod']
+    : 'PAY_ON_DELIVERY';
+  const customerEmail = typeof b['customerEmail'] === 'string' ? (b['customerEmail'] as string).trim() : undefined;
+  if (paymentMethod === 'PAY_ONLINE') {
+    if (!customerEmail || customerEmail.length < 5) {
+      return { valid: false, error: 'Email is required for Pay online. Please enter your email address.' };
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+      return { valid: false, error: 'Please enter a valid email address for Pay online.' };
+    }
+  }
+
   return {
     valid: true,
     data: {
@@ -191,6 +224,11 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
       customerAddress: typeof b['customerAddress'] === 'string' ? b['customerAddress'] : undefined,
       deliveryAddress: typeof b['deliveryAddress'] === 'string' ? b['deliveryAddress'] : undefined,
       deliveryNotes: typeof b['deliveryNotes'] === 'string' ? b['deliveryNotes'] : undefined,
+      deliveryState: typeof b['deliveryState'] === 'string' ? b['deliveryState'] : undefined,
+      customerGender: typeof b['customerGender'] === 'string' ? b['customerGender'] : undefined,
+      preferredDeliveryDate: typeof b['preferredDeliveryDate'] === 'string' ? b['preferredDeliveryDate'] : undefined,
+      paymentMethod,
+      customerEmail: customerEmail || undefined,
       items: normalisedItems as SubmissionPayload['items'],
       totalAmount: typeof b['totalAmount'] === 'string' ? b['totalAmount'] : typeof b['totalAmount'] === 'number' ? String(b['totalAmount']) : undefined,
       cartId: typeof b['cartId'] === 'string' ? b['cartId'] : undefined,
@@ -388,6 +426,37 @@ async function forwardToApi(
   }
 }
 
+// ── Prepare Paystack (payment-first: no order until paid) ───────
+
+async function forwardPreparePaystackToApi(
+  payload: OrderCreatePayload,
+  env: Env,
+): Promise<{ ok: boolean; status: number; data: unknown }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CIRCUIT_BREAKER_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${env.API_URL}/trpc/orders.preparePaystackOrder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.error('[edge] orders.preparePaystackOrder failed', response.status, JSON.stringify(data));
+    }
+    return { ok: response.ok, status: response.status, data };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    console.error('[edge] orders.preparePaystackOrder unreachable:', err);
+    return { ok: false, status: 503, data: { error: 'API unreachable' } };
+  }
+}
+
 // ── QStash Failover ────────────────────────────────────────────
 
 async function bufferToQStash(
@@ -436,6 +505,7 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .msg-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
     .yannis-form-card .msg-info{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
     .yannis-form-card .hidden{display:none}
+    .yannis-form-card .required{color:#dc2626;font-weight:700}
     .yannis-form-card .product-selector{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem}
     .yannis-form-card .product-option{display:flex;align-items:center;gap:.75rem;padding:.75rem;border:1px solid #ddd;border-radius:8px;cursor:pointer;transition:border-color .2s}
     .yannis-form-card .product-option:hover{border-color:${accentColor}}
@@ -474,15 +544,18 @@ function getFormScript(
       var selectedOffer = null;
       var products = ${JSON.stringify(products)};
 
-      // Single-product auto-select
+      function clearError() {
+        msg.className = 'msg hidden';
+        msg.textContent = '';
+      }
+      form.addEventListener('input', clearError);
+      form.addEventListener('change', clearError);
+      form.addEventListener('focusin', clearError);
+
+      // Single-product: set product only, do not preselect offer
       var singleProductId = form.dataset.singleProduct;
       if (singleProductId) {
         selectedProduct = singleProductId;
-        var offerGroup = document.getElementById('offers-' + singleProductId);
-        if (offerGroup) {
-          var firstRadio = offerGroup.querySelector('input[type=radio]');
-          if (firstRadio) { firstRadio.checked = true; firstRadio.dispatchEvent(new Event('change')); }
-        }
       }
 
       // Multi-product selection
@@ -491,21 +564,12 @@ function getFormScript(
           document.querySelectorAll('.product-option').forEach(function(o) { o.classList.remove('selected'); });
           el.classList.add('selected');
           selectedProduct = el.dataset.productId;
-          // Show offers for this product
+          selectedOffer = null;
           document.querySelectorAll('.offer-group').forEach(function(g) { g.style.display = 'none'; });
           var offerGroup = document.getElementById('offers-' + selectedProduct);
           if (offerGroup) { offerGroup.style.display = 'flex'; }
-          // Auto-select first offer for this product
-          selectedOffer = null;
-          var firstRadio = offerGroup && offerGroup.querySelector('input[type=radio]');
-          if (firstRadio) { firstRadio.checked = true; firstRadio.dispatchEvent(new Event('change')); }
         });
       });
-      // Auto-select first product (multi-product mode)
-      if (!singleProductId) {
-        var firstProduct = document.querySelector('.product-option');
-        if (firstProduct) { firstProduct.click(); }
-      }
 
       // Offer selection via radio buttons
       document.querySelectorAll('.offer-radio').forEach(function(radio) {
@@ -627,6 +691,23 @@ function getFormScript(
       if (phoneInput) phoneInput.addEventListener('input', maybeSaveCart);
       if (phoneInput) phoneInput.addEventListener('blur', maybeSaveCart);
 
+      var pmSelect = form.querySelector('#paymentMethod');
+      if (pmSelect) {
+        var emailWrap = document.getElementById('customerEmailWrap');
+        var emailInput = document.getElementById('customerEmail');
+        function togglePaymentEmail() {
+          if (pmSelect.value === 'PAY_ONLINE') {
+            if (emailWrap) emailWrap.classList.remove('hidden');
+            if (emailInput) { emailInput.setAttribute('required', 'required'); }
+          } else {
+            if (emailWrap) emailWrap.classList.add('hidden');
+            if (emailInput) { emailInput.removeAttribute('required'); emailInput.value = ''; }
+          }
+        }
+        pmSelect.addEventListener('change', togglePaymentEmail);
+        togglePaymentEmail();
+      }
+
       form.addEventListener('submit', function(e) {
         e.preventDefault();
         btn.disabled = true;
@@ -642,14 +723,39 @@ function getFormScript(
         }
 
         var fd = new FormData(form);
+        var showPaymentMethod = form.dataset.showPaymentMethod === 'true';
+        var paymentMethod = (fd.get('paymentMethod') || '').toString().trim();
+        if (showPaymentMethod && !paymentMethod) {
+          msg.className = 'msg msg-error';
+          msg.textContent = 'Please select a payment method.';
+          btn.disabled = false;
+          btn.textContent = form.dataset.btnText || 'Submit Order';
+          return;
+        }
+        if (!paymentMethod) paymentMethod = 'PAY_ON_DELIVERY';
+        var customerEmail = (fd.get('customerEmail') || '').toString().trim();
+        if (paymentMethod === 'PAY_ONLINE' && (!customerEmail || customerEmail.length < 5)) {
+          msg.className = 'msg msg-error';
+          msg.textContent = 'Email is required for Pay online. Please enter your email address.';
+          btn.disabled = false;
+          btn.textContent = form.dataset.btnText || 'Submit Order';
+          return;
+        }
         var orderData = {
           campaignId: '${campaignId}',
+          mediaBuyerId: ${mediaBuyerIdJson},
           customerName: fd.get('customerName'),
           customerPhone: fd.get('customerPhone'),
           deliveryAddress: fd.get('deliveryAddress') || undefined,
           deliveryNotes: fd.get('deliveryNotes') || undefined,
+          deliveryState: fd.get('deliveryState') || undefined,
+          customerGender: fd.get('customerGender') || undefined,
+          preferredDeliveryDate: fd.get('preferredDeliveryDate') || undefined,
+          paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
+          customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
           items: [{ productId: selectedProduct, quantity: selectedOffer.qty, unitPrice: selectedOffer.price, offerLabel: selectedOffer.label }],
-          cartId: savedCartId || undefined
+          cartId: savedCartId || undefined,
+          totalAmount: (selectedOffer.qty * parseFloat(selectedOffer.price)).toString()
         };
 
         if (!isOnline) {
@@ -678,6 +784,11 @@ function getFormScript(
 
         submitOrder(orderData).then(function(result) {
           if (result.ok) {
+            var authUrl = result.data.authorizationUrl;
+            if (authUrl) {
+              window.location.href = authUrl;
+              return;
+            }
             msg.className = 'msg msg-success';
             msg.textContent = result.data.message || 'Order received successfully! We will contact you shortly.';
             form.reset();
@@ -787,11 +898,10 @@ function getFormInnerHTML(config: CampaignConfig): string {
       : [{ label: 'Standard', qty: 1, price: p.price }];
 
     const radioName = `offer-${p.id}`;
-    const offersHtml = offers.map((o, oIdx) =>
-      `<label class="offer-option${oIdx === 0 ? ' selected' : ''}">
+    const offersHtml = offers.map((o) =>
+      `<label class="offer-option">
         <input type="radio" name="${radioName}" class="offer-radio"
-          data-offer='${JSON.stringify({ label: o.label, qty: o.qty, price: o.price }).replace(/'/g, '&#39;')}'
-          ${oIdx === 0 ? 'checked' : ''}>
+          data-offer='${JSON.stringify({ label: o.label, qty: o.qty, price: o.price }).replace(/'/g, '&#39;')}'>
         <span class="offer-label">${escapeHtml(o.label)}</span>
         <span class="offer-details">
           <span class="offer-qty">${o.qty} unit${o.qty > 1 ? 's' : ''}</span>
@@ -800,7 +910,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
       </label>`
     ).join('\n');
 
-    const display = hasSingleProduct || pIdx === 0 ? 'flex' : 'none';
+    const display = hasSingleProduct ? 'flex' : 'none';
     return `<div id="offers-${p.id}" class="offer-group offer-selector" style="display:${display}">${offersHtml}</div>`;
   }).join('\n');
 
@@ -812,7 +922,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
     <p class="subtitle">${escapeHtml(subtitle)}</p>
     <div id="yannisOffline" class="offline-badge hidden">Offline</div>
     <div id="yannisMsg" class="msg hidden"></div>
-    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}"${singleProductAttr}>
+    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${fc.showPaymentMethod ? 'true' : 'false'}"${singleProductAttr}>
       ${!hasSingleProduct ? `<label>Select Product</label>
       <div class="product-selector">${productOptionsHtml}</div>` : ''}
       <label>Select Offer</label>
@@ -821,10 +931,42 @@ function getFormInnerHTML(config: CampaignConfig): string {
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
       <label for="customerPhone">Phone Number</label>
       <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678">
-      <label for="deliveryAddress">Delivery Address</label>
-      <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"></textarea>
-      <label for="deliveryNotes">Delivery Notes (optional)</label>
-      <input id="deliveryNotes" name="deliveryNotes" type="text" placeholder="Any special instructions">
+      ${fc.showGender ? `<label for="customerGender">Gender <span class="required">*</span></label>
+      <select id="customerGender" name="customerGender" required>
+        <option value="">Select gender...</option>
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+      </select>` : ''}
+      ${fc.showDeliveryState ? `<label for="deliveryState">Delivery State <span class="required">*</span></label>
+      <select id="deliveryState" name="deliveryState" required>
+        <option value="">Select state...</option>
+        ${(fc.deliveryStateOptions && fc.deliveryStateOptions.length > 0
+          ? fc.deliveryStateOptions
+          : ['Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun', 'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo', 'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue', 'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe', 'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi']
+        ).map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('\n')}
+      </select>` : ''}
+      ${fc.showDeliveryAddress !== false ? `<label for="deliveryAddress">Delivery Address</label>
+      <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"></textarea>` : ''}
+      ${fc.showDeliveryNotes ? `<label for="deliveryNotes">Delivery Notes (optional)</label>
+      <input id="deliveryNotes" name="deliveryNotes" type="text" placeholder="Any special instructions">` : ''}
+      ${fc.showPreferredDeliveryDate ? `<label for="preferredDeliveryDate">When do you want to receive your order? <span class="required">*</span></label>
+      <select id="preferredDeliveryDate" name="preferredDeliveryDate" required>
+        <option value="">Select...</option>
+        ${(fc.preferredDeliveryDateOptions && fc.preferredDeliveryDateOptions.length > 0
+          ? fc.preferredDeliveryDateOptions
+          : ['As soon as possible', 'Within 1-2 days', 'Within 3-5 days', 'Next week', 'Specific date (mention in notes)']
+        ).map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('\n')}
+      </select>` : ''}
+      ${fc.showPaymentMethod ? `<label for="paymentMethod">Payment method</label>
+      <select id="paymentMethod" name="paymentMethod">
+        <option value="">Select payment method...</option>
+        <option value="PAY_ON_DELIVERY">Pay on delivery</option>
+        <option value="PAY_ONLINE">Pay online (card / bank)</option>
+      </select>
+      <div id="customerEmailWrap" class="hidden">
+        <label for="customerEmail">Email (for payment receipt) <span class="required">*</span></label>
+        <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com">
+      </div>` : ''}
       <button type="submit" class="btn" id="yannisSubmitBtn">${escapeHtml(buttonText)}</button>
     </form>
   `;
@@ -982,7 +1124,7 @@ function renderIframeForm(config: CampaignConfig, workerUrl: string): Response {
     ${getFormInnerHTML(config)}
   </div>
   <script>
-    ${getFormScript(workerUrl, config.id, config.products)}
+    ${getFormScript(workerUrl, config.id, config.products, config.mediaBuyerId)}
     // Auto-resize iframe height
     var resizeObserver = new ResizeObserver(function() {
       window.parent.postMessage({ type: 'yannis-form-resize', height: document.body.scrollHeight }, '*');
@@ -1018,6 +1160,8 @@ async function isApiHealthy(env: Env): Promise<boolean> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    // Normalize double slashes in pathname
+    url.pathname = url.pathname.replace(/\/\/+/g, '/');
 
     // Handle CORS preflight
     if (request.method === 'OPTIONS') {
@@ -1247,8 +1391,12 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
   const dupProduct = await checkDedup(data.customerPhone, productIds, env);
   if (dupProduct) {
     return corsResponse(
-      { error: 'A similar order was recently submitted. If this is a new order, please wait and try again.' },
-      409,
+      {
+        success: true,
+        message: 'Your order has already been submitted. No need to submit again.',
+        alreadySubmitted: true,
+      },
+      200,
     );
   }
 
@@ -1270,30 +1418,59 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     mediaBuyerId: data.mediaBuyerId,
     customerName: data.customerName,
     customerPhoneHash: phoneHash,
+    customerPhone: data.customerPhone,
     customerAddress: data.customerAddress,
     deliveryAddress: data.deliveryAddress,
     deliveryNotes: data.deliveryNotes,
+    deliveryState: data.deliveryState,
+    customerGender: data.customerGender,
+    preferredDeliveryDate: data.preferredDeliveryDate,
+    paymentMethod: data.paymentMethod,
+    customerEmail: data.customerEmail,
     items: data.items,
     totalAmount: data.totalAmount,
     source: 'edge-form',
     cartId: data.cartId,
   };
 
-  // 8. Forward to API with circuit breaker
-  const apiResult = await forwardToApi(orderPayload, env);
+  // 8. Forward to API: PAY_ONLINE → prepare Paystack (no order yet); else → orders.create
+  const isPayOnline = data.paymentMethod === 'PAY_ONLINE';
+  const apiResult = isPayOnline
+    ? await forwardPreparePaystackToApi(orderPayload, env)
+    : await forwardToApi(orderPayload, env);
 
   if (apiResult.ok) {
     // Success — mark dedup entries
     await markDedup(data.customerPhone, productIds, env);
 
+    const resultData = apiResult.data as { result?: { data?: { id?: string; authorizationUrl?: string; reference?: string } } };
+    const orderId = resultData?.result?.data?.id;
+    const authorizationUrl = resultData?.result?.data?.authorizationUrl;
+
+    if (isPayOnline && authorizationUrl) {
+      return corsResponse({
+        success: true,
+        message: 'Redirecting to payment...',
+        authorizationUrl,
+      });
+    }
+
     return corsResponse({
       success: true,
       message: 'Order received successfully',
-      orderId: (apiResult.data as { result?: { data?: { id: string } } })?.result?.data?.id,
+      orderId,
+      ...(authorizationUrl ? { authorizationUrl } : {}),
     });
   }
 
-  // 9. API failed — try QStash failover
+  // PAY_ONLINE + 5xx/503: no QStash — ask user to retry
+  if (isPayOnline && (apiResult.status >= 500 || apiResult.status === 503)) {
+    const errorMessage = (apiResult.data as { error?: { message?: string } })?.error?.message
+      ?? 'Payment service is temporarily unavailable. Please try again in a moment.';
+    return corsResponse({ error: errorMessage }, 503);
+  }
+
+  // 9. API failed — try QStash failover (Pay on delivery only)
   if (apiResult.status >= 500 || apiResult.status === 503) {
     const buffered = await bufferToQStash(orderPayload, env);
 

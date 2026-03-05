@@ -4,6 +4,8 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { Tabs } from '~/components/ui/tabs';
+import { Checkbox } from '~/components/ui/checkbox';
+import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatActivityDescription } from '~/lib/format-activity';
 import type {
   UserDetailLoaderData,
@@ -36,38 +38,6 @@ const ROLES = [
   { value: 'HR_MANAGER', label: 'HR Manager' },
   { value: 'SUPER_ADMIN', label: 'Super Admin' },
 ];
-
-const ORDER_STATUSES = [
-  { value: 'UNPROCESSED', label: 'Unprocessed', color: 'bg-surface-500' },
-  { value: 'CS_ENGAGED', label: 'CS Engaged', color: 'bg-blue-500' },
-  { value: 'CONFIRMED', label: 'Confirmed', color: 'bg-green-500' },
-  { value: 'CANCELLED', label: 'Cancelled', color: 'bg-red-500' },
-  { value: 'ALLOCATED', label: 'Allocated', color: 'bg-indigo-500' },
-  { value: 'DISPATCHED', label: 'Dispatched', color: 'bg-purple-500' },
-  { value: 'IN_TRANSIT', label: 'In Transit', color: 'bg-amber-500' },
-  { value: 'DELIVERED', label: 'Delivered', color: 'bg-emerald-500' },
-  { value: 'PARTIALLY_DELIVERED', label: 'Partial Delivery', color: 'bg-teal-500' },
-  { value: 'RETURNED', label: 'Returned', color: 'bg-orange-500' },
-  { value: 'RESTOCKED', label: 'Restocked', color: 'bg-cyan-500' },
-  { value: 'WRITTEN_OFF', label: 'Written Off', color: 'bg-rose-500' },
-  { value: 'COMPLETED', label: 'Completed', color: 'bg-green-700' },
-];
-
-const ORDER_STATUS_COLORS: Record<string, string> = {
-  UNPROCESSED: 'badge-warning',
-  CS_ENGAGED: 'badge-info',
-  CONFIRMED: 'badge-success',
-  CANCELLED: 'badge-danger',
-  ALLOCATED: 'badge-info',
-  DISPATCHED: 'badge-brand',
-  IN_TRANSIT: 'badge-warning',
-  DELIVERED: 'badge-success',
-  PARTIALLY_DELIVERED: 'badge-warning',
-  RETURNED: 'badge-danger',
-  RESTOCKED: 'badge-info',
-  WRITTEN_OFF: 'badge-danger',
-  COMPLETED: 'badge-success',
-};
 
 const ROLE_DESCRIPTIONS: Record<string, string> = {
   SUPER_ADMIN: 'Full system access. Can manage all modules, users, and settings.',
@@ -109,10 +79,14 @@ export function UserDetailPage({
   adjustments,
   auditLog,
   marketingMetrics,
+  fundingBalance,
   pendingEmailChange,
   stockMovements,
   financeActivity,
   canDisburseToThisUser = false,
+  isSuperAdmin = false,
+  isViewerHeadOfMarketing = false,
+  isViewerHeadOfCS = false,
 }: UserDetailLoaderData) {
   const actionData = useActionData<{ error?: string; success?: boolean; message?: string; requiresApproval?: boolean }>();
   const navigation = useNavigation();
@@ -123,6 +97,7 @@ export function UserDetailPage({
   const isResetting = isSubmitting && formIntent === 'resetPassword';
   const isUpdating = isSubmitting && formIntent === 'update';
   const isProcessingEmailChange = isSubmitting && formIntent === 'processEmailChange';
+  const restrictHeadView = isViewerHeadOfMarketing || isViewerHeadOfCS;
 
   type TabId = 'overview' | 'orders' | 'payroll' | 'stock' | 'finance' | 'audit' | 'edit';
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -162,7 +137,7 @@ export function UserDetailPage({
     ...(showStockTab ? [{ id: 'stock' as const, label: 'Stock' }] : []),
     ...(showFinanceTab ? [{ id: 'finance' as const, label: 'Finance Activity' }] : []),
     { id: 'audit', label: 'Activity' },
-    ...(!isSuperAdminProfile ? [{ id: 'edit' as const, label: 'Settings' }] : []),
+    ...(!isSuperAdminProfile && !restrictHeadView ? [{ id: 'edit' as const, label: 'Settings' }] : []),
   ];
 
   // When viewing a user, ensure activeTab is valid for their role
@@ -172,32 +147,22 @@ export function UserDetailPage({
     if (showPayrollTab) validIds.add('payroll');
     if (showStockTab) validIds.add('stock');
     if (showFinanceTab) validIds.add('finance');
-    if (!isSuperAdminProfile) validIds.add('edit');
+    if (!isSuperAdminProfile && !restrictHeadView) validIds.add('edit');
     if (!validIds.has(activeTab)) {
       setActiveTab('overview');
     }
-  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showStockTab, showFinanceTab, isSuperAdminProfile]);
+  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showStockTab, showFinanceTab, isSuperAdminProfile, restrictHeadView]);
 
   // Edit form state
   const [selectedRole, setSelectedRole] = useState(user.role);
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(
-    user.visibleOrderStatuses ?? ORDER_STATUSES.map((s) => s.value),
-  );
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
 
   const showCapacity = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
-  const showOrderStatuses = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
   const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
-  const showProductAssignment = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
+  const showProductAssignment = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(selectedRole);
   const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
   const isCSRole = ['CS_AGENT', 'HEAD_OF_CS'].includes(user.role);
   const isLogisticsRole = ['TPL_MANAGER', 'TPL_RIDER', 'HEAD_OF_LOGISTICS', 'WAREHOUSE_MANAGER'].includes(user.role);
-
-  const toggleStatus = (value: string) => {
-    setSelectedStatuses((prev) =>
-      prev.includes(value) ? prev.filter((s) => s !== value) : [...prev, value],
-    );
-  };
 
   const toggleProduct = (id: string) => {
     setSelectedProductIds((prev) =>
@@ -266,17 +231,17 @@ export function UserDetailPage({
                   <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-white">{user.name}</h1>
                   <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{user.email}</p>
                 </div>
-                {(canDisburseToThisUser || !isSuperAdminProfile) && (
+                {(canDisburseToThisUser || (!isSuperAdminProfile && !restrictHeadView)) && (
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {canDisburseToThisUser && (
                       <Link
-                        to={`/admin/disbursements?receiverId=${user.id}`}
+                        to={`/admin/finance/disbursements?receiverId=${user.id}`}
                         className="btn-primary btn-sm"
                       >
                         Disburse
                       </Link>
                     )}
-                    {!isSuperAdminProfile && (
+                    {!isSuperAdminProfile && !restrictHeadView && (
                       <>
                         <Button
                           type="button"
@@ -290,13 +255,13 @@ export function UserDetailPage({
                           </svg>
                           Reset Password
                         </Button>
-                        {user.status === 'ACTIVE' && (
+                        {(user.status === 'ACTIVE' || user.status === 'PENDING') && isSuperAdmin && (
                           <Button
                             type="button"
-                            variant="secondary"
+                            variant="danger"
                             size="sm"
                             onClick={() => setShowDeactivateConfirm(true)}
-                            className="text-danger-600 dark:text-danger-400 hover:text-danger-700 border-danger-200 dark:border-danger-700 hover:border-danger-300"
+                            className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
                           >
                             Deactivate
                           </Button>
@@ -308,6 +273,11 @@ export function UserDetailPage({
                               Reactivate
                             </Button>
                           </Form>
+                        )}
+                        {user.status === 'DEACTIVATED' && (
+                          <p className="text-xs text-surface-600 dark:text-surface-400 italic">
+                            Deactivated accounts cannot be reactivated. Re-invite the user to create a new account.
+                          </p>
                         )}
                       </>
                     )}
@@ -367,14 +337,14 @@ export function UserDetailPage({
             <div className="card space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-surface-900 dark:text-white">Account Information</h2>
-                {!isSuperAdminProfile && (
+                {!isSuperAdminProfile && !restrictHeadView && (
                   <button type="button" onClick={() => setActiveTab('edit')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
                     Edit
                   </button>
                 )}
               </div>
               <DeferredSection resolve={pendingEmailChange} skeleton="inline">
-                {(pending: PendingEmailChange | null) => pending && !isSuperAdminProfile && (
+                {(pending: PendingEmailChange | null) => pending && !isSuperAdminProfile && !restrictHeadView && (
                   <div className="rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-800 p-3 mb-4">
                     <p className="text-sm font-medium text-warning-800 dark:text-warning-200">
                       Pending email change to <strong>{pending.requestedNewEmail}</strong> — requires SuperAdmin approval
@@ -423,25 +393,9 @@ export function UserDetailPage({
             </div>
 
             {/* Role Settings */}
-            {(user.visibleOrderStatuses || user.logisticsLocationId || user.restrictProductAccess) && (
+            {(user.logisticsLocationId || user.restrictProductAccess || user.commissionPlanId) && (
               <div className="card space-y-4">
                 <h2 className="text-base font-semibold text-surface-900 dark:text-white">Role Configuration</h2>
-
-                {user.visibleOrderStatuses && user.visibleOrderStatuses.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-2">Visible Order Tabs</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {user.visibleOrderStatuses.map((s) => {
-                        const def = ORDER_STATUSES.find((os) => os.value === s);
-                        return (
-                          <span key={s} className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium text-white ${def?.color ?? 'bg-surface-500'}`}>
-                            {def?.label ?? s}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
 
                 {user.logisticsLocationId && (
                   <div>
@@ -486,6 +440,34 @@ export function UserDetailPage({
                 )}
               </DeferredSection>
             )}
+
+            {/* Funding balance — only for HoM / Media Buyer (disbursement recipients) */}
+            {isMarketingRole && (
+              <DeferredSection resolve={fundingBalance} skeleton="stat">
+                {(balance) => balance && (
+                  <div className="card space-y-4 border-brand-200 dark:border-brand-700/50 bg-brand-50/20 dark:bg-brand-900/10">
+                    <h2 className="text-base font-semibold text-surface-900 dark:text-white">Funding balance</h2>
+                    <p className="text-xs text-surface-600 dark:text-surface-400">Confirmed funding received minus approved ad spend</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div>
+                        <p className="text-xs text-surface-600 dark:text-surface-400">Total received</p>
+                        <p className="text-lg font-medium text-surface-900 dark:text-white">₦{Number(balance.totalReceived).toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-surface-600 dark:text-surface-400">Total spent</p>
+                        <p className="text-lg font-medium text-surface-900 dark:text-white">
+                          {user.role === 'MEDIA_BUYER' ? `₦${Number(balance.totalSpend).toLocaleString()}` : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-surface-600 dark:text-surface-400">Balance</p>
+                        <p className="text-xl font-bold text-brand-600 dark:text-brand-400">₦{Number(balance.balance).toLocaleString()}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </DeferredSection>
+            )}
           </div>
 
           {/* Right Column — Quick Stats */}
@@ -510,7 +492,7 @@ export function UserDetailPage({
                         {data.orders.slice(0, 3).map((order) => (
                           <Link key={order.id} to={`/admin/orders/${order.id}`} prefetch="intent" className="flex items-center justify-between text-xs hover:bg-surface-50 dark:hover:bg-surface-800/50 -mx-1 px-1 py-1 rounded transition-colors">
                             <span className="text-surface-900 dark:text-surface-100 font-medium">{order.referenceNumber || order.id.slice(0, 8)}</span>
-                            <span className={ORDER_STATUS_COLORS[order.status] ?? 'badge'}>{order.status.replace('_', ' ')}</span>
+                            <OrderStatusBadge status={order.status} />
                           </Link>
                         ))}
                       </div>
@@ -621,7 +603,7 @@ export function UserDetailPage({
                           </td>
                           <td className="table-cell text-sm text-surface-800 dark:text-surface-300">{order.customerName || '—'}</td>
                           <td className="table-cell">
-                            <span className={ORDER_STATUS_COLORS[order.status] ?? 'badge'}>{order.status.replace(/_/g, ' ')}</span>
+                            <OrderStatusBadge status={order.status} />
                           </td>
                           <td className="table-cell text-right text-sm font-medium text-surface-900 dark:text-surface-100">
                             {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
@@ -890,9 +872,6 @@ export function UserDetailPage({
       {activeTab === 'edit' && (
         <Form method="post" className="space-y-6">
           <input type="hidden" name="intent" value="update" />
-          {showOrderStatuses && (
-            <input type="hidden" name="visibleOrderStatuses" value={JSON.stringify(selectedStatuses)} />
-          )}
           {showProductAssignment && selectedProductIds.length > 0 && (
             <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
           )}
@@ -920,14 +899,18 @@ export function UserDetailPage({
               </div>
               <div>
                 <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Status</label>
-                <div className="flex items-center gap-4 mt-2">
-                  {(['ACTIVE', 'INACTIVE', 'ARCHIVED'] as const).map((s) => (
-                    <label key={s} className="flex items-center gap-2 cursor-pointer">
-                      <input type="radio" name="status" value={s} defaultChecked={user.status === s} className="text-brand-500 focus:ring-brand-500" />
-                      <span className="text-sm text-surface-700 dark:text-surface-300">{s.charAt(0) + s.slice(1).toLowerCase()}</span>
-                    </label>
-                  ))}
-                </div>
+                {user.status === 'DEACTIVATED' ? (
+                  <p className="text-sm text-surface-600 dark:text-surface-400">Deactivated accounts cannot be reactivated. Re-invite to create a new account.</p>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-4 mt-2">
+                    {(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED'] as const).map((s) => (
+                      <label key={s} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="status" value={s} defaultChecked={user.status === s} className="text-brand-500 focus:ring-brand-500" />
+                        <span className="text-sm text-surface-700 dark:text-surface-300">{s.charAt(0) + s.slice(1).toLowerCase()}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label htmlFor="phone" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Phone</label>
@@ -938,7 +921,7 @@ export function UserDetailPage({
           </div>
 
           {/* Role Settings */}
-          {(showCapacity || showOrderStatuses || showLogisticsLocation || showProductAssignment) && (
+          {(showCapacity || showLogisticsLocation || showProductAssignment) && (
             <div className="card space-y-4">
               <h2 className="text-base font-semibold text-surface-900 dark:text-white">Role Settings</h2>
 
@@ -946,25 +929,6 @@ export function UserDetailPage({
                 <div>
                   <label htmlFor="capacity" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Order Capacity</label>
                   <input id="capacity" name="capacity" type="number" min={1} max={100} defaultValue={user.capacity} className="input w-full sm:w-32" />
-                </div>
-              )}
-
-              {showOrderStatuses && (
-                <div>
-                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Active Tabs</label>
-                  <div className="flex flex-wrap gap-2">
-                    {ORDER_STATUSES.map((status) => {
-                      const isActive = selectedStatuses.includes(status.value);
-                      return (
-                        <button key={status.value} type="button" onClick={() => toggleStatus(status.value)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 ${isActive ? `${status.color} text-white shadow-sm` : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300'}`}>
-                          {status.label}
-                          {isActive && (
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
                 </div>
               )}
 
@@ -1002,7 +966,10 @@ export function UserDetailPage({
                         <div className="border border-surface-200 dark:border-surface-700 rounded-lg max-h-48 overflow-y-auto">
                           {prods.map((product: UserCreateProduct) => (
                             <label key={product.id} className="flex items-center gap-3 px-3 py-2 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer border-b border-surface-100 dark:border-surface-800 last:border-b-0">
-                              <input type="checkbox" checked={selectedProductIds.includes(product.id)} onChange={() => toggleProduct(product.id)} className="rounded border-surface-300 dark:border-surface-600 text-brand-500 focus:ring-brand-500" />
+                              <Checkbox
+                                checked={selectedProductIds.includes(product.id)}
+                                onChange={() => toggleProduct(product.id)}
+                              />
                               <span className="text-sm text-surface-900 dark:text-surface-100">{product.name}</span>
                               <span className="text-xs text-surface-700 dark:text-surface-300 ml-auto">{product.category ?? ''}</span>
                             </label>
@@ -1014,7 +981,11 @@ export function UserDetailPage({
                       {selectedProductIds.length > 0 && (
                         <div className="mt-3">
                           <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" name="restrictProductAccess" value="true" defaultChecked={user.restrictProductAccess} className="rounded border-surface-300 dark:border-surface-600 text-brand-500 focus:ring-brand-500" />
+                            <Checkbox
+                              name="restrictProductAccess"
+                              value="true"
+                              defaultChecked={user.restrictProductAccess}
+                            />
                             <span className="text-sm text-surface-700 dark:text-surface-300">Restrict access to only assigned products</span>
                           </label>
                         </div>
@@ -1112,24 +1083,52 @@ export function UserDetailPage({
 
       {/* ─── Deactivate Confirmation Modal ───────────────── */}
       {showDeactivateConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="card w-full max-w-md space-y-4">
-            <h3 className="text-lg font-semibold text-danger-600 dark:text-danger-400">Deactivate User</h3>
-            <p className="text-sm text-surface-700 dark:text-surface-200">
-              Are you sure you want to deactivate <strong>{user.name}</strong>? This will immediately
-              terminate all their active sessions and prevent them from logging in.
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" aria-modal="true" role="alertdialog" aria-labelledby="deactivate-modal-title" aria-describedby="deactivate-modal-desc">
+          <div className="card w-full max-w-lg space-y-5 border-2 border-danger-200 dark:border-danger-800 bg-white dark:bg-surface-900 shadow-xl">
+            <div className="flex items-center gap-3 pb-2 border-b border-danger-100 dark:border-danger-900/50">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/50 flex items-center justify-center">
+                <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h3 id="deactivate-modal-title" className="text-lg font-semibold text-danger-700 dark:text-danger-300">
+                Deactivate user permanently
+              </h3>
+            </div>
+            <p id="deactivate-modal-desc" className="text-sm text-surface-700 dark:text-surface-200">
+              You are about to deactivate <strong>{user.name}</strong> ({user.email}). This action is <strong>irreversible</strong> for this account.
+            </p>
+            <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 p-4 space-y-2">
+              <p className="text-sm font-medium text-danger-800 dark:text-danger-200">Risks and consequences:</p>
+              <ul className="text-sm text-danger-700 dark:text-danger-300 space-y-1.5 list-disc list-inside">
+                <li>Their login will be disabled immediately; all sessions will be terminated.</li>
+                <li>They will disappear from the default user list (only visible when filtering by “Deactivated”).</li>
+                <li>This account <strong>cannot be reactivated</strong>. To give them access again you must re-invite them, which creates a new account and new audit history.</li>
+                <li>Existing audit trail and historical data (orders, payouts, etc.) remain tied to this user for compliance.</li>
+              </ul>
+            </div>
+            <p className="text-xs text-surface-600 dark:text-surface-400">
+              Only Super Admins can deactivate users. If you need to temporarily disable access, use <strong>Inactive</strong> or <strong>Archived</strong> instead (those can be reactivated).
             </p>
             {actionData?.error && (
               <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-3 py-2">
                 <p className="text-sm text-danger-700 dark:text-danger-500">{actionData.error}</p>
               </div>
             )}
-            <div className="flex items-center justify-end gap-3">
-              <Button type="button" variant="secondary" onClick={() => setShowDeactivateConfirm(false)} disabled={isDeactivating}>Cancel</Button>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button type="button" variant="secondary" onClick={() => setShowDeactivateConfirm(false)} disabled={isDeactivating}>
+                Cancel
+              </Button>
               <Form method="post">
                 <input type="hidden" name="intent" value="deactivate" />
-                <Button type="submit" variant="danger" loading={isDeactivating} loadingText="Deactivating...">
-                  Deactivate
+                <Button
+                  type="submit"
+                  variant="danger"
+                  loading={isDeactivating}
+                  loadingText="Deactivating..."
+                  className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700"
+                >
+                  Deactivate permanently
                 </Button>
               </Form>
             </div>
@@ -1169,7 +1168,7 @@ function MetricCard({ label, value, accent }: { label: string; value: string; ac
 }
 
 function StatusDot({ status }: { status: string }) {
-  const color = status === 'ACTIVE' ? 'bg-success-500' : status === 'INACTIVE' ? 'bg-danger-500' : 'bg-warning-500';
+  const color = status === 'ACTIVE' ? 'bg-success-500' : status === 'PENDING' ? 'bg-info-500' : status === 'DEACTIVATED' ? 'bg-danger-500' : status === 'INACTIVE' ? 'bg-danger-500' : 'bg-warning-500';
   return <div className={`w-4 h-4 rounded-full ${color} flex items-center justify-center`}><div className="w-2 h-2 rounded-full bg-white" /></div>;
 }
 

@@ -22,14 +22,10 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
   useFetcherToast(fetcher.data, { successMessage: 'Delivery updated' });
   const [activeTab, setActiveTab] = useState<'transit' | 'pickup'>('transit');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [otpInput, setOtpInput] = useState('');
   const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
-  const [actionType, setActionType] = useState<'DELIVERED' | 'PARTIALLY_DELIVERED' | 'RETURNED' | 'IN_TRANSIT' | null>(null);
+  const [actionType, setActionType] = useState<'RETURNED' | 'IN_TRANSIT' | null>(null);
   const [reason, setReason] = useState('');
-  const [deliveredQty, setDeliveredQty] = useState('');
-  const [returnedQty, setReturnedQty] = useState('');
-  const [deliveryFeeAddOn, setDeliveryFeeAddOn] = useState('');
 
   // Auto-capture GPS on component mount
   useEffect(() => {
@@ -53,38 +49,23 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
   useEffect(() => {
     if (fetcher.data?.success) {
       setSelectedOrder(null);
-      setOtpInput('');
       setActionType(null);
       setReason('');
-      setDeliveredQty('');
-      setReturnedQty('');
-      setDeliveryFeeAddOn('');
     }
   }, [fetcher.data]);
 
   const handleOfflineSubmit = useCallback(
-    async (orderId: string, status: 'DELIVERED' | 'PARTIALLY_DELIVERED' | 'RETURNED') => {
-      const addOn = deliveryFeeAddOn ? parseFloat(deliveryFeeAddOn) : undefined;
+    async (orderId: string, status: 'RETURNED') => {
       await queueDeliveryConfirmation({
         orderId,
         status,
-        otp: otpInput || undefined,
-        gpsLat: gps?.lat,
-        gpsLng: gps?.lng,
         returnReason: reason || undefined,
-        deliveredQty: deliveredQty ? parseInt(deliveredQty, 10) : undefined,
-        returnedQty: returnedQty ? parseInt(returnedQty, 10) : undefined,
-        deliveryFeeAddOn: addOn !== undefined && !Number.isNaN(addOn) && addOn >= 0 ? addOn : undefined,
       });
       setSelectedOrder(null);
-      setOtpInput('');
       setActionType(null);
       setReason('');
-      setDeliveredQty('');
-      setReturnedQty('');
-      setDeliveryFeeAddOn('');
     },
-    [otpInput, gps, reason, deliveredQty, returnedQty, deliveryFeeAddOn],
+    [reason],
   );
 
   const isSubmitting = fetcher.state !== 'idle';
@@ -270,25 +251,12 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
             {/* Expanded delivery form */}
             {selectedOrder?.id === order.id && (
               <div className="mt-4 border-t border-surface-200 pt-4 dark:border-surface-700">
-                {/* Action type selection */}
+                {/* v1: Only 3PL marks delivered. Rider can only mark Returned. */}
                 {!actionType && (
                   <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); setActionType('DELIVERED'); }}
-                      className="w-full rounded-lg bg-green-600 py-3.5 text-sm font-semibold text-white active:bg-green-700"
-                      style={{ minHeight: '48px' }}
-                    >
-                      Confirm Delivery
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); setActionType('PARTIALLY_DELIVERED'); }}
-                      className="w-full rounded-lg bg-amber-500 py-3.5 text-sm font-semibold text-white active:bg-amber-600"
-                      style={{ minHeight: '48px' }}
-                    >
-                      Partial Delivery
-                    </button>
+                    <p className="text-sm text-surface-600 dark:text-surface-400">
+                      Your 3PL manager will confirm delivery. If the customer rejects, mark as Returned below.
+                    </p>
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); setActionType('RETURNED'); }}
@@ -297,179 +265,6 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
                     >
                       Reject / Return
                     </button>
-                  </div>
-                )}
-
-                {/* DELIVERED form — requires OTP */}
-                {actionType === 'DELIVERED' && (
-                  <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
-                      Enter 4-digit OTP from customer
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="\d{4}"
-                      maxLength={4}
-                      value={otpInput}
-                      onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                      placeholder="0000"
-                      className="w-full rounded-lg border border-surface-300 bg-white px-4 py-3.5 text-center text-2xl font-mono tracking-[0.5em] dark:border-surface-600 dark:bg-surface-800 dark:text-white"
-                      style={{ minHeight: '48px' }}
-                      autoFocus
-                    />
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
-                      Delivery add-on (&#8358;) — optional
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      step="0.01"
-                      value={deliveryFeeAddOn}
-                      onChange={(e) => setDeliveryFeeAddOn(e.target.value)}
-                      placeholder="Tolls, fuel, remote area..."
-                      className="w-full rounded-lg border border-surface-300 bg-white px-4 py-3 text-sm dark:border-surface-600 dark:bg-surface-800 dark:text-white"
-                      style={{ minHeight: '44px' }}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setActionType(null)}
-                        className="flex-1 rounded-lg border border-surface-300 py-3 text-sm font-medium text-surface-700 dark:border-surface-600 dark:text-surface-300"
-                        style={{ minHeight: '48px' }}
-                      >
-                        Back
-                      </button>
-                      {isOnline ? (
-                        <fetcher.Form method="POST" className="flex-1">
-                          <input type="hidden" name="orderId" value={order.id} />
-                          <input type="hidden" name="newStatus" value="DELIVERED" />
-                          <input type="hidden" name="otp" value={otpInput} />
-                          {deliveryFeeAddOn && <input type="hidden" name="deliveryFeeAddOn" value={deliveryFeeAddOn} />}
-                          {gps && <input type="hidden" name="gpsLat" value={gps.lat.toString()} />}
-                          {gps && <input type="hidden" name="gpsLng" value={gps.lng.toString()} />}
-                          <button
-                            type="submit"
-                            disabled={otpInput.length !== 4 || isSubmitting}
-                            className="w-full rounded-lg bg-green-600 py-3 text-sm font-semibold text-white disabled:opacity-50 active:bg-green-700"
-                            style={{ minHeight: '48px' }}
-                          >
-                            {isSubmitting ? 'Submitting...' : 'Confirm'}
-                          </button>
-                        </fetcher.Form>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={otpInput.length !== 4}
-                          onClick={() => handleOfflineSubmit(order.id, 'DELIVERED')}
-                          className="flex-1 rounded-lg bg-green-600 py-3 text-sm font-semibold text-white disabled:opacity-50"
-                          style={{ minHeight: '48px' }}
-                        >
-                          Save Offline
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* PARTIALLY_DELIVERED form */}
-                {actionType === 'PARTIALLY_DELIVERED' && (
-                  <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
-                      Delivered Quantity
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      value={deliveredQty}
-                      onChange={(e) => setDeliveredQty(e.target.value)}
-                      className="w-full rounded-lg border border-surface-300 bg-white px-4 py-3 text-sm dark:border-surface-600 dark:bg-surface-800 dark:text-white"
-                      style={{ minHeight: '48px' }}
-                      placeholder="Items delivered"
-                    />
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
-                      Returned Quantity
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      value={returnedQty}
-                      onChange={(e) => setReturnedQty(e.target.value)}
-                      className="w-full rounded-lg border border-surface-300 bg-white px-4 py-3 text-sm dark:border-surface-600 dark:bg-surface-800 dark:text-white"
-                      style={{ minHeight: '48px' }}
-                      placeholder="Items returned"
-                    />
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
-                      OTP (from customer)
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="\d{4}"
-                      maxLength={4}
-                      value={otpInput}
-                      onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                      placeholder="0000"
-                      className="w-full rounded-lg border border-surface-300 bg-white px-4 py-3 text-center text-lg font-mono tracking-[0.3em] dark:border-surface-600 dark:bg-surface-800 dark:text-white"
-                      style={{ minHeight: '48px' }}
-                    />
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
-                      Delivery add-on (&#8358;) — optional
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      step="0.01"
-                      value={deliveryFeeAddOn}
-                      onChange={(e) => setDeliveryFeeAddOn(e.target.value)}
-                      placeholder="Tolls, fuel, remote area..."
-                      className="w-full rounded-lg border border-surface-300 bg-white px-4 py-3 text-sm dark:border-surface-600 dark:bg-surface-800 dark:text-white"
-                      style={{ minHeight: '44px' }}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setActionType(null)}
-                        className="flex-1 rounded-lg border border-surface-300 py-3 text-sm font-medium text-surface-700 dark:border-surface-600 dark:text-surface-300"
-                        style={{ minHeight: '48px' }}
-                      >
-                        Back
-                      </button>
-                      {isOnline ? (
-                        <fetcher.Form method="POST" className="flex-1">
-                          <input type="hidden" name="orderId" value={order.id} />
-                          <input type="hidden" name="newStatus" value="PARTIALLY_DELIVERED" />
-                          <input type="hidden" name="otp" value={otpInput} />
-                          <input type="hidden" name="deliveredQuantity" value={deliveredQty} />
-                          <input type="hidden" name="returnedQuantity" value={returnedQty} />
-                          {deliveryFeeAddOn && <input type="hidden" name="deliveryFeeAddOn" value={deliveryFeeAddOn} />}
-                          {gps && <input type="hidden" name="gpsLat" value={gps.lat.toString()} />}
-                          {gps && <input type="hidden" name="gpsLng" value={gps.lng.toString()} />}
-                          <button
-                            type="submit"
-                            disabled={!deliveredQty || !returnedQty || isSubmitting}
-                            className="w-full rounded-lg bg-amber-500 py-3 text-sm font-semibold text-white disabled:opacity-50 active:bg-amber-600"
-                            style={{ minHeight: '48px' }}
-                          >
-                            {isSubmitting ? 'Submitting...' : 'Submit'}
-                          </button>
-                        </fetcher.Form>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={!deliveredQty || !returnedQty}
-                          onClick={() => handleOfflineSubmit(order.id, 'PARTIALLY_DELIVERED')}
-                          className="flex-1 rounded-lg bg-amber-500 py-3 text-sm font-semibold text-white disabled:opacity-50"
-                          style={{ minHeight: '48px' }}
-                        >
-                          Save Offline
-                        </button>
-                      )}
-                    </div>
                   </div>
                 )}
 

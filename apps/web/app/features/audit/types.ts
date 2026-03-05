@@ -14,6 +14,7 @@ export interface AuditFilters {
   actorId: string;
   startDate: string;
   endDate: string;
+  periodAllTime?: boolean;
   page: number;
   limit: number;
 }

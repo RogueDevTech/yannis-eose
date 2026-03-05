@@ -34,6 +34,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect(`/auth${redirectTo}`);
   }
 
+  if (user.role === 'TPL_MANAGER') {
+    return redirect('/tpl');
+  }
+
   const cookie = getSessionCookie(request);
   const notificationsPromise = apiRequest<unknown>('/trpc/notifications.list?input=%7B%7D', { method: 'GET', cookie })
     .then((res) => {
@@ -66,11 +70,16 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'markNotificationRead') {
     const notificationId = formData.get('notificationId')?.toString();
     if (notificationId) {
-      await apiRequest<unknown>('/trpc/notifications.markAsRead', {
+      const res = await apiRequest<unknown>('/trpc/notifications.markAsRead', {
         method: 'POST',
         cookie,
         body: { notificationIds: [notificationId] },
       });
+      if (!res.ok) {
+        const errMsg = (res.data && typeof res.data === 'object' && (res.data as { error?: { message?: string } }).error?.message) ?? 'Mark read failed';
+        return json({ success: false, error: errMsg });
+      }
+      return json({ success: true });
     }
     return json({ success: true });
   }
@@ -89,6 +98,7 @@ export default function AdminLayout() {
     <DashboardLayout
       user={user}
       notificationsPromise={notifications}
+      notificationsActionUrl="/admin"
     />
   );
 }

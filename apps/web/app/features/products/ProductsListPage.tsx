@@ -54,6 +54,12 @@ function getDisplayCategory(product: Product): string {
   return '\u2014';
 }
 
+const ViewIcon = (
+  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.06a4.5 4.5 0 00-1.242-7.244l4.5-4.5a4.5 4.5 0 116.364 6.364l-1.757 1.757" />
+  </svg>
+);
+
 export function ProductsListPage({ products, total }: ProductsListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -140,112 +146,82 @@ export function ProductsListPage({ products, total }: ProductsListPageProps) {
         </div>
       </div>
 
-      {/* Products table */}
-      <div className="card p-0 overflow-hidden">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Product</th>
-                <th className="table-header">Category</th>
-                <th className="table-header">Brand</th>
-                <th className="table-header">Offer Tiers</th>
-                <th className="table-header text-right">Price Range</th>
-                <th className="table-header text-right">Cost Price</th>
-                <th className="table-header">Status</th>
-                <th className="table-header text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map((product) => (
-                <tr key={product.id} className="table-row">
-                  <td className="table-cell">
-                    <div>
-                      <p className="font-medium text-surface-900 dark:text-surface-100">{product.name}</p>
-                      {product.description && (
-                        <p className="text-xs text-surface-700 dark:text-surface-300 truncate max-w-[200px]">
-                          {product.description}
-                        </p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200">
-                    {getDisplayCategory(product)}
-                  </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200">
-                    {product.brandName ?? '\u2014'}
-                  </td>
-                  <td className="table-cell min-w-[280px] max-w-[320px] align-top whitespace-normal">
-                    <OfferTiersDisplay offers={product.offers} />
-                  </td>
-                  <td className="table-cell text-right font-medium">
-                    {formatPriceRange(product)}
-                  </td>
-                  <td className="table-cell text-right font-medium">
-                    {product.costPrice ? `\u20A6${Number(product.costPrice).toLocaleString()}` : '\u2014'}
-                  </td>
-                  <td className="table-cell">
-                    <span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>
-                      {product.status}
-                    </span>
-                  </td>
-                  <td className="table-cell text-right">
-                    <Link
-                      to={`/admin/products/${product.id}`}
-                      className="text-brand-500 hover:text-brand-600 text-sm font-medium"
-                    >
-                      Edit
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-              {filteredProducts.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                    {products.length === 0 ? 'No products yet. Add your first product.' : 'No matching products found'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile card list */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
-          {filteredProducts.map((product) => (
-            <Link
-              key={product.id}
-              to={`/admin/products/${product.id}`}
-              className="block p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="font-medium text-surface-900 dark:text-surface-100">{product.name}</span>
-                <span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>{product.status}</span>
-              </div>
-              <div className="flex items-start justify-between gap-2 text-sm">
-                <div className="min-w-0 flex-1">
-                  <OfferTiersDisplay offers={product.offers} />
-                </div>
-                <span className="font-medium text-surface-900 dark:text-surface-100 shrink-0">
-                  {formatPriceRange(product)}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1 text-xs text-surface-700 dark:text-surface-300">
-                {getDisplayCategory(product) !== '\u2014' && (
-                  <span>Category: {getDisplayCategory(product)}</span>
-                )}
-                {product.brandName && (
-                  <span>Brand: {product.brandName}</span>
-                )}
-              </div>
-            </Link>
-          ))}
-          {filteredProducts.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-300">
-              {products.length === 0 ? 'No products yet' : 'No matching products found'}
+      {/* Products card grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {filteredProducts.map((product) => (
+          <article
+            key={product.id}
+            className="group relative bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-700 p-5 shadow-sm hover:shadow-md hover:border-surface-300 dark:hover:border-surface-600 transition-all duration-200 flex flex-col min-h-[180px] h-full"
+          >
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <h3 className="font-semibold text-surface-900 dark:text-white text-base leading-snug line-clamp-2 min-w-0 flex-1">
+                {product.name}
+              </h3>
+              <span className={`${PRODUCT_STATUS_COLORS[product.status] ?? 'badge'} shrink-0 capitalize`}>
+                {product.status.toLowerCase()}
+              </span>
             </div>
-          )}
-        </div>
+
+            <div className="text-sm text-surface-500 dark:text-surface-400 mb-4 flex-1">
+              {getDisplayCategory(product) !== '\u2014' && (
+                <>
+                  <span className="text-surface-700 dark:text-surface-300">{getDisplayCategory(product)}</span>
+                  <span className="mx-1.5">·</span>
+                </>
+              )}
+              {product.brandName && (
+                <>
+                  <span className="text-surface-700 dark:text-surface-300">{product.brandName}</span>
+                  <span className="mx-1.5">·</span>
+                </>
+              )}
+              <time dateTime={product.createdAt}>
+                {new Date(product.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </time>
+            </div>
+
+            {(product.description || (product.offers && product.offers.length > 0)) && (
+              <div className="mb-4 pt-3 border-t border-surface-100 dark:border-surface-800">
+                <p className="text-xs font-medium text-surface-500 dark:text-surface-500 uppercase tracking-wider mb-2">
+                  Offer tiers · Price
+                </p>
+                <div className="space-y-1">
+                  {product.offers && product.offers.length > 0 && (
+                    <OfferTiersDisplay offers={product.offers} />
+                  )}
+                  <p className="text-sm font-medium text-surface-800 dark:text-surface-200">
+                    {formatPriceRange(product)}
+                  </p>
+                  {product.description && (
+                    <p className="text-xs text-surface-600 dark:text-surface-400 line-clamp-2">
+                      {product.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-3 border-t border-surface-100 dark:border-surface-800">
+              <Link
+                to={`/admin/products/${product.id}`}
+                className="btn-primary btn-sm inline-flex items-center gap-1.5 shrink-0"
+              >
+                {ViewIcon}
+                <span>View</span>
+              </Link>
+            </div>
+          </article>
+        ))}
+        {filteredProducts.length === 0 && (
+          <div className="col-span-full rounded-xl border border-dashed border-surface-300 dark:border-surface-600 bg-surface-50 dark:bg-surface-800/50 py-16 text-center">
+            <p className="text-surface-600 dark:text-surface-400 font-medium">
+              {products.length === 0 ? 'No products yet' : 'No matching products found'}
+            </p>
+            <p className="text-sm text-surface-500 dark:text-surface-500 mt-1">
+              {products.length === 0 ? 'Add your first product with Add Product above.' : 'Try adjusting your search or filters.'}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Pagination */}

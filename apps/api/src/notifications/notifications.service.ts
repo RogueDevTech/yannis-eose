@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { eq, and, desc, count, sql } from 'drizzle-orm';
+import { eq, and, desc, count, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import sgMail from '@sendgrid/mail';
 import { db as schema } from '@yannis/shared';
@@ -259,7 +259,8 @@ export class NotificationsService {
     if (!data) return '/admin';
     if (data['orderId']) return `/admin/orders/${data['orderId']}`;
     if (data['requestId'] && type.includes('approval')) return '/admin/users';
-    if (data['fundingId']) return '/admin/marketing';
+    if (data['fundingId'] || (data['requesterId'] && type === 'funding:request')) return '/admin/marketing/funding';
+    if (data['requestId'] && (type === 'funding:approved' || type === 'funding:rejected')) return '/admin/marketing/funding';
     if (data['transferId']) return '/admin/inventory';
     if (data['payoutId']) return '/admin/hr';
     return '/admin';
@@ -383,7 +384,7 @@ export class NotificationsService {
       .where(
         and(
           eq(schema.notifications.userId, userId),
-          sql`${schema.notifications.id} = ANY(${input.notificationIds})`,
+          inArray(schema.notifications.id, input.notificationIds),
         ),
       );
 

@@ -27,6 +27,7 @@ export const MV_PROFIT_SUMMARY = `
 
 /**
  * SQL to create the ad spend summary materialized view.
+ * Only APPROVED ad spend counts toward profit/metrics.
  */
 export const MV_AD_SPEND_SUMMARY = `
   CREATE MATERIALIZED VIEW IF NOT EXISTS mv_ad_spend_summary AS
@@ -36,6 +37,7 @@ export const MV_AD_SPEND_SUMMARY = `
     media_buyer_id,
     product_id
   FROM ad_spend_logs
+  WHERE status = 'APPROVED'
   GROUP BY spend_date, media_buyer_id, product_id
   WITH DATA
 `;

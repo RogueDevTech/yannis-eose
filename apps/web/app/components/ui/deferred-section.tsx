@@ -42,6 +42,28 @@ function TableSkeleton() {
   );
 }
 
+function ListSkeleton() {
+  return (
+    <div className="card animate-pulse divide-y divide-surface-100 dark:divide-surface-800">
+      <div className="h-4 w-48 rounded bg-surface-200 dark:bg-surface-700 mb-4" />
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="flex items-center gap-3 py-4">
+          <div className="h-8 w-8 rounded-full bg-surface-200 dark:bg-surface-700 shrink-0" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 w-32 rounded bg-surface-100 dark:bg-surface-800" />
+            <div className="flex gap-4">
+              <div className="h-3 w-16 rounded bg-surface-100 dark:bg-surface-800" />
+              <div className="h-3 w-20 rounded bg-surface-100 dark:bg-surface-800" />
+              <div className="h-3 w-14 rounded bg-surface-100 dark:bg-surface-800" />
+            </div>
+          </div>
+          <div className="h-6 w-12 rounded bg-surface-200 dark:bg-surface-700 shrink-0" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function InlineSkeleton() {
   return (
     <div className="flex items-center gap-2 py-1">
@@ -58,12 +80,13 @@ const SKELETON_COMPONENTS: Record<SkeletonVariant, () => ReactNode> = {
   stat: StatSkeleton,
   card: CardSkeleton,
   table: TableSkeleton,
+  list: ListSkeleton,
   inline: InlineSkeleton,
 };
 
 // ── Error Fallback ───────────────────────────────────────────
 
-function DeferredError() {
+export function DeferredError() {
   const { revalidate, state } = useRevalidator();
 
   return (
@@ -90,12 +113,14 @@ function DeferredError() {
 
 // ── Main Component ───────────────────────────────────────────
 
-type SkeletonVariant = 'stat' | 'card' | 'table' | 'inline';
+type SkeletonVariant = 'stat' | 'card' | 'table' | 'list' | 'inline';
 
 interface DeferredSectionProps<T> {
   resolve: Promise<T> | T;
   children: (data: T) => ReactNode;
   skeleton?: SkeletonVariant;
+  /** When provided, used as Suspense fallback instead of the skeleton variant. */
+  fallback?: ReactNode;
   errorElement?: ReactNode;
 }
 
@@ -113,12 +138,14 @@ export function DeferredSection<T>({
   resolve,
   children,
   skeleton = 'card',
+  fallback,
   errorElement,
 }: DeferredSectionProps<T>) {
   const SkeletonComponent = SKELETON_COMPONENTS[skeleton];
+  const suspenseFallback = fallback ?? <SkeletonComponent />;
 
   return (
-    <Suspense fallback={<SkeletonComponent />}>
+    <Suspense fallback={suspenseFallback}>
       <Await resolve={resolve} errorElement={errorElement ?? <DeferredError />}>
         {(data) => <>{children(data as T)}</>}
       </Await>

@@ -16,6 +16,7 @@ export const userRoleEnum = pgEnum('user_role', [
 
 export const orderStatusEnum = pgEnum('order_status', [
   'UNPROCESSED',
+  'CS_ASSIGNED',
   'CS_ENGAGED',
   'CONFIRMED',
   'CANCELLED',
@@ -55,6 +56,12 @@ export const fundingStatusEnum = pgEnum('funding_status', [
   'SENT',
   'COMPLETED',
   'DISPUTED',
+]);
+
+export const fundingRequestStatusEnum = pgEnum('funding_request_status', [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
 ]);
 
 export const invoiceStatusEnum = pgEnum('invoice_status', [
@@ -139,6 +146,8 @@ export const recordStatusEnum = pgEnum('record_status', [
   'ACTIVE',
   'INACTIVE',
   'ARCHIVED',
+  'PENDING',
+  'DEACTIVATED',
 ]);
 
 export const cartStatusEnum = pgEnum('cart_status', [
@@ -154,6 +163,32 @@ export const permissionRequestTypeEnum = pgEnum('permission_request_type', [
 ]);
 
 export const permissionRequestStatusEnum = pgEnum('permission_request_status', [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+]);
+
+export const adSpendStatusEnum = pgEnum('ad_spend_status', [
+  'PENDING',
+  'APPROVED',
+]);
+
+/** Status of a CS order transfer request (agent-to-agent). */
+export const orderTransferRequestStatusEnum = pgEnum('order_transfer_request_status', [
+  'PENDING',
+  'ACCEPTED',
+  'REJECTED',
+]);
+
+/** Status of a 3PL→warehouse transfer remittance (receipt upload, HoL marks received). */
+export const remittanceStatusEnum = pgEnum('remittance_status', [
+  'SENT',
+  'RECEIVED',
+  'DISPUTED',
+]);
+
+/** Status of a delivery confirmation request (rider/3PL submit → HOL approve/reject). */
+export const deliveryConfirmationRequestStatusEnum = pgEnum('delivery_confirmation_request_status', [
   'PENDING',
   'APPROVED',
   'REJECTED',

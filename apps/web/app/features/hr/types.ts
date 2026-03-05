@@ -72,10 +72,9 @@ export interface HRStreamData {
   totalPlans: number;
   payouts: Payout[];
   totalPayouts: number;
-  // Deferred (streaming promises)
-  adjustments: Promise<Adjustment[]>;
-  payoutSummary: Promise<PayoutSummary>;
-  users: Promise<HRUser[]>;
-  settlementConfig: Promise<SettlementConfig | null>;
-  currentPeriod: Promise<SettlementPeriod | null>;
+  adjustments: Adjustment[];
+  payoutSummary: PayoutSummary;
+  users: HRUser[];
+  settlementConfig: SettlementConfig | null;
+  currentPeriod: SettlementPeriod | null;
 }

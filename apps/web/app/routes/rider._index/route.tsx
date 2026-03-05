@@ -71,6 +71,23 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!Number.isNaN(addOn) && addOn >= 0) metadata.deliveryFeeAddOn = addOn;
   }
 
+  // DELIVERED and PARTIALLY_DELIVERED require HOL approval: submit request instead of direct transition
+  if (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED') {
+    const res = await apiRequest<unknown>('/trpc/logistics.submitDeliveryConfirmation', {
+      method: 'POST',
+      cookie,
+      body: { orderId, newStatus, metadata },
+    });
+    if (!res.ok) {
+      const errData = res.data as { error?: { message?: string } };
+      return json(
+        { error: errData?.error?.message ?? 'Submit failed', success: false },
+        { status: 400 },
+      );
+    }
+    return json({ success: true, error: null, message: 'Delivery confirmation submitted; pending Head of Logistics approval.' });
+  }
+
   const res = await apiRequest<unknown>('/trpc/orders.transition', {
     method: 'POST',
     cookie,

@@ -1,22 +1,40 @@
 import {
   Controller,
   Post,
+  Get,
   Req,
+  Res,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { VoipService } from './voip.service';
 import { Public } from '../common/decorators/public.decorator';
 
 /**
- * VOIP Controller — handles Twilio webhook callbacks.
+ * VOIP Controller — handles Twilio webhook callbacks and TwiML App Voice Request URL.
  * These endpoints are public because Twilio calls them directly.
  * In production, Twilio request signature validation should be added.
  */
 @Controller('voip')
 export class VoipController {
   constructor(private readonly voipService: VoipService) {}
+
+  /**
+   * TwiML App "Voice Request URL" — Twilio calls this when a Twilio Client (browser) places
+   * an outbound call or when an incoming call hits your Twilio number.
+   * Accepts GET or POST so it works whether Twilio is set to GET or POST in the TwiML App.
+   */
+  @Public()
+  @Get('voice')
+  @Post('voice')
+  @HttpCode(HttpStatus.OK)
+  voiceTwiML(@Req() _req: Request, @Res() res: Response) {
+    res.setHeader('Content-Type', 'text/xml');
+    res.send(
+      '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Connecting your call.</Say></Response>',
+    );
+  }
 
   /**
    * Twilio StatusCallback webhook.

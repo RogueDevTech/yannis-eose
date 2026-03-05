@@ -61,13 +61,30 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Get a single order by ID.
+   * Prepare Paystack payment (payment-first): do NOT create order.
+   * Stores payload in Redis, returns Paystack authorization URL. Order is created only after payment in completePaymentByReference.
+   * Public procedure — Edge Worker calls without auth when user selects Pay online.
+   */
+  preparePaystackOrder: publicProcedure
+    .input(createOrderSchema)
+    .mutation(async ({ input, ctx }) => {
+      const actorId =
+        ctx.user?.id ??
+        (input.source === 'edge-form' ? EDGE_FORM_ACTOR_ID : null);
+      return getOrdersService().preparePaystackOrder(
+        { ...input, cartId: input.cartId },
+        actorId,
+      );
+    }),
+
+  /**
    * Allows orders.read (full access) or marketing.orders (own orders for Media Buyer, all for Head of Marketing).
    */
   getById: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
       const order = await getOrdersService().getById(input.orderId);
+      if (ctx.user.role === 'SUPER_ADMIN') return order;
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
       const hasMarketingOrders = perms.includes('marketing.orders');
@@ -89,6 +106,9 @@ export const ordersRouter = router({
   list: authedProcedure
     .input(listOrdersSchema)
     .query(async ({ input, ctx }) => {
+      if (ctx.user.role === 'SUPER_ADMIN') {
+        return getOrdersService().list(input);
+      }
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
       const hasMarketingOrders = perms.includes('marketing.orders');
@@ -101,6 +121,9 @@ export const ordersRouter = router({
       let effectiveInput = input;
       if (!hasOrdersRead && hasMarketingOrders && ctx.user.role === 'MEDIA_BUYER') {
         effectiveInput = { ...input, mediaBuyerId: ctx.user.id };
+      }
+      if (hasOrdersRead && ctx.user.role === 'CS_AGENT') {
+        effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
       return getOrdersService().list(effectiveInput);
     }),
@@ -150,8 +173,66 @@ export const ordersRouter = router({
     }),
 
   /**
+   * Redistribute CS_ASSIGNED orders across agents (load-balanced or performance strategy).
+   * Restricted to Head of CS and SuperAdmin.
+   */
+  redistributeCSOrders: permissionProcedure('orders.reassign').mutation(async ({ ctx }) => {
+    return getOrdersService().redistributeCSOrders(ctx.user);
+  }),
+
+  /**
+   * Distribute all UNPROCESSED (unassigned) orders to CS agents using the dispatch algorithm.
+   * Manual fallback when auto-assignment on order creation did not run. Restricted to Head of CS and SuperAdmin.
+   */
+  distributeUnassignedOrders: permissionProcedure('orders.reassign').mutation(async ({ ctx }) => {
+    return getOrdersService().distributeUnassignedOrders(ctx.user);
+  }),
+
+  /**
+   * CS_AGENT can request for their assigned orders; HoS/SuperAdmin can request for any.
+   */
+  requestTransfer: permissionProcedure('orders.requestTransfer')
+    .input(z.object({ orderId: z.string().uuid(), toCsAgentId: z.string().uuid(), reason: z.string().max(500).optional() }))
+    .mutation(async ({ input, ctx }) => {
+      return getOrdersService().requestTransfer(input.orderId, input.toCsAgentId, ctx.user, input.reason);
+    }),
+
+  /**
+   * Accept a transfer request (target agent or HoS/SuperAdmin).
+   */
+  acceptTransfer: authedProcedure
+    .input(z.object({ requestId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getOrdersService().acceptTransfer(input.requestId, ctx.user);
+    }),
+
+  /**
+   * Reject a transfer request (target agent or HoS/SuperAdmin).
+   */
+  rejectTransfer: authedProcedure
+    .input(z.object({ requestId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getOrdersService().rejectTransfer(input.requestId, ctx.user);
+    }),
+
+  /**
+   * List PENDING transfer requests where the current user is the target.
+   */
+  listTransferRequestsForMe: authedProcedure.query(async ({ ctx }) => {
+    return getOrdersService().listTransferRequestsForMe(ctx.user);
+  }),
+
+  /**
+   * List CS agents (id + name) for transfer dropdown. Requires orders.requestTransfer.
+   */
+  listCSAgents: permissionProcedure('orders.requestTransfer').query(async () => {
+    return getOrdersService().listCSAgents();
+  }),
+
+  /**
    * Get order counts by status — for dashboard stats.
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
+   * Optional assignedCsId filters to that CS agent's orders (for CS Orders page).
    * Optional startDate/endDate filter by orders.createdAt.
    */
   statusCounts: authedProcedure
@@ -159,6 +240,8 @@ export const ordersRouter = router({
       z
         .object({
           mediaBuyerId: z.string().uuid().optional(),
+          assignedCsId: z.string().uuid().optional(),
+          logisticsLocationId: z.string().uuid().optional(),
           startDate: z.string().date().optional(),
           endDate: z.string().date().optional(),
         })
@@ -169,6 +252,8 @@ export const ordersRouter = router({
         input?.mediaBuyerId,
         input?.startDate,
         input?.endDate,
+        input?.assignedCsId,
+        input?.logisticsLocationId,
       );
     }),
 
@@ -178,6 +263,14 @@ export const ordersRouter = router({
    */
   csWorkloads: permissionProcedure('orders.csWorkloads').query(async () => {
     return getOrdersService().getCSAgentWorkloads();
+  }),
+
+  /**
+   * Get workload for the current CS agent — for \"My Orders\" page.
+   * Non–CS agents receive null.
+   */
+  myCSWorkload: authedProcedure.query(async ({ ctx }) => {
+    return getOrdersService().getMyCSWorkload(ctx.user);
   }),
 
   /**
@@ -205,10 +298,18 @@ export const ordersRouter = router({
    */
   csLeaderboard: permissionProcedure('orders.csLeaderboard')
     .input(
-      z.object({ period: z.enum(['this_month', 'all_time']).optional().default('this_month') }),
+      z.object({
+        period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }),
     )
     .query(async ({ input }) =>
-      getOrdersService().getCSAgentLeaderboard(input.period ?? 'this_month'),
+      getOrdersService().getCSAgentLeaderboard(
+        input.period ?? 'this_month',
+        input.startDate,
+        input.endDate,
+      ),
     ),
 
   // ── Manual Call (Relaxed Mode) ──────────────────────────────────
@@ -229,11 +330,18 @@ export const ordersRouter = router({
   /**
    * Initiate a VOIP call for an order.
    * Agent must be assigned to the order (or HEAD_OF_CS / SUPER_ADMIN).
-   * Order must be in CS_ENGAGED status.
+   * If the order is UNPROCESSED or CS_ASSIGNED, it is transitioned to CS_ENGAGED first, then the call is initiated.
    */
   initiateCall: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      const order = await getOrdersService().getById(input.orderId);
+      if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
+        await getOrdersService().transition(
+          { orderId: input.orderId, newStatus: 'CS_ENGAGED' },
+          ctx.user,
+        );
+      }
       return getVoipService().initiateCall(input.orderId, ctx.user);
     }),
 

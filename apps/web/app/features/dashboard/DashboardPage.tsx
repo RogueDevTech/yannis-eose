@@ -1,20 +1,8 @@
 import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
-import { DateFilterBar } from '~/components/dashboard/DateFilterBar';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
-
-const STATUS_COLORS: Record<string, string> = {
-  UNPROCESSED: 'badge-warning',
-  CS_ENGAGED: 'badge-info',
-  CONFIRMED: 'badge-brand',
-  CANCELLED: 'badge-danger',
-  ALLOCATED: 'badge-info',
-  DISPATCHED: 'badge-info',
-  IN_TRANSIT: 'badge-brand',
-  DELIVERED: 'badge-success',
-  COMPLETED: 'badge-success',
-  RETURNED: 'badge-danger',
-};
 
 const KNOWN_ROLES = [
   'SUPER_ADMIN',
@@ -129,6 +117,7 @@ function GenericFallbackDashboard() {
 function SuperAdminDashboard({ data }: { data: DashboardPageData }) {
   const counts = data.orderCounts as Record<string, number>;
   const unprocessed = counts['UNPROCESSED'] ?? 0;
+  const confirmed = counts['CONFIRMED'] ?? 0;
 
   return (
     <>
@@ -160,16 +149,46 @@ function SuperAdminDashboard({ data }: { data: DashboardPageData }) {
         </DeferredSection>
       </div>
 
+      {/* Awaiting Allocation alert */}
+      {confirmed > 0 && (
+        <div className="card border-warning-200 dark:border-warning-700/50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-warning-50 dark:bg-warning-700/20 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-warning-600 dark:text-warning-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-surface-900 dark:text-white">
+                  {confirmed} {confirmed === 1 ? 'order' : 'orders'} awaiting allocation
+                </h3>
+                <p className="text-sm text-surface-800 dark:text-surface-200">
+                  Confirmed orders need to be allocated to a logistics location for dispatch.
+                </p>
+              </div>
+            </div>
+            <Link to="/admin/logistics/orders" prefetch="intent" className="btn-primary btn-sm shrink-0">
+              Allocate
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Order Pipeline — immediate (uses orderCounts) */}
       <div className="card">
         <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Pipeline</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
           {[
             { label: 'Unprocessed', key: 'UNPROCESSED', color: 'text-warning-600 dark:text-warning-400' },
+            { label: 'CS Assigned', key: 'CS_ASSIGNED', color: 'text-info-600 dark:text-info-400' },
             { label: 'CS Engaged', key: 'CS_ENGAGED', color: 'text-info-600 dark:text-info-400' },
             { label: 'Confirmed', key: 'CONFIRMED', color: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Allocated', key: 'ALLOCATED', color: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Dispatched', key: 'DISPATCHED', color: 'text-brand-600 dark:text-brand-400' },
             { label: 'In Transit', key: 'IN_TRANSIT', color: 'text-brand-600 dark:text-brand-400' },
             { label: 'Delivered', key: 'DELIVERED', color: 'text-success-600 dark:text-success-400' },
+            { label: 'Cancelled', key: 'CANCELLED', color: 'text-danger-600 dark:text-danger-400' },
             { label: 'Returned', key: 'RETURNED', color: 'text-danger-600 dark:text-danger-400' },
           ].map((item) => (
             <div key={item.key} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
@@ -196,18 +215,46 @@ function SuperAdminDashboard({ data }: { data: DashboardPageData }) {
 function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) {
   const counts = data.orderCounts as Record<string, number>;
   const unprocessed = counts['UNPROCESSED'] ?? 0;
+  const csAssigned = counts['CS_ASSIGNED'] ?? 0;
   const engaged = counts['CS_ENGAGED'] ?? 0;
   const confirmed = counts['CONFIRMED'] ?? 0;
+  const allocated = counts['ALLOCATED'] ?? 0;
+  const inTransit = counts['IN_TRANSIT'] ?? 0;
+  const delivered = counts['DELIVERED'] ?? 0;
+  const cancelled = counts['CANCELLED'] ?? 0;
+  const pendingQueue = unprocessed + csAssigned;
 
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Unprocessed Queue" value={unprocessed.toString()} icon="pending" highlight={unprocessed > 20 ? 'danger' : unprocessed > 0 ? 'warning' : 'success'} />
+        <StatCard label="Pending Queue" value={pendingQueue.toString()} icon="pending" highlight={pendingQueue > 20 ? 'danger' : pendingQueue > 0 ? 'warning' : 'success'} />
         <StatCard label="Currently Engaged" value={engaged.toString()} icon="orders" />
-        <StatCard label="Confirmed Today" value={confirmed.toString()} icon="orders" highlight="success" />
+        <StatCard label="Confirmed" value={confirmed.toString()} icon="orders" highlight="success" />
         <DeferredSection resolve={data.metrics} skeleton="stat">
           {(metrics) => <StatCard label="Delivery Rate" value={`${metrics.deliveryRate.toFixed(1)}%`} icon="roas" highlight={metrics.deliveryRate >= 70 ? 'success' : 'warning'} />}
         </DeferredSection>
+      </div>
+
+      {/* Order Pipeline */}
+      <div className="card">
+        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Pipeline</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
+          {[
+            { label: 'Unprocessed', value: unprocessed, color: 'text-warning-600 dark:text-warning-400' },
+            { label: 'CS Assigned', value: csAssigned, color: 'text-info-600 dark:text-info-400' },
+            { label: 'CS Engaged', value: engaged, color: 'text-info-600 dark:text-info-400' },
+            { label: 'Confirmed', value: confirmed, color: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Allocated', value: allocated, color: 'text-brand-600 dark:text-brand-400' },
+            { label: 'In Transit', value: inTransit, color: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Delivered', value: delivered, color: 'text-success-600 dark:text-success-400' },
+            { label: 'Cancelled', value: cancelled, color: 'text-danger-600 dark:text-danger-400' },
+          ].map((item) => (
+            <div key={item.label} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
+              <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
+              <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{item.label}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {role === 'HEAD_OF_CS' && (
@@ -217,7 +264,7 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
             Manage agent assignments and monitor queue health.
           </p>
           <div className="flex gap-2">
-            <Link to="/admin/cs" prefetch="intent" className="btn-primary btn-sm">CS Dashboard</Link>
+            <Link to="/admin/cs/queue" prefetch="intent" className="btn-primary btn-sm">CS Dashboard</Link>
             <Link to="/admin/cs/orders" prefetch="intent" className="btn-secondary btn-sm">View All Orders</Link>
           </div>
         </div>
@@ -251,9 +298,9 @@ function MarketingDashboard({ data, role }: { data: DashboardPageData; role: str
             Manage media buyers and monitor team performance.
           </p>
           <div className="flex gap-2">
-            <Link to="/admin/marketing-overview" prefetch="intent" className="btn-primary btn-sm">Team Overview</Link>
-            <Link to="/admin/marketing" prefetch="intent" className="btn-secondary btn-sm">Funding & Ad Spend</Link>
-            <Link to="/admin/marketing-leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
+            <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>
+            <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">Funding & Ad Spend</Link>
+            <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
           </div>
         </div>
       )}
@@ -327,6 +374,7 @@ function FinanceDashboard({ data }: { data: DashboardPageData }) {
 
 function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: string }) {
   const counts = data.orderCounts as Record<string, number>;
+  const confirmed = counts['CONFIRMED'] ?? 0;
   const allocated = counts['ALLOCATED'] ?? 0;
   const dispatched = counts['DISPATCHED'] ?? 0;
   const inTransit = counts['IN_TRANSIT'] ?? 0;
@@ -334,18 +382,44 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
 
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <StatCard label="Awaiting Allocation" value={confirmed.toString()} icon="pending" highlight={confirmed > 10 ? 'danger' : confirmed > 0 ? 'warning' : undefined} />
         <StatCard label="Allocated" value={allocated.toString()} icon="orders" />
         <StatCard label="Dispatched" value={dispatched.toString()} icon="orders" highlight="warning" />
         <StatCard label="In Transit" value={inTransit.toString()} icon="orders" />
         <StatCard label="Delivered" value={delivered.toString()} icon="orders" highlight="success" />
       </div>
 
+      {confirmed > 0 && (
+        <div className="card border-warning-200 dark:border-warning-700/50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-warning-50 dark:bg-warning-700/20 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-warning-600 dark:text-warning-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-surface-900 dark:text-white">
+                  {confirmed} {confirmed === 1 ? 'order' : 'orders'} awaiting allocation
+                </h3>
+                <p className="text-sm text-surface-800 dark:text-surface-200">
+                  Confirmed orders need to be allocated to a logistics location for dispatch.
+                </p>
+              </div>
+            </div>
+            <Link to="/admin/logistics/orders" prefetch="intent" className="btn-primary btn-sm shrink-0">
+              Allocate
+            </Link>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
           <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Delivery Pipeline</h2>
           <div className="space-y-3">
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Awaiting Allocation</span><span className="text-sm font-medium">{counts['CONFIRMED'] ?? 0}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Awaiting Allocation</span><span className={`text-sm font-medium ${confirmed > 0 ? 'text-warning-600 dark:text-warning-400' : ''}`}>{confirmed}</span></div>
             <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Ready for Dispatch</span><span className="text-sm font-medium">{allocated}</span></div>
             <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Active Deliveries</span><span className="text-sm font-medium">{inTransit}</span></div>
             <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Returns Queue</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{counts['RETURNED'] ?? 0}</span></div>
@@ -480,7 +554,7 @@ function RecentOrdersCard({ orders }: { orders: DashboardData['recentOrders'] })
                     {'\u20A6'}{Number(order.totalAmount).toLocaleString()}
                   </span>
                 )}
-                <span className={STATUS_COLORS[order.status] ?? 'badge'}>{order.status.replace(/_/g, ' ')}</span>
+                <OrderStatusBadge status={order.status} />
               </div>
             </Link>
           ))}
@@ -530,17 +604,17 @@ function getQuickActions(role: string, unprocessed: number) {
         { href: '/admin/products/new', label: 'Add Product', description: 'Create a new product', icon: 'add', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
         { href: '/hr/users/new', label: 'Add Staff', description: 'Invite a team member', icon: 'users', bg: 'bg-success-50 dark:bg-success-700/20 text-success-600 dark:text-success-400' },
         ...common,
-        { href: '/admin/finance', label: 'Finance', description: 'True profit reports', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
+        { href: '/admin/finance/overview', label: 'Finance', description: 'True profit reports', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
       ];
     case 'HEAD_OF_MARKETING':
     case 'MEDIA_BUYER':
       return [
-        { href: '/admin/marketing', label: 'Marketing', description: 'Funding & ad spend', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
-        { href: '/admin/forms', label: 'Forms', description: 'Manage forms', icon: 'orders', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
+        { href: '/admin/marketing/funding', label: 'Marketing', description: 'Funding & ad spend', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
+        { href: '/admin/marketing/forms', label: 'Forms', description: 'Manage forms', icon: 'orders', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
       ];
     case 'FINANCE_OFFICER':
       return [
-        { href: '/admin/finance', label: 'Finance', description: 'Profit & invoices', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
+        { href: '/admin/finance/overview', label: 'Finance', description: 'Profit & invoices', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
         ...common,
       ];
     case 'WAREHOUSE_MANAGER':

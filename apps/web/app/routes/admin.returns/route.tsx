@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { ReturnsPage } from '~/features/returns/ReturnsPage';
 import type {
   ReturnedOrder,
@@ -81,7 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to restock' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to restock' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -103,7 +103,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to write off' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to write off' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -123,7 +123,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create reconciliation' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to create reconciliation' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -140,7 +140,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to resolve reconciliation' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to resolve reconciliation' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

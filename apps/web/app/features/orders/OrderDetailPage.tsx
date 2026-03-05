@@ -1,33 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast } from '~/components/ui/toast';
-import { AmountInput } from '~/components/ui/amount-input';
+import { DismissibleAlert } from '~/components/ui/dismissible-alert';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
+import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useVoipDevice } from '~/hooks/useVoipDevice';
-import type { CallLogEntry, HistoryEntry, OrderDetailStreamData } from './types';
+import type { CallLogEntry, HistoryEntry, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
 
 const STATUS_FLOW = [
-  'UNPROCESSED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED',
+  'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED',
   'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'COMPLETED',
 ] as const;
-
-const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  UNPROCESSED: { bg: 'bg-warning-50 dark:bg-warning-700/20', text: 'text-warning-700 dark:text-warning-500', dot: 'bg-warning-500' },
-  CS_ENGAGED: { bg: 'bg-info-50 dark:bg-info-700/20', text: 'text-info-700 dark:text-info-500', dot: 'bg-info-500' },
-  CONFIRMED: { bg: 'bg-brand-50 dark:bg-brand-700/20', text: 'text-brand-700 dark:text-brand-400', dot: 'bg-brand-500' },
-  CANCELLED: { bg: 'bg-danger-50 dark:bg-danger-700/20', text: 'text-danger-700 dark:text-danger-500', dot: 'bg-danger-500' },
-  ALLOCATED: { bg: 'bg-info-50 dark:bg-info-700/20', text: 'text-info-700 dark:text-info-500', dot: 'bg-info-500' },
-  DISPATCHED: { bg: 'bg-info-50 dark:bg-info-700/20', text: 'text-info-700 dark:text-info-500', dot: 'bg-info-500' },
-  IN_TRANSIT: { bg: 'bg-brand-50 dark:bg-brand-700/20', text: 'text-brand-700 dark:text-brand-400', dot: 'bg-brand-500' },
-  DELIVERED: { bg: 'bg-success-50 dark:bg-success-700/20', text: 'text-success-700 dark:text-success-500', dot: 'bg-success-500' },
-  COMPLETED: { bg: 'bg-success-50 dark:bg-success-700/20', text: 'text-success-700 dark:text-success-500', dot: 'bg-success-500' },
-  RETURNED: { bg: 'bg-danger-50 dark:bg-danger-700/20', text: 'text-danger-700 dark:text-danger-500', dot: 'bg-danger-500' },
-};
 
 const CALL_STATUS_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
   INITIATED: { bg: 'bg-info-50 dark:bg-info-700/20', text: 'text-info-600 dark:text-info-400', icon: 'text-info-500' },
@@ -76,6 +65,250 @@ function formatValue(val: unknown): string {
   if (typeof val === 'object') return JSON.stringify(val);
   return String(val);
 }
+
+// ── Order Details field config (dynamic, show-only when value present or alwaysShow) ──
+
+function hasValue(v: unknown): boolean {
+  if (v === null || v === undefined) return false;
+  if (typeof v === 'string') return v.trim() !== '';
+  return true;
+}
+
+/** Value styling: static class or function for payment/status-dependent colors */
+type DetailValueClass = string | ((value: unknown, order: OrderDetail) => string);
+
+interface DetailFieldConfig {
+  label: string;
+  alwaysShow?: boolean;
+  getValue: (order: OrderDetail) => unknown;
+  format: (value: unknown, order: OrderDetail) => string;
+  ddClassName?: DetailValueClass;
+  /** Optional: accent border on the row (e.g. 'border-l-4 border-l-success-500') */
+  rowAccent?: string;
+}
+
+const DETAIL_DATE_CLASS = 'text-surface-600 dark:text-surface-400 tabular-nums';
+const DETAIL_CURRENCY_CLASS = 'font-semibold text-success-600 dark:text-success-400 tabular-nums';
+const DETAIL_PERSON_CLASS = 'font-medium text-brand-600 dark:text-brand-400';
+const DETAIL_ID_CLASS = 'font-mono text-xs text-surface-500 dark:text-surface-400 break-all';
+
+const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
+  {
+    label: 'Payment',
+    alwaysShow: true,
+    getValue: (o) => o.paymentMethod,
+    format: (_, o) =>
+      o.paymentMethod === 'PAY_ONLINE'
+        ? `Pay online${o.paymentStatus ? ` — ${o.paymentStatus}` : ''}${o.paymentReference ? ` (ref: ${o.paymentReference})` : ''}`
+        : 'Pay on delivery',
+    ddClassName: (_, o) => {
+      if (o.paymentMethod === 'PAY_ON_DELIVERY') return 'font-medium text-success-600 dark:text-success-400';
+      const s = (o.paymentStatus ?? '').toUpperCase();
+      if (s === 'PAID') return 'font-medium text-success-600 dark:text-success-400';
+      if (s === 'PENDING') return 'font-medium text-warning-600 dark:text-warning-400';
+      if (s === 'FAILED') return 'font-medium text-danger-600 dark:text-danger-400';
+      return 'font-medium text-surface-700 dark:text-surface-300';
+    },
+    rowAccent: 'border-l-4 border-l-surface-200 dark:border-l-surface-700',
+  },
+  {
+    label: 'Created',
+    alwaysShow: true,
+    getValue: (o) => o.createdAt,
+    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Confirmed',
+    getValue: (o) => o.confirmedAt,
+    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Allocated',
+    getValue: (o) => o.allocatedAt,
+    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Dispatched',
+    getValue: (o) => o.dispatchedAt,
+    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Delivered',
+    getValue: (o) => o.deliveredAt,
+    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Preferred delivery date',
+    getValue: (o) => o.preferredDeliveryDate,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Customer Address',
+    getValue: (o) => o.customerAddress,
+    format: (v) => (v ? String(v) : ''),
+  },
+  {
+    label: 'Delivery Address',
+    getValue: (o) => o.deliveryAddress,
+    format: (v) => (v ? String(v) : ''),
+  },
+  {
+    label: 'Delivery Notes',
+    getValue: (o) => o.deliveryNotes,
+    format: (v) => (v ? String(v) : ''),
+  },
+  {
+    label: 'Delivery State',
+    getValue: (o) => o.deliveryState,
+    format: (v) => (v ? String(v) : ''),
+  },
+  {
+    label: 'Customer Email',
+    getValue: (o) => o.customerEmail,
+    format: (v) => (v ? String(v) : ''),
+  },
+  {
+    label: 'Callback scheduled',
+    getValue: (o) => o.callbackScheduledAt,
+    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Callback attempts',
+    getValue: (o) => o.callbackAttempts,
+    format: (v) => (v != null && v !== '' ? String(v) : ''),
+    ddClassName: (v) =>
+      Number(v) > 0
+        ? 'font-medium text-warning-600 dark:text-warning-400 tabular-nums'
+        : 'text-surface-600 dark:text-surface-400 tabular-nums',
+  },
+  {
+    label: 'Callback notes',
+    getValue: (o) => o.callbackNotes,
+    format: (v) => (v ? String(v) : ''),
+  },
+  {
+    label: 'Duplicate status',
+    getValue: (o) => o.isDuplicate,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: (v) => {
+      const s = String(v ?? '').toUpperCase();
+      if (s === 'FLAGGED') return 'font-medium text-warning-600 dark:text-warning-400';
+      if (s === 'MERGED' || s === 'DISMISSED') return 'text-surface-600 dark:text-surface-400';
+      return '';
+    },
+  },
+  {
+    label: 'Duplicate of',
+    getValue: (o) => o.duplicateOfId,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: 'font-mono text-xs text-surface-600 dark:text-surface-400 break-all',
+  },
+  {
+    label: 'Locked until',
+    getValue: (o) => o.lockedUntil,
+    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Locked by',
+    getValue: (o) => o.lockedByName ?? o.lockedBy,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_PERSON_CLASS,
+  },
+  {
+    label: 'Total amount',
+    getValue: (o) => o.totalAmount,
+    format: (v) => (v != null && v !== '' ? `\u20A6${Number(v).toLocaleString()}` : ''),
+    ddClassName: DETAIL_CURRENCY_CLASS,
+    rowAccent: 'border-l-4 border-l-success-200 dark:border-l-success-900/40',
+  },
+  {
+    label: 'Landed cost',
+    getValue: (o) => o.landedCost,
+    format: (v) => (v != null && v !== '' ? `\u20A6${Number(v).toLocaleString()}` : ''),
+    ddClassName: DETAIL_CURRENCY_CLASS,
+  },
+  {
+    label: 'Delivery fee',
+    getValue: (o) => o.deliveryFee,
+    format: (v) => (v != null && v !== '' ? `\u20A6${Number(v).toLocaleString()}` : ''),
+    ddClassName: DETAIL_CURRENCY_CLASS,
+  },
+  {
+    label: 'Assigned to (CS)',
+    getValue: (o) => o.assignedCsName ?? o.assignedCsId,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_PERSON_CLASS,
+  },
+  {
+    label: 'Media buyer',
+    getValue: (o) => o.mediaBuyerName ?? o.mediaBuyerId,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_PERSON_CLASS,
+  },
+  {
+    label: 'Campaign',
+    getValue: (o) => o.campaignName ?? o.campaignId,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_PERSON_CLASS,
+  },
+  {
+    label: 'Logistics provider',
+    getValue: (o) => o.logisticsProviderName ?? o.logisticsProviderId,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_PERSON_CLASS,
+  },
+  {
+    label: 'Logistics location',
+    getValue: (o) => o.logisticsLocationName ?? o.logisticsLocationId,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_PERSON_CLASS,
+  },
+  {
+    label: 'Rider',
+    getValue: (o) => o.riderName ?? o.riderId,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_PERSON_CLASS,
+  },
+  {
+    label: 'Parent order',
+    getValue: (o) => o.parentOrderId,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: 'font-mono text-xs text-surface-600 dark:text-surface-400 break-all',
+  },
+  {
+    label: 'Delivery OTP',
+    getValue: (o) => o.deliveryOtp,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: 'font-mono text-sm text-surface-700 dark:text-surface-300',
+  },
+  {
+    label: 'Customer gender',
+    getValue: (o) => o.customerGender,
+    format: (v) => (v ? String(v) : ''),
+  },
+  {
+    label: 'Updated',
+    getValue: (o) => o.updatedAt,
+    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    ddClassName: DETAIL_DATE_CLASS,
+  },
+  {
+    label: 'Order ID',
+    alwaysShow: true,
+    getValue: (o) => o.id,
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_ID_CLASS,
+    rowAccent: 'border-l-4 border-l-surface-200 dark:border-l-surface-700',
+  },
+];
 
 // ── Call Status Indicator Component ─────────────────────────────
 
@@ -220,35 +453,37 @@ function OrderHistoryTimeline({ history }: { history: HistoryEntry[] }) {
                           {Object.entries(entry.data)
                             .filter(([key]) => !['valid_from', 'valid_to', 'valid_period', 'changed_by', '_table_name', '_row_data'].includes(key))
                             .map(([key, value]) => (
-                              <div key={key} className="flex gap-2 text-xs">
-                                <span className="font-medium text-surface-800 dark:text-surface-200 min-w-[120px]">{key}:</span>
+                              <div key={key} className="flex gap-2 text-xs flex-wrap">
+                                <span className="font-medium text-surface-800 dark:text-surface-200 min-w-[100px] sm:min-w-[120px]">{key}:</span>
                                 <span className="font-mono text-surface-900 dark:text-surface-100 break-all">{formatValue(value)}</span>
                               </div>
                             ))}
                         </div>
                       ) : diffs.length > 0 ? (
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr>
-                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">Field</th>
-                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">Old Value</th>
-                              <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">New Value</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {diffs.map((d) => (
-                              <tr key={d.field} className="border-t border-surface-100 dark:border-surface-800">
-                                <td className="py-1.5 px-2 font-medium text-surface-700 dark:text-surface-300">{d.field}</td>
-                                <td className="py-1.5 px-2 font-mono text-danger-600 dark:text-danger-400 break-all">
-                                  {formatValue(d.oldValue)}
-                                </td>
-                                <td className="py-1.5 px-2 font-mono text-success-600 dark:text-success-400 break-all">
-                                  {formatValue(d.newValue)}
-                                </td>
+                        <div className="overflow-x-auto -mx-1 px-1">
+                          <table className="w-full text-xs min-w-[280px]">
+                            <thead>
+                              <tr>
+                                <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">Field</th>
+                                <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">Old Value</th>
+                                <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">New Value</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {diffs.map((d) => (
+                                <tr key={d.field} className="border-t border-surface-100 dark:border-surface-800">
+                                  <td className="py-1.5 px-2 font-medium text-surface-700 dark:text-surface-300 align-top">{d.field}</td>
+                                  <td className="py-1.5 px-2 font-mono text-danger-600 dark:text-danger-400 break-all align-top max-w-[120px] sm:max-w-none">
+                                    {formatValue(d.oldValue)}
+                                  </td>
+                                  <td className="py-1.5 px-2 font-mono text-success-600 dark:text-success-400 break-all align-top max-w-[120px] sm:max-w-none">
+                                    {formatValue(d.newValue)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       ) : (
                         <p className="text-xs text-surface-800 dark:text-surface-200">No field changes detected.</p>
                       )}
@@ -260,72 +495,6 @@ function OrderHistoryTimeline({ history }: { history: HistoryEntry[] }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ── Manual Call Panel (Relaxed Mode) ────────────────────────────
-
-function ManualCallPanel({
-  order,
-  fetcher,
-  revealedPhone,
-  phoneRevealed,
-}: {
-  order: OrderDetailStreamData['order'];
-  fetcher: ReturnType<typeof useFetcher>;
-  revealedPhone: string | null;
-  phoneRevealed: boolean;
-}) {
-  if (order.status !== 'CS_ENGAGED') return null;
-
-  return (
-    <div className="card">
-      <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Manual Call</h2>
-        <span className="inline-flex items-center gap-1 rounded-full bg-warning-50 dark:bg-warning-700/20 px-2 py-0.5 text-2xs font-medium text-warning-700 dark:text-warning-400">
-          Relaxed Mode
-        </span>
-      </div>
-
-      {!phoneRevealed ? (
-        <>
-          <p className="text-xs text-surface-800 dark:text-surface-200 mb-3">
-            Click below to reveal the customer phone number for manual calling.
-            This action is logged in the audit trail.
-          </p>
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="revealPhone" />
-            <Button
-              type="submit"
-              variant="primary"
-              className="w-full"
-              loading={fetcher.state === 'submitting'}
-              loadingText="Revealing..."
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-              </svg>
-              Call Customer
-            </Button>
-          </fetcher.Form>
-        </>
-      ) : (
-        <>
-          <div className="rounded-lg bg-info-50 dark:bg-info-700/20 border border-info-200 dark:border-info-700/50 p-3 mb-3">
-            <p className="text-xs text-info-600 dark:text-info-400 mb-1 font-medium">Customer Phone Number</p>
-            <p className="text-lg font-mono font-bold text-info-700 dark:text-info-300 tracking-wider">
-              {revealedPhone}
-            </p>
-          </div>
-          <p className="text-xs text-surface-800 dark:text-surface-200 text-center">
-            Call this number manually, then confirm the order below.
-          </p>
-          <p className="text-xs text-success-600 dark:text-success-400 mt-2 text-center">
-            Phone revealed. You can now confirm the order.
-          </p>
-        </>
-      )}
     </div>
   );
 }
@@ -360,7 +529,7 @@ function InCallOverlay({
   const isActive = callStatus === 'INITIATED' || callStatus === 'RINGING' || callStatus === 'IN_PROGRESS';
 
   return (
-    <div className="rounded-xl bg-surface-900 dark:bg-surface-950 p-4 text-white animate-fade-in">
+    <div className="rounded-xl bg-surface-900 dark:bg-surface-950 p-4 sm:p-5 text-white animate-fade-in w-full max-w-sm mx-auto max-h-[90vh] overflow-y-auto">
       {/* Status + pulsing dot */}
       <div className="flex items-center justify-center gap-2 mb-3">
         {isActive && (
@@ -380,12 +549,13 @@ function InCallOverlay({
         )}
       </div>
 
-      {/* Controls */}
+      {/* Controls — touch-friendly min sizes */}
       <div className="flex items-center justify-center gap-4">
         {/* Mute button */}
         <button
+          type="button"
           onClick={onToggleMute}
-          className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
+          className={`min-w-[48px] min-h-[48px] w-12 h-12 rounded-full flex items-center justify-center transition-colors touch-manipulation ${
             muted
               ? 'bg-danger-500 hover:bg-danger-600 text-white'
               : 'bg-surface-700 hover:bg-surface-600 text-surface-300'
@@ -405,8 +575,9 @@ function InCallOverlay({
 
         {/* Hang up button */}
         <button
+          type="button"
           onClick={onHangUp}
-          className="w-14 h-14 rounded-full bg-danger-500 hover:bg-danger-600 text-white flex items-center justify-center transition-colors"
+          className="min-w-[56px] min-h-[56px] w-14 h-14 rounded-full bg-danger-500 hover:bg-danger-600 text-white flex items-center justify-center transition-colors touch-manipulation"
           title="Hang up"
         >
           <svg className="w-6 h-6 rotate-[135deg]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -436,7 +607,6 @@ function VoipCallPanel({
   const revalidator = useRevalidator();
 
   const voip = useVoipDevice({
-    fetchTokenUrl: '/trpc/voip.generateToken',
     onCallStatusChange: (status) => {
       // Revalidate loader data when call completes to update callLogs
       if (status === 'COMPLETED' || status === 'FAILED') {
@@ -447,15 +617,17 @@ function VoipCallPanel({
     },
   });
 
-  // Auto-init device when component mounts and order is CS_ENGAGED
+  const canShowCallPanel = order.status === 'CS_ENGAGED' || order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED';
+
+  // Auto-init device when Call panel is shown (CS_ENGAGED or assignable pre-engage)
   useEffect(() => {
-    if (order.status === 'CS_ENGAGED' && !voip.ready && !voip.connecting) {
+    if (canShowCallPanel && !voip.ready && !voip.connecting) {
       voip.initDevice();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order.status]);
 
-  if (order.status !== 'CS_ENGAGED') return null;
+  if (!canShowCallPanel) return null;
 
   const isServerCallActive = latestCall && ['INITIATED', 'RINGING', 'IN_PROGRESS'].includes(latestCall.callStatus);
   const isLocalCallActive = voip.onCall;
@@ -481,10 +653,24 @@ function VoipCallPanel({
         )}
       </div>
 
-      {/* Device error */}
+      {/* Device error — friendly message, no raw HTML */}
       {voip.error && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-3 py-2 mb-3">
-          <p className="text-xs text-danger-600 dark:text-danger-400">{voip.error}</p>
+        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-3 py-2.5 mb-3 flex items-start gap-2">
+          <svg className="w-4 h-4 text-danger-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-danger-700 dark:text-danger-300">Call service unavailable</p>
+            <p className="text-xs text-danger-600 dark:text-danger-400 mt-0.5">{voip.error}</p>
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-2 text-xs"
+              onClick={() => voip.initDevice()}
+            >
+              Try again
+            </Button>
+          </div>
         </div>
       )}
 
@@ -546,41 +732,93 @@ function VoipCallPanel({
 
 // ── Main Feature Component ───────────────────────────────────────
 
-export function OrderDetailPage({ order, latestCall, history, strictDataMode, voipEnabled }: OrderDetailStreamData) {
+export function OrderDetailPage({
+  order,
+  latestCall,
+  history,
+  strictDataMode,
+  voipEnabled,
+  canEditOrder = true,
+  userRole,
+  userId,
+  permissions,
+  csAgentsForAssign = [],
+}: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
+  const revealFetcher = useFetcher();
+  const recordCallFetcher = useFetcher();
+  const scheduleFetcher = useFetcher();
+  const adjustItemsFetcher = useFetcher();
   const revalidator = useRevalidator();
-  const [cancelReason, setCancelReason] = useState('');
-  const [returnReason, setReturnReason] = useState('');
-  const [writeOffReason, setWriteOffReason] = useState('');
   const [activeTab, setActiveTab] = useState<'details' | 'history'>('details');
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferToId, setTransferToId] = useState('');
+  const [transferReason, setTransferReason] = useState('');
+  const [assignToId, setAssignToId] = useState('');
+  const [callCustomerModalOpen, setCallCustomerModalOpen] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
+  const [dismissedMessage, setDismissedMessage] = useState<string | null>(null);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [deliveryDate, setDeliveryDate] = useState('');
+  const [scheduleDelayMinutes, setScheduleDelayMinutes] = useState(120);
+  const [scheduleNotes, setScheduleNotes] = useState('');
+  const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
+  const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number }>>([]);
 
   const currentStatusIndex = STATUS_FLOW.indexOf(order.status as (typeof STATUS_FLOW)[number]);
   const actionError = (fetcher.data as { error?: string })?.error;
   const callInitiated = (fetcher.data as { callInitiated?: boolean })?.callInitiated;
-  // Track revealed phone from manual call action
-  const revealedPhone = (fetcher.data as { phone?: string })?.phone ?? null;
-  const phoneRevealed = revealedPhone !== null || (fetcher.data as { phoneRevealed?: boolean })?.phoneRevealed === true;
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
+  useFetcherToast(scheduleFetcher.data, { successMessage: 'Callback scheduled' });
+  useFetcherToast(adjustItemsFetcher.data, { successMessage: 'Order items updated' });
 
-  // Check if any call log in the order meets the confirm gate
-  const anyCallMeetsConfirmGate = order.callLogs.some(
+  // When user submits again, clear dismissed so the next response error will show
+  useEffect(() => {
+    if (fetcher.state === 'submitting') setDismissedMessage(null);
+  }, [fetcher.state]);
+
+  const showActionError = actionError && actionError !== dismissedMessage;
+
+  const isAssignedToMe = order.assignedCsId === userId;
+  const isCSOrHoS = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'].includes(userRole);
+  const isElevated = userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN';
+  // CS agent can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
+  const canPerformCSActionsOnOrder =
+    isElevated ||
+    (userRole === 'CS_AGENT' && (isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId)));
+  const canAssignToCS = permissions.includes('orders.reassign');
+  const canRequestTransfer =
+    permissions.includes('orders.requestTransfer') &&
+    (userRole !== 'CS_AGENT' || isAssignedToMe);
+
+  function canTransitionTo(newStatus: string): boolean {
+    const allowed = order.allowedTransitions ?? [];
+    if (!allowed.includes(newStatus)) return false;
+    const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
+    if (!csOnlyStatuses.includes(newStatus)) return true;
+    if (!isCSOrHoS) return false;
+    if (userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN') return true;
+    if (userRole === 'CS_AGENT') {
+      if (newStatus === 'CS_ENGAGED') {
+        return isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId);
+      }
+      return isAssignedToMe;
+    }
+    return false;
+  }
+
+  // Check call logs for confirm gate conditions
+  const hasQualifyingVoipCall = order.callLogs.some(
     (c) => c.callStatus === 'COMPLETED' && (c.durationSeconds ?? 0) >= 15,
   );
+  const hasAnyCallLog = order.callLogs.length > 0;
 
-  // Check if any call was attempted (for No Answer button)
-  const anyCallAttempted = order.callLogs.some(
-    (c) => c.callStatus !== 'INITIATED',
-  );
-
-  // Check if any manual call exists (for relaxed mode confirm gate)
-  const hasManualCallLog = order.callLogs.some(
-    (c) => c.callStatus === 'MANUAL_CALL',
-  );
-
-  // Whether the Confirm button should be enabled — mode-aware
-  const canConfirm = voipEnabled
-    ? anyCallMeetsConfirmGate // VOIP mode: need VOIP call >= 15s
-    : (hasManualCallLog || phoneRevealed || anyCallMeetsConfirmGate); // Manual mode: phone revealed or manual call logged
+  // Whether the Confirm button should be enabled
+  // - VOIP enabled: require completed VOIP call of at least 15 seconds
+  // - VOIP disabled: require at least one call log (agent clicked Call)
+  const canConfirm = voipEnabled ? hasQualifyingVoipCall : hasAnyCallLog;
 
   // Poll for call status updates while a call is active
   // This is a fallback until Socket.io frontend hooks are wired.
@@ -599,37 +837,109 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
     return undefined;
   }, [callInitiated, revalidate]);
 
+  const revealData = revealFetcher.data as {
+    phoneRevealed?: boolean;
+    phone?: string;
+    isDialable?: boolean;
+    error?: string;
+  } | undefined;
+
+  // Revalidate when MANUAL_CALL is recorded (after Copy or Call on my phone) so Confirm order appears.
+  // Use a ref to avoid revalidation loop: only revalidate once per success.
+  const recordCallData = recordCallFetcher.data as { success?: boolean; error?: string } | undefined;
+  const revalidatedForRecordCallRef = useRef(false);
+  useEffect(() => {
+    if (recordCallData?.success && revalidator.state === 'idle' && !revalidatedForRecordCallRef.current) {
+      revalidatedForRecordCallRef.current = true;
+      revalidator.revalidate();
+    }
+  }, [recordCallData?.success, revalidator]);
+  // Reset ref when order changes so a new copy on another order can trigger one revalidation
+  useEffect(() => {
+    revalidatedForRecordCallRef.current = false;
+  }, [order.id]);
+
+  // Close confirm modal when confirm transition succeeds
+  const fetcherSuccess = (fetcher.data as { success?: boolean })?.success;
+  const prevFetcherState = useRef(fetcher.state);
+  useEffect(() => {
+    // Detect transition from submitting/loading → idle with success
+    if (prevFetcherState.current !== 'idle' && fetcher.state === 'idle' && fetcherSuccess && confirmModalOpen) {
+      setConfirmModalOpen(false);
+      setDeliveryDate('');
+    }
+    prevFetcherState.current = fetcher.state;
+  }, [fetcher.state, fetcherSuccess, confirmModalOpen]);
+
+  // Close confirm modal and revalidate when schedule callback succeeds
+  const scheduleData = scheduleFetcher.data as { success?: boolean; scheduled?: boolean; error?: string } | undefined;
+  useEffect(() => {
+    if (scheduleData?.success && scheduleData?.scheduled && revalidator.state === 'idle') {
+      setConfirmModalOpen(false);
+      setScheduleDelayMinutes(120);
+      setScheduleNotes('');
+      revalidator.revalidate();
+    }
+  }, [scheduleData?.success, scheduleData?.scheduled, revalidator]);
+
+  // Close adjust items modal and revalidate when update succeeds
+  const adjustItemsData = adjustItemsFetcher.data as { success?: boolean; error?: string } | undefined;
+  useEffect(() => {
+    if (adjustItemsData?.success && revalidator.state === 'idle') {
+      setAdjustItemsModalOpen(false);
+      revalidator.revalidate();
+    }
+  }, [adjustItemsData?.success, revalidator]);
+
+  // Escape to close adjust items modal
+  useEffect(() => {
+    if (!adjustItemsModalOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAdjustItemsModalOpen(false);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [adjustItemsModalOpen]);
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 overflow-x-hidden min-w-0">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <Link to="/admin/cs/orders" className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
           Orders
         </Link>
-        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
-        <span className="text-surface-900 dark:text-white font-medium">{order.id.slice(0, 8)}...</span>
+        <span className="text-surface-900 dark:text-white font-medium truncate min-w-0">{order.id.slice(0, 8)}...</span>
       </div>
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">{order.customerName}</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 font-mono mt-0.5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 min-w-0">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-white truncate">{order.customerName}</h1>
+          <p className="text-sm text-surface-800 dark:text-surface-200 font-mono mt-0.5 break-all">
             {order.customerPhoneDisplay}
           </p>
         </div>
-        <span className={`badge ${STATUS_COLORS[order.status]?.bg ?? ''} ${STATUS_COLORS[order.status]?.text ?? ''}`}>
-          <span className={`status-dot ${STATUS_COLORS[order.status]?.dot ?? ''}`} />
-          {order.status.replace(/_/g, ' ')}
-        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <PageRefreshButton />
+          {!canEditOrder && (
+            <span className="inline-flex items-center rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-1 text-xs font-medium text-surface-600 dark:text-surface-400">
+              View only
+            </span>
+          )}
+          <OrderStatusBadge status={order.status} />
+        </div>
       </div>
 
-      {actionError && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionError}</p>
-        </div>
+      {showActionError && actionError && (
+        <DismissibleAlert
+          message={actionError}
+          variant="danger"
+          durationMs={6000}
+          onDismiss={() => setDismissedMessage(actionError ?? null)}
+        />
       )}
 
       <Tabs
@@ -647,17 +957,18 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
           {/* Left column */}
           <div className="lg:col-span-2 space-y-4">
             {/* Status Timeline */}
-            <div className="card">
+            <div className="card overflow-hidden">
               <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Progress</h2>
-              <div className="flex items-center overflow-x-auto pb-2">
+              <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain">
+                <div className="flex items-center flex-nowrap gap-0 min-w-max">
                 {STATUS_FLOW.map((status, idx) => {
                   const isPast = idx < currentStatusIndex;
                   const isCurrent = idx === currentStatusIndex;
 
                   return (
-                    <div key={status} className="flex items-center min-w-0">
+                    <div key={status} className="flex items-center flex-shrink-0">
                       <div className="flex flex-col items-center">
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
                           isCurrent
                             ? 'bg-brand-500 text-white ring-4 ring-brand-100 dark:ring-brand-900'
                             : isPast
@@ -684,48 +995,52 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                     </div>
                   );
                 })}
+                </div>
               </div>
             </div>
 
-            {/* Order Items */}
+            {/* Order Items — card layout (typically 3–4 items) */}
             <div className="card">
               <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Order Items</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="table-header">Product</th>
-                      <th className="table-header text-center">Qty</th>
-                      <th className="table-header text-right">Unit Price</th>
-                      <th className="table-header text-right">Subtotal</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {order.orderItems.map((item) => (
-                      <tr key={item.id} className="table-row">
-                        <td className="table-cell font-medium text-surface-900 dark:text-surface-100 font-mono text-sm">
-                          {item.productId.slice(0, 8)}...
-                        </td>
-                        <td className="table-cell text-center">{item.quantity}</td>
-                        <td className="table-cell text-right">&#8358;{Number(item.unitPrice).toLocaleString()}</td>
-                        <td className="table-cell text-right font-medium">
-                          &#8358;{(item.quantity * Number(item.unitPrice)).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  {order.totalAmount && (
-                    <tfoot>
-                      <tr className="border-t-2 border-surface-200 dark:border-surface-700">
-                        <td colSpan={3} className="table-cell font-semibold text-surface-900 dark:text-surface-100 text-right">Total</td>
-                        <td className="table-cell text-right font-bold text-surface-900 dark:text-white">
-                          &#8358;{Number(order.totalAmount).toLocaleString()}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {order.orderItems.map((item) => {
+                  const subtotal = item.quantity * Number(item.unitPrice);
+                  return (
+                    <div
+                      key={item.id}
+                      className="rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 p-3 flex flex-col"
+                    >
+                      <p className="font-medium text-surface-900 dark:text-surface-100 line-clamp-2" title={item.productName ?? item.productId}>
+                        {item.productName ?? `${item.productId.slice(0, 8)}...`}
+                      </p>
+                      <div className="mt-2 flex items-center justify-between text-sm text-surface-800 dark:text-surface-200">
+                        <span>Qty: {item.quantity}</span>
+                        <span>&#8358;{Number(item.unitPrice).toLocaleString()} each</span>
+                      </div>
+                      <p className="mt-1.5 text-sm font-semibold text-surface-900 dark:text-white">
+                        Subtotal: &#8358;{subtotal.toLocaleString()}
+                      </p>
+                      <Link
+                        to={`/admin/products/${item.productId}`}
+                        className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        View product
+                      </Link>
+                    </div>
+                  );
+                })}
               </div>
+              {order.totalAmount && (
+                <div className="mt-3 pt-3 border-t border-surface-200 dark:border-surface-700 flex justify-end">
+                  <p className="text-base font-bold text-surface-900 dark:text-white">
+                    Total: &#8358;{Number(order.totalAmount).toLocaleString()}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Call History */}
@@ -775,8 +1090,158 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
 
           {/* Right column */}
           <div className="space-y-4">
-            {/* Call Panel — switches between VOIP (strict) and Manual (relaxed) */}
-            {order.status === 'CS_ENGAGED' && voipEnabled && (
+            {/* Order Actions — CS / Head of CS only, role-based */}
+            {canEditOrder && isCSOrHoS && (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || order.status === 'CS_ENGAGED') && (
+              <div className="card">
+                <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Order Actions</h2>
+                {!canPerformCSActionsOnOrder && (
+                  <div className="rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3 mb-3">
+                    <p className="text-sm text-warning-800 dark:text-warning-200">
+                      This order is not assigned to you. You cannot perform actions until it is assigned to you by Head of CS or the system.
+                    </p>
+                  </div>
+                )}
+                <div className={`space-y-2 ${!canPerformCSActionsOnOrder ? 'pointer-events-none opacity-60' : ''}`}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => {
+                      setEditedItems(
+                        order.orderItems.map((item) => ({
+                          productId: item.productId,
+                          productName: item.productName ?? null,
+                          quantity: item.quantity,
+                          unitPrice: Number(item.unitPrice),
+                        })),
+                      );
+                      setAdjustItemsModalOpen(true);
+                    }}
+                    disabled={!canPerformCSActionsOnOrder || order.orderItems.length === 0}
+                  >
+                    Adjust order items
+                  </Button>
+                  {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && (
+                    <>
+                      {!voipEnabled && canTransitionTo('CS_ENGAGED') && (
+                        <fetcher.Form method="post">
+                          <input type="hidden" name="intent" value="transition" />
+                          <input type="hidden" name="newStatus" value="CS_ENGAGED" />
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            className="w-full"
+                            disabled={fetcher.state === 'submitting' || !canPerformCSActionsOnOrder}
+                            loading={fetcher.state === 'submitting'}
+                            loadingText="Starting..."
+                          >
+                            Call customer
+                          </Button>
+                        </fetcher.Form>
+                      )}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
+                        onClick={() => {
+                          setCancelModalOpen(true);
+                          setCancelReason('Customer not picking');
+                        }}
+                        disabled={fetcher.state === 'submitting' || !canTransitionTo('CANCELLED')}
+                      >
+                        Delete order
+                      </Button>
+                    </>
+                  )}
+                  {order.status === 'CS_ENGAGED' && (
+                    <>
+                      {canConfirm && canTransitionTo('CONFIRMED') && (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          className="w-full"
+                          onClick={() => setConfirmModalOpen(true)}
+                          disabled={fetcher.state === 'submitting'}
+                        >
+                          Confirm order
+                        </Button>
+                      )}
+                      {!voipEnabled && (
+                        <div className="space-y-2">
+                          {!canConfirm && (
+                            <p className="text-xs text-warning-600 dark:text-warning-400 text-center">
+                              Call the customer manually, then confirm the order.
+                            </p>
+                          )}
+                          <Button
+                            type="button"
+                            variant={canConfirm ? 'secondary' : 'primary'}
+                            className="w-full"
+                            onClick={() => setCallCustomerModalOpen(true)}
+                          >
+                            Call customer
+                          </Button>
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
+                        onClick={() => {
+                          setCancelModalOpen(true);
+                          setCancelReason('Customer not picking');
+                        }}
+                        disabled={fetcher.state === 'submitting' || !canTransitionTo('CANCELLED')}
+                      >
+                        Delete order
+                      </Button>
+                      {canRequestTransfer && csAgentsForAssign && csAgentsForAssign.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full"
+                          onClick={() => setTransferModalOpen(true)}
+                          disabled={fetcher.state === 'submitting'}
+                        >
+                          Request transfer
+                        </Button>
+                      )}
+                      {canAssignToCS && csAgentsForAssign && csAgentsForAssign.length > 0 && (
+                        <div className="flex gap-2">
+                          <select
+                            value={assignToId}
+                            onChange={(e) => setAssignToId(e.target.value)}
+                            className="input flex-1 min-w-0"
+                            aria-label="Assign to agent"
+                          >
+                            <option value="">Select agent...</option>
+                            {csAgentsForAssign.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                          <fetcher.Form method="post" className="flex-shrink-0">
+                            <input type="hidden" name="intent" value="assignToCS" />
+                            <input type="hidden" name="toCsAgentId" value={assignToId} />
+                            <Button
+                              type="submit"
+                              variant="primary"
+                              disabled={!assignToId || fetcher.state === 'submitting'}
+                              loading={fetcher.state === 'submitting'}
+                              loadingText="Assigning..."
+                            >
+                              Assign
+                            </Button>
+                          </fetcher.Form>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Call Panel — CS only; VOIP; show for CS_ENGAGED or for UNPROCESSED/CS_ASSIGNED when user can engage */}
+            {canEditOrder && voipEnabled && canPerformCSActionsOnOrder && (order.status === 'CS_ENGAGED' || ((order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && canTransitionTo('CS_ENGAGED'))) && (
               <DeferredSection resolve={latestCall} skeleton="card">
                 {(resolvedCall) => (
                   <VoipCallPanel
@@ -792,281 +1257,36 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
                 )}
               </DeferredSection>
             )}
-            {order.status === 'CS_ENGAGED' && !voipEnabled && (
-              <ManualCallPanel
-                order={order}
-                fetcher={fetcher}
-                revealedPhone={revealedPhone}
-                phoneRevealed={phoneRevealed}
-              />
-            )}
 
-            {/* Actions */}
-            <div className="card">
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Actions</h2>
-              <div className="space-y-2">
-                {order.allowedTransitions.includes('CS_ENGAGED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="CS_ENGAGED" />
-                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Engaging...">
-                      Engage Customer
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('CONFIRMED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="CONFIRMED" />
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      className="w-full"
-                      disabled={!canConfirm}
-                      loading={fetcher.state === 'submitting'}
-                      loadingText="Confirming..."
-                      title={!canConfirm
-                        ? voipEnabled
-                          ? 'A VOIP call of at least 15 seconds is required before confirming'
-                          : 'Click Call to reveal the phone number before confirming'
-                        : undefined
-                      }
-                    >
-                      Confirm Order
-                      {!canConfirm && (
-                        <span className="ml-1 text-xs opacity-70">(call required)</span>
-                      )}
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('CANCELLED') && order.status === 'CS_ENGAGED' && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="CANCELLED" />
-                    <textarea
-                      name="reason"
-                      placeholder="Cancellation reason (min 10 characters)..."
-                      value={cancelReason}
-                      onChange={(e) => setCancelReason(e.target.value)}
-                      className="input text-sm mb-2"
-                      rows={2}
-                    />
-                    <Button
-                      type="submit"
-                      variant="danger"
-                      className="w-full"
-                      disabled={cancelReason.length < 10 || !anyCallAttempted}
-                      loading={fetcher.state === 'submitting'}
-                      loadingText="Cancelling..."
-                      title={!anyCallAttempted ? 'At least one call attempt is required' : undefined}
-                    >
-                      No Answer / Cancel
-                      {!anyCallAttempted && (
-                        <span className="ml-1 text-xs opacity-70">(call required)</span>
-                      )}
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {/* Non-CS_ENGAGED cancel */}
-                {order.allowedTransitions.includes('CANCELLED') && order.status !== 'CS_ENGAGED' && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="CANCELLED" />
-                    <textarea
-                      name="reason"
-                      placeholder="Cancellation reason (min 10 characters)..."
-                      value={cancelReason}
-                      onChange={(e) => setCancelReason(e.target.value)}
-                      className="input text-sm mb-2"
-                      rows={2}
-                    />
-                    <Button
-                      type="submit"
-                      variant="danger"
-                      className="w-full"
-                      disabled={cancelReason.length < 10}
-                      loading={fetcher.state === 'submitting'}
-                      loadingText="Cancelling..."
-                    >
-                      Cancel Order
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('ALLOCATED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="ALLOCATED" />
-                    <input name="logisticsLocationId" type="text" placeholder="Logistics Location ID" className="input text-sm mb-2" required />
-                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Allocating...">
-                      Allocate to 3PL
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('DISPATCHED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="DISPATCHED" />
-                    <input name="riderId" type="text" placeholder="Rider ID" className="input text-sm mb-2" required />
-                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Dispatching...">
-                      Dispatch to Rider
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('IN_TRANSIT') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="IN_TRANSIT" />
-                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Updating...">
-                      Mark In Transit
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('DELIVERED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="DELIVERED" />
-                    <AmountInput name="deliveryFeeAddOn" placeholder="Delivery add-on (₦) — optional" className="input text-sm mb-2" />
-                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Updating...">
-                      Mark Delivered
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('PARTIALLY_DELIVERED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="PARTIALLY_DELIVERED" />
-                    <div className="grid grid-cols-2 gap-2 mb-2">
-                      <input name="deliveredQuantity" type="number" min="0" placeholder="Delivered qty" className="input text-sm" required />
-                      <input name="returnedQuantity" type="number" min="0" placeholder="Returned qty" className="input text-sm" required />
-                    </div>
-                    <AmountInput name="deliveryFeeAddOn" placeholder="Delivery add-on (₦) — optional" className="input text-sm mb-2" />
-                    <Button type="submit" variant="warning" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Updating...">
-                      Partial Delivery
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('COMPLETED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="COMPLETED" />
-                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Completing...">
-                      Complete Order
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('RETURNED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="RETURNED" />
-                    <textarea
-                      name="reason"
-                      placeholder="Return reason (min 10 characters)..."
-                      value={returnReason}
-                      onChange={(e) => setReturnReason(e.target.value)}
-                      className="input text-sm mb-2"
-                      rows={2}
-                    />
-                    <Button
-                      type="submit"
-                      variant="danger"
-                      className="w-full"
-                      disabled={returnReason.length < 10}
-                      loading={fetcher.state === 'submitting'}
-                      loadingText="Updating..."
-                    >
-                      Mark Returned
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('RESTOCKED') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="RESTOCKED" />
-                    <Button type="submit" variant="primary" className="w-full" loading={fetcher.state === 'submitting'} loadingText="Updating...">
-                      Restock (Sellable)
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.includes('WRITTEN_OFF') && (
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="transition" />
-                    <input type="hidden" name="newStatus" value="WRITTEN_OFF" />
-                    <textarea
-                      name="reason"
-                      placeholder="Damage note (min 10 characters)..."
-                      value={writeOffReason}
-                      onChange={(e) => setWriteOffReason(e.target.value)}
-                      className="input text-sm mb-2"
-                      rows={2}
-                    />
-                    <Button
-                      type="submit"
-                      variant="danger"
-                      className="w-full"
-                      disabled={writeOffReason.length < 10}
-                      loading={fetcher.state === 'submitting'}
-                      loadingText="Updating..."
-                    >
-                      Write Off (Damaged)
-                    </Button>
-                  </fetcher.Form>
-                )}
-                {order.allowedTransitions.length === 0 && (
-                  <p className="text-sm text-surface-800 dark:text-surface-200 text-center py-2">
-                    No actions available
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Order Info */}
+            {/* Order Info — dynamic fields: show when value present or alwaysShow */}
             <div className="card">
               <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Details</h2>
-              <dl className="space-y-3 text-sm">
-                {order.customerAddress && (
-                  <div>
-                    <dt className="text-surface-800 dark:text-surface-200">Customer Address</dt>
-                    <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{order.customerAddress}</dd>
-                  </div>
-                )}
-                {order.deliveryAddress && (
-                  <div>
-                    <dt className="text-surface-800 dark:text-surface-200">Delivery Address</dt>
-                    <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{order.deliveryAddress}</dd>
-                  </div>
-                )}
-                {order.deliveryNotes && (
-                  <div>
-                    <dt className="text-surface-800 dark:text-surface-200">Delivery Notes</dt>
-                    <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{order.deliveryNotes}</dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-surface-800 dark:text-surface-200">Created</dt>
-                  <dd className="text-surface-900 dark:text-surface-100 mt-0.5">
-                    {new Date(order.createdAt).toLocaleString('en-NG')}
-                  </dd>
-                </div>
-                {order.confirmedAt && (
-                  <div>
-                    <dt className="text-surface-800 dark:text-surface-200">Confirmed</dt>
-                    <dd className="text-surface-900 dark:text-surface-100 mt-0.5">
-                      {new Date(order.confirmedAt).toLocaleString('en-NG')}
-                    </dd>
-                  </div>
-                )}
-                {order.deliveredAt && (
-                  <div>
-                    <dt className="text-surface-800 dark:text-surface-200">Delivered</dt>
-                    <dd className="text-surface-900 dark:text-surface-100 mt-0.5">
-                      {new Date(order.deliveredAt).toLocaleString('en-NG')}
-                    </dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-surface-800 dark:text-surface-200">Order ID</dt>
-                  <dd className="text-surface-900 dark:text-surface-100 mt-0.5 font-mono text-xs break-all">{order.id}</dd>
-                </div>
+              <dl className="space-y-2.5 text-sm">
+                {ORDER_DETAIL_FIELDS.map((field) => {
+                  const value = field.getValue(order);
+                  if (!field.alwaysShow && !hasValue(value)) return null;
+                  const formatted = field.format(value, order);
+                  const valueClass =
+                    typeof field.ddClassName === 'function'
+                      ? field.ddClassName(value, order)
+                      : field.ddClassName ?? '';
+                  const ddClass = [
+                    'mt-0.5 break-words',
+                    valueClass || 'text-surface-900 dark:text-surface-100',
+                  ].filter(Boolean).join(' ');
+                  const rowClass = [
+                    'min-w-0 pl-3 py-1.5 rounded-r-md -ml-px',
+                    field.rowAccent ?? '',
+                  ].filter(Boolean).join(' ');
+                  return (
+                    <div key={field.label} className={rowClass}>
+                      <dt className="text-surface-600 dark:text-surface-400 text-xs font-medium uppercase tracking-wider">
+                        {field.label}
+                      </dt>
+                      <dd className={ddClass}>{formatted}</dd>
+                    </div>
+                  );
+                })}
               </dl>
             </div>
           </div>
@@ -1083,6 +1303,497 @@ export function OrderDetailPage({ order, latestCall, history, strictDataMode, vo
           <DeferredSection resolve={history} skeleton="table">
             {(resolvedHistory) => <OrderHistoryTimeline history={resolvedHistory} />}
           </DeferredSection>
+        </div>
+      )}
+
+      {/* Confirm order modal — Confirm now or Schedule callback */}
+      {confirmModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Confirm order</h3>
+            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+              Confirm the order now or schedule a callback for later.
+            </p>
+            <div className="space-y-4">
+              <fetcher.Form
+                method="post"
+                className="block"
+              >
+                <input type="hidden" name="intent" value="transition" />
+                <input type="hidden" name="newStatus" value="CONFIRMED" />
+                <input type="hidden" name="preferredDeliveryDate" value={deliveryDate} />
+                <div className="space-y-2 mb-4">
+                  <label className="block text-xs font-medium text-surface-600 dark:text-surface-400">
+                    Scheduled delivery date
+                  </label>
+                  <input
+                    type="date"
+                    value={deliveryDate}
+                    onChange={(e) => setDeliveryDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="input w-full"
+                    aria-label="Delivery date"
+                  />
+                  <p className="text-xs text-surface-600 dark:text-surface-400">
+                    When should logistics deliver this order? Leave empty if not specified.
+                  </p>
+                </div>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  className="w-full"
+                  disabled={fetcher.state === 'submitting'}
+                  loading={fetcher.state === 'submitting'}
+                  loadingText="Confirming..."
+                >
+                  Confirm now
+                </Button>
+              </fetcher.Form>
+              <div className="border-t border-surface-200 dark:border-surface-700 pt-4">
+                <p className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Schedule callback</p>
+                <p className="text-xs text-surface-600 dark:text-surface-400 mb-3">
+                  Move order back to queue and set a time to call again (e.g. customer not picking).
+                </p>
+                <div className="space-y-2 mb-3">
+                  <label className="block text-xs font-medium text-surface-600 dark:text-surface-400">Delay</label>
+                  <select
+                    value={scheduleDelayMinutes}
+                    onChange={(e) => setScheduleDelayMinutes(parseInt(e.target.value, 10))}
+                    className="input w-full"
+                    aria-label="Callback delay"
+                  >
+                    <option value={30}>30 minutes</option>
+                    <option value={60}>1 hour</option>
+                    <option value={120}>2 hours</option>
+                    <option value={240}>4 hours</option>
+                    <option value={480}>8 hours</option>
+                    <option value={1440}>24 hours</option>
+                  </select>
+                  <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mt-2">Notes (optional)</label>
+                  <textarea
+                    value={scheduleNotes}
+                    onChange={(e) => setScheduleNotes(e.target.value)}
+                    placeholder="e.g. Customer not picking"
+                    className="input w-full min-h-[60px]"
+                    rows={2}
+                  />
+                </div>
+                <scheduleFetcher.Form method="post" className="block">
+                  <input type="hidden" name="intent" value="scheduleCallback" />
+                  <input type="hidden" name="delayMinutes" value={scheduleDelayMinutes} />
+                  <input type="hidden" name="notes" value={scheduleNotes} />
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    className="w-full"
+                    disabled={scheduleFetcher.state === 'submitting'}
+                    loading={scheduleFetcher.state === 'submitting'}
+                    loadingText="Scheduling..."
+                  >
+                    Schedule callback
+                  </Button>
+                </scheduleFetcher.Form>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setConfirmModalOpen(false);
+                  setDeliveryDate('');
+                  setScheduleDelayMinutes(120);
+                  setScheduleNotes('');
+                }}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete order modal (cancel with reason) */}
+      {cancelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Delete order</h3>
+            <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+              Please provide a reason (at least 10 characters). This will move the order to Cancelled.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate', 'Other'].map((preset) => {
+                const isOther = preset === 'Other';
+                const isActive = isOther
+                  ? cancelReason.length > 0 && !['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate'].includes(cancelReason)
+                  : cancelReason === preset;
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setCancelReason(isOther ? '' : preset)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700'
+                        : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 border border-surface-200 dark:border-surface-700 hover:bg-surface-200 dark:hover:bg-surface-700'
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                );
+              })}
+            </div>
+            <textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Customer not picking"
+              className="input w-full min-h-[80px]"
+              rows={3}
+            />
+            <div className="flex gap-2 mt-4 justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setCancelModalOpen(false);
+                  setCancelReason('');
+                }}
+              >
+                Back
+              </Button>
+              <fetcher.Form
+                method="post"
+                onSubmit={() => {
+                  setCancelModalOpen(false);
+                  setCancelReason('');
+                }}
+              >
+                <input type="hidden" name="intent" value="transition" />
+                <input type="hidden" name="newStatus" value="CANCELLED" />
+                <input type="hidden" name="reason" value={cancelReason} />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  className="border-danger-500 bg-danger-500 hover:bg-danger-600 text-white"
+                  disabled={cancelReason.trim().length < 10 || fetcher.state === 'submitting'}
+                  loading={fetcher.state === 'submitting'}
+                  loadingText="Deleting..."
+                >
+                  Delete order
+                </Button>
+              </fetcher.Form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Request transfer modal */}
+      {transferModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Request transfer</h3>
+            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+              Transfer this order to another CS agent. They will need to accept the transfer.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">To agent</label>
+                <select
+                  value={transferToId}
+                  onChange={(e) => setTransferToId(e.target.value)}
+                  className="input w-full"
+                  aria-label="Transfer to agent"
+                >
+                  <option value="">Select agent...</option>
+                  {csAgentsForAssign?.filter((a) => a.id !== userId).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Reason (optional)</label>
+                <textarea
+                  value={transferReason}
+                  onChange={(e) => setTransferReason(e.target.value)}
+                  placeholder="Reason for transfer..."
+                  className="input w-full min-h-[60px]"
+                  rows={2}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4 justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setTransferModalOpen(false);
+                  setTransferToId('');
+                  setTransferReason('');
+                }}
+              >
+                Back
+              </Button>
+              <fetcher.Form
+                method="post"
+                onSubmit={() => {
+                  setTransferModalOpen(false);
+                  setTransferToId('');
+                  setTransferReason('');
+                }}
+              >
+                <input type="hidden" name="intent" value="requestTransfer" />
+                <input type="hidden" name="toCsAgentId" value={transferToId} />
+                <input type="hidden" name="reason" value={transferReason} />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={!transferToId || fetcher.state === 'submitting'}
+                  loading={fetcher.state === 'submitting'}
+                  loadingText="Sending..."
+                >
+                  Request transfer
+                </Button>
+              </fetcher.Form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Call customer modal — VOIP off: reveal number, copy, open dialer */}
+      {callCustomerModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Call customer</h3>
+            {!revealData?.phoneRevealed ? (
+              <>
+                <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+                  Reveal the customer&apos;s number to call them manually. The call is recorded when you click &quot;Copy number&quot; or &quot;Call on my phone&quot;.
+                </p>
+                {revealData?.error && (
+                  <p className="text-sm text-danger-600 dark:text-danger-400 mb-3">{revealData.error}</p>
+                )}
+                <div className="flex gap-2 justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setCallCustomerModalOpen(false)}
+                  >
+                    Close
+                  </Button>
+                  <revealFetcher.Form method="post">
+                    <input type="hidden" name="intent" value="revealPhone" />
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={revealFetcher.state === 'submitting'}
+                      loading={revealFetcher.state === 'submitting'}
+                      loadingText="Revealing..."
+                    >
+                      Reveal number
+                    </Button>
+                  </revealFetcher.Form>
+                </div>
+              </>
+            ) : !revealData?.isDialable ? (
+              <>
+                <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+                  This order was created with phone protection. The customer&apos;s number is not stored in a dialable form and cannot be shown. Enable VOIP in Settings to call via the app, or record that you called using your own records below.
+                </p>
+                <div className="flex gap-2 justify-end flex-wrap">
+                  <Button type="button" variant="secondary" onClick={() => setCallCustomerModalOpen(false)}>
+                    Close
+                  </Button>
+                  <recordCallFetcher.Form method="post">
+                    <input type="hidden" name="intent" value="initiateCall" />
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={recordCallFetcher.state === 'submitting'}
+                      loading={recordCallFetcher.state === 'submitting'}
+                      loadingText="Recording..."
+                    >
+                      I&apos;ve called the customer
+                    </Button>
+                  </recordCallFetcher.Form>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+                  Click &quot;Copy number&quot; or &quot;Call on my phone&quot; to record the call, then use the number to contact the customer.
+                </p>
+                <div className="rounded-lg bg-surface-100 dark:bg-surface-800 p-4 mb-4">
+                  <p className="text-sm text-surface-600 dark:text-surface-400">
+                    Number is loaded. Click &quot;Copy number&quot; or &quot;Call on my phone&quot; to use it — the number is not shown in the app.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={async () => {
+                      recordCallFetcher.submit(
+                        { intent: 'initiateCall' },
+                        { method: 'post' },
+                      );
+                      const phone = revealData.phone ?? '';
+                      if (phone && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(phone);
+                        setCopyFeedback(true);
+                        setTimeout(() => setCopyFeedback(false), 2000);
+                      }
+                    }}
+                    disabled={recordCallFetcher.state === 'submitting'}
+                  >
+                    {copyFeedback ? 'Copied' : 'Copy number'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    className="inline-flex items-center justify-center gap-2"
+                    disabled={recordCallFetcher.state === 'submitting'}
+                    onClick={() => {
+                      recordCallFetcher.submit(
+                        { intent: 'initiateCall' },
+                        { method: 'post' },
+                      );
+                      const phone = revealData.phone ?? '';
+                      if (phone) {
+                        window.location.href = `tel:${phone}`;
+                      }
+                    }}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                    </svg>
+                    Call on my phone
+                  </Button>
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setCallCustomerModalOpen(false)}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Adjust order items modal */}
+      {adjustItemsModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="adjust-items-title"
+        >
+          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <h2 id="adjust-items-title" className="text-lg font-semibold text-surface-900 dark:text-white p-6 pb-2">
+              Adjust order items
+            </h2>
+            <p className="text-sm text-surface-600 dark:text-surface-400 px-6 pb-4">
+              Update quantities or prices. This changes the order details only, not the order status.
+            </p>
+            {adjustItemsData?.error && (
+              <p className="text-sm text-danger-600 dark:text-danger-400 mx-6 mb-2">{adjustItemsData.error}</p>
+            )}
+            <div className="flex-1 overflow-y-auto px-6 space-y-4">
+              {editedItems.map((item, index) => (
+                <div
+                  key={`${item.productId}-${index}`}
+                  className="rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-2"
+                >
+                  <p className="font-medium text-surface-900 dark:text-surface-100 text-sm line-clamp-2">
+                    {item.productName ?? item.productId.slice(0, 8) + '...'}
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-surface-500 dark:text-surface-400 mb-1">Quantity</label>
+                      <input
+                        type="number"
+                        min={1}
+                        className="input w-full"
+                        value={item.quantity}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          if (!Number.isNaN(v) && v >= 1) {
+                            setEditedItems((prev) =>
+                              prev.map((p, i) => (i === index ? { ...p, quantity: v } : p)),
+                            );
+                          }
+                        }}
+                        aria-label={`Quantity for ${item.productName ?? 'item'}`}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-surface-500 dark:text-surface-400 mb-1">Unit price (&#8358;)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        className="input w-full"
+                        value={item.unitPrice}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (!Number.isNaN(v) && v >= 0) {
+                            setEditedItems((prev) =>
+                              prev.map((p, i) => (i === index ? { ...p, unitPrice: v } : p)),
+                            );
+                          }
+                        }}
+                        aria-label={`Unit price for ${item.productName ?? 'item'}`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="p-6 pt-4 border-t border-surface-200 dark:border-surface-700">
+              <p className="text-sm font-semibold text-surface-900 dark:text-white mb-4">
+                Total: &#8358;
+                {editedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </p>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setAdjustItemsModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={adjustItemsFetcher.state === 'submitting' || editedItems.some((i) => i.quantity < 1 || i.unitPrice < 0)}
+                  loading={adjustItemsFetcher.state === 'submitting'}
+                  loadingText="Saving..."
+                  onClick={() => {
+                    const payload = editedItems.map(({ productId, quantity, unitPrice }) => ({
+                      productId,
+                      quantity,
+                      unitPrice,
+                    }));
+                    const totalAmount = payload.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+                    adjustItemsFetcher.submit(
+                      {
+                        intent: 'adjustOrderItems',
+                        items: JSON.stringify(payload),
+                        totalAmount: String(totalAmount),
+                      },
+                      { method: 'post' },
+                    );
+                  }}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

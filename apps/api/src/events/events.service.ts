@@ -55,13 +55,14 @@ export class EventsService {
   }
 
   /**
-   * New order created — notify CS dispatch and admin.
+   * New order created — notify CS dispatch, admin, and marketing.
    */
   emitNewOrder(data: { orderId: string; productName: string }) {
     const event = 'order:new';
     const payload = { ...data, timestamp: new Date().toISOString() };
     this.gateway.server.to('admin').emit(event, payload);
     this.gateway.server.to('cs-all').emit(event, payload);
+    this.gateway.server.to('marketing-all').emit(event, payload);
   }
 
   /**

@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Form, useFetcher, useNavigate } from '@remix-run/react';
+import { Form, useNavigate } from '@remix-run/react';
 import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { getNotificationLink, getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
+import { useNotificationsState } from '~/contexts/notifications-state';
 
 interface Notification {
   id: string;
@@ -29,6 +31,9 @@ interface HeaderProps {
   socketConnected?: boolean;
   onToggleDarkMode: () => void;
   onMobileMenuToggle: () => void;
+  onRemoveRealtimeNotification?: (id: string) => void;
+  onPruneServerKnown?: (serverIds: Set<string>) => void;
+  onClearRealtimeNotifications?: () => void;
 }
 
 const NOTIFICATION_COLORS: Record<string, string> = {
@@ -50,45 +55,39 @@ const NOTIFICATION_COLORS: Record<string, string> = {
   'escalation:stuck_order': 'bg-danger-500',
   'high_cpa:warning': 'bg-warning-500',
   'system:info': 'bg-surface-500',
+  'remittance:sent': 'bg-warning-500',
+  'remittance:received': 'bg-success-500',
 };
 
-function getNotificationLink(notif: Notification): string | null {
-  const data = notif.data as Record<string, string> | null | undefined;
-  if (!data) return null;
+function timeAgo(dateStr: string): string {
+  return formatNotificationTime(dateStr);
+}
 
-  if (data.orderId) return `/admin/orders/${data.orderId}`;
-  if (data.transferId) return '/admin/transfers';
-  if (data.productId) return `/admin/products`;
-  if (data.fundingId) return '/admin/marketing';
-  if (data.payoutId) return '/hr/payroll';
-  if (data.approvalId) return '/admin/finance';
-  if (data.locationId) return '/admin/logistics';
-  if (data.link && typeof data.link === 'string') return data.link;
-
+/** When server list resolves, prune optimistic read set and realtime duplicates. */
+function SyncNotificationReadIds({ notifications, onPruneServerKnown }: { notifications: Notification[]; onPruneServerKnown?: (serverIds: Set<string>) => void }) {
+  const { syncReadIdsFromServer } = useNotificationsState();
+  useEffect(() => {
+    const readIds = notifications.filter((n) => n.read).map((n) => n.id);
+    if (readIds.length > 0) syncReadIdsFromServer(readIds);
+    // Prune realtime notifications that are already in the server list
+    if (onPruneServerKnown && notifications.length > 0) {
+      const serverIds = new Set(notifications.map((n) => n.id));
+      onPruneServerKnown(serverIds);
+    }
+  }, [notifications, syncReadIdsFromServer, onPruneServerKnown]);
   return null;
 }
 
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
-export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle }: HeaderProps) {
+export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const notifTriggerRef = useRef<HTMLButtonElement>(null);
   const notifPanelRef = useRef<HTMLDivElement>(null);
-  const fetcher = useFetcher();
-  const markReadFetcher = useFetcher();
   const navigate = useNavigate();
+  const { displayUnreadCount, isOptimisticallyRead, markAsRead, markAllRead } = useNotificationsState();
 
   useSearchShortcut(() => setSearchOpen(true));
 
@@ -122,39 +121,33 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
     };
   }, [notifOpen]);
 
-  // Escape key to close notification drawer
+  // Escape key to close notification drawer or detail modal
   useEffect(() => {
     function handleEscape(e: KeyboardEvent) {
-      if (e.key === 'Escape') setNotifOpen(false);
+      if (e.key === 'Escape') {
+        if (selectedNotification) setSelectedNotification(null);
+        else setNotifOpen(false);
+      }
     }
-    if (notifOpen) {
+    if (notifOpen || selectedNotification) {
       document.addEventListener('keydown', handleEscape);
     }
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [notifOpen]);
+  }, [notifOpen, selectedNotification]);
 
   const handleMarkAllRead = useCallback(() => {
-    fetcher.submit(
-      { intent: 'markAllNotificationsRead' },
-      { method: 'post', action: '/admin' },
-    );
-  }, [fetcher]);
+    markAllRead();
+    onClearRealtimeNotifications?.();
+  }, [markAllRead, onClearRealtimeNotifications]);
 
   const handleNotificationClick = useCallback((notif: Notification) => {
-    // Mark as read if unread
+    setNotifOpen(false);
+    setSelectedNotification(notif);
     if (!notif.read) {
-      markReadFetcher.submit(
-        { intent: 'markNotificationRead', notificationId: notif.id },
-        { method: 'post', action: '/admin' },
-      );
+      markAsRead(notif.id);
+      onRemoveRealtimeNotification?.(notif.id);
     }
-    // Navigate to relevant record
-    const link = getNotificationLink(notif);
-    if (link) {
-      setNotifOpen(false);
-      navigate(link);
-    }
-  }, [markReadFetcher, navigate]);
+  }, [markAsRead, onRemoveRealtimeNotification]);
 
   return (
     <header
@@ -225,10 +218,15 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
         <div className="relative">
           <DeferredSection resolve={notificationsPromise} skeleton="inline">
             {({ notifications, unreadCount }) => {
-              const mergedNotifications = [...realtimeNotifications, ...notifications];
-              const mergedUnreadCount = unreadCount + realtimeCount;
+              // Deduplicate: only include realtime notifications NOT already in the server list
+              const serverIds = new Set(notifications.map((n: Notification) => n.id));
+              const uniqueRealtime = realtimeNotifications.filter((n) => !serverIds.has(n.id));
+              const mergedNotifications = [...uniqueRealtime, ...notifications];
+              const serverUnread = unreadCount + uniqueRealtime.length;
+              const mergedUnreadCount = displayUnreadCount(serverUnread);
               return (
                 <>
+                  <SyncNotificationReadIds notifications={notifications} onPruneServerKnown={onPruneServerKnown} />
                   <button
                     ref={notifTriggerRef}
                     onClick={() => setNotifOpen(!notifOpen)}
@@ -314,18 +312,19 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                                 {mergedNotifications.map((n: Notification) => {
                                   const link = getNotificationLink(n);
                                   const dotColor = NOTIFICATION_COLORS[n.type] ?? 'bg-surface-400';
+                                  const isRead = n.read || isOptimisticallyRead(n.id);
                                   return (
                                     <button
                                       key={n.id}
                                       type="button"
                                       onClick={() => handleNotificationClick(n)}
-                                      className={`w-full text-left px-4 py-3 border-b border-surface-50 dark:border-surface-700/50 hover:bg-surface-50 dark:hover:bg-surface-700/30 transition-colors ${
-                                        link ? 'cursor-pointer' : 'cursor-default'
-                                      } ${!n.read ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}
+                                      className={`w-full text-left px-4 py-3 border-b border-surface-50 dark:border-surface-700/50 hover:bg-surface-50 dark:hover:bg-surface-700/30 transition-colors cursor-pointer ${
+                                        !isRead ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''
+                                      }`}
                                     >
                                       <div className="flex items-start gap-2.5">
                                         <div className={`w-2 h-2 mt-1.5 rounded-full flex-shrink-0 ${
-                                          !n.read ? dotColor : 'bg-transparent'
+                                          !isRead ? dotColor : 'bg-transparent'
                                         }`} />
                                         <div className="flex-1 min-w-0">
                                           <p className="text-sm font-medium text-surface-900 dark:text-surface-100 leading-tight">
@@ -366,6 +365,74 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                               </a>
                             </div>
                           )}
+                        </div>
+                      </>,
+                      document.body
+                    )}
+
+                  {/* Notification detail modal — mark as read when opened */}
+                  {selectedNotification &&
+                    createPortal(
+                      <>
+                        <div
+                          className="fixed inset-0 z-[110] bg-black/50 dark:bg-black/60"
+                          aria-hidden
+                          onClick={() => setSelectedNotification(null)}
+                        />
+                        <div
+                          role="dialog"
+                          aria-modal="true"
+                          aria-labelledby="notification-detail-title"
+                          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[111] w-full max-w-md max-h-[90vh] flex flex-col bg-white dark:bg-surface-800 rounded-xl shadow-xl border border-surface-200 dark:border-surface-700 mx-4 animate-fade-in"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-start justify-between gap-3 p-5 pb-0 flex-shrink-0">
+                            <h2 id="notification-detail-title" className="text-lg font-semibold text-surface-900 dark:text-white pr-8">
+                              {selectedNotification.title}
+                            </h2>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedNotification(null)}
+                              className="p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-700 transition-colors -mt-1 -mr-1"
+                              aria-label="Close"
+                            >
+                              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+                            {selectedNotification.body ? (
+                              <p className="text-sm text-surface-700 dark:text-surface-200 whitespace-pre-wrap">
+                                {selectedNotification.body}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-surface-500 dark:text-surface-400 italic">No additional message.</p>
+                            )}
+                            <p className="text-xs text-surface-500 dark:text-surface-400 mt-4">
+                              {formatNotificationDate(selectedNotification.createdAt)}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 p-5 pt-3 border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
+                            {(() => {
+                              const action = getNotificationAction(selectedNotification);
+                              return action ? (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedNotification(null);
+                                    navigate(action.link);
+                                  }}
+                                >
+                                  {action.label}
+                                </Button>
+                              ) : null;
+                            })()}
+                            <Button variant="secondary" size="sm" onClick={() => setSelectedNotification(null)}>
+                              Close
+                            </Button>
+                          </div>
                         </div>
                       </>,
                       document.body

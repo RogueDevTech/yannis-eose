@@ -10,7 +10,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption } from './types';
 import { MOVEMENT_COLORS, formatMovementType } from './types';
 
-export function InventoryPage({ levels, totalLevels, movements, totalMovements, products, locations }: InventoryStreamData) {
+export function InventoryPage({ levels, totalLevels, movements, totalMovements, products, locations, canIntake = false }: InventoryStreamData) {
   const [activeTab, setActiveTab] = useState<'levels' | 'movements'>('levels');
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
@@ -45,16 +45,22 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setShowIntakeForm(!showIntakeForm)}
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Stock Intake
-          </Button>
+          {canIntake && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setShowIntakeForm(!showIntakeForm)}
+            >
+              {showIntakeForm ? 'Close' : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Stock Intake
+                </>
+              )}
+            </Button>
+          )}
           <Button
           variant="secondary"
           size="sm"
@@ -85,8 +91,8 @@ export function InventoryPage({ levels, totalLevels, movements, totalMovements, 
         </div>
       </div>
 
-      {/* Stock Intake form */}
-      {showIntakeForm && (
+      {/* Stock Intake form (only when user has inventory.intake) */}
+      {canIntake && showIntakeForm && (
         <div className="card space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Receive Stock (Stock Intake)</h3>

@@ -31,7 +31,7 @@ export const cartRouter = router({
    * Mark abandoned carts. Called by cron or admin.
    */
   markAbandoned: permissionProcedure('settings.write')
-    .input(z.object({ thresholdMinutes: z.number().int().min(1).default(15) }))
+    .input(z.object({ thresholdMinutes: z.number().int().min(1).default(5) }))
     .mutation(async ({ input }) => {
       const count = await getCartService().markAbandoned(input.thresholdMinutes);
       return { marked: count };

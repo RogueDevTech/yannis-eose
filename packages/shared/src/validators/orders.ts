@@ -9,6 +9,7 @@ import { z } from 'zod';
  */
 export const orderStatusSchema = z.enum([
   'UNPROCESSED',
+  'CS_ASSIGNED',
   'CS_ENGAGED',
   'CONFIRMED',
   'CANCELLED',
@@ -51,11 +52,20 @@ export const createOrderSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),
   customerName: z.string().min(2, 'Customer name is required'),
   customerPhoneHash: z.string().min(1, 'Phone hash is required'),
+  /** Raw phone for manual-call reveal when VOIP is off. Sent by Edge on create only; never exposed except via reveal endpoint. */
+  customerPhone: z.string().max(50).optional(),
   customerAddress: z.string().optional(),
   deliveryAddress: z.string().optional(),
   deliveryNotes: z.string().optional(),
+  deliveryState: z.string().max(100).optional(),
+  customerGender: z.enum(['male', 'female']).optional(),
+  preferredDeliveryDate: z.string().max(100).optional(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  /** Payment method: PAY_ON_DELIVERY (default) or PAY_ONLINE (requires customerEmail for Paystack) */
+  paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),
+  /** Required when paymentMethod is PAY_ONLINE (for Paystack receipt and initialize) */
+  customerEmail: z.string().email().max(255).optional(),
   /** Set by Edge Worker to identify order source in audit trail */
   source: z.enum(['edge-form']).optional(),
   /** Cart ID from prior cart save — marks cart as CONVERTED when order created */
@@ -81,8 +91,12 @@ export const transitionOrderSchema = z.object({
     otp: z.string().length(4).regex(/^\d{4}$/).optional(),
     gpsLat: z.number().min(-90).max(90).optional(),
     gpsLng: z.number().min(-180).max(180).optional(),
-    /** Add-on to delivery fee when marking DELIVERED/PARTIALLY_DELIVERED (tolls, fuel, remote area, etc.) */
+    /** Add-on to delivery fee when marking DELIVERED/PARTIALLY_DELIVERED (required in v1 — 3PL records delivery cost) */
     deliveryFeeAddOn: z.number().min(0).optional(),
+    /** URL of screenshot from 3PL delivery app (required when marking DELIVERED/PARTIALLY_DELIVERED in v1) */
+    deliveryProofUrl: z.string().url().optional(),
+    /** Scheduled delivery date set by CS agent when confirming the order */
+    preferredDeliveryDate: z.string().optional(),
   }).optional(),
 });
 
@@ -97,8 +111,13 @@ export const updateOrderSchema = z.object({
   customerAddress: z.string().optional(),
   deliveryAddress: z.string().optional(),
   deliveryNotes: z.string().optional(),
+  deliveryState: z.string().max(100).optional(),
+  customerGender: z.enum(['male', 'female']).optional(),
+  preferredDeliveryDate: z.string().max(100).optional(),
   items: z.array(orderItemSchema).min(1).optional(),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),
+  customerEmail: z.string().email().max(255).optional(),
 });
 
 export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;
@@ -135,9 +154,11 @@ export const listOrdersSchema = z.object({
   riderId: z.string().uuid().optional(),
   logisticsLocationId: z.string().uuid().optional(),
   search: z.string().optional(),
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
-  sortBy: z.enum(['createdAt', 'updatedAt', 'status', 'totalAmount']).default('createdAt'),
+  sortBy: z.enum(['createdAt', 'updatedAt', 'status', 'totalAmount', 'preferredDeliveryDate']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
 

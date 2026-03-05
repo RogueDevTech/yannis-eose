@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, gte, lte, count, sum } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, count, sum, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -167,6 +167,12 @@ export class MarketingService {
     if (input.senderId) {
       conditions.push(eq(schema.marketingFunding.senderId, input.senderId));
     }
+    if (input.startDate) {
+      conditions.push(gte(schema.marketingFunding.sentAt, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      conditions.push(lte(schema.marketingFunding.sentAt, new Date(input.endDate)));
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
@@ -207,6 +213,357 @@ export class MarketingService {
     };
   }
 
+  /**
+   * Funding balance for one user: COMPLETED funding received minus APPROVED ad spend.
+   * Used for Media Buyers and Head of Marketing (HoM has no ad spend).
+   */
+  async getFundingBalance(userId: string): Promise<{ totalReceived: string; totalSpend: string; balance: string }> {
+    const [receivedRow] = await this.db
+      .select({ total: sum(schema.marketingFunding.amount) })
+      .from(schema.marketingFunding)
+      .where(
+        and(
+          eq(schema.marketingFunding.receiverId, userId),
+          eq(schema.marketingFunding.status, 'COMPLETED'),
+        ),
+      );
+
+    const [spendRow] = await this.db
+      .select({ total: sum(schema.adSpendLogs.spendAmount) })
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          eq(schema.adSpendLogs.mediaBuyerId, userId),
+          eq(schema.adSpendLogs.status, 'APPROVED'),
+        ),
+      );
+
+    const totalReceived = receivedRow?.total ?? '0';
+    const totalSpend = spendRow?.total ?? '0';
+    const received = Number(totalReceived);
+    const spend = Number(totalSpend);
+    const balance = String(Math.max(0, received - spend));
+
+    return { totalReceived, totalSpend, balance };
+  }
+
+  /**
+   * List funding balances for recipient users. Scoped by caller role:
+   * - HEAD_OF_MARKETING: self + all Media Buyers
+   * - SUPER_ADMIN / FINANCE_OFFICER: all Head of Marketing + all Media Buyers
+   */
+  async listFundingBalances(caller: { id: string; role: string }): Promise<
+    Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>
+  > {
+    const isHoM = caller.role === 'HEAD_OF_MARKETING';
+    const recipientUserIds: string[] = [];
+
+    if (isHoM) {
+      recipientUserIds.push(caller.id);
+      const mediaBuyers = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.role, 'MEDIA_BUYER'));
+      for (const u of mediaBuyers) {
+        if (u.id !== caller.id) recipientUserIds.push(u.id);
+      }
+    } else {
+      const recipients = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']));
+      recipientUserIds.push(...recipients.map((r) => r.id));
+    }
+
+    if (recipientUserIds.length === 0) {
+      return [];
+    }
+
+    const [fundingByReceiver, spendByMediaBuyer, userRows] = await Promise.all([
+      this.db
+        .select({
+          receiverId: schema.marketingFunding.receiverId,
+          total: sum(schema.marketingFunding.amount),
+        })
+        .from(schema.marketingFunding)
+        .where(
+          and(
+            inArray(schema.marketingFunding.receiverId, recipientUserIds),
+            eq(schema.marketingFunding.status, 'COMPLETED'),
+          ),
+        )
+        .groupBy(schema.marketingFunding.receiverId),
+      this.db
+        .select({
+          mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
+          total: sum(schema.adSpendLogs.spendAmount),
+        })
+        .from(schema.adSpendLogs)
+        .where(
+          and(
+            inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
+            eq(schema.adSpendLogs.status, 'APPROVED'),
+          ),
+        )
+        .groupBy(schema.adSpendLogs.mediaBuyerId),
+      this.db
+        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role })
+        .from(schema.users)
+        .where(inArray(schema.users.id, recipientUserIds)),
+    ]);
+
+    const receivedMap = new Map<string, string>();
+    for (const r of fundingByReceiver) {
+      receivedMap.set(r.receiverId, r.total ?? '0');
+    }
+    const spendMap = new Map<string, string>();
+    for (const s of spendByMediaBuyer) {
+      spendMap.set(s.mediaBuyerId, s.total ?? '0');
+    }
+
+    const result: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }> = [];
+    for (const u of userRows) {
+      const totalReceived = receivedMap.get(u.id) ?? '0';
+      const totalSpend = spendMap.get(u.id) ?? '0';
+      const balance = String(Math.max(0, Number(totalReceived) - Number(totalSpend)));
+      result.push({
+        userId: u.id,
+        name: u.name,
+        role: u.role,
+        totalReceived,
+        totalSpend,
+        balance,
+      });
+    }
+
+    return result.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Get funding balance for a user with caller authorization.
+   * Allowed: own balance; HoM viewing MB; SA/FO viewing any; users.read viewing HoM/MB.
+   */
+  async getFundingBalanceWithAuth(
+    userId: string,
+    caller: { id: string; role: string; permissions?: string[] },
+  ): Promise<{ totalReceived: string; totalSpend: string; balance: string }> {
+    const [target] = await this.db
+      .select({ role: schema.users.role })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!target) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+
+    const targetRole = target.role;
+    const isRecipient = targetRole === 'HEAD_OF_MARKETING' || targetRole === 'MEDIA_BUYER';
+    if (!isRecipient) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Funding balance is only available for Head of Marketing or Media Buyer',
+      });
+    }
+
+    if (caller.id === userId) {
+      return this.getFundingBalance(userId);
+    }
+    if (caller.role === 'SUPER_ADMIN' || caller.role === 'FINANCE_OFFICER') {
+      return this.getFundingBalance(userId);
+    }
+    if (caller.role === 'HEAD_OF_MARKETING' && targetRole === 'MEDIA_BUYER') {
+      return this.getFundingBalance(userId);
+    }
+    const perms = caller.permissions ?? [];
+    if (perms.includes('users.read')) {
+      return this.getFundingBalance(userId);
+    }
+
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to view this user\'s funding balance' });
+  }
+
+  /**
+   * Media Buyer requests funds. Persists the request and notifies Head of Marketing only.
+   */
+  async requestFunding(amount: number, reason: string, requesterId: string) {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${requesterId}, true)`;
+
+    const rows = await this.db
+      .insert(schema.marketingFundingRequests)
+      .values({
+        requesterId,
+        amount: String(amount),
+        reason: reason.trim() || null,
+        status: 'PENDING',
+      })
+      .returning();
+
+    const request = rows[0];
+    if (!request) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create funding request' });
+    }
+
+    const [requester] = await this.db
+      .select({ name: schema.users.name })
+      .from(schema.users)
+      .where(eq(schema.users.id, requesterId))
+      .limit(1);
+
+    const name = requester?.name ?? 'A Media Buyer';
+    const body = reason.trim()
+      ? `${name} requested ₦${Number(amount).toLocaleString()}. Reason: ${reason}`
+      : `${name} requested ₦${Number(amount).toLocaleString()}`;
+
+    await this.notifications
+      .createForRole('HEAD_OF_MARKETING', {
+        type: 'funding:request',
+        title: 'Funding request',
+        body,
+        data: { requesterId, amount, reason: reason || null, requestId: request.id },
+      })
+      .catch(() => {});
+
+    return request;
+  }
+
+  /**
+   * List funding requests. Media Buyer: only their own. HoM/Admin: can filter by requesterId or get all.
+   */
+  async listFundingRequests(input: { requesterId?: string; page: number; limit: number }) {
+    const conditions = [];
+    if (input.requesterId) {
+      conditions.push(eq(schema.marketingFundingRequests.requesterId, input.requesterId));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const offset = (input.page - 1) * input.limit;
+
+    const [records, totalRows] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.marketingFundingRequests)
+        .where(whereClause)
+        .orderBy(desc(schema.marketingFundingRequests.createdAt))
+        .limit(input.limit)
+        .offset(offset),
+      this.db.select({ count: count() }).from(schema.marketingFundingRequests).where(whereClause),
+    ]);
+
+    return {
+      records,
+      pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
+    };
+  }
+
+  /**
+   * Head of Marketing (or SuperAdmin) approves a funding request: money sent manually, then receipt attached.
+   * Notifies the Media Buyer so they can preview the receipt.
+   */
+  async approveFundingRequest(
+    requestId: string,
+    receiptUrl: string,
+    approverId: string,
+  ) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.marketingFundingRequests)
+      .where(eq(schema.marketingFundingRequests.id, requestId))
+      .limit(1);
+
+    if (!existing) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Funding request not found' });
+    }
+    if (existing.status !== 'PENDING') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
+    }
+
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${approverId}, true)`;
+
+    const [updated] = await this.db
+      .update(schema.marketingFundingRequests)
+      .set({
+        status: 'APPROVED',
+        receiptUrl,
+        resolvedAt: new Date(),
+        resolvedBy: approverId,
+      })
+      .where(eq(schema.marketingFundingRequests.id, requestId))
+      .returning();
+
+    if (!updated) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
+    }
+
+    const amount = Number(existing.amount);
+    const body = `Your funding request of ₦${amount.toLocaleString()} was approved. You can view the receipt in Marketing → Funding.`;
+    await this.notifications
+      .create({
+        userId: existing.requesterId,
+        type: 'funding:approved',
+        title: 'Funding request approved',
+        body,
+        data: {
+          requestId: updated.id,
+          receiptUrl: updated.receiptUrl,
+          amount: amount,
+        },
+      })
+      .catch(() => {});
+
+    return updated;
+  }
+
+  /**
+   * Head of Marketing (or SuperAdmin) rejects a funding request. Notifies the Media Buyer.
+   */
+  async rejectFundingRequest(
+    requestId: string,
+    _reason: string | undefined,
+    rejectorId: string,
+  ) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.marketingFundingRequests)
+      .where(eq(schema.marketingFundingRequests.id, requestId))
+      .limit(1);
+
+    if (!existing) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Funding request not found' });
+    }
+    if (existing.status !== 'PENDING') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
+    }
+
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${rejectorId}, true)`;
+
+    const [updated] = await this.db
+      .update(schema.marketingFundingRequests)
+      .set({
+        status: 'REJECTED',
+        resolvedAt: new Date(),
+        resolvedBy: rejectorId,
+      })
+      .where(eq(schema.marketingFundingRequests.id, requestId))
+      .returning();
+
+    if (!updated) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
+    }
+
+    const amount = Number(existing.amount);
+    await this.notifications
+      .create({
+        userId: existing.requesterId,
+        type: 'funding:rejected',
+        title: 'Funding request not approved',
+        body: `Your funding request of ₦${amount.toLocaleString()} was not approved.`,
+        data: { requestId: updated.id, amount },
+      })
+      .catch(() => {});
+
+    return updated;
+  }
+
   // ============================================
   // Ad Spend Logs
   // ============================================
@@ -214,7 +571,7 @@ export class MarketingService {
   async createAdSpend(input: CreateAdSpendInput, mediaBuyerId: string) {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${mediaBuyerId}, true)`;
 
-    // Screenshot is mandatory — enforced by Zod schema
+    // Screenshot is mandatory — enforced by Zod schema. status defaults to PENDING in DB.
     const rows = await this.db
       .insert(schema.adSpendLogs)
       .values({
@@ -232,6 +589,39 @@ export class MarketingService {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to log ad spend' });
     }
     return spend;
+  }
+
+  /** Head of Marketing / SuperAdmin: approve a PENDING ad spend entry. */
+  async approveAdSpend(adSpendId: string, approverId: string) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.adSpendLogs)
+      .where(eq(schema.adSpendLogs.id, adSpendId))
+      .limit(1);
+
+    if (!existing) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
+    }
+    if (existing.status !== 'PENDING') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only PENDING ad spend can be approved' });
+    }
+
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${approverId}, true)`;
+
+    const [updated] = await this.db
+      .update(schema.adSpendLogs)
+      .set({
+        status: 'APPROVED',
+        approvedAt: new Date(),
+        approvedBy: approverId,
+      })
+      .where(eq(schema.adSpendLogs.id, adSpendId))
+      .returning();
+
+    if (!updated) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to approve ad spend' });
+    }
+    return updated;
   }
 
   async listAdSpend(input: ListAdSpendInput) {
@@ -287,11 +677,11 @@ export class MarketingService {
       periodStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     }
 
-    const spendConditions: Parameters<typeof and>[0][] = [];
+    const spendConditions: Parameters<typeof and>[0][] = [eq(schema.adSpendLogs.status, 'APPROVED')];
     if (mediaBuyerId) spendConditions.push(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
     if (periodStart) spendConditions.push(gte(schema.adSpendLogs.spendDate, periodStart));
     if (periodEnd) spendConditions.push(lte(schema.adSpendLogs.spendDate, periodEnd));
-    const spendWhere = spendConditions.length > 0 ? and(...spendConditions) : undefined;
+    const spendWhere = and(...spendConditions);
 
     const orderConditions: Parameters<typeof and>[0][] = [];
     if (mediaBuyerId) orderConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
@@ -345,23 +735,31 @@ export class MarketingService {
   // Media Buyer Leaderboard & CPA Alerts
   // ============================================
 
-  async getMediaBuyerLeaderboard(period: 'this_month' | 'all_time' = 'this_month') {
-    // Get all media buyers who have ad spend (respecting period for this_month)
-    const periodStart = period === 'this_month'
-      ? new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-      : null;
+  async getMediaBuyerLeaderboard(period: 'this_month' | 'all_time' = 'this_month', startDate?: string, endDate?: string) {
+    const useCustomRange = startDate && endDate;
+    const periodStart = useCustomRange
+      ? new Date(startDate)
+      : period === 'this_month'
+        ? new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+        : null;
+    let periodEnd: Date | null = useCustomRange ? new Date(endDate) : null;
+    if (periodEnd) periodEnd.setHours(23, 59, 59, 999);
 
     const buyersQuery = this.db
       .selectDistinct({ mediaBuyerId: schema.adSpendLogs.mediaBuyerId })
       .from(schema.adSpendLogs);
-    const buyers = periodStart
-      ? await buyersQuery.where(gte(schema.adSpendLogs.spendDate, periodStart))
-      : await buyersQuery;
+    const buyerWhereConditions: Parameters<typeof and>[0][] = [eq(schema.adSpendLogs.status, 'APPROVED')];
+    if (periodStart && periodEnd) {
+      buyerWhereConditions.push(gte(schema.adSpendLogs.spendDate, periodStart), lte(schema.adSpendLogs.spendDate, periodEnd));
+    } else if (periodStart) {
+      buyerWhereConditions.push(gte(schema.adSpendLogs.spendDate, periodStart));
+    }
+    const buyerWhere = and(...buyerWhereConditions);
+    const buyers = await buyersQuery.where(buyerWhere);
 
     const leaderboard = await Promise.all(
       buyers.map(async (b) => {
-        const metrics = await this.getPerformanceMetrics(b.mediaBuyerId, period);
-        // Get buyer name from users table
+        const metrics = await this.getPerformanceMetrics(b.mediaBuyerId, period, startDate, endDate);
         const userRows = await this.db
           .select({ name: schema.users.name, email: schema.users.email })
           .from(schema.users)
@@ -651,6 +1049,13 @@ export class MarketingService {
         buttonText?: string;
         accentColor?: string;
         successMessage?: string;
+        showDeliveryAddress?: boolean;
+        showDeliveryNotes?: boolean;
+        showDeliveryState?: boolean;
+        showGender?: boolean;
+        showPreferredDeliveryDate?: boolean;
+        deliveryStateOptions?: string[];
+        preferredDeliveryDateOptions?: string[];
       } | null,
     };
   }
@@ -674,8 +1079,21 @@ export class MarketingService {
       this.db.select({ count: count() }).from(schema.campaigns).where(whereClause),
     ]);
 
+    const mediaBuyerIds = [...new Set(campaigns.map((c) => c.mediaBuyerId).filter(Boolean))] as string[];
+    let mediaBuyerNames: Map<string, string> = new Map();
+    if (mediaBuyerIds.length > 0) {
+      const users = await this.db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.users)
+        .where(inArray(schema.users.id, mediaBuyerIds));
+      users.forEach((u) => mediaBuyerNames.set(u.id, u.name));
+    }
+
     return {
-      campaigns,
+      campaigns: campaigns.map((c) => ({
+        ...c,
+        mediaBuyerName: c.mediaBuyerId ? mediaBuyerNames.get(c.mediaBuyerId) ?? null : null,
+      })),
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
     };
   }

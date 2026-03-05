@@ -1,0 +1,65 @@
+import { useLoaderData } from '@remix-run/react';
+import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { MarketingLeaderboardPage } from '~/features/leaderboards/MarketingLeaderboardPage';
+import type { LeaderboardEntry } from '~/features/marketing/types';
+
+export const meta: MetaFunction = () => [
+  { title: 'Marketing Leaderboard — Yannis EOSE' },
+];
+
+function parseMediaLeaderboard(res: { ok: boolean; data: unknown }): LeaderboardEntry[] {
+  const data = res.ok
+    ? (res.data as { result?: { data?: LeaderboardEntry[] } })?.result?.data
+    : null;
+  return data ?? [];
+}
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  await requirePermission(request, 'marketing.leaderboard');
+  const cookie = getSessionCookie(request);
+
+  const url = new URL(request.url);
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  let startDate = url.searchParams.get('startDate') ?? undefined;
+  let endDate = url.searchParams.get('endDate') ?? undefined;
+  if (!periodAllTime && !startDate && !endDate) {
+    const now = new Date();
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+  }
+  if (periodAllTime) {
+    startDate = undefined;
+    endDate = undefined;
+  }
+  const leaderboardPeriod = periodAllTime ? 'all_time' : 'this_month';
+  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
+
+  const input: { period: 'this_month' | 'all_time'; startDate?: string; endDate?: string } = {
+    period: leaderboardPeriod,
+  };
+  if (startDate) input.startDate = startDate;
+  if (endDate) input.endDate = endDate;
+
+  const mediaBuyerLeaderboard = await apiRequest<unknown>(
+    `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(input))}`,
+    { method: 'GET', cookie },
+  ).then(parseMediaLeaderboard).catch((): LeaderboardEntry[] => []);
+
+  return {
+    mediaBuyerLeaderboard,
+    leaderboardPeriod,
+    filters,
+  };
+}
+
+export default function MarketingLeaderboardRoute() {
+  const data = useLoaderData<typeof loader>();
+  return (
+    <MarketingLeaderboardPage
+      mediaBuyerLeaderboard={data.mediaBuyerLeaderboard}
+      leaderboardPeriod={data.leaderboardPeriod}
+      filters={data.filters}
+    />
+  );
+}

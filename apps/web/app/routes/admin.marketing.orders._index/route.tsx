@@ -9,7 +9,16 @@ export const meta: MetaFunction = () => [
   { title: 'Marketing Orders — Yannis EOSE' },
 ];
 
+const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed'] as const;
+
 const ORDERS_PER_PAGE = 40;
+
+function getDefaultThisMonthRange(): { startDate: string; endDate: string } {
+  const now = new Date();
+  const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
+  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+  return { startDate, endDate };
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.orders');
@@ -21,6 +30,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const search = url.searchParams.get('search') || undefined;
   const mediaBuyerIdParam = url.searchParams.get('mediaBuyerId') || undefined;
 
+  // Date filter — default to this month when no params
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  let startDate = url.searchParams.get('startDate') ?? undefined;
+  let endDate = url.searchParams.get('endDate') ?? undefined;
+  if (!periodAllTime && !startDate && !endDate) {
+    const def = getDefaultThisMonthRange();
+    startDate = def.startDate;
+    endDate = def.endDate;
+  }
+  if (periodAllTime) {
+    startDate = undefined;
+    endDate = undefined;
+  }
+  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
+
   const isMediaBuyer = user.role === 'MEDIA_BUYER';
   const mediaBuyerId = isMediaBuyer ? user.id : mediaBuyerIdParam;
 
@@ -30,11 +54,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     status: status || undefined,
     search: search || undefined,
     mediaBuyerId,
+    ...(startDate && { startDate }),
+    ...(endDate && { endDate }),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
-  const countsInputStr = mediaBuyerId
-    ? encodeURIComponent(JSON.stringify({ mediaBuyerId }))
-    : '%7B%7D';
+  const countsInput: { mediaBuyerId?: string; startDate?: string; endDate?: string } = mediaBuyerId ? { mediaBuyerId } : {};
+  if (startDate) countsInput.startDate = startDate;
+  if (endDate) countsInput.endDate = endDate;
+  const countsInputStr = encodeURIComponent(JSON.stringify(countsInput));
 
   const [res, countsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, { method: 'GET', cookie }),
@@ -62,11 +89,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusFilter: status,
     searchFilter: search,
     isMediaBuyer,
+    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN',
+    filters,
   };
 }
 
 export default function MarketingOrdersRoute() {
   const data = useLoaderData<typeof loader>();
-  usePageRefreshOnEvent(['order:new', 'order:status_changed']);
-  return <MarketingOrdersPage {...data} />;
+  const { filters, ...pageData } = data;
+  usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
+  return (
+    <MarketingOrdersPage
+      {...pageData}
+      filters={filters}
+      liveEvents={[...MARKETING_ORDERS_LIVE_EVENTS]}
+    />
+  );
 }

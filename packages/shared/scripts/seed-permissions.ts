@@ -19,6 +19,7 @@ const PERMISSIONS: Array<{ code: string; resource: string; action: string; descr
   { code: 'ceo.overview', resource: 'ceo', action: 'overview', description: 'View CEO dashboard' },
   { code: 'orders.read', resource: 'orders', action: 'read', description: 'View orders' },
   { code: 'orders.reassign', resource: 'orders', action: 'reassign', description: 'Reassign CS orders' },
+  { code: 'orders.requestTransfer', resource: 'orders', action: 'requestTransfer', description: 'Request order transfer to another CS agent' },
   { code: 'orders.bulkTransition', resource: 'orders', action: 'bulkTransition', description: 'Bulk order status transitions' },
   { code: 'orders.bulkAssign', resource: 'orders', action: 'bulkAssign', description: 'Bulk assign orders to CS' },
   { code: 'orders.csWorkloads', resource: 'orders', action: 'csWorkloads', description: 'View CS workloads' },
@@ -52,6 +53,7 @@ const PERMISSIONS: Array<{ code: string; resource: string; action: string; descr
   { code: 'returns.read', resource: 'returns', action: 'read', description: 'View returns' },
   { code: 'logistics.read', resource: 'logistics', action: 'read', description: 'View logistics' },
   { code: 'logistics.write', resource: 'logistics', action: 'write', description: 'Create/update logistics providers and locations' },
+  { code: 'logistics.remit', resource: 'logistics', action: 'remit', description: 'Submit transfer remittance to warehouse (3PL)' },
   { code: 'marketing.read', resource: 'marketing', action: 'read', description: 'View marketing' },
   { code: 'marketing.funding', resource: 'marketing', action: 'funding', description: 'Create funding records' },
   { code: 'marketing.fundingSummary', resource: 'marketing', action: 'fundingSummary', description: 'View funding summary' },
@@ -85,12 +87,12 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: [], // bypasses all checks - no need to store
   HEAD_OF_MARKETING: ['marketing.read', 'marketing.funding', 'marketing.fundingSummary', 'marketing.leaderboard', 'marketing.checkHighCpa', 'marketing.offerTemplate', 'marketing.campaigns', 'marketing.teamOverview', 'marketing.orders', 'products.read', 'users.read'],
   MEDIA_BUYER: ['marketing.read', 'marketing.adSpend', 'marketing.leaderboard', 'marketing.campaigns', 'marketing.orders', 'products.read'],
-  HEAD_OF_CS: ['orders.read', 'orders.reassign', 'orders.bulkTransition', 'orders.bulkAssign', 'orders.csWorkloads', 'orders.releaseLocks', 'orders.inactiveAgents', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.mergeDuplicate', 'orders.dismissDuplicate', 'cs.teamOverview', 'cs.leaderboard', 'cart.read', 'users.read'],
-  CS_AGENT: ['orders.read', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.dismissDuplicate', 'cs.leaderboard', 'cart.read'],
+  HEAD_OF_CS: ['orders.read', 'orders.reassign', 'orders.requestTransfer', 'orders.bulkTransition', 'orders.bulkAssign', 'orders.csWorkloads', 'orders.releaseLocks', 'orders.inactiveAgents', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.mergeDuplicate', 'orders.dismissDuplicate', 'cs.teamOverview', 'cs.leaderboard', 'cart.read', 'users.read'],
+  CS_AGENT: ['orders.read', 'orders.requestTransfer', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.dismissDuplicate', 'cs.leaderboard', 'cart.read'],
   FINANCE_OFFICER: ['finance.read', 'finance.costView', 'finance.approve', 'finance.disburse', 'marketing.fundingSummary', 'orders.read'],
-  HEAD_OF_LOGISTICS: ['orders.read', 'orders.bulkTransition', 'logistics.read', 'logistics.write', 'inventory.read', 'inventory.transfer', 'inventory.lowStockAlerts', 'inventory.resolveReconciliation', 'inventory.reconciliations', 'transfers.read', 'returns.read', 'products.read', 'products.create', 'categories.read', 'categories.write', 'users.read'],
+  HEAD_OF_LOGISTICS: ['orders.read', 'orders.bulkTransition', 'logistics.read', 'logistics.write', 'inventory.read', 'inventory.lowStockAlerts'],
   WAREHOUSE_MANAGER: ['inventory.read', 'inventory.intake', 'inventory.transfer', 'inventory.adjust', 'inventory.lowStockAlerts', 'inventory.createReconciliation', 'inventory.resolveReconciliation', 'inventory.reconciliations', 'transfers.read', 'returns.read', 'products.read', 'products.create', 'categories.read', 'categories.write'],
-  TPL_MANAGER: ['inventory.verifyTransfer', 'inventory.returnedOrders', 'inventory.createReconciliation', 'inventory.reconciliations', 'transfers.read', 'returns.read', 'logistics.read', 'orders.read'],
+  TPL_MANAGER: ['inventory.verifyTransfer', 'inventory.returnedOrders', 'inventory.createReconciliation', 'inventory.reconciliations', 'logistics.read', 'logistics.remit', 'orders.read'],
   TPL_RIDER: ['rider.dashboard'],
   HR_MANAGER: ['hr.read', 'hr.write', 'users.read', 'users.create', 'users.update'],
   // hr.approveAdjustment: SuperAdmin only (not in any role — bypass)
@@ -127,6 +129,35 @@ async function seedPermissions() {
     permMap.set(p.code, p.id);
   }
 
+  // Allowed permission IDs per role (source of truth)
+  const roleAllowedPermIds = new Map<string, Set<string>>();
+  for (const [role, codes] of Object.entries(ROLE_PERMISSIONS)) {
+    if (role === 'SUPER_ADMIN') continue;
+    const ids = new Set<string>();
+    for (const code of codes) {
+      const permId = permMap.get(code);
+      if (permId) ids.add(permId);
+    }
+    roleAllowedPermIds.set(role, ids);
+  }
+
+  // Remove role_permissions that are no longer in ROLE_PERMISSIONS (revoke removed permissions)
+  let rpDeleted = 0;
+  const allRolePerms = await sql`
+    SELECT rp.role::text, rp.permission_id
+    FROM role_permissions rp
+  `;
+  for (const row of allRolePerms) {
+    const allowed = roleAllowedPermIds.get(row.role);
+    if (allowed && !allowed.has(row.permission_id)) {
+      await sql`
+        DELETE FROM role_permissions
+        WHERE role = ${row.role}::user_role AND permission_id = ${row.permission_id}
+      `;
+      rpDeleted++;
+    }
+  }
+
   // Insert role_permissions — add any missing (ON CONFLICT DO NOTHING)
   let rpInserted = 0;
   for (const [role, codes] of Object.entries(ROLE_PERMISSIONS)) {
@@ -146,7 +177,7 @@ async function seedPermissions() {
   }
 
   console.log(`  Permissions: ${permInserted} new, ${PERMISSIONS.length - permInserted} already existed`);
-  console.log(`  Role assignments: ${rpInserted} new added`);
+  console.log(`  Role assignments: ${rpDeleted} revoked, ${rpInserted} new added`);
   console.log('  Done.\n');
   await sql.end();
 }

@@ -34,7 +34,7 @@ test.describe('RBAC — Access Control', () => {
     await assertNoExposedPhoneNumbers(page);
 
     // Check CS page
-    await page.goto('/admin/cs');
+    await page.goto('/admin/cs/queue');
     await page.waitForLoadState('networkidle');
     await assertNoExposedPhoneNumbers(page);
   });
@@ -76,13 +76,13 @@ test.describe('RBAC — Access Control', () => {
     const pages = [
       '/admin',
       '/admin/cs/orders',
-      '/admin/cs',
+      '/admin/cs/queue',
       '/admin/inventory',
       '/admin/logistics',
-      '/admin/marketing',
-      '/admin/finance',
+      '/admin/marketing/funding',
+      '/admin/finance/overview',
       '/admin/hr',
-      '/admin/forms',
+      '/admin/marketing/forms',
       '/admin/users',
       '/admin/settings',
     ];

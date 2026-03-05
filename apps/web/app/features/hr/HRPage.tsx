@@ -103,13 +103,13 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             Export CSV
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setShowGenerate(!showGenerate)}>
-            Generate Payouts
+            {showGenerate ? 'Close' : 'Generate Payouts'}
           </Button>
           <Button variant="secondary" size="sm" onClick={() => { setShowAddAdjustment(!showAddAdjustment); setActiveTab('adjustments'); }}>
-            + Add-on
+            {showAddAdjustment ? 'Close' : '+ Add-on'}
           </Button>
           <Button variant="primary" size="sm" onClick={() => { setShowAddPlan(!showAddPlan); setActiveTab('plans'); }}>
-            + Commission Plan
+            {showAddPlan ? 'Close' : '+ Commission Plan'}
           </Button>
         </div>
       </div>

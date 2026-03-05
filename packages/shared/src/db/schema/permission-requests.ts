@@ -2,7 +2,7 @@ import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { jsonb } from 'drizzle-orm/pg-core';
 import { userRoleEnum } from './enums';
 import { permissionRequestTypeEnum, permissionRequestStatusEnum } from './enums';
-import { uuidv7Pk, timestampColumns } from './helpers';
+import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 
 export const permissionRequests = pgTable('permission_requests', {
@@ -20,5 +20,6 @@ export const permissionRequests = pgTable('permission_requests', {
   approvalReason: text('approval_reason'),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   payload: jsonb('payload'),
+  ...temporalColumns,
   ...timestampColumns,
 });

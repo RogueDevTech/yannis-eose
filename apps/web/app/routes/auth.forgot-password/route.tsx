@@ -55,7 +55,7 @@ export default function ForgotPasswordRoute() {
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
             <img
-              src="/assets/yannis-logo1.png"
+              src="/assets/yannis-logo-white-bg.png"
               alt="Yannis"
               className="h-14 w-auto max-w-full object-contain"
             />
@@ -64,14 +64,14 @@ export default function ForgotPasswordRoute() {
         </div>
       </div>
 
-      {/* Right panel — form */}
-      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white lg:dark:bg-surface-950">
+      {/* Right panel — form (always light-mode on auth) */}
+      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
           <div className="lg:hidden text-center">
             <div className="flex items-center justify-center mb-2">
               <img
-                src="/assets/yannis-logo1.png"
+                src="/assets/yannis-logo-white-bg.png"
                 alt="Yannis"
                 className="h-10 w-auto max-w-full object-contain"
               />
@@ -80,24 +80,24 @@ export default function ForgotPasswordRoute() {
           </div>
 
           <div>
-            <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
+            <h2 className="text-2xl font-bold text-white lg:text-surface-900">
               Reset your password
             </h2>
-            <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
+            <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
               Enter your email address and we'll send you a reset link.
             </p>
           </div>
 
           {actionData?.error && (
-            <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 lg:dark:bg-danger-700/20 border border-danger-700/50 lg:border-danger-200 lg:dark:border-danger-700/50 px-4 py-3">
-              <p className="text-sm text-danger-400 lg:text-danger-700 lg:dark:text-danger-500">{actionData.error}</p>
+            <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 border border-danger-700/50 lg:border-danger-200 px-4 py-3">
+              <p className="text-sm text-danger-400 lg:text-danger-700">{actionData.error}</p>
             </div>
           )}
 
           {actionData?.success ? (
             <>
-              <div className="rounded-lg bg-success-700/20 lg:bg-success-50 lg:dark:bg-success-700/20 border border-success-700/50 lg:border-success-200 lg:dark:border-success-700/50 px-4 py-3">
-                <p className="text-sm text-success-400 lg:text-success-700 lg:dark:text-success-500">{actionData.success}</p>
+              <div className="rounded-lg bg-success-700/20 lg:bg-success-50 border border-success-700/50 lg:border-success-200 px-4 py-3">
+                <p className="text-sm text-success-400 lg:text-success-700">{actionData.success}</p>
               </div>
 
               <Link
@@ -112,7 +112,7 @@ export default function ForgotPasswordRoute() {
               <div>
                 <label
                   htmlFor="email"
-                  className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+                  className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
                 >
                   Email address
                 </label>

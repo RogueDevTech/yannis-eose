@@ -1,7 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { HRPage } from '~/features/hr/HRPage';
 import type {
   CommissionPlan,
@@ -42,41 +42,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (payoutsRes.data as { result?: { data?: { payouts: Payout[]; pagination: { total: number } } } })?.result?.data
     : null;
 
-  // ── Return deferred promises with .catch() fallbacks ──────────
-  const adjustments: Promise<Adjustment[]> = adjustmentsPromise
-    .then((res) => {
-      if (!res.ok) return [];
-      return ((res.data as { result?: { data?: Adjustment[] } })?.result?.data) ?? [];
-    })
-    .catch(() => []);
+  // Await secondary data in parallel
+  const [adjustments, payoutSummary, users, settlementConfig, currentPeriod] = await Promise.all([
+    adjustmentsPromise
+      .then((res) => {
+        if (!res.ok) return [];
+        return ((res.data as { result?: { data?: Adjustment[] } })?.result?.data) ?? [];
+      })
+      .catch((): Adjustment[] => []),
 
-  const payoutSummary: Promise<PayoutSummary> = summaryPromise
-    .then((res) => {
-      if (!res.ok) return {};
-      return ((res.data as { result?: { data?: PayoutSummary } })?.result?.data) ?? {};
-    })
-    .catch(() => ({}));
+    summaryPromise
+      .then((res) => {
+        if (!res.ok) return {};
+        return ((res.data as { result?: { data?: PayoutSummary } })?.result?.data) ?? {};
+      })
+      .catch((): PayoutSummary => ({})),
 
-  const users: Promise<HRUser[]> = usersPromise
-    .then((res) => {
-      if (!res.ok) return [];
-      return ((res.data as { result?: { data?: { users: HRUser[] } } })?.result?.data?.users) ?? [];
-    })
-    .catch(() => []);
+    usersPromise
+      .then((res) => {
+        if (!res.ok) return [];
+        return ((res.data as { result?: { data?: { users: HRUser[] } } })?.result?.data?.users) ?? [];
+      })
+      .catch((): HRUser[] => []),
 
-  const settlementConfig: Promise<SettlementConfig | null> = settlementPromise
-    .then((res) => {
-      if (!res.ok) return null;
-      return ((res.data as { result?: { data?: SettlementConfig | null } })?.result?.data) ?? null;
-    })
-    .catch(() => null);
+    settlementPromise
+      .then((res) => {
+        if (!res.ok) return null;
+        return ((res.data as { result?: { data?: SettlementConfig | null } })?.result?.data) ?? null;
+      })
+      .catch((): SettlementConfig | null => null),
 
-  const currentPeriod: Promise<SettlementPeriod | null> = periodPromise
-    .then((res) => {
-      if (!res.ok) return null;
-      return ((res.data as { result?: { data?: SettlementPeriod | null } })?.result?.data) ?? null;
-    })
-    .catch(() => null);
+    periodPromise
+      .then((res) => {
+        if (!res.ok) return null;
+        return ((res.data as { result?: { data?: SettlementPeriod | null } })?.result?.data) ?? null;
+      })
+      .catch((): SettlementPeriod | null => null),
+  ]);
 
   return {
     plans: plansData?.plans ?? [],
@@ -126,7 +128,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create plan' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to create plan' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -143,7 +145,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to generate payouts' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to generate payouts' }, { status: safeStatus(res.status) });
     }
     const data = res.data as { result?: { data?: { generated: number } } };
     return json({ success: true, generated: data?.result?.data?.generated ?? 0 });
@@ -161,7 +163,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update payout' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to update payout' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -180,7 +182,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create adjustment' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to create adjustment' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -197,7 +199,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to approve adjustment' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to approve adjustment' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -214,7 +216,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update settlement config' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to update settlement config' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

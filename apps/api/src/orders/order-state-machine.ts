@@ -20,8 +20,12 @@ interface TransitionRule {
  * Any transition not in this list is REJECTED.
  */
 const ALLOWED_TRANSITIONS: TransitionRule[] = [
+  // CS assignment (set by auto-dispatch or assignToCS; not a user-triggered transition from UI)
+  { from: 'UNPROCESSED', to: 'CS_ASSIGNED' },
   // CS engagement flow
   { from: 'UNPROCESSED', to: 'CS_ENGAGED', gate: 'Agent must have capacity' },
+  { from: 'CS_ASSIGNED', to: 'CS_ENGAGED', gate: 'Agent must have capacity' },
+  { from: 'CS_ASSIGNED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },
   { from: 'CS_ENGAGED', to: 'CONFIRMED', gate: 'VOIP call_duration > 15 seconds' },
   { from: 'CS_ENGAGED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },
   { from: 'UNPROCESSED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },

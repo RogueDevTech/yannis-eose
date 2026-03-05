@@ -1,54 +1,50 @@
-import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
+import { Spinner } from '~/components/ui/spinner';
+import { useNavigation } from '@remix-run/react';
 import type { LeaderboardEntry } from '~/features/marketing/types';
 
 const HIGH_CPA_THRESHOLD = 5000;
 
 interface MarketingLeaderboardPageProps {
-  mediaBuyerLeaderboard: Promise<LeaderboardEntry[]>;
+  mediaBuyerLeaderboard: LeaderboardEntry[];
   leaderboardPeriod: 'this_month' | 'all_time';
+  filters?: { startDate: string; endDate: string; periodAllTime: boolean };
 }
 
 export function MarketingLeaderboardPage({
   mediaBuyerLeaderboard,
   leaderboardPeriod,
+  filters = { startDate: '', endDate: '', periodAllTime: false },
 }: MarketingLeaderboardPageProps) {
-  const periodLabel = leaderboardPeriod === 'all_time' ? 'all time' : 'this month';
-  const periodLinks = (
-    <div className="flex gap-1 rounded-lg bg-surface-100 dark:bg-surface-800 p-1">
-      <Link
-        to="/admin/marketing-leaderboard?period=this_month"
-        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-          leaderboardPeriod === 'this_month'
-            ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-            : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
-        }`}
-      >
-        This month
-      </Link>
-      <Link
-        to="/admin/marketing-leaderboard?period=all_time"
-        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-          leaderboardPeriod === 'all_time'
-            ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-            : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
-        }`}
-      >
-        All time
-      </Link>
-    </div>
-  );
+  const periodLabel = leaderboardPeriod === 'all_time' ? 'all time' : (filters.startDate && filters.endDate ? `${filters.startDate} – ${filters.endDate}` : 'this month');
+  const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
+  const navigation = useNavigation();
+  const isFilterLoading = navigation.state === 'loading';
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Marketing Leaderboard</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
-          Media buyer performance ranked by True ROAS ({periodLabel}).
-        </p>
+    <div className="space-y-6 px-3 sm:px-0">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Marketing Leaderboard</h1>
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
+            Media buyer performance ranked by True ROAS ({periodLabel}).
+          </p>
+        </div>
+        <DateFilterBar
+          startDate={dateFilters.startDate}
+          endDate={dateFilters.endDate}
+          periodAllTime={dateFilters.periodAllTime}
+        />
+        {isFilterLoading && (
+          <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+            <Spinner size="sm" className="shrink-0" />
+          </span>
+        )}
       </div>
 
-      <DeferredSection resolve={mediaBuyerLeaderboard} skeleton="table">
+      <DeferredSection resolve={mediaBuyerLeaderboard} skeleton="list">
         {(lb: LeaderboardEntry[]) => {
           if (lb.length === 0) {
             return (
@@ -59,93 +55,73 @@ export function MarketingLeaderboardPage({
           }
           return (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Media Buyer Performance</h2>
-                    <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
-                      Ranked by True ROAS ({periodLabel})
-                    </p>
-                  </div>
-                  {periodLinks}
-                </div>
+              <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-surface-100 dark:border-surface-800">
+                <h2 className="text-base font-semibold text-surface-900 dark:text-white sm:text-lg">Media Buyer Performance</h2>
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+                  Ranked by True ROAS ({periodLabel})
+                </p>
               </div>
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="table-header">#</th>
-                      <th className="table-header">Media Buyer</th>
-                      <th className="table-header text-right">Spend</th>
-                      <th className="table-header text-right">Orders</th>
-                      <th className="table-header text-right">Delivered</th>
-                      <th className="table-header text-right">Revenue</th>
-                      <th className="table-header text-right">CPA</th>
-                      <th className="table-header text-right">ROAS</th>
-                      <th className="table-header text-right">Del. Rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lb.map((b, idx) => {
-                      const isHighCpa = b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0;
-                      return (
-                        <tr key={b.mediaBuyerId} className={`table-row ${isHighCpa ? 'bg-warning-50/50 dark:bg-warning-900/10' : ''}`}>
-                          <td className="table-cell text-surface-700 dark:text-surface-300 font-mono text-sm">{idx + 1}</td>
-                          <td className="table-cell">
-                            <div>
-                              <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{b.name}</p>
-                              <p className="text-xs text-surface-700 dark:text-surface-300">{b.email}</p>
-                            </div>
-                          </td>
-                          <td className="table-cell text-right text-sm font-medium">{'\u20A6'}{Math.round(b.totalSpend).toLocaleString()}</td>
-                          <td className="table-cell text-right text-sm">{b.totalOrders}</td>
-                          <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">{b.deliveredOrders}</td>
-                          <td className="table-cell text-right text-sm font-medium">{'\u20A6'}{Math.round(b.deliveredRevenue).toLocaleString()}</td>
-                          <td className="table-cell text-right">
-                            <span className={`text-sm font-medium ${isHighCpa ? 'text-danger-600 dark:text-danger-400' : 'text-surface-900 dark:text-white'}`}>
-                              {'\u20A6'}{Math.round(b.cpa).toLocaleString()}
-                            </span>
-                          </td>
-                          <td className="table-cell text-right">
-                            <span className={`text-sm font-bold ${b.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : b.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'}`}>
-                              {b.trueRoas.toFixed(2)}x
-                            </span>
-                          </td>
-                          <td className="table-cell text-right text-sm">{b.deliveryRate.toFixed(1)}%</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+              <div className="space-y-4 px-4 py-4">
                 {lb.map((b, idx) => {
+                  const rank = idx + 1;
+                  const isTopThree = rank <= 3;
                   const isHighCpa = b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0;
                   return (
-                    <div key={b.mediaBuyerId} className={`p-4 space-y-2 ${isHighCpa ? 'bg-warning-50/50 dark:bg-warning-900/10' : ''}`}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
-                          <span className="font-medium text-surface-900 dark:text-white text-sm">{b.name}</span>
+                    <div
+                      key={b.mediaBuyerId}
+                      className={`rounded-lg border border-surface-100 bg-white p-4 dark:border-surface-800 dark:bg-surface-900/50 ${
+                        isTopThree ? 'bg-surface-50/80 dark:bg-surface-800/40' : ''
+                      } ${isHighCpa ? 'border-warning-200 bg-warning-50/50 dark:border-warning-800/50 dark:bg-warning-900/10' : ''}`}
+                    >
+                      {/* Mobile: stacked layout. Desktop: single row */}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                        {/* Rank + trophy + name + email */}
+                        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-200 dark:bg-surface-700 font-mono text-sm font-medium text-surface-700 dark:text-surface-300">
+                            #{rank}
+                          </span>
+                          {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
+                          <div className="min-w-0 flex-1 sm:flex-none">
+                            <p className={`truncate text-sm font-medium text-surface-900 dark:text-white ${isTopThree ? 'font-semibold' : ''}`}>
+                              {b.name}
+                            </p>
+                            <p className="truncate text-xs text-surface-600 dark:text-surface-400">{b.email}</p>
+                          </div>
                         </div>
-                        <span className={`text-sm font-bold ${b.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : b.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'}`}>
-                          {b.trueRoas.toFixed(2)}x ROAS
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div>
-                          <span className="text-surface-700 dark:text-surface-300">Spend</span>
-                          <p className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(b.totalSpend).toLocaleString()}</p>
+                        {/* Primary metric pill — right-aligned on mobile */}
+                        <div className="flex shrink-0 justify-end sm:order-last">
+                          <span
+                            className={`inline-block rounded-full px-3 py-1.5 text-sm font-bold ${
+                              b.trueRoas >= 2
+                                ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400'
+                                : b.trueRoas >= 1
+                                  ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400'
+                                  : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'
+                            }`}
+                          >
+                            {b.trueRoas.toFixed(2)}x ROAS
+                          </span>
                         </div>
-                        <div>
-                          <span className="text-surface-700 dark:text-surface-300">Delivered</span>
-                          <p className="font-medium text-surface-900 dark:text-white">{b.deliveredOrders}</p>
-                        </div>
-                        <div>
-                          <span className="text-surface-700 dark:text-surface-300">CPA</span>
-                          <p className={`font-medium ${isHighCpa ? 'text-danger-600 dark:text-danger-400' : 'text-surface-900 dark:text-white'}`}>
-                            {'\u20A6'}{Math.round(b.cpa).toLocaleString()}
-                          </p>
+                        {/* Metrics: 2-col grid on mobile, inline on desktop */}
+                        <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
+                          <span className="text-surface-600 dark:text-surface-400 font-medium">
+                            {'\u20A6'}{Math.round(b.totalSpend).toLocaleString()} spend
+                          </span>
+                          <span className="text-surface-600 dark:text-surface-400">
+                            Orders <strong className="text-surface-900 dark:text-white">{b.totalOrders}</strong>
+                          </span>
+                          <span className="text-success-600 dark:text-success-400">
+                            Delivered <strong>{b.deliveredOrders}</strong>
+                          </span>
+                          <span className="text-surface-600 dark:text-surface-400 font-medium">
+                            {'\u20A6'}{Math.round(b.deliveredRevenue).toLocaleString()} revenue
+                          </span>
+                          <span className={isHighCpa ? 'text-danger-600 dark:text-danger-400' : 'text-surface-600 dark:text-surface-400'}>
+                            CPA <strong>{'\u20A6'}{Math.round(b.cpa).toLocaleString()}</strong>
+                          </span>
+                          <span className="text-surface-600 dark:text-surface-400">
+                            Del. rate <strong className="text-surface-900 dark:text-white">{b.deliveryRate.toFixed(1)}%</strong>
+                          </span>
                         </div>
                       </div>
                     </div>

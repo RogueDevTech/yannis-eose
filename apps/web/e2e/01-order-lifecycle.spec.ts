@@ -5,7 +5,7 @@ import { loginAsSuperAdmin, navigateTo } from './helpers';
  * E2E Test: Full Order Lifecycle
  *
  * Tests the complete order state machine:
- * UNPROCESSED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRANSIT → DELIVERED → COMPLETED
+ * UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRANSIT → DELIVERED → COMPLETED
  */
 
 test.describe('Order Lifecycle', () => {
@@ -38,7 +38,7 @@ test.describe('Order Lifecycle', () => {
   test('should enforce state machine — no state skipping', async ({ page }) => {
     await navigateTo(page, 'orders');
     // The UI should disable invalid state transitions
-    // An UNPROCESSED order should only show "Engage" button, not "Dispatch"
+    // An UNPROCESSED/CS_ASSIGNED order should show Call (or Call customer), not "Dispatch"
     const firstRow = page.locator('table tbody tr').first();
     const rowExists = await firstRow.isVisible().catch(() => false);
     if (rowExists) {
@@ -46,10 +46,10 @@ test.describe('Order Lifecycle', () => {
       await page.waitForURL(/\/admin\/orders\//);
       // Check that only valid next-state buttons are enabled
       const dispatchBtn = page.getByRole('button', { name: /dispatch/i });
-      const engageBtn = page.getByRole('button', { name: /engage|call/i });
-      // If order is UNPROCESSED, dispatch should not be available
+      const callBtn = page.getByRole('button', { name: /call/i });
+      // If order is UNPROCESSED or CS_ASSIGNED, dispatch should not be available
       const status = await page.locator('[data-status]').getAttribute('data-status');
-      if (status === 'UNPROCESSED') {
+      if (status === 'UNPROCESSED' || status === 'CS_ASSIGNED') {
         if (await dispatchBtn.isVisible().catch(() => false)) {
           await expect(dispatchBtn).toBeDisabled();
         }

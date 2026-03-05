@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Form, useNavigation, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { Spinner } from '~/components/ui/spinner';
 
 interface Category {
   id: string;
@@ -29,6 +31,8 @@ function CategoryModal({
 }) {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
+  const formWrapperRef = useRef<HTMLDivElement>(null);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
 
   // Close modal on successful submission
   useEffect(() => {
@@ -38,6 +42,16 @@ function CategoryModal({
   }, [navigation.state, navigation.formData]);
 
   const isEdit = category !== null;
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    if (!isEdit || !category || category.status === 'ARCHIVED') return;
+    const form = e.currentTarget;
+    const statusSelect = form.querySelector<HTMLSelectElement>('[name="status"]');
+    if (statusSelect?.value === 'ARCHIVED') {
+      e.preventDefault();
+      setShowArchiveConfirm(true);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -59,7 +73,8 @@ function CategoryModal({
         </div>
 
         {/* Form */}
-        <Form method="post" className="px-6 py-4 space-y-4">
+        <div ref={formWrapperRef}>
+          <Form method="post" className="px-6 py-4 space-y-4" onSubmit={handleSubmit}>
           <input type="hidden" name="intent" value={isEdit ? 'update' : 'create'} />
           {isEdit && <input type="hidden" name="categoryId" value={category.id} />}
 
@@ -197,7 +212,29 @@ function CategoryModal({
             </Button>
           </div>
         </Form>
+        </div>
       </div>
+
+      {showArchiveConfirm && category && (
+        <ConfirmActionModal
+          open={showArchiveConfirm}
+          onClose={() => setShowArchiveConfirm(false)}
+          title={`Archive "${category.name}"?`}
+          description={<><strong>{category.name}</strong> will be hidden from default category lists.</>}
+          details={
+            <ul className="list-disc list-inside text-sm text-surface-600 dark:text-surface-400 space-y-1">
+              <li>Hidden from default category lists</li>
+              <li>You can change status back anytime</li>
+            </ul>
+          }
+          confirmLabel="Archive"
+          variant="archive"
+          loading={isSubmitting}
+          onConfirm={() => {
+            formWrapperRef.current?.querySelector<HTMLFormElement>('form')?.requestSubmit();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -206,6 +243,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
   const [searchParams, setSearchParams] = useSearchParams();
   const [modalCategory, setModalCategory] = useState<Category | null | undefined>(undefined); // undefined = closed
   const navigation = useNavigation();
+  const isFilterLoading = navigation.state === 'loading';
 
   // Close modal on successful action
   useEffect(() => {
@@ -266,13 +304,20 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
 
       {/* Search */}
       <div className="card">
-        <input
-          type="text"
-          placeholder="Search categories or brand names..."
-          value={search}
-          onChange={(e) => updateSearch(e.target.value)}
-          className="input text-sm"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="Search categories or brand names..."
+            value={search}
+            onChange={(e) => updateSearch(e.target.value)}
+            className="input text-sm flex-1"
+          />
+          {isFilterLoading && (
+            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+              <Spinner size="sm" className="shrink-0" />
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Table */}

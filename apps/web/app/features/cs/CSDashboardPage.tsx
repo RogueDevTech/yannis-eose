@@ -1,9 +1,15 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { DismissibleMessageCard } from '~/components/ui/dismissible-message-card';
+import { LiveIndicator } from '~/components/ui/live-indicator';
 import { useFetcherToast } from '~/components/ui/toast';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
+import { Checkbox } from '~/components/ui/checkbox';
+import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { useLiveIndicator } from '~/hooks/useSocket';
 import type {
   CSDashboardStreamData,
   AgentWorkload,
@@ -14,17 +20,49 @@ import type {
   PendingCart,
 } from './types';
 
-// ─── Constants ──────────────────────────────────────────
+// ─── Agent Workload Card (reusable for strip + modal) ───
 
-const STATUS_COLORS: Record<string, string> = {
-  UNPROCESSED: 'badge-warning',
-  CS_ENGAGED: 'badge-info',
-  CONFIRMED: 'badge-brand',
-  CANCELLED: 'badge-danger',
-};
+function AgentWorkloadCard({ agent, className }: { agent: AgentWorkload; className?: string }) {
+  const utilization = agent.capacity > 0 ? (agent.pendingCount / agent.capacity) * 100 : 0;
+  const barColor = utilization >= 90
+    ? 'bg-danger-500'
+    : utilization >= 70
+    ? 'bg-warning-500'
+    : 'bg-success-500';
 
-function formatStatus(status: string): string {
-  return status.replace(/_/g, ' ');
+  return (
+    <div className={className ?? 'card'}>
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+          <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
+            {agent.agentName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+          </span>
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
+            {agent.agentName}
+          </p>
+          <p className="text-xs text-surface-800 dark:text-surface-200">
+            {agent.pendingCount} of {agent.capacity} slots
+          </p>
+        </div>
+      </div>
+      <div className="w-full h-2 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+          style={{ width: `${Math.min(utilization, 100)}%` }}
+        />
+      </div>
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-xs text-surface-700 dark:text-surface-300">
+          {Math.round(utilization)}% utilized
+        </span>
+        {agent.pendingCount >= agent.capacity && (
+          <span className="text-xs font-medium text-danger-600 dark:text-danger-400">FULL</span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── Component ──────────────────────────────────────────
@@ -43,19 +81,53 @@ export function CSDashboardPage({
   leaderboardPeriod = 'this_month',
   cartStats,
   pendingCarts,
+  liveEvents,
 }: CSDashboardStreamData) {
   const fetcher = useFetcher();
-  const [activeTab, setActiveTab] = useState<'queue' | 'active' | 'callbacks' | 'duplicates' | 'hotswap'>('queue');
+  const liveState = useLiveIndicator(liveEvents ?? []);
+  const [activeTab, setActiveTab] = useState<'queue' | 'active' | 'callbacks' | 'duplicates' | 'carts' | 'hotswap' | 'performance'>('active');
   const [assignAgent, setAssignAgent] = useState<Record<string, string>>({});
   const [hotSwapFrom, setHotSwapFrom] = useState('');
   const [hotSwapTo, setHotSwapTo] = useState('');
   const [hotSwapOrderIds, setHotSwapOrderIds] = useState<string[]>([]);
-  const [callbackModal, setCallbackModal] = useState<{ orderId: string; customerName: string } | null>(null);
-  const [callbackDelay, setCallbackDelay] = useState('120');
-  const [callbackNotes, setCallbackNotes] = useState('');
+  /** Reassign order modal: order + current assignee so we can pick new agent */
+  const [reassignOrder, setReassignOrder] = useState<{ orderId: string; customerName: string; assignedCsId: string } | null>(null);
+  const [reassignToAgentId, setReassignToAgentId] = useState('');
+  /** Pending confirm for Cancel order (replaces window.confirm) */
+  const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ orderId: string; customerName: string } | null>(null);
+  /** Live carts table pagination (5 rows per page) */
+  const [cartPage, setCartPage] = useState(1);
+  /** Agent Workloads: View all modal and pagination */
+  const [viewAllAgentsOpen, setViewAllAgentsOpen] = useState(false);
+  const [viewAllPage, setViewAllPage] = useState(1);
+  const agentScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollAgentStrip = useCallback((delta: number) => {
+    agentScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    if (viewAllAgentsOpen) setViewAllPage(1);
+  }, [viewAllAgentsOpen]);
+
+  useEffect(() => {
+    if (!viewAllAgentsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewAllAgentsOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewAllAgentsOpen]);
 
   const actionError = (fetcher.data as { error?: string })?.error;
-  useFetcherToast(fetcher.data, { successMessage: 'CS action completed' });
+  const distributeResult = fetcher.data as { success?: boolean; distributed?: number } | undefined;
+  const successMessage =
+    distributeResult && 'distributed' in distributeResult
+      ? distributeResult.distributed === 0
+        ? 'No unassigned orders to distribute'
+        : `${distributeResult.distributed} order(s) distributed to agents`
+      : 'CS action completed';
+  useFetcherToast(fetcher.data, { successMessage });
   const totalPending = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
   const totalCapacity = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
   const confirmedCount = (statusCounts as Record<string, number>)['CONFIRMED'] ?? 0;
@@ -88,6 +160,21 @@ export function CSDashboardPage({
     );
   }
 
+  function handleReassignSubmit() {
+    if (!reassignOrder || !reassignToAgentId || reassignToAgentId === reassignOrder.assignedCsId) return;
+    fetcher.submit(
+      {
+        intent: 'bulkReassign',
+        orderIds: JSON.stringify([reassignOrder.orderId]),
+        fromAgentId: reassignOrder.assignedCsId,
+        toAgentId: reassignToAgentId,
+      },
+      { method: 'post' },
+    );
+    setReassignOrder(null);
+    setReassignToAgentId('');
+  }
+
   function toggleHotSwapOrder(orderId: string) {
     setHotSwapOrderIds((prev) =>
       prev.includes(orderId)
@@ -106,11 +193,16 @@ export function CSDashboardPage({
   return (
     <div className="space-y-4">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">CS Dashboard</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-          Manage customer service agents, dispatch orders, and monitor workloads
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Live activities</h1>
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+            Manage agents, dispatch orders, and monitor workloads
+          </p>
+        </div>
+        {liveEvents != null && liveEvents.length > 0 && (
+          <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+        )}
       </div>
 
       {actionError && (
@@ -119,83 +211,121 @@ export function CSDashboardPage({
         </div>
       )}
 
-      {/* Inactive agents alert — deferred */}
-      <DeferredSection resolve={inactiveAgents} skeleton="card">
-        {(agents: InactiveAgent[]) =>
-          agents.length > 0 ? (
-            <div className="rounded-lg bg-warning-50 dark:bg-warning-700/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3">
-              <div className="flex items-start gap-2">
-                <svg className="w-5 h-5 text-warning-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                </svg>
-                <div>
-                  <p className="text-sm font-medium text-warning-800 dark:text-warning-300">Inactive Agents Detected</p>
-                  <p className="text-xs text-warning-600 dark:text-warning-400 mt-0.5">
-                    {agents.map((a: InactiveAgent) =>
-                      `${a.agentName} (${a.pendingCount} pending, idle > 10 min)`
-                    ).join(', ')} — consider reassigning their orders.
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : null
-        }
-      </DeferredSection>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Active Agents</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{workloads.length}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Pending</p>
-          <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{totalPending}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Unassigned</p>
-          <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">{unassignedTotal}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Confirmed</p>
-          <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{confirmedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Capacity</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
-            {totalPending}<span className="text-sm font-normal text-surface-700">/{totalCapacity}</span>
-          </p>
+      {/* Overview + Order Pipeline (compact, single horizontal row) */}
+      <div className="card">
+        <div className="flex flex-nowrap gap-3 overflow-x-auto pb-1">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              Active Agents
+            </p>
+            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+              {workloads.length}
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              Pending confirmation
+            </p>
+            <p className="text-xl font-bold text-warning-600 dark:text-warning-400 mt-1">
+              {totalPending}
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              Unassigned
+            </p>
+            <p className="text-xl font-bold text-danger-600 dark:text-danger-400 mt-1">
+              {unassignedTotal}
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              Confirmed
+            </p>
+            <p className="text-xl font-bold text-brand-600 dark:text-brand-400 mt-1">
+              {confirmedCount}
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              Capacity
+            </p>
+            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+              {totalPending}
+              <span className="text-sm font-normal text-surface-700 dark:text-surface-300">
+                /{totalCapacity}
+              </span>
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              CS Engaged
+            </p>
+            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+              {(statusCounts as Record<string, number>)['CS_ENGAGED'] ?? 0}
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              Cancelled
+            </p>
+            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+              {(statusCounts as Record<string, number>)['CANCELLED'] ?? 0}
+            </p>
+          </div>
+          {cartStats && (
+            <>
+              <DeferredSection resolve={cartStats} skeleton="inline">
+                {(stats: { pending: number; abandonedLast24h: number }) => (
+                  <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+                      Cart Pending
+                    </p>
+                    <p className="text-xl font-bold text-warning-600 dark:text-warning-400 mt-1">
+                      {stats.pending}
+                    </p>
+                  </div>
+                )}
+              </DeferredSection>
+              <DeferredSection resolve={cartStats} skeleton="inline">
+                {(stats: { pending: number; abandonedLast24h: number }) => (
+                  <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+                      Abandoned (24h)
+                    </p>
+                    <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+                      {stats.abandonedLast24h}
+                    </p>
+                  </div>
+                )}
+              </DeferredSection>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Cart Abandonment — deferred */}
-      {cartStats && pendingCarts && (
-        <DeferredSection resolve={cartStats} skeleton="stat">
-          {(stats: { pending: number; abandonedLast24h: number }) => (
-            <div className="card">
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Cart Abandonment</h2>
-              <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
-                Carts saved when customers fill name + phone but don&apos;t submit. Pending carts may convert to orders soon.
-              </p>
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="rounded-lg bg-surface-100 dark:bg-surface-800 p-3">
-                  <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Pending</p>
-                  <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{stats.pending}</p>
-                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">May convert soon</p>
-                </div>
-                <div className="rounded-lg bg-surface-100 dark:bg-surface-800 p-3">
-                  <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Abandoned (24h)</p>
-                  <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{stats.abandonedLast24h}</p>
-                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">Marked abandoned</p>
-                </div>
-              </div>
-              <DeferredSection resolve={pendingCarts} skeleton="table">
-                {(carts: PendingCart[]) =>
-                  carts.length > 0 ? (
-                    <div className="overflow-x-auto -mx-4 px-4">
-                      <table className="w-full text-sm">
+      {/* Live carts — fixed height, 5 rows per page, prev/next */}
+      {pendingCarts && (
+        <div className="card">
+          <h2 className="text-sm font-semibold text-surface-900 dark:text-white mb-2">Live carts</h2>
+          <p className="text-xs text-surface-700 dark:text-surface-300 mb-3">
+            Carts in progress: customers filled name + phone but haven&apos;t submitted yet. May convert soon.
+          </p>
+          <div className="flex flex-col">
+            <DeferredSection resolve={pendingCarts} skeleton="table">
+              {(carts: PendingCart[]) => {
+                const pageSize = 5;
+                const totalPages = Math.max(1, Math.ceil(carts.length / pageSize));
+                const page = Math.min(cartPage, totalPages);
+                const start = (page - 1) * pageSize;
+                const rows = carts.slice(start, start + pageSize);
+
+                return carts.length > 0 ? (
+                  <>
+                    <div className="overflow-x-auto overflow-y-auto -mx-4 px-4 min-h-0 max-h-[15rem]">
+                      <table className="w-full text-sm table-fixed">
                         <thead>
-                          <tr>
+                          <tr className="h-10">
                             <th className="table-header text-left">Customer</th>
                             <th className="table-header text-left">Phone</th>
                             <th className="table-header text-left">Product</th>
@@ -204,249 +334,211 @@ export function CSDashboardPage({
                           </tr>
                         </thead>
                         <tbody>
-                          {carts.map((c) => (
-                            <tr key={c.id} className="table-row">
-                              <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{c.customerName}</td>
-                              <td className="table-cell font-mono text-xs">{c.customerPhoneDisplay}</td>
-                              <td className="table-cell text-surface-800 dark:text-surface-200">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
-                              <td className="table-cell text-surface-800 dark:text-surface-200">{c.campaignName ?? '—'}</td>
-                              <td className="table-cell text-surface-700 dark:text-surface-300">
+                          {rows.map((c) => (
+                            <tr key={c.id} className="table-row h-10">
+                              <td className="table-cell font-medium text-surface-900 dark:text-surface-100 truncate">{c.customerName}</td>
+                              <td className="table-cell font-mono text-xs truncate">{c.customerPhoneDisplay}</td>
+                              <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
+                              <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.campaignName ?? '—'}</td>
+                              <td className="table-cell text-surface-700 dark:text-surface-300 whitespace-nowrap">
                                 {new Date(c.updatedAt).toLocaleDateString('en-NG', {
                                   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                                 })}
                               </td>
                             </tr>
                           ))}
+                          {/* Spacer rows so height is always 5 rows */}
+                          {rows.length < pageSize &&
+                            Array.from({ length: pageSize - rows.length }).map((_, i) => (
+                              <tr key={`empty-${i}`} className="h-10" aria-hidden="true">
+                                <td colSpan={5} className="table-cell border-b border-transparent" />
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>
-                  ) : (
-                    <p className="text-sm text-surface-700 dark:text-surface-300 py-4 text-center">No pending carts</p>
-                  )
-                }
-              </DeferredSection>
-            </div>
-          )}
-        </DeferredSection>
+                    <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-surface-100 dark:border-surface-800 shrink-0">
+                      <span className="text-xs text-surface-600 dark:text-surface-400">
+                        Page {page} of {totalPages}
+                        {carts.length > 0 && (
+                          <span className="ml-1">
+                            ({start + 1}–{Math.min(start + pageSize, carts.length)} of {carts.length})
+                          </span>
+                        )}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={page <= 1}
+                          onClick={() => setCartPage((p) => Math.max(1, p - 1))}
+                        >
+                          Prev
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={page >= totalPages}
+                          onClick={() => setCartPage((p) => Math.min(totalPages, p + 1))}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-surface-700 dark:text-surface-300 py-3 text-center">No live carts</p>
+                );
+              }}
+            </DeferredSection>
+          </div>
+        </div>
       )}
 
-      {/* Agent Workload Cards */}
+      {/* Agent Workloads — horizontal scroll strip + View all */}
       <div>
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Agent Workloads</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Agent Workloads</h2>
+          {workloads.length > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => scrollAgentStrip(-280)}
+                className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                aria-label="Scroll left"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollAgentStrip(280)}
+                className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                aria-label="Scroll right"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setViewAllAgentsOpen(true)}
+              >
+                View all
+              </Button>
+            </div>
+          )}
+        </div>
         {workloads.length === 0 ? (
           <div className="card text-center py-8">
-            <p className="text-surface-700 dark:text-surface-300">No CS agents found. Add CS agents from the Users page.</p>
-            <Link to="/hr/users/new" className="btn-primary inline-block mt-3">Add CS Agent</Link>
+            <p className="text-surface-700 dark:text-surface-300">No CS agents found. Manage staff from HR → Users.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {workloads.map((agent: AgentWorkload) => {
-              const utilization = agent.capacity > 0 ? (agent.pendingCount / agent.capacity) * 100 : 0;
-              const barColor = utilization >= 90
-                ? 'bg-danger-500'
-                : utilization >= 70
-                ? 'bg-warning-500'
-                : 'bg-success-500';
-
-              return (
-                <div key={agent.agentId} className="card">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center">
-                      <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
-                        {agent.agentName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
-                        {agent.agentName}
-                      </p>
-                      <p className="text-xs text-surface-800 dark:text-surface-200">
-                        {agent.pendingCount} of {agent.capacity} slots
-                      </p>
-                    </div>
-                  </div>
-                  {/* Capacity bar */}
-                  <div className="w-full h-2 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-                      style={{ width: `${Math.min(utilization, 100)}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-surface-700 dark:text-surface-300">
-                      {Math.round(utilization)}% utilized
-                    </span>
-                    {agent.pendingCount >= agent.capacity && (
-                      <span className="text-xs font-medium text-danger-600 dark:text-danger-400">FULL</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <div
+            ref={agentScrollRef}
+            className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden pb-1"
+          >
+            {workloads.map((agent: AgentWorkload) => (
+              <AgentWorkloadCard
+                key={agent.agentId}
+                agent={agent}
+                className="card shrink-0 w-64"
+              />
+            ))}
           </div>
         )}
       </div>
 
-      {/* CS Agent Leaderboard — deferred */}
-      <DeferredSection resolve={leaderboard} skeleton="table">
-        {(lb: CSLeaderboardEntry[]) => {
-          if (lb.length === 0) return null;
-          return (
-            <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">CS Agent Performance</h3>
-                    <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
-                      Ranked by delivery rate ({leaderboardPeriod === 'all_time' ? 'all time' : 'this month'})
-                    </p>
-                  </div>
-                  <div className="flex gap-1 rounded-lg bg-surface-100 dark:bg-surface-800 p-1">
-                    <Link
-                      to="/admin/cs?period=this_month"
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                        leaderboardPeriod === 'this_month'
-                          ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                          : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
-                      }`}
-                    >
-                      This month
-                    </Link>
-                    <Link
-                      to="/admin/cs?period=all_time"
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                        leaderboardPeriod === 'all_time'
-                          ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                          : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
-                      }`}
-                    >
-                      All time
-                    </Link>
-                  </div>
-                </div>
-              </div>
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="table-header">#</th>
-                      <th className="table-header">Agent</th>
-                      <th className="table-header text-right">Engaged</th>
-                      <th className="table-header text-right">Confirmed</th>
-                      <th className="table-header text-right">Delivered</th>
-                      <th className="table-header text-right">Calls</th>
-                      <th className="table-header text-right">Conf. Rate</th>
-                      <th className="table-header text-right">Del. Rate</th>
-                      <th className="table-header text-right">Avg Call</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lb.map((e: CSLeaderboardEntry, idx: number) => (
-                      <tr key={e.agentId} className="table-row">
-                        <td className="table-cell text-surface-700 dark:text-surface-300 font-mono text-sm">{idx + 1}</td>
-                        <td className="table-cell">
-                          <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{e.agentName}</p>
-                        </td>
-                        <td className="table-cell text-right text-sm">{e.ordersEngaged}</td>
-                        <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">{e.ordersConfirmed}</td>
-                        <td className="table-cell text-right text-sm font-medium text-brand-600 dark:text-brand-400">{e.ordersDelivered}</td>
-                        <td className="table-cell text-right text-sm">{e.callsMade}</td>
-                        <td className="table-cell text-right text-sm">{e.confirmationRate.toFixed(1)}%</td>
-                        <td className="table-cell text-right">
-                          <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-surface-900 dark:text-white'}`}>
-                            {e.deliveryRate.toFixed(1)}%
-                          </span>
-                        </td>
-                        <td className="table-cell text-right text-sm text-surface-700 dark:text-surface-300">
-                          {e.avgCallDurationSeconds >= 60
-                            ? `${Math.floor(e.avgCallDurationSeconds / 60)}m ${e.avgCallDurationSeconds % 60}s`
-                            : `${e.avgCallDurationSeconds}s`}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile leaderboard */}
-              <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
-                {lb.map((e: CSLeaderboardEntry, idx: number) => (
-                  <div key={e.agentId} className="p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
-                        <span className="font-medium text-surface-900 dark:text-white text-sm">{e.agentName}</span>
-                      </div>
-                      <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-surface-900 dark:text-white'}`}>
-                        {e.deliveryRate.toFixed(1)}% del.
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-surface-200 dark:border-surface-700">
+        <Tabs
+          value={activeTab}
+          onChange={(v) => setActiveTab(v as typeof activeTab)}
+          tabs={[
+            { value: 'active', label: `Active Orders (${activeTotal})` },
+            { value: 'queue', label: `Unassigned Queue (${unassignedTotal})` },
+            {
+              value: 'callbacks',
+              label: 'Callbacks',
+              badge: (
+                <DeferredSection resolve={callbackOrders} skeleton="inline">
+                  {(orders: CSOrder[]) =>
+                    orders.length > 0 ? (
+                      <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 text-xs font-bold">
+                        {orders.length}
                       </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-xs">
-                      <div>
-                        <span className="text-surface-700 dark:text-surface-300">Confirmed</span>
-                        <p className="font-medium text-surface-900 dark:text-white">{e.ordersConfirmed}</p>
-                      </div>
-                      <div>
-                        <span className="text-surface-700 dark:text-surface-300">Calls</span>
-                        <p className="font-medium text-surface-900 dark:text-white">{e.callsMade}</p>
-                      </div>
-                      <div>
-                        <span className="text-surface-700 dark:text-surface-300">Conf. Rate</span>
-                        <p className="font-medium text-surface-900 dark:text-white">{e.confirmationRate.toFixed(1)}%</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        }}
-      </DeferredSection>
+                    ) : null
+                  }
+                </DeferredSection>
+              ),
+            },
+            {
+              value: 'duplicates',
+              label: 'Duplicates',
+              badge: (
+                <DeferredSection resolve={flaggedDuplicates} skeleton="inline">
+                  {(pairs: DuplicatePair[]) =>
+                    pairs.length > 0 ? (
+                      <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400 text-xs font-bold">
+                        {pairs.length}
+                      </span>
+                    ) : null
+                  }
+                </DeferredSection>
+              ),
+            },
+            {
+              value: 'carts',
+              label: 'Cart Abandonment',
+              badge:
+                cartStats && pendingCarts ? (
+                  <DeferredSection resolve={cartStats} skeleton="inline">
+                    {(stats: { pending: number }) =>
+                      stats.pending > 0 ? (
+                        <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-surface-200 dark:bg-surface-600 text-surface-700 dark:text-surface-200 text-xs font-bold">
+                          {stats.pending}
+                        </span>
+                      ) : null
+                    }
+                  </DeferredSection>
+                ) : undefined,
+            },
+            { value: 'hotswap', label: 'Hot Swap' },
+            { value: 'performance', label: 'Performance' },
+          ]}
+          className="border-b-0 flex-1 min-w-0"
+        />
+        {activeTab === 'queue' ? (
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            className="shrink-0 -mb-px"
+            disabled={fetcher.state !== 'idle'}
+            onClick={() => fetcher.submit({ intent: 'redistribute' }, { method: 'post' })}
+          >
+            {fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'redistribute'
+              ? 'Distributing…'
+              : 'Distribute Order'}
+          </Button>
+        ) : (
+          <Link
+            to="/admin/cs/orders"
+            className="btn-primary btn-sm shrink-0 -mb-px inline-flex items-center justify-center"
+          >
+            Go to Orders
+          </Link>
+        )}
+      </div>
 
-      <Tabs
-        value={activeTab}
-        onChange={(v) => setActiveTab(v as typeof activeTab)}
-        tabs={[
-          { value: 'queue', label: `Unassigned Queue (${unassignedTotal})` },
-          { value: 'active', label: `Active Orders (${activeTotal})` },
-          {
-            value: 'callbacks',
-            label: 'Callbacks',
-            badge: (
-              <DeferredSection resolve={callbackOrders} skeleton="inline">
-                {(orders: CSOrder[]) =>
-                  orders.length > 0 ? (
-                    <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 text-xs font-bold">
-                      {orders.length}
-                    </span>
-                  ) : null
-                }
-              </DeferredSection>
-            ),
-          },
-          {
-            value: 'duplicates',
-            label: 'Duplicates',
-            badge: (
-              <DeferredSection resolve={flaggedDuplicates} skeleton="inline">
-                {(pairs: DuplicatePair[]) =>
-                  pairs.length > 0 ? (
-                    <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400 text-xs font-bold">
-                      {pairs.length}
-                    </span>
-                  ) : null
-                }
-              </DeferredSection>
-            ),
-          },
-          { value: 'hotswap', label: 'Hot Swap' },
-        ]}
-      />
-
-      {/* Tab Content */}
+      {/* Tab Content — fixed height so layout does not shift */}
       {activeTab === 'queue' && (
-        <div className="card p-0 overflow-hidden">
-          <div className="hidden md:block overflow-x-auto">
+        <div className="card p-0 overflow-hidden flex flex-col h-[28rem]">
+          <div className="hidden md:block overflow-auto flex-1 min-h-0">
             <table className="w-full">
               <thead>
                 <tr>
@@ -456,6 +548,7 @@ export function CSDashboardPage({
                   <th className="table-header text-right">Amount</th>
                   <th className="table-header">Created</th>
                   <th className="table-header">Assign To</th>
+                  <th className="table-header text-center">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -511,11 +604,37 @@ export function CSDashboardPage({
                         </Button>
                       </div>
                     </td>
+                    <td className="table-cell text-center">
+                      <div className="inline-flex items-center gap-2">
+                        <Link
+                          to={`/admin/orders/${order.id}`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          View
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName })}
+                          disabled={fetcher.state === 'submitting'}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-danger-700 dark:text-danger-200 bg-danger-50 dark:bg-danger-900/40 hover:bg-danger-100 dark:hover:bg-danger-800/50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                          title="Cancel order (removes from queue; order stays in DB)"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {unassignedOrders.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
+                    <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                       No unassigned orders in queue
                     </td>
                   </tr>
@@ -525,7 +644,7 @@ export function CSDashboardPage({
           </div>
 
           {/* Mobile */}
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800 overflow-auto flex-1 min-h-0">
             {unassignedOrders.map((order: CSOrder) => (
               <div key={order.id} className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
@@ -565,6 +684,26 @@ export function CSDashboardPage({
                     Assign
                   </Button>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Link
+                    to={`/admin/orders/${order.id}`}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                  >
+                    View Order
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName })}
+                    disabled={fetcher.state === 'submitting'}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-danger-700 dark:text-danger-200 bg-danger-50 dark:bg-danger-900/40 hover:bg-danger-100 dark:hover:bg-danger-800/50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                    title="Cancel order (removes from queue; order stays in DB)"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
             {unassignedOrders.length === 0 && (
@@ -577,8 +716,8 @@ export function CSDashboardPage({
       )}
 
       {activeTab === 'active' && (
-        <div className="card p-0 overflow-hidden">
-          <div className="hidden md:block overflow-x-auto">
+        <div className="card p-0 overflow-hidden flex flex-col h-[28rem]">
+          <div className="hidden md:block overflow-auto flex-1 min-h-0">
             <table className="w-full">
               <thead>
                 <tr>
@@ -588,6 +727,7 @@ export function CSDashboardPage({
                   <th className="table-header text-right">Amount</th>
                   <th className="table-header">Assigned Agent</th>
                   <th className="table-header">Created</th>
+                  <th className="table-header text-center">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -607,9 +747,7 @@ export function CSDashboardPage({
                         {order.customerName}
                       </td>
                       <td className="table-cell">
-                        <span className={STATUS_COLORS[order.status] ?? 'badge'}>
-                          {formatStatus(order.status)}
-                        </span>
+                        <OrderStatusBadge status={order.status} />
                       </td>
                       <td className="table-cell text-right font-medium">
                         {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
@@ -626,12 +764,38 @@ export function CSDashboardPage({
                           month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                         })}
                       </td>
+                      <td className="table-cell">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => order.assignedCsId && setReassignOrder({ orderId: order.id, customerName: order.customerName, assignedCsId: order.assignedCsId })}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/40 hover:bg-brand-100 dark:hover:bg-brand-800/50 transition-colors"
+                            title="Reassign to another agent"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4m4 4V4m0 12l4 4m-4-4l4-4" />
+                            </svg>
+                            Reassign
+                          </button>
+                          <button
+                            onClick={() => setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName })}
+                            disabled={fetcher.state === 'submitting'}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-danger-700 dark:text-danger-200 bg-danger-50 dark:bg-danger-900/40 hover:bg-danger-100 dark:hover:bg-danger-800/50 transition-colors"
+                            title="Cancel order"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            Cancel order
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
                 {activeOrders.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
+                    <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                       No active CS-engaged orders
                     </td>
                   </tr>
@@ -641,18 +805,14 @@ export function CSDashboardPage({
           </div>
 
           {/* Mobile */}
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800 overflow-auto flex-1 min-h-0">
             {activeOrders.map((order: CSOrder) => {
               const agent = workloads.find((w: AgentWorkload) => w.agentId === order.assignedCsId);
               return (
-                <Link
-                  key={order.id}
-                  to={`/admin/orders/${order.id}`}
-                  className="block p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
-                >
+                <div key={order.id} className="p-4 space-y-3">
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-medium text-surface-900 dark:text-surface-100">{order.customerName}</span>
-                    <span className={STATUS_COLORS[order.status] ?? 'badge'}>{formatStatus(order.status)}</span>
+                    <OrderStatusBadge status={order.status} />
                   </div>
                   <div className="flex items-center justify-between text-sm text-surface-800 dark:text-surface-200">
                     <span>{agent?.agentName ?? 'Unassigned'}</span>
@@ -660,7 +820,23 @@ export function CSDashboardPage({
                       {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                     </span>
                   </div>
-                </Link>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => order.assignedCsId && setReassignOrder({ orderId: order.id, customerName: order.customerName, assignedCsId: order.assignedCsId })}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-brand-700 dark:text-brand-200 bg-brand-50 dark:bg-brand-900/40 hover:bg-brand-100 dark:hover:bg-brand-800/50 transition-colors"
+                    >
+                      Reassign
+                    </button>
+                    <button
+                      onClick={() => setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName })}
+                      disabled={fetcher.state === 'submitting'}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-danger-700 dark:text-danger-200 bg-danger-50 dark:bg-danger-900/40 hover:bg-danger-100 dark:hover:bg-danger-800/50 transition-colors"
+                    >
+                      Cancel order
+                    </button>
+                  </div>
+                </div>
               );
             })}
             {activeOrders.length === 0 && (
@@ -673,7 +849,8 @@ export function CSDashboardPage({
       )}
 
       {activeTab === 'hotswap' && (
-        <div className="space-y-4">
+        <div className="h-[28rem] overflow-auto">
+          <div className="space-y-4">
           <div className="card">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Hot Swap</h2>
             <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
@@ -742,20 +919,16 @@ export function CSDashboardPage({
                       key={order.id}
                       className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer"
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={hotSwapOrderIds.includes(order.id)}
                         onChange={() => toggleHotSwapOrder(order.id)}
-                        className="rounded border-surface-300 dark:border-surface-600 text-brand-500 focus:ring-brand-500"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
                             {order.customerName}
                           </span>
-                          <span className={STATUS_COLORS[order.status] ?? 'badge'}>
-                            {formatStatus(order.status)}
-                          </span>
+                          <OrderStatusBadge status={order.status} />
                         </div>
                         <span className="text-xs text-surface-700 dark:text-surface-300">
                           {order.id.slice(0, 8)}... &middot; {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
@@ -791,13 +964,133 @@ export function CSDashboardPage({
               </Button>
             </div>
           )}
+          </div>
         </div>
+      )}
+
+      {/* ── Performance Tab ─────────────────────────── */}
+      {activeTab === 'performance' && (
+        <DeferredSection resolve={leaderboard} skeleton="table">
+          {(lb: CSLeaderboardEntry[]) => {
+            if (lb.length === 0) return null;
+            return (
+              <div className="card p-0 overflow-hidden flex flex-col h-[28rem]">
+                <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-surface-900 dark:text-white">CS Agent Performance</h3>
+                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+                        Ranked by delivery rate ({leaderboardPeriod === 'all_time' ? 'all time' : 'this month'})
+                      </p>
+                    </div>
+                    <div className="flex gap-1 rounded-lg bg-surface-100 dark:bg-surface-800 p-1">
+                      <Link
+                        to="/admin/cs/queue?period=this_month"
+                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                          leaderboardPeriod === 'this_month'
+                            ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
+                            : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
+                        }`}
+                      >
+                        This month
+                      </Link>
+                      <Link
+                        to="/admin/cs/queue?period=all_time"
+                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                          leaderboardPeriod === 'all_time'
+                            ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
+                            : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
+                        }`}
+                      >
+                        All time
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+                <div className="hidden md:block overflow-auto flex-1 min-h-0">
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        <th className="table-header">#</th>
+                        <th className="table-header">Agent</th>
+                        <th className="table-header text-right">Engaged</th>
+                        <th className="table-header text-right">Confirmed</th>
+                        <th className="table-header text-right">Delivered</th>
+                        <th className="table-header text-right">Calls</th>
+                        <th className="table-header text-right">Conf. Rate</th>
+                        <th className="table-header text-right">Del. Rate</th>
+                        <th className="table-header text-right">Avg Call</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lb.map((e: CSLeaderboardEntry, idx: number) => (
+                        <tr key={e.agentId} className="table-row">
+                          <td className="table-cell text-surface-700 dark:text-surface-300 font-mono text-sm">{idx + 1}</td>
+                          <td className="table-cell">
+                            <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{e.agentName}</p>
+                          </td>
+                          <td className="table-cell text-right text-sm">{e.ordersEngaged}</td>
+                          <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">{e.ordersConfirmed}</td>
+                          <td className="table-cell text-right text-sm font-medium text-brand-600 dark:text-brand-400">{e.ordersDelivered}</td>
+                          <td className="table-cell text-right text-sm">{e.callsMade}</td>
+                          <td className="table-cell text-right text-sm">{e.confirmationRate.toFixed(1)}%</td>
+                          <td className="table-cell text-right">
+                            <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-surface-900 dark:text-white'}`}>
+                              {e.deliveryRate.toFixed(1)}%
+                            </span>
+                          </td>
+                          <td className="table-cell text-right text-sm text-surface-700 dark:text-surface-300">
+                            {e.avgCallDurationSeconds >= 60
+                              ? `${Math.floor(e.avgCallDurationSeconds / 60)}m ${e.avgCallDurationSeconds % 60}s`
+                              : `${e.avgCallDurationSeconds}s`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile leaderboard */}
+                <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800 overflow-auto flex-1 min-h-0">
+                  {lb.map((e: CSLeaderboardEntry, idx: number) => (
+                    <div key={e.agentId} className="p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
+                          <span className="font-medium text-surface-900 dark:text-white text-sm">{e.agentName}</span>
+                        </div>
+                        <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-surface-900 dark:text-white'}`}>
+                          {e.deliveryRate.toFixed(1)}% del.
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <span className="text-surface-700 dark:text-surface-300">Confirmed</span>
+                          <p className="font-medium text-surface-900 dark:text-white">{e.ordersConfirmed}</p>
+                        </div>
+                        <div>
+                          <span className="text-surface-700 dark:text-surface-300">Calls</span>
+                          <p className="font-medium text-surface-900 dark:text-white">{e.callsMade}</p>
+                        </div>
+                        <div>
+                          <span className="text-surface-700 dark:text-surface-300">Conf. Rate</span>
+                          <p className="font-medium text-surface-900 dark:text-white">{e.confirmationRate.toFixed(1)}%</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          }}
+        </DeferredSection>
       )}
 
       {/* ── Callbacks Tab ──────────────────────────── */}
       {activeTab === 'callbacks' && (
         <DeferredSection resolve={callbackOrders} skeleton="table">
           {(resolvedCallbacks: CSOrder[]) => (
+            <div className="h-[28rem] overflow-auto">
             <div className="space-y-4">
               <div className="card">
                 <div className="flex items-center justify-between mb-4">
@@ -882,6 +1175,7 @@ export function CSDashboardPage({
                 )}
               </div>
             </div>
+            </div>
           )}
         </DeferredSection>
       )}
@@ -890,6 +1184,7 @@ export function CSDashboardPage({
       {activeTab === 'duplicates' && (
         <DeferredSection resolve={flaggedDuplicates} skeleton="table">
           {(resolvedDuplicates: DuplicatePair[]) => (
+            <div className="h-[28rem] overflow-auto">
             <div className="space-y-4">
               <div className="card">
                 <div className="mb-4">
@@ -929,7 +1224,7 @@ export function CSDashboardPage({
                                   Amount: {pair.original.totalAmount ? `\u20A6${Number(pair.original.totalAmount).toLocaleString()}` : '\u2014'}
                                 </p>
                                 <p className="text-xs text-surface-800 dark:text-surface-200">
-                                  Status: <span className={STATUS_COLORS[pair.original.status] ?? 'badge'}>{formatStatus(pair.original.status)}</span>
+                                  Status: <OrderStatusBadge status={pair.original.status} />
                                 </p>
                                 <p className="text-xs text-surface-700 dark:text-surface-300">
                                   Created: {new Date(pair.original.createdAt).toLocaleString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -955,7 +1250,7 @@ export function CSDashboardPage({
                                 Amount: {pair.duplicate.totalAmount ? `\u20A6${Number(pair.duplicate.totalAmount).toLocaleString()}` : '\u2014'}
                               </p>
                               <p className="text-xs text-surface-800 dark:text-surface-200">
-                                Status: <span className={STATUS_COLORS[pair.duplicate.status] ?? 'badge'}>{formatStatus(pair.duplicate.status)}</span>
+                                Status: <OrderStatusBadge status={pair.duplicate.status} />
                               </p>
                               <p className="text-xs text-surface-700 dark:text-surface-300">
                                 Created: {new Date(pair.duplicate.createdAt).toLocaleString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -1021,109 +1316,274 @@ export function CSDashboardPage({
                 )}
               </div>
             </div>
+            </div>
           )}
         </DeferredSection>
       )}
 
-      {/* ── Callback Schedule Modal ───────────────── */}
-      {callbackModal && (
+      {/* ── Cart Abandonment Tab ─────────────────────────── */}
+      {activeTab === 'carts' && pendingCarts && (
+        <div className="card p-0 overflow-hidden flex flex-col h-[28rem]">
+          <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
+            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Cart Abandonment</h2>
+            <p className="text-sm text-surface-700 dark:text-surface-300 mt-0.5">
+              Live carts: customers filled name + phone but haven&apos;t submitted yet. May convert soon.
+            </p>
+          </div>
+          <div className="flex flex-col flex-1 min-h-0">
+            <DeferredSection resolve={pendingCarts} skeleton="table">
+              {(carts: PendingCart[]) => {
+                const pageSize = 5;
+                const totalPages = Math.max(1, Math.ceil(carts.length / pageSize));
+                const page = Math.min(cartPage, totalPages);
+                const start = (page - 1) * pageSize;
+                const rows = carts.slice(start, start + pageSize);
+
+                return carts.length > 0 ? (
+                  <>
+                    <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+                      <table className="w-full text-sm table-fixed">
+                        <thead>
+                          <tr className="h-10">
+                            <th className="table-header text-left">Customer</th>
+                            <th className="table-header text-left">Phone</th>
+                            <th className="table-header text-left">Product</th>
+                            <th className="table-header text-left">Campaign</th>
+                            <th className="table-header text-left">Last activity</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((c) => (
+                            <tr key={c.id} className="table-row h-10">
+                              <td className="table-cell font-medium text-surface-900 dark:text-surface-100 truncate">{c.customerName}</td>
+                              <td className="table-cell font-mono text-xs truncate">{c.customerPhoneDisplay}</td>
+                              <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
+                              <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.campaignName ?? '—'}</td>
+                              <td className="table-cell text-surface-700 dark:text-surface-300 whitespace-nowrap">
+                                {new Date(c.updatedAt).toLocaleDateString('en-NG', {
+                                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                                })}
+                              </td>
+                            </tr>
+                          ))}
+                          {rows.length < pageSize &&
+                            Array.from({ length: pageSize - rows.length }).map((_, i) => (
+                              <tr key={`empty-${i}`} className="h-10" aria-hidden="true">
+                                <td colSpan={5} className="table-cell border-b border-transparent" />
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-surface-100 dark:border-surface-800 shrink-0">
+                      <span className="text-xs text-surface-600 dark:text-surface-400">
+                        Page {page} of {totalPages}
+                        {carts.length > 0 && (
+                          <span className="ml-1">
+                            ({start + 1}–{Math.min(start + pageSize, carts.length)} of {carts.length})
+                          </span>
+                        )}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={page <= 1}
+                          onClick={() => setCartPage((p) => Math.max(1, p - 1))}
+                        >
+                          Prev
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={page >= totalPages}
+                          onClick={() => setCartPage((p) => Math.min(totalPages, p + 1))}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-surface-700 dark:text-surface-300 py-8 text-center">No live carts</p>
+                );
+              }}
+            </DeferredSection>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reassign order modal ───────────────── */}
+      {reassignOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">
-              Schedule Callback
+              Reassign order
             </h3>
             <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
-              For: {callbackModal.customerName} ({callbackModal.orderId.slice(0, 8)}...)
+              {reassignOrder.customerName} ({reassignOrder.orderId.slice(0, 8)}...)
             </p>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Retry After
-                </label>
-                <select
-                  value={callbackDelay}
-                  onChange={(e) => setCallbackDelay(e.target.value)}
-                  className="input"
-                >
-                  <option value="30">30 minutes</option>
-                  <option value="60">1 hour</option>
-                  <option value="120">2 hours (default)</option>
-                  <option value="240">4 hours</option>
-                  <option value="480">8 hours</option>
-                  <option value="1440">Tomorrow (24 hours)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Notes for next call attempt
-                </label>
-                <textarea
-                  value={callbackNotes}
-                  onChange={(e) => setCallbackNotes(e.target.value)}
-                  className="input"
-                  rows={3}
-                  placeholder="e.g., Customer was busy, try after 5pm..."
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                Assign to agent
+              </label>
+              <select
+                value={reassignToAgentId}
+                onChange={(e) => setReassignToAgentId(e.target.value)}
+                className="input"
+              >
+                <option value="">Select agent...</option>
+                {workloads
+                  .filter((w: AgentWorkload) => w.agentId !== reassignOrder.assignedCsId && w.pendingCount < w.capacity)
+                  .map((w: AgentWorkload) => (
+                    <option key={w.agentId} value={w.agentId}>
+                      {w.agentName} ({w.pendingCount}/{w.capacity})
+                    </option>
+                  ))}
+              </select>
             </div>
 
             <div className="flex items-center justify-end gap-3 mt-6">
               <Button
                 variant="secondary"
                 onClick={() => {
-                  setCallbackModal(null);
-                  setCallbackDelay('120');
-                  setCallbackNotes('');
+                  setReassignOrder(null);
+                  setReassignToAgentId('');
                 }}
               >
                 Cancel
               </Button>
               <Button
                 variant="primary"
-                onClick={() => {
-                  fetcher.submit(
-                    {
-                      intent: 'scheduleCallback',
-                      orderId: callbackModal.orderId,
-                      delayMinutes: callbackDelay,
-                      notes: callbackNotes || '',
-                    },
-                    { method: 'post' },
-                  );
-                  setCallbackModal(null);
-                  setCallbackDelay('120');
-                  setCallbackNotes('');
-                }}
-                disabled={fetcher.state === 'submitting'}
+                onClick={handleReassignSubmit}
+                disabled={!reassignToAgentId || fetcher.state === 'submitting'}
                 loading={fetcher.state === 'submitting'}
-                loadingText="Scheduling..."
+                loadingText="Reassigning..."
               >
-                Schedule Callback
+                Reassign
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Performance Quick Stats */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Order Pipeline</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {(['UNPROCESSED', 'CS_ENGAGED', 'CONFIRMED', 'CANCELLED'] as const).map((status) => {
-            const count = (statusCounts as Record<string, number>)[status] ?? 0;
-            return (
-              <div key={status} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-                <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-                  {formatStatus(status)}
-                </p>
-                <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">{count}</p>
-              </div>
+      {/* Performance Quick Stats moved into top Overview card */}
+
+      {cancelConfirmOrder && (
+        <ConfirmActionModal
+          open={!!cancelConfirmOrder}
+          onClose={() => setCancelConfirmOrder(null)}
+          title="Cancel order?"
+          description={
+            <>
+              Cancel order for <strong>{cancelConfirmOrder.customerName}</strong>? The order will be moved to Cancelled. You can add a reason on the order detail page if needed.
+            </>
+          }
+          confirmLabel="Cancel order"
+          variant="danger"
+          loading={fetcher.state === 'submitting'}
+          onConfirm={() => {
+            fetcher.submit(
+              {
+                intent: 'transition',
+                orderId: cancelConfirmOrder.orderId,
+                newStatus: 'CANCELLED',
+                reason: 'Cancelled by CS from dashboard',
+              },
+              { method: 'post' },
             );
-          })}
+          }}
+        />
+      )}
+
+      {/* View all Agent Workloads modal — 20 per page, Prev/Next */}
+      {viewAllAgentsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+          onClick={() => setViewAllAgentsOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="view-all-agents-title"
+        >
+          <div
+            className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
+              <h2 id="view-all-agents-title" className="text-lg font-semibold text-surface-900 dark:text-white">
+                Agent Workloads
+              </h2>
+              <button
+                type="button"
+                onClick={() => setViewAllAgentsOpen(false)}
+                className="p-2 rounded-lg text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-4 py-2 border-b border-surface-100 dark:border-surface-800 shrink-0">
+              <p className="text-sm text-surface-600 dark:text-surface-400">
+                {workloads.length} agent{workloads.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {(() => {
+                const pageSize = 20;
+                const totalPages = Math.max(1, Math.ceil(workloads.length / pageSize));
+                const page = Math.min(viewAllPage, totalPages);
+                const start = (page - 1) * pageSize;
+                const rows = workloads.slice(start, start + pageSize);
+
+                return (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
+                      {rows.map((agent: AgentWorkload) => (
+                        <AgentWorkloadCard key={agent.agentId} agent={agent} />
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-surface-100 dark:border-surface-800">
+                      <span className="text-sm text-surface-600 dark:text-surface-400">
+                        Page {page} of {totalPages}
+                        {workloads.length > 0 && (
+                          <span className="ml-1">
+                            ({start + 1}–{Math.min(start + pageSize, workloads.length)} of {workloads.length})
+                          </span>
+                        )}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={page <= 1}
+                          onClick={() => setViewAllPage((p) => Math.max(1, p - 1))}
+                        >
+                          Prev
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={page >= totalPages}
+                          onClick={() => setViewAllPage((p) => Math.min(totalPages, p + 1))}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -38,6 +38,13 @@ export const usersRouter = router({
     }),
 
   /**
+   * List CS team (HEAD_OF_CS + CS_AGENT) for Team page. Gated by cs.teamOverview.
+   */
+  listCSTeam: permissionProcedure('cs.teamOverview').query(async () => {
+    return getUsersService().listCSTeam();
+  }),
+
+  /**
    * Get a single user by ID.
    */
   getById: authedProcedure

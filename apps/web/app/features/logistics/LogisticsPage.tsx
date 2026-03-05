@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '~/components/ui/button';
 import { useFetcher, useRevalidator } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import type {
@@ -270,13 +271,7 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
                       {order.orderId.slice(0, 8)}...
                     </td>
                     <td className="table-cell">
-                      <span className={
-                        order.status === 'DISPATCHED'
-                          ? 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
-                          : 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
-                      }>
-                        {order.status}
-                      </span>
+                      <OrderStatusBadge status={order.status} />
                     </td>
                     <td className="table-cell text-surface-700 dark:text-surface-300">{order.customerName}</td>
                     <td className="table-cell text-surface-800 dark:text-surface-200">{order.riderName ?? '—'}</td>
@@ -373,10 +368,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(!showAddProvider)}>
-            + Provider
+            {showAddProvider ? 'Close' : '+ Provider'}
           </Button>
           <Button variant="primary" size="sm" onClick={() => setShowAddLocation(!showAddLocation)}>
-            + Location
+            {showAddLocation ? 'Close' : '+ Location'}
           </Button>
         </div>
       </div>

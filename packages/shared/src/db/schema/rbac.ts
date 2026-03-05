@@ -1,6 +1,6 @@
 import { pgTable, text, boolean, timestamp, primaryKey } from 'drizzle-orm/pg-core';
 import { userRoleEnum } from './enums';
-import { uuidv7Pk } from './helpers';
+import { uuidv7Pk, temporalColumns } from './helpers';
 import { users } from './users';
 
 export const permissions = pgTable('permissions', {
@@ -12,6 +12,7 @@ export const permissions = pgTable('permissions', {
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
+  ...temporalColumns,
 });
 
 export const rolePermissions = pgTable(
@@ -21,6 +22,7 @@ export const rolePermissions = pgTable(
     permissionId: text('permission_id')
       .notNull()
       .references(() => permissions.id, { onDelete: 'cascade' }),
+    ...temporalColumns,
   },
   (t) => ({
     pk: primaryKey({ columns: [t.role, t.permissionId] }),
@@ -40,4 +42,5 @@ export const userPermissions = pgTable('user_permissions', {
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
+  ...temporalColumns,
 });

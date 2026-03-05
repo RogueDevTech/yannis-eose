@@ -1,22 +1,40 @@
 import { useState } from 'react';
 import { Button } from '~/components/ui/button';
-import { Link } from '@remix-run/react';
+import { Link, useSearchParams, useNavigation } from '@remix-run/react';
 import type { User } from './types';
 import { ROLE_COLORS, USER_STATUS_COLORS, ROLE_OPTIONS, formatRole } from './types';
+import { Spinner } from '~/components/ui/spinner';
 
 interface UsersListPageProps {
   users: User[];
   total: number;
+  statusParam?: string;
+  roleParam?: string;
 }
 
-export function UsersListPage({ users, total }: UsersListPageProps) {
-  const [selectedRole, setSelectedRole] = useState('ALL');
-  const [selectedStatus, setSelectedStatus] = useState('ALL');
+export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = 'ALL' }: UsersListPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
+  const navigation = useNavigation();
+  const isFilterLoading = navigation.state === 'loading';
+
+  const handleStatusChange = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'ALL') next.delete('status');
+    else next.set('status', value);
+    setSearchParams(next, { replace: true });
+  };
+
+  const handleRoleChange = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'ALL') next.delete('role');
+    else next.set('role', value);
+    setSearchParams(next, { replace: true });
+  };
 
   const filteredUsers = users.filter((user) => {
-    if (selectedRole !== 'ALL' && user.role !== selectedRole) return false;
-    if (selectedStatus !== 'ALL' && user.status !== selectedStatus) return false;
+    if (statusParam !== 'ALL' && user.status !== statusParam) return false;
+    if (roleParam !== 'ALL' && user.role !== roleParam) return false;
     if (
       searchQuery &&
       !user.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
@@ -45,7 +63,7 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Users</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
@@ -57,9 +75,15 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
           </p>
         </div>
         <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Inactive</p>
-          <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
-            {users.filter((u) => u.status === 'INACTIVE').length}
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Pending</p>
+          <p className="text-2xl font-bold text-info-600 dark:text-info-400 mt-1">
+            {users.filter((u) => u.status === 'PENDING').length}
+          </p>
+        </div>
+        <div className="card">
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Inactive / Archived</p>
+          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
+            {users.filter((u) => u.status === 'INACTIVE' || u.status === 'ARCHIVED').length}
           </p>
         </div>
         <div className="card">
@@ -92,18 +116,25 @@ export function UsersListPage({ users, total }: UsersListPageProps) {
             />
           </div>
           <select
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
+            value={statusParam}
+            onChange={(e) => handleStatusChange(e.target.value)}
             className="input w-full sm:w-40 py-1.5"
           >
             <option value="ALL">All Status</option>
+            <option value="PENDING">Pending</option>
             <option value="ACTIVE">Active</option>
             <option value="INACTIVE">Inactive</option>
             <option value="ARCHIVED">Archived</option>
+            <option value="DEACTIVATED">Deactivated</option>
           </select>
+          {isFilterLoading && (
+            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+              <Spinner size="sm" className="shrink-0" />
+            </span>
+          )}
           <select
-            value={selectedRole}
-            onChange={(e) => setSelectedRole(e.target.value)}
+            value={roleParam}
+            onChange={(e) => handleRoleChange(e.target.value)}
             className="input w-full sm:w-48 py-1.5"
           >
             {ROLE_OPTIONS.map((role) => (

@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { SettingsPage } from '~/features/settings/SettingsPage';
 
 export const meta: MetaFunction = () => [
@@ -75,7 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update profile' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to update profile' }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Profile updated' });
   }
@@ -99,9 +99,53 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to change password' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to change password' }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Password changed' });
+  }
+
+  if (intent === 'updateSystemSettings') {
+    const strictDataMode = formData.get('strictDataMode')?.toString() === 'true';
+    const voipEnabled = formData.get('voipEnabled')?.toString() === 'true';
+    const csDispatchStrategy = formData.get('csDispatchStrategy')?.toString() ?? 'load_balanced';
+    if (csDispatchStrategy !== 'load_balanced' && csDispatchStrategy !== 'performance') {
+      return json({ error: 'Invalid CS dispatch strategy' }, { status: 400 });
+    }
+
+    // 1. VOIP (dedicated procedure)
+    const voipRes = await apiRequest<unknown>('/trpc/voip.setEnabled', {
+      method: 'POST',
+      cookie,
+      body: { enabled: voipEnabled },
+    });
+    if (!voipRes.ok) {
+      const errorData = voipRes.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to update VOIP setting' }, { status: safeStatus(voipRes.status) });
+    }
+
+    // 2. Strict Data Mode
+    const strictRes = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
+      method: 'POST',
+      cookie,
+      body: { key: 'STRICT_DATA_MODE', value: { enabled: strictDataMode } },
+    });
+    if (!strictRes.ok) {
+      const errorData = strictRes.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to update Data Security setting' }, { status: safeStatus(strictRes.status) });
+    }
+
+    // 3. CS dispatch strategy
+    const csRes = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
+      method: 'POST',
+      cookie,
+      body: { key: 'CS_DISPATCH_STRATEGY', value: { strategy: csDispatchStrategy } },
+    });
+    if (!csRes.ok) {
+      const errorData = csRes.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to update CS order distribution' }, { status: safeStatus(csRes.status) });
+    }
+
+    return json({ success: true, message: 'System settings saved' });
   }
 
   if (intent === 'updateSystemSetting') {
@@ -126,7 +170,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
       if (!res.ok) {
         const errorData = res.data as { error?: { message?: string } };
-        return json({ error: errorData?.error?.message ?? 'Failed to update VOIP setting' }, { status: res.status });
+        return json({ error: errorData?.error?.message ?? 'Failed to update VOIP setting' }, { status: safeStatus(res.status) });
       }
       return json({ success: true, message: enabled ? 'VOIP enabled' : 'VOIP disabled' });
     }
@@ -138,7 +182,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update setting' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to update setting' }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Setting updated' });
   }
@@ -159,7 +203,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update notification config' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to update notification config' }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Notification email settings updated' });
   }

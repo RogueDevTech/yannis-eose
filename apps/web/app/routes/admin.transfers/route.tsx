@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { TransfersPage } from '~/features/transfers/TransfersPage';
 import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from '~/features/transfers/types';
 
@@ -73,7 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to initiate transfer' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to initiate transfer' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -94,7 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to verify transfer' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to verify transfer' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

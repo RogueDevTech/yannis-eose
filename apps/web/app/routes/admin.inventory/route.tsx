@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption } from '~/features/inventory/types';
@@ -11,7 +11,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'inventory.read');
+  const user = await requirePermission(request, 'inventory.read');
   const cookie = getSessionCookie(request);
 
   // Start fetches concurrently
@@ -27,8 +27,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (levelsRes.data as { result?: { data?: { levels: InventoryLevel[]; pagination: { total: number } } } })?.result?.data
     : null;
 
-  // Return movements as un-awaited promise
-  const movementsData = movementsPromise.then((movementsRes) => {
+  // Await movements data
+  const movementsData = await movementsPromise.then((movementsRes) => {
     if (!movementsRes.ok) return { movements: [] as StockMovement[], total: 0 };
     const data = (movementsRes.data as { result?: { data?: { movements: StockMovement[]; pagination: { total: number } } } })?.result?.data;
     return { movements: data?.movements ?? [], total: data?.pagination?.total ?? 0 };
@@ -52,10 +52,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     levels: levelsData?.levels ?? [],
     totalLevels: levelsData?.pagination?.total ?? 0,
-    movements: movementsData.then((d) => d.movements),
-    totalMovements: movementsData.then((d) => d.total),
+    movements: movementsData.movements,
+    totalMovements: movementsData.total,
     products,
     locations,
+    canIntake: user.permissions?.includes('inventory.intake') ?? false,
   };
 }
 
@@ -90,7 +91,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to add stock' }, { status: res.status });
+      return json({ error: errorData?.error?.message ?? 'Failed to add stock' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

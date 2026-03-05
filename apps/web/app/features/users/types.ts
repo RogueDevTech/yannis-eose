@@ -23,8 +23,10 @@ export const ROLE_COLORS: Record<string, string> = {
 };
 
 export const USER_STATUS_COLORS: Record<string, string> = {
+  PENDING: 'badge-info',
   ACTIVE: 'badge-success',
   INACTIVE: 'badge-danger',
+  DEACTIVATED: 'badge-danger',
   ARCHIVED: 'badge-warning',
 };
 
@@ -184,10 +186,14 @@ export interface UserDetailLoaderData {
   adjustments: Promise<UserAdjustment[]>;
   auditLog: Promise<UserAuditEntry[]>;
   marketingMetrics: Promise<UserMarketingMetrics | null>;
+  fundingBalance: Promise<{ totalReceived: string; totalSpend: string; balance: string } | null>;
   pendingEmailChange: Promise<PendingEmailChange | null>;
   stockMovements: Promise<{ movements: UserStockMovement[]; total: number }> | null;
   financeActivity: Promise<{ approvals: UserApprovalRecord[]; total: number }> | null;
   canDisburseToThisUser?: boolean;
+  isSuperAdmin?: boolean;
+  isViewerHeadOfMarketing?: boolean;
+  isViewerHeadOfCS?: boolean;
 }
 
 // ─── Avatar gradient mapping by role ────────────────────

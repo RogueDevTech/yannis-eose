@@ -37,6 +37,7 @@ const STATUS_LABELS: Record<string, string> = {
   INACTIVE: 'Inactive',
   ARCHIVED: 'Archived',
   UNPROCESSED: 'Unprocessed',
+  CS_ASSIGNED: 'CS Assigned',
   CS_ENGAGED: 'CS Engaged',
   CONFIRMED: 'Confirmed',
   CANCELLED: 'Cancelled',
@@ -117,6 +118,7 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const customer = data.customer_name ? ` for ${data.customer_name}` : '';
     if (status === 'UNPROCESSED') return `New order created${customer}`;
+    if (status === 'CS_ASSIGNED') return `Order assigned to CS agent${customer}`;
     if (status === 'CS_ENGAGED') return `Engaged CS call on order${customer}`;
     if (status === 'CONFIRMED') return `Confirmed order${customer}`;
     if (status === 'CANCELLED') {

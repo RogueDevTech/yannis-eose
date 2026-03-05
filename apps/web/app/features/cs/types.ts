@@ -70,6 +70,16 @@ export interface PendingCart {
   updatedAt: string;
 }
 
+/** Single item in the live activities feed (from socket events). */
+export interface CSActivityItem {
+  id: string;
+  type: 'order:new' | 'order:status_changed' | 'order:assigned' | 'order:reassigned' | 'order:assigned_bulk' | 'order:assignments_changed' | 'cs:duplicates_changed' | 'cart:updated';
+  orderId?: string;
+  description: string;
+  timestamp: string;
+  meta?: Record<string, unknown>;
+}
+
 /** What the loader returns — mix of resolved data + streaming promises */
 export interface CSDashboardStreamData {
   // Critical (resolved immediately)
@@ -87,4 +97,6 @@ export interface CSDashboardStreamData {
   leaderboardPeriod: 'this_month' | 'all_time';
   cartStats?: Promise<{ pending: number; abandonedLast24h: number }>;
   pendingCarts?: Promise<PendingCart[]>;
+  /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
+  liveEvents?: string[];
 }

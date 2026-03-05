@@ -4,7 +4,8 @@ type Variant = 'warning' | 'danger' | 'success' | 'info';
 
 interface ActionItem {
   label: string;
-  href: string;
+  href?: string;
+  onClick?: () => void;
 }
 
 interface InlineNotificationProps {
@@ -57,15 +58,26 @@ export function InlineNotification({
         <p className={`text-sm ${classes.text}`}>{message}</p>
         {items.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
-            {items.map((item) => (
-              <Link
-                key={item.href}
-                to={item.href}
-                className={`text-sm shrink-0 ${classes.link}`}
-              >
-                {item.label} →
-              </Link>
-            ))}
+            {items.map((item, index) =>
+              item.onClick ? (
+                <button
+                  key={item.label + index}
+                  type="button"
+                  onClick={item.onClick}
+                  className={`text-sm shrink-0 ${classes.link} bg-transparent border-none cursor-pointer p-0`}
+                >
+                  {item.label} →
+                </button>
+              ) : item.href ? (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  className={`text-sm shrink-0 ${classes.link}`}
+                >
+                  {item.label} →
+                </Link>
+              ) : null
+            )}
           </div>
         )}
       </div>

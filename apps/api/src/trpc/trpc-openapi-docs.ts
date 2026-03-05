@@ -41,6 +41,8 @@ const ENDPOINTS: TrpcEndpoint[] = [
   { procedure: 'orders.update', method: 'POST', summary: 'Update order details', tag: 'Orders' },
   { procedure: 'orders.assignToCS', method: 'POST', summary: 'Assign order to CS agent', tag: 'Orders' },
   { procedure: 'orders.bulkReassign', method: 'POST', summary: 'Bulk reassign orders', tag: 'Orders' },
+  { procedure: 'orders.redistributeCSOrders', method: 'POST', summary: 'Redistribute CS-assigned orders', tag: 'Orders' },
+  { procedure: 'orders.distributeUnassignedOrders', method: 'POST', summary: 'Distribute unassigned (UNPROCESSED) orders to CS agents', tag: 'Orders' },
   { procedure: 'orders.statusCounts', method: 'GET', summary: 'Get order status counts', tag: 'Orders' },
   { procedure: 'orders.csWorkloads', method: 'GET', summary: 'CS agent workloads', tag: 'Orders' },
   { procedure: 'orders.releaseExpiredLocks', method: 'POST', summary: 'Release expired order locks', tag: 'Orders' },
@@ -111,6 +113,10 @@ const ENDPOINTS: TrpcEndpoint[] = [
   { procedure: 'logistics.stuckOrders', method: 'GET', summary: 'Stuck orders', tag: 'Logistics' },
   { procedure: 'logistics.transferDelays', method: 'GET', summary: 'Transfer delays', tag: 'Logistics' },
   { procedure: 'logistics.healthDashboard', method: 'GET', summary: 'Logistics health dashboard', tag: 'Logistics' },
+  { procedure: 'logistics.submitDeliveryConfirmation', method: 'POST', summary: 'Submit delivery confirmation for HOL approval', tag: 'Logistics' },
+  { procedure: 'logistics.listDeliveryConfirmationRequests', method: 'GET', summary: 'List delivery confirmation requests', tag: 'Logistics' },
+  { procedure: 'logistics.approveDeliveryConfirmation', method: 'POST', summary: 'Approve delivery confirmation', tag: 'Logistics' },
+  { procedure: 'logistics.rejectDeliveryConfirmation', method: 'POST', summary: 'Reject delivery confirmation', tag: 'Logistics' },
 
   // Marketing
   { procedure: 'marketing.createFunding', method: 'POST', summary: 'Create funding record', tag: 'Marketing' },
@@ -184,6 +190,8 @@ const ENDPOINTS: TrpcEndpoint[] = [
 
   // Dashboard
   { procedure: 'dashboard.ceoOverview', method: 'GET', summary: 'CEO executive overview', tag: 'Dashboard' },
+  { procedure: 'dashboard.ceoOverviewTimeSeries', method: 'GET', summary: 'CEO overview time-series (daily revenue & orders)', tag: 'Dashboard' },
+  { procedure: 'dashboard.orderPipelineChart', method: 'GET', summary: 'Order pipeline chart (Volume, CS Engaged, Confirmed, Logistics, Delivered)', tag: 'Dashboard' },
 
   // Settings
   { procedure: 'settings.getSystemSettings', method: 'GET', summary: 'Get system settings', tag: 'Settings' },

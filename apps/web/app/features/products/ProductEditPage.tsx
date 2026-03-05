@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Form, useNavigation, Link } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PRODUCT_STATUS_COLORS } from './types';
 import type { Product } from './types';
@@ -22,6 +23,8 @@ interface ProductEditPageProps {
   product: Product;
   categories: CategoryOption[];
   actionData?: { error?: string };
+  /** When provided, show a "View" link back to the product view (no edit mode). */
+  productId?: string;
 }
 
 function parseOffers(offers: Product['offers']): OfferRow[] {
@@ -33,10 +36,12 @@ function parseOffers(offers: Product['offers']): OfferRow[] {
   }));
 }
 
-export function ProductEditPage({ product, categories, actionData }: ProductEditPageProps) {
+export function ProductEditPage({ product, categories, actionData, productId }: ProductEditPageProps) {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
   const errorRef = useRef<HTMLDivElement>(null);
+  const formWrapperRef = useRef<HTMLDivElement>(null);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
 
   const [offers, setOffers] = useState<OfferRow[]>(() => parseOffers(product.offers));
 
@@ -59,6 +64,16 @@ export function ProductEditPage({ product, categories, actionData }: ProductEdit
       prev.map((o, i) => (i === index ? { ...o, [field]: value } : o)),
     );
   }
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    if (product.status === 'ARCHIVED') return;
+    const form = e.currentTarget;
+    const statusSelect = form.querySelector<HTMLSelectElement>('[name="status"]');
+    if (statusSelect?.value === 'ARCHIVED') {
+      e.preventDefault();
+      setShowArchiveConfirm(true);
+    }
+  };
 
   return (
     <div className="w-full space-y-6">
@@ -91,7 +106,8 @@ export function ProductEditPage({ product, categories, actionData }: ProductEdit
         </div>
       )}
 
-      <Form method="post" className="space-y-6">
+      <div ref={formWrapperRef}>
+      <Form method="post" className="space-y-6" onSubmit={handleSubmit}>
         <input type="hidden" name="productId" value={product.id} />
         <input type="hidden" name="offers" value={JSON.stringify(
           offers.map((o) => ({
@@ -299,14 +315,42 @@ export function ProductEditPage({ product, categories, actionData }: ProductEdit
 
         {/* Actions */}
         <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
-          <Link to="/admin/products" className="btn-secondary w-full sm:w-auto">
-            Cancel
-          </Link>
+          {productId ? (
+            <Link to={`/admin/products/${productId}`} className="btn-secondary w-full sm:w-auto">
+              View
+            </Link>
+          ) : (
+            <Link to="/admin/products" className="btn-secondary w-full sm:w-auto">
+              Cancel
+            </Link>
+          )}
           <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isSubmitting} loadingText="Saving..." disabled={offers.length === 0}>
             Save Changes
           </Button>
         </div>
       </Form>
+      </div>
+
+      {showArchiveConfirm && (
+        <ConfirmActionModal
+          open={showArchiveConfirm}
+          onClose={() => setShowArchiveConfirm(false)}
+          title={`Archive "${product.name}"?`}
+          description={<><strong>{product.name}</strong> will be hidden from default product lists.</>}
+          details={
+            <ul className="list-disc list-inside text-sm text-surface-600 dark:text-surface-400 space-y-1">
+              <li>Hidden from default product lists</li>
+              <li>You can change status back anytime</li>
+            </ul>
+          }
+          confirmLabel="Archive"
+          variant="archive"
+          loading={isSubmitting}
+          onConfirm={() => {
+            formWrapperRef.current?.querySelector<HTMLFormElement>('form')?.requestSubmit();
+          }}
+        />
+      )}
     </div>
   );
 }

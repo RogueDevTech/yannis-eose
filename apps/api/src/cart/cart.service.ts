@@ -1,9 +1,10 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { eq, and, lt, desc, count, gte } from 'drizzle-orm';
+import { eq, and, lt, desc, count, gte, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
+import { EventsService } from '../events/events.service';
 
 function maskPhone(phoneHash: string): string {
   if (phoneHash.length <= 8) return '****';
@@ -12,7 +13,10 @@ function maskPhone(phoneHash: string): string {
 
 @Injectable()
 export class CartService {
-  constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    private readonly events: EventsService,
+  ) {}
 
   /**
    * Save or upsert a cart. Called by Edge Worker when user fills name + phone.
@@ -51,6 +55,7 @@ export class CartService {
           updatedAt: now,
         })
         .where(eq(schema.cartAbandonments.id, existingRow.id));
+      this.events.emitToRoom('cs-all', 'cart:updated', {});
       return { id: existingRow.id, created: false };
     }
 
@@ -70,6 +75,7 @@ export class CartService {
     if (!row) {
       throw new Error('Failed to create cart');
     }
+    this.events.emitToRoom('cs-all', 'cart:updated', {});
     return { id: row.id, created: true };
   }
 
@@ -85,10 +91,12 @@ export class CartService {
         updatedAt: new Date(),
       })
       .where(eq(schema.cartAbandonments.id, cartId));
+    this.events.emitToRoom('cs-all', 'cart:updated', {});
   }
 
   /**
    * Mark cart as CONVERTED by phone hash + product (when cartId not available).
+   * Matches both PENDING and ABANDONED so we "bring back" carts that were marked abandoned if the user completes later.
    */
   async convertByPhoneAndProduct(
     campaignId: string,
@@ -108,18 +116,20 @@ export class CartService {
           eq(schema.cartAbandonments.campaignId, campaignId),
           eq(schema.cartAbandonments.customerPhoneHash, customerPhoneHash),
           eq(schema.cartAbandonments.productId, productId),
-          eq(schema.cartAbandonments.status, 'PENDING'),
+          inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
         ),
       );
+    this.events.emitToRoom('cs-all', 'cart:updated', {});
   }
 
   /**
    * Cron: mark PENDING carts as ABANDONED every 10 minutes.
-   * Carts not updated in 15+ minutes are considered abandoned.
+   * Carts not updated in 5+ minutes are considered abandoned.
+   * If the user later completes the order, we still convert the cart (CONVERTED) via convert() / convertByPhoneAndProduct().
    */
   @Cron('0 */10 * * * *') // Every 10 minutes at :00 seconds
   async handleAbandonedCarts(): Promise<void> {
-    const thresholdMinutes = 15;
+    const thresholdMinutes = 5;
     const count = await this.markAbandoned(thresholdMinutes);
     if (count > 0) {
       console.log(`[Cart] Marked ${count} cart(s) as abandoned`);
@@ -142,6 +152,9 @@ export class CartService {
       )
       .returning({ id: schema.cartAbandonments.id });
 
+    if (result.length > 0) {
+      this.events.emitToRoom('cs-all', 'cart:updated', {});
+    }
     return result.length;
   }
 

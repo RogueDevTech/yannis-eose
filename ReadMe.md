@@ -58,3 +58,5 @@ pnpm turbo build --filter=@yannis/web   # Build web only
 cd packages/shared && pnpm db:migrate   # Run migrations
 cd apps/web && pnpm exec playwright test # Run E2E tests
 ```
+
+> **Note:** AWS/EC2 and other deployment secrets belong in environment variables or a secrets manager, not in this repo. Use `.env` (gitignored) or your deployment platform's secret storage.

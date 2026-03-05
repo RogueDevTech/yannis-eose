@@ -1,9 +1,19 @@
-import { Link } from '@remix-run/react';
-import { DateFilterBar } from '~/components/dashboard/DateFilterBar';
-import type { CEODashboardData } from './types';
+import { useState, useEffect } from 'react';
+import { Link, useSearchParams, useNavigation } from '@remix-run/react';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, AreaChart, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import type { CEODashboardData, CEODashboardFilters } from './types';
+
+/** Renders children only on the client to avoid Recharts SSR dimension warnings. */
+function ClientOnly({ children, fallback }: { children: React.ReactNode; fallback?: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  return mounted ? <>{children}</> : <>{fallback}</>;
+}
 
 const STATUS_LABELS: Record<string, string> = {
   UNPROCESSED: 'Unprocessed',
+  CS_ASSIGNED: 'CS Assigned',
   CS_ENGAGED: 'CS Engaged',
   CONFIRMED: 'Confirmed',
   ALLOCATED: 'Allocated',
@@ -20,6 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 const STATUS_COLORS: Record<string, string> = {
   UNPROCESSED: 'text-warning-600 dark:text-warning-400',
+  CS_ASSIGNED: 'text-info-600 dark:text-info-400',
   CS_ENGAGED: 'text-info-600 dark:text-info-400',
   CONFIRMED: 'text-brand-600 dark:text-brand-400',
   ALLOCATED: 'text-info-600 dark:text-info-400',
@@ -34,6 +45,30 @@ const STATUS_COLORS: Record<string, string> = {
   WRITTEN_OFF: 'text-danger-600 dark:text-danger-400',
 };
 
+/** Hex colors for Recharts (status) */
+const STATUS_COLORS_HEX: Record<string, string> = {
+  UNPROCESSED: '#d97706',
+  CS_ASSIGNED: '#0284c7',
+  CS_ENGAGED: '#0284c7',
+  CONFIRMED: '#4f46e5',
+  ALLOCATED: '#0ea5e9',
+  DISPATCHED: '#38bdf8',
+  IN_TRANSIT: '#6366f1',
+  DELIVERED: '#059669',
+  COMPLETED: '#10b981',
+  CANCELLED: '#dc2626',
+  RETURNED: '#ef4444',
+  PARTIALLY_DELIVERED: '#f59e0b',
+  RESTOCKED: '#34d399',
+  WRITTEN_OFF: '#b91c1c',
+};
+
+/** Hex colors for cost breakdown donut */
+const COST_COLORS_HEX = ['#dc2626', '#ea580c', '#d97706', '#ca8a04', '#65a30d', '#b91c1c'] as const;
+
+/** Order pipeline chart stage colors (funnel: volume → delivered) */
+const PIPELINE_CHART_COLORS = ['#6366f1', '#0284c7', '#4f46e5', '#0ea5e9', '#059669'] as const;
+
 function fmt(n: number): string {
   return `\u20A6${Math.round(n).toLocaleString()}`;
 }
@@ -44,11 +79,16 @@ function pct(n: number): string {
 
 export interface CEODashboardPageProps {
   data: CEODashboardData;
-  filters?: { startDate: string; endDate: string; periodAllTime?: boolean };
+  filters?: CEODashboardFilters;
   showBackToDashboard?: boolean;
 }
 
 export function CEODashboardPage({ data, filters = { startDate: '', endDate: '', periodAllTime: false }, showBackToDashboard = true }: CEODashboardPageProps) {
+  const [showChartView, setShowChartView] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = useNavigation();
+  const topic = filters?.topic ?? 'orders';
+  const isLoadingTopic = navigation.state === 'loading';
   const { costBreakdown, orderPipeline, marketing, csTeam, payroll } = data;
   const totalCosts =
     costBreakdown.landedCost +
@@ -79,6 +119,13 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowChartView((v) => !v)}
+            className="btn-secondary btn-sm"
+          >
+            {showChartView ? 'View as data' : 'View data in chart'}
+          </button>
           <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} />
           {showBackToDashboard && (
             <Link to="/admin" className="btn-secondary btn-sm">Back to Dashboard</Link>
@@ -86,6 +133,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         </div>
       </div>
 
+      {/* ── Data view: KPIs, lists, grids ─────────────────────── */}
+      {!showChartView && (
+        <>
       {/* ── Section 1: Revenue & Profit KPIs ────────────────── */}
       <div>
         <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
@@ -120,6 +170,58 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">
             Cost Breakdown
           </h2>
+          {showChartView && (
+          <div className="mb-4 h-48">
+            <ClientOnly fallback={<div className="h-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={
+                    totalCosts > 0
+                      ? [
+                          { name: 'Landed COGS', value: costBreakdown.landedCost },
+                          { name: 'Delivery Fees', value: costBreakdown.deliveryFee },
+                          { name: 'Ad Spend', value: costBreakdown.adSpend },
+                          { name: 'Commission', value: costBreakdown.commission },
+                          { name: 'Fulfillment', value: costBreakdown.fulfillmentCost },
+                          { name: 'Op. Loss', value: costBreakdown.operationalLoss },
+                        ].filter((d) => d.value > 0)
+                      : [{ name: 'No cost data', value: 1 }]
+                  }
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={48}
+                  outerRadius={72}
+                  paddingAngle={totalCosts > 0 ? 2 : 0}
+                  dataKey="value"
+                  nameKey="name"
+                  label={({ name, percent }) => (totalCosts > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : name)}
+                >
+                  {totalCosts > 0
+                    ? [
+                        costBreakdown.landedCost,
+                        costBreakdown.deliveryFee,
+                        costBreakdown.adSpend,
+                        costBreakdown.commission,
+                        costBreakdown.fulfillmentCost,
+                        costBreakdown.operationalLoss,
+                      ]
+                        .filter((v) => v > 0)
+                        .map((_, i) => (
+                          <Cell key={i} fill={COST_COLORS_HEX[i % COST_COLORS_HEX.length]} />
+                        ))
+                    : [<Cell key="empty" fill="#94a3b8" />]}
+                </Pie>
+                <Tooltip
+                  formatter={(value: number) => [totalCosts > 0 ? fmt(value) : '—', 'Amount']}
+                  contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-surface-200)' }}
+                />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+            </ClientOnly>
+          </div>
+          )}
           <div className="space-y-3">
             <CostRow label="Landed COGS" value={costBreakdown.landedCost} total={totalCosts} />
             <CostRow label="Delivery Fees" value={costBreakdown.deliveryFee} total={totalCosts} />
@@ -165,6 +267,48 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
           Order Pipeline
         </h2>
+
+        {/* Order pipeline chart: Volume → CS Engaged → Confirmed → Logistics distributed → Delivered (chart view only) */}
+        {showChartView && (
+        <div className="card mb-4">
+          <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-2">Order funnel</h3>
+          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+            Volume, CS engaged, Confirmed, Logistics distributed, and Delivered for the selected period.
+          </p>
+          <div className="h-64">
+            <ClientOnly fallback={<div className="h-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                layout="vertical"
+                data={[
+                  { stage: 'Volume', count: data.orderPipelineChart?.volume ?? 0, fill: PIPELINE_CHART_COLORS[0] },
+                  { stage: 'CS Engaged', count: data.orderPipelineChart?.csEngaged ?? 0, fill: PIPELINE_CHART_COLORS[1] },
+                  { stage: 'Confirmed', count: data.orderPipelineChart?.confirmed ?? 0, fill: PIPELINE_CHART_COLORS[2] },
+                  { stage: 'Logistics distributed', count: data.orderPipelineChart?.logisticsDistributed ?? 0, fill: PIPELINE_CHART_COLORS[3] },
+                  { stage: 'Delivered', count: data.orderPipelineChart?.delivered ?? 0, fill: PIPELINE_CHART_COLORS[4] },
+                ]}
+                margin={{ top: 8, right: 24, left: 100, bottom: 8 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-surface-200 dark:stroke-surface-700" />
+                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="stage" width={96} tick={{ fontSize: 12 }} />
+                <Tooltip
+                  formatter={(value: number) => [value, 'Orders']}
+                  contentStyle={{ borderRadius: '8px' }}
+                  cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                />
+                <Bar dataKey="count" name="Orders" radius={[0, 4, 4, 0]} minPointSize={4}>
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <Cell key={i} fill={PIPELINE_CHART_COLORS[i]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            </ClientOnly>
+          </div>
+        </div>
+        )}
+
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
           <KPICard label="Total Orders" value={orderPipeline.total.toString()} icon="orders" />
           <KPICard label="Active" value={orderPipeline.active.toString()} icon="pending" highlight="warning" />
@@ -193,6 +337,51 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
         <div className="card">
           <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Status Distribution</h3>
+          {showChartView && (
+          <div className="mb-4 h-52">
+            <ClientOnly fallback={<div className="h-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={
+                    orderPipeline.total > 0
+                      ? Object.entries(orderPipeline.statusCounts)
+                          .filter(([, count]) => count > 0)
+                          .sort(([, a], [, b]) => b - a)
+                          .map(([status, value]) => ({
+                            name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
+                            value,
+                            fill: STATUS_COLORS_HEX[status] ?? '#64748b',
+                          }))
+                      : [{ name: 'No orders', value: 1 }]
+                  }
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={56}
+                  outerRadius={88}
+                  paddingAngle={orderPipeline.total > 0 ? 2 : 0}
+                  dataKey="value"
+                  nameKey="name"
+                >
+                  {orderPipeline.total > 0
+                    ? Object.entries(orderPipeline.statusCounts)
+                        .filter(([, count]) => count > 0)
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([status]) => (
+                          <Cell key={status} fill={STATUS_COLORS_HEX[status] ?? '#64748b'} />
+                        ))
+                    : [<Cell key="empty" fill="#94a3b8" />]}
+                </Pie>
+                <Tooltip
+                  formatter={(value: number) => [orderPipeline.total > 0 ? value : '—', 'Orders']}
+                  contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-surface-200)' }}
+                />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+            </ClientOnly>
+          </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {Object.entries(orderPipeline.statusCounts)
               .filter(([, count]) => count > 0)
@@ -217,7 +406,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Marketing</h2>
-            <Link to="/admin/marketing" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
+            <Link to="/admin/marketing/funding" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
             <MetricRow label="Total Ad Spend" value={fmt(marketing.totalSpend)} />
@@ -243,7 +432,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white">CS Team</h2>
-            <Link to="/admin/cs" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
+            <Link to="/admin/cs/queue" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
             <MetricRow label="Agents Active" value={csTeam.agentCount.toString()} />
@@ -294,11 +483,11 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           {[
             { href: '/admin/cs/orders', label: 'Orders', icon: 'orders' },
-            { href: '/admin/finance', label: 'Finance', icon: 'finance' },
-            { href: '/admin/marketing', label: 'Marketing', icon: 'marketing' },
+            { href: '/admin/finance/overview', label: 'Finance', icon: 'finance' },
+            { href: '/admin/marketing/funding', label: 'Marketing', icon: 'marketing' },
             { href: '/admin/inventory', label: 'Inventory', icon: 'inventory' },
             { href: '/hr/payroll', label: 'HR & Payroll', icon: 'hr' },
-            { href: '/admin/audit', label: 'Audit Trail', icon: 'audit' },
+            { href: '/admin/analytics/audit', label: 'Audit Trail', icon: 'audit' },
           ].map((item) => (
             <Link
               key={item.href}
@@ -313,11 +502,325 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           ))}
         </div>
       </div>
+
+      </> )}
+
+      {/* ── Chart view only: content by topic (Orders / Media buyers / CS) ───────────────── */}
+      {showChartView && (
+      <>
+        {/* Topic filter: only visible in chart section */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <label htmlFor="chart-topic" className="text-sm font-medium text-surface-700 dark:text-surface-300">Chart topic</label>
+          <div className="flex items-center gap-2">
+            <select
+              id="chart-topic"
+              value={topic}
+              onChange={(e) => setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set('topic', e.target.value);
+                return next;
+              })}
+              disabled={isLoadingTopic}
+              className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 text-surface-900 dark:text-white text-sm py-2 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60"
+            >
+              <option value="orders">Orders</option>
+              <option value="media_buyers">Media buyers</option>
+              <option value="cs">CS</option>
+            </select>
+            {isLoadingTopic && (
+              <span
+                className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-surface-300 border-t-brand-500"
+                aria-hidden
+              />
+            )}
+          </div>
+        </div>
+
+        {topic === 'orders' && (
+        <div className="space-y-4">
+        <div>
+          <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
+            Revenue & orders over time
+          </h2>
+          <div className="card">
+            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+              <strong>Revenue</strong> and <strong>Orders delivered</strong> are by delivery date. <strong>Orders created</strong> shows daily order volume (any status) so the chart has data even before deliveries.
+            </p>
+            {data.timeSeries && data.timeSeries.length > 0 ? (
+              <div className="h-72 min-h-[288px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={data.timeSeries} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-surface-200 dark:stroke-surface-700" />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(v) => (typeof v === 'string' ? v.slice(0, 10) : v)}
+                    />
+                    <YAxis yAxisId="revenue" orientation="left" tick={{ fontSize: 11 }} tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
+                    <YAxis yAxisId="orders" orientation="right" tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: '8px' }}
+                      labelFormatter={(label) => (typeof label === 'string' ? label : String(label))}
+                      formatter={(value: number, name: string) => [
+                        name === 'Revenue' ? fmt(value) : value,
+                        name,
+                      ]}
+                      labelStyle={{ fontWeight: 600 }}
+                    />
+                    <Legend />
+                    <Area
+                      yAxisId="revenue"
+                      type="monotone"
+                      dataKey="revenue"
+                      name="Revenue"
+                      fill="#4f46e5"
+                      stroke="#4f46e5"
+                      fillOpacity={0.4}
+                    />
+                    <Line
+                      yAxisId="orders"
+                      type="monotone"
+                      dataKey="orderCount"
+                      name="Orders delivered"
+                      stroke="#059669"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                    <Line
+                      yAxisId="orders"
+                      type="monotone"
+                      dataKey="createdCount"
+                      name="Orders created"
+                      stroke="#0284c7"
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                      dot={{ r: 3 }}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-72 min-h-[288px] flex flex-col items-center justify-center gap-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm text-center px-4">
+                <p className="font-medium">No orders in this period.</p>
+                <p className="text-xs max-w-md">
+                  Revenue and &quot;Orders delivered&quot; appear when orders are marked Delivered. &quot;Orders created&quot; shows daily volume (any status). Try &quot;All time&quot; or a wider date range.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Second row: Cost + Status 50/50 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="card">
+            <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Breakdown</h2>
+            <div className="h-48 min-h-[192px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={
+                      totalCosts > 0
+                        ? [
+                            { name: 'Landed COGS', value: costBreakdown.landedCost },
+                            { name: 'Delivery Fees', value: costBreakdown.deliveryFee },
+                            { name: 'Ad Spend', value: costBreakdown.adSpend },
+                            { name: 'Commission', value: costBreakdown.commission },
+                            { name: 'Fulfillment', value: costBreakdown.fulfillmentCost },
+                            { name: 'Op. Loss', value: costBreakdown.operationalLoss },
+                          ].filter((d) => d.value > 0)
+                        : [{ name: 'No cost data', value: 1 }]
+                    }
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={48}
+                    outerRadius={72}
+                    paddingAngle={totalCosts > 0 ? 2 : 0}
+                    dataKey="value"
+                    nameKey="name"
+                    label={({ name, percent }) => (totalCosts > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : name)}
+                  >
+                    {totalCosts > 0
+                      ? [
+                          costBreakdown.landedCost,
+                          costBreakdown.deliveryFee,
+                          costBreakdown.adSpend,
+                          costBreakdown.commission,
+                          costBreakdown.fulfillmentCost,
+                          costBreakdown.operationalLoss,
+                        ]
+                          .filter((v) => v > 0)
+                          .map((_, i) => <Cell key={i} fill={COST_COLORS_HEX[i % COST_COLORS_HEX.length]} />)
+                      : [<Cell key="empty" fill="#94a3b8" />]}
+                  </Pie>
+                  <Tooltip formatter={(v: number) => [totalCosts > 0 ? fmt(v) : '—', '']} contentStyle={{ borderRadius: '8px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="card">
+            <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Status Distribution</h3>
+            <div className="h-52 min-h-[208px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={
+                      orderPipeline.total > 0
+                        ? Object.entries(orderPipeline.statusCounts)
+                            .filter(([, count]) => count > 0)
+                            .sort(([, a], [, b]) => b - a)
+                            .map(([status, value]) => ({
+                              name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
+                              value,
+                              fill: STATUS_COLORS_HEX[status] ?? '#64748b',
+                            }))
+                        : [{ name: 'No orders', value: 1 }]
+                    }
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={56}
+                    outerRadius={88}
+                    paddingAngle={orderPipeline.total > 0 ? 2 : 0}
+                    dataKey="value"
+                    nameKey="name"
+                  >
+                    {orderPipeline.total > 0
+                      ? Object.entries(orderPipeline.statusCounts)
+                          .filter(([, count]) => count > 0)
+                          .sort(([, a], [, b]) => b - a)
+                          .map(([status]) => (
+                            <Cell key={status} fill={STATUS_COLORS_HEX[status] ?? '#64748b'} />
+                          ))
+                      : [<Cell key="empty" fill="#94a3b8" />]}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => [orderPipeline.total > 0 ? value : '—', 'Orders']} contentStyle={{ borderRadius: '8px', border: '1px solid var(--color-surface-200)' }} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Third row: Order funnel full width */}
+        <div className="card">
+          <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-2">Order funnel</h3>
+          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+            Volume, CS engaged, Confirmed, Logistics distributed, and Delivered for the selected period.
+          </p>
+          <div className="h-64 min-h-[256px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                layout="vertical"
+                data={[
+                  { stage: 'Volume', count: data.orderPipelineChart?.volume ?? 0, fill: PIPELINE_CHART_COLORS[0] },
+                  { stage: 'CS Engaged', count: data.orderPipelineChart?.csEngaged ?? 0, fill: PIPELINE_CHART_COLORS[1] },
+                  { stage: 'Confirmed', count: data.orderPipelineChart?.confirmed ?? 0, fill: PIPELINE_CHART_COLORS[2] },
+                  { stage: 'Logistics distributed', count: data.orderPipelineChart?.logisticsDistributed ?? 0, fill: PIPELINE_CHART_COLORS[3] },
+                  { stage: 'Delivered', count: data.orderPipelineChart?.delivered ?? 0, fill: PIPELINE_CHART_COLORS[4] },
+                ]}
+                margin={{ top: 8, right: 24, left: 100, bottom: 8 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-surface-200 dark:stroke-surface-700" />
+                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="stage" width={96} tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(value: number) => [value, 'Orders']} contentStyle={{ borderRadius: '8px' }} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+                <Bar dataKey="count" name="Orders" radius={[0, 4, 4, 0]} minPointSize={4}>
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <Cell key={i} fill={PIPELINE_CHART_COLORS[i]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        </div>
+        )}
+
+        {topic === 'media_buyers' && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Media buyer performance</h2>
+          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+            Ad spend, delivered orders, and True ROAS by media buyer for the selected period.
+          </p>
+          {data.chartTopicData?.mediaBuyerLeaderboard && data.chartTopicData.mediaBuyerLeaderboard.length > 0 ? (
+            <div className="h-96 min-h-[320px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  layout="vertical"
+                  data={data.chartTopicData.mediaBuyerLeaderboard.map((b) => ({
+                    name: b.name,
+                    spend: b.totalSpend,
+                    orders: b.deliveredOrders,
+                    roas: b.trueRoas,
+                  }))}
+                  margin={{ top: 8, right: 24, left: 120, bottom: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-surface-200 dark:stroke-surface-700" />
+                  <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
+                  <YAxis type="category" dataKey="name" width={112} tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    formatter={(value: number, name: string) => [
+                      name === 'roas' ? `${Number(value).toFixed(2)}x` : name === 'spend' ? fmt(value) : value,
+                      name === 'spend' ? 'Ad spend' : name === 'orders' ? 'Delivered' : 'True ROAS',
+                    ]}
+                    contentStyle={{ borderRadius: '8px' }}
+                    cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                  />
+                  <Bar dataKey="spend" name="Ad spend" fill="#6366f1" radius={[0, 4, 4, 0]} minPointSize={4} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-64 flex items-center justify-center rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm">
+              No media buyer data for this period. Try a different date range or ensure ad spend is logged.
+            </div>
+          )}
+        </div>
+        )}
+
+        {topic === 'cs' && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">CS agent workload</h2>
+          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+            Pending orders per agent (Unprocessed, CS Assigned, CS Engaged).
+          </p>
+          {data.chartTopicData?.csWorkloads && data.chartTopicData.csWorkloads.length > 0 ? (
+            <div className="h-80 min-h-[280px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  layout="vertical"
+                  data={data.chartTopicData.csWorkloads.map((w) => ({
+                    name: w.agentName,
+                    pending: w.pendingCount,
+                    capacity: w.capacity,
+                  }))}
+                  margin={{ top: 8, right: 24, left: 120, bottom: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-surface-200 dark:stroke-surface-700" />
+                  <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" width={112} tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    formatter={(value: number, name: string) => [value, name === 'pending' ? 'Pending orders' : 'Capacity']}
+                    contentStyle={{ borderRadius: '8px' }}
+                    cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                  />
+                  <Bar dataKey="pending" name="Pending orders" fill="#0284c7" radius={[0, 4, 4, 0]} minPointSize={4} />
+                  <Bar dataKey="capacity" name="Capacity" fill="#94a3b8" radius={[0, 4, 4, 0]} minPointSize={4} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-64 flex items-center justify-center rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm">
+              No CS agents or workload data available.
+            </div>
+          )}
+        </div>
+        )}
+      </>
+      )}
+
     </div>
   );
 }
-
-// ── Sub-components ──────────────────────────────────────────
 
 function KPICard({
   label,

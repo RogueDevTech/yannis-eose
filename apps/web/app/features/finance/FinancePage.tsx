@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { useFetcher, useSearchParams, useNavigation } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { useFetcherToast } from '~/components/ui/toast';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { Spinner } from '~/components/ui/spinner';
 import { Tabs } from '~/components/ui/tabs';
 import type { FinanceStreamData, Invoice, ApprovalRequest } from './types';
 
@@ -37,6 +39,8 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
   const approvalFetcher = useFetcher();
   const overdueFetcher = useFetcher();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = useNavigation();
+  const isFilterLoading = navigation.state === 'loading';
 
   // Auto-flag overdue invoices on page load
   useEffect(() => {
@@ -77,15 +81,6 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
   const totalCosts = profit.landedCost + profit.deliveryFee + profit.adSpend + profit.commission + profit.fulfillmentCost + profit.operationalLoss;
   const getBarWidth = (value: number) => profit.revenue > 0 ? Math.max((value / profit.revenue) * 100, 2) : 0;
 
-  const handleDateFilter = (start: string, end: string) => {
-    const params = new URLSearchParams(searchParams);
-    if (start) params.set('startDate', start);
-    else params.delete('startDate');
-    if (end) params.set('endDate', end);
-    else params.delete('endDate');
-    setSearchParams(params);
-  };
-
   const addLineItem = () => {
     setLineItems([...lineItems, { description: '', quantity: 1, unitPrice: '' }]);
   };
@@ -112,7 +107,17 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             True profit tracking, invoicing, and financial overview
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <DateFilterBar
+            startDate={filters.startDate}
+            endDate={filters.endDate}
+            periodAllTime={filters.periodAllTime ?? false}
+          />
+          {isFilterLoading && (
+            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+              <Spinner size="sm" className="shrink-0" />
+            </span>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -137,7 +142,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             Export CSV
           </Button>
           <Button variant="primary" size="sm" onClick={() => { setShowInvoiceForm(!showInvoiceForm); setActiveTab('invoices'); }}>
-            + Create Invoice
+            {showInvoiceForm ? 'Close' : '+ Create Invoice'}
           </Button>
         </div>
       </div>
@@ -147,40 +152,6 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
           <p className="text-sm text-danger-700 dark:text-danger-500">{actionError}</p>
         </div>
       )}
-
-      {/* Date Range Filter */}
-      <div className="card">
-        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-          <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">From</label>
-            <input
-              type="date"
-              defaultValue={filters.startDate}
-              onChange={(e) => handleDateFilter(e.target.value, filters.endDate)}
-              className="input text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">To</label>
-            <input
-              type="date"
-              defaultValue={filters.endDate}
-              onChange={(e) => handleDateFilter(filters.startDate, e.target.value)}
-              className="input text-sm"
-            />
-          </div>
-          {(filters.startDate || filters.endDate) && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="text-xs"
-              onClick={() => handleDateFilter('', '')}
-            >
-              Clear Dates
-            </Button>
-          )}
-        </div>
-      </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

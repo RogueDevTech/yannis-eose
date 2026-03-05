@@ -1,8 +1,11 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, asc, sql, ilike, or, count, gte, lte } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
+import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
+import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
 import type {
   CreateOrderInput,
@@ -11,40 +14,57 @@ import type {
   ListOrdersInput,
   OrderStatus,
 } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE, PG_CLIENT, REDIS } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   isTransitionAllowed,
   getAllowedNextStatuses,
   TRANSITION_TIMESTAMPS,
 } from './order-state-machine';
-import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { CartService } from '../cart/cart.service';
+import { PaystackService } from '../payments/paystack.service';
+import type { SessionUser } from '../common/decorators/current-user.decorator';
+
+const PENDING_PAYMENT_PREFIX = 'pending_payment:';
+const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
 
 @Injectable()
 export class OrdersService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
+    @Inject(REDIS) private readonly redis: Redis,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
     private readonly settingsService: SettingsService,
     private readonly cartService: CartService,
+    private readonly inventoryService: InventoryService,
+    private readonly paystackService: PaystackService,
   ) {}
 
   /**
    * Create a new order with status UNPROCESSED.
    * Called by Edge Worker or admin manual entry.
+   * When paymentMethod is PAY_ONLINE, initializes Paystack and returns authorizationUrl for redirect.
    */
-  async create(input: CreateOrderInput & { cartId?: string }, actorId: string | null) {
+  async create(input: CreateOrderInput & { cartId?: string }, actorId: string | null): Promise<{ id: string; authorizationUrl?: string }> {
     // Set actor for audit trail
     if (actorId) {
       await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
     }
 
     const { cartId, ...orderInput } = input;
+    const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
+
+    if (paymentMethod === 'PAY_ONLINE' && (!orderInput.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(orderInput.customerEmail))) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Email is required for Pay online. Please provide a valid email address.',
+      });
+    }
 
     const rows = await this.db
       .insert(schema.orders)
@@ -53,9 +73,17 @@ export class OrdersService {
         mediaBuyerId: orderInput.mediaBuyerId ?? null,
         customerName: orderInput.customerName,
         customerPhoneHash: orderInput.customerPhoneHash,
+        customerPhone: orderInput.customerPhone ?? null,
         customerAddress: orderInput.customerAddress ?? null,
         deliveryAddress: orderInput.deliveryAddress ?? null,
         deliveryNotes: orderInput.deliveryNotes ?? null,
+        deliveryState: orderInput.deliveryState ?? null,
+        customerGender: orderInput.customerGender ?? null,
+        preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
+        customerEmail: orderInput.customerEmail ?? null,
+        paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
+        paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
+        paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
         items: orderInput.items,
         totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
         status: 'UNPROCESSED',
@@ -86,7 +114,15 @@ export class OrdersService {
       productName: 'Order created',
     });
 
-    // Notify Head of CS and Head of Marketing (every new order)
+    // Notify Admin, Head of CS, Head of Marketing, and all CS agents (every new order)
+    this.notifications
+      .createForRole('SUPER_ADMIN', {
+        type: 'order:new',
+        title: 'New order received',
+        body: 'A new order needs attention.',
+        data: { orderId: order.id },
+      })
+      .catch(() => {});
     this.notifications
       .createForRole('HEAD_OF_CS', {
         type: 'order:new',
@@ -100,6 +136,14 @@ export class OrdersService {
         type: 'order:new',
         title: 'New order received',
         body: 'A new order has been created.',
+        data: { orderId: order.id },
+      })
+      .catch(() => {});
+    this.notifications
+      .createForRole('CS_AGENT', {
+        type: 'order:new',
+        title: 'New order in queue',
+        body: 'A new order has been received and may be assigned to you.',
         data: { orderId: order.id },
       })
       .catch(() => {});
@@ -125,7 +169,89 @@ export class OrdersService {
       await this.cartService.convert(cartId, order.id);
     }
 
-    return order;
+    let authorizationUrl: string | undefined;
+    if (paymentMethod === 'PAY_ONLINE' && orderInput.customerEmail && this.paystackService.isConfigured()) {
+      const totalAmount = orderInput.totalAmount != null ? Number(orderInput.totalAmount) : 0;
+      const amountInKobo = Math.round(totalAmount * 100); // NGN to kobo
+      const callbackBase = process.env.PAYSTACK_CALLBACK_API_URL || process.env.API_URL || 'http://localhost:4444';
+      const callbackUrl = `${callbackBase.replace(/\/$/, '')}/payments/complete`;
+      const result = await this.paystackService.initializeTransaction({
+        email: orderInput.customerEmail,
+        amountInKobo: amountInKobo > 0 ? amountInKobo : 10000, // fallback 100 NGN if missing
+        reference: `order-${order.id}`,
+        callbackUrl,
+        metadata: { orderId: order.id },
+      });
+      if (result) {
+        authorizationUrl = result.authorizationUrl;
+        await this.db
+          .update(schema.orders)
+          .set({ paymentReference: result.reference })
+          .where(eq(schema.orders.id, order.id));
+      }
+    }
+
+    return { id: order.id, authorizationUrl };
+  }
+
+  /**
+   * Prepare Paystack payment for PAY_ONLINE: do NOT create order yet.
+   * Store payload in Redis; redirect user to Paystack. Order is created only after payment (in completePaymentByReference).
+   */
+  async preparePaystackOrder(input: CreateOrderInput & { cartId?: string }, _actorId: string | null): Promise<{ authorizationUrl: string; reference: string }> {
+    if (input.paymentMethod !== 'PAY_ONLINE') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'preparePaystackOrder is only for PAY_ONLINE. Use orders.create for Pay on delivery.',
+      });
+    }
+    if (!input.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Email is required for Pay online. Please provide a valid email address.',
+      });
+    }
+    if (!this.paystackService.isConfigured()) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Online payment is not configured. Please try Pay on delivery.',
+      });
+    }
+
+    const reference = randomUUID();
+    const payload = {
+      ...input,
+      source: 'edge-form' as const,
+      paymentMethod: 'PAY_ONLINE' as const,
+    };
+    await this.redis.setex(
+      PENDING_PAYMENT_PREFIX + reference,
+      PENDING_PAYMENT_TTL_SECONDS,
+      JSON.stringify(payload),
+    );
+
+    const totalAmount = input.totalAmount != null ? Number(input.totalAmount) : 0;
+    const amountInKobo = Math.round(totalAmount * 100) || 10000;
+    const callbackBase = process.env.PAYSTACK_CALLBACK_API_URL || process.env.API_URL || 'http://localhost:4444';
+    const callbackUrl = `${callbackBase.replace(/\/$/, '')}/payments/complete`;
+
+    const result = await this.paystackService.initializeTransaction({
+      email: input.customerEmail,
+      amountInKobo,
+      reference,
+      callbackUrl,
+      metadata: { reference },
+    });
+
+    if (!result) {
+      await this.redis.del(PENDING_PAYMENT_PREFIX + reference);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Could not initialize payment. Please try again or use Pay on delivery.',
+      });
+    }
+
+    return { authorizationUrl: result.authorizationUrl, reference: result.reference };
   }
 
   /**
@@ -143,11 +269,28 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
-    // Get order items
-    const items = await this.db
-      .select()
+    // Get order items with product name
+    const itemRows = await this.db
+      .select({
+        id: schema.orderItems.id,
+        orderId: schema.orderItems.orderId,
+        productId: schema.orderItems.productId,
+        quantity: schema.orderItems.quantity,
+        unitPrice: schema.orderItems.unitPrice,
+        productName: schema.products.name,
+      })
       .from(schema.orderItems)
+      .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
       .where(eq(schema.orderItems.orderId, orderId));
+
+    const items = itemRows.map((row) => ({
+      id: row.id,
+      orderId: row.orderId,
+      productId: row.productId,
+      quantity: row.quantity,
+      unitPrice: row.unitPrice,
+      productName: row.productName ?? null,
+    }));
 
     // Get call logs
     const calls = await this.db
@@ -159,22 +302,79 @@ export class OrdersService {
     // Get allowed next statuses for UI button state
     const allowedTransitions = getAllowedNextStatuses(order.status as OrderStatus);
 
+    // Resolve display names for users, campaign, logistics (so UI shows names instead of IDs)
+    const userIds = [
+      order.assignedCsId,
+      order.mediaBuyerId,
+      order.riderId,
+      order.lockedBy,
+    ].filter((id): id is string => Boolean(id));
+    const uniqueUserIds = [...new Set(userIds)];
+
+    const [userRows, campaignRow, providerRow, locationRow] = await Promise.all([
+      uniqueUserIds.length > 0
+        ? this.db
+            .select({ id: schema.users.id, name: schema.users.name })
+            .from(schema.users)
+            .where(inArray(schema.users.id, uniqueUserIds))
+        : Promise.resolve([]),
+      order.campaignId
+        ? this.db
+            .select({ id: schema.campaigns.id, name: schema.campaigns.name })
+            .from(schema.campaigns)
+            .where(eq(schema.campaigns.id, order.campaignId))
+            .limit(1)
+        : Promise.resolve([]),
+      order.logisticsProviderId
+        ? this.db
+            .select({ id: schema.logisticsProviders.id, name: schema.logisticsProviders.name })
+            .from(schema.logisticsProviders)
+            .where(eq(schema.logisticsProviders.id, order.logisticsProviderId))
+            .limit(1)
+        : Promise.resolve([]),
+      order.logisticsLocationId
+        ? this.db
+            .select({ id: schema.logisticsLocations.id, name: schema.logisticsLocations.name })
+            .from(schema.logisticsLocations)
+            .where(eq(schema.logisticsLocations.id, order.logisticsLocationId))
+            .limit(1)
+        : Promise.resolve([]),
+    ]);
+
+    const userNames = new Map(userRows.map((r) => [r.id, r.name]));
+    const assignedCsName = order.assignedCsId ? userNames.get(order.assignedCsId) ?? null : null;
+    const mediaBuyerName = order.mediaBuyerId ? userNames.get(order.mediaBuyerId) ?? null : null;
+    const riderName = order.riderId ? userNames.get(order.riderId) ?? null : null;
+    const lockedByName = order.lockedBy ? userNames.get(order.lockedBy) ?? null : null;
+    const campaignName = campaignRow[0]?.name ?? null;
+    const logisticsProviderName = providerRow[0]?.name ?? null;
+    const logisticsLocationName = locationRow[0]?.name ?? null;
+
+    const { customerPhone: _rawPhone, ...orderSafe } = order;
     return {
-      ...order,
+      ...orderSafe,
       customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
       orderItems: items,
       callLogs: calls,
       allowedTransitions,
+      assignedCsName,
+      mediaBuyerName,
+      campaignName,
+      logisticsProviderName,
+      logisticsLocationName,
+      riderName,
+      lockedByName,
     };
   }
 
   /**
-   * Reveal the raw customer phone number for manual calling.
-   * Only works when VOIP feature flag is OFF (manual mode).
-   * Logs a MANUAL_CALL record in call_logs for audit purposes.
+   * Get the customer contact for manual calling (VOIP off).
+   * Only works when VOIP feature flag is OFF. Does NOT insert MANUAL_CALL — that is recorded
+   * when the agent clicks "Copy number" or "Call on my phone" in the UI (via initiateCall).
+   * When the order was created via the edge form, customer_phone_hash stores a one-way hash,
+   * so the real number cannot be revealed; we return isDialable: false and the UI shows a message.
    */
-  async revealPhoneForManualCall(orderId: string, actor: SessionUser): Promise<{ phone: string }> {
-    // Verify VOIP is disabled (manual calling only available when VOIP is off)
+  async revealPhoneForManualCall(orderId: string, actor: SessionUser): Promise<{ phone: string; isDialable: boolean }> {
     const voipSetting = await this.settingsService.get('VOIP_ENABLED');
     const isVoipEnabled = voipSetting?.['enabled'] === true;
     if (isVoipEnabled) {
@@ -184,10 +384,6 @@ export class OrdersService {
       });
     }
 
-    // Set actor for audit trail
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    // Get order
     const rows = await this.db
       .select()
       .from(schema.orders)
@@ -199,7 +395,6 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
-    // Must be CS_ENGAGED to reveal phone
     if (order.status !== 'CS_ENGAGED') {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -207,7 +402,6 @@ export class OrdersService {
       });
     }
 
-    // Agent must be assigned or elevated
     const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
     if (!isElevated && order.assignedCsId !== actor.id) {
       throw new TRPCError({
@@ -216,18 +410,16 @@ export class OrdersService {
       });
     }
 
-    // Log a MANUAL_CALL record for audit trail
-    await this.db.insert(schema.callLogs).values({
-      orderId,
-      agentId: actor.id,
-      callStatus: 'MANUAL_CALL',
-      durationSeconds: null,
-      callToken: null,
-      recordingUrl: null,
-    });
+    // Prefer stored raw phone (set by Edge on create) so CS can copy/dial when VOIP is off
+    const rawPhone = order.customerPhone?.trim();
+    if (rawPhone) {
+      return { phone: rawPhone, isDialable: true };
+    }
 
-    // Return the raw phone number
-    return { phone: order.customerPhoneHash };
+    const value = order.customerPhoneHash;
+    // Edge form may send only SHA-256 hash (64 hex chars); we cannot reveal the real number
+    const isDialable = !/^[a-f0-9]{64}$/i.test(value ?? '');
+    return { phone: value ?? '', isDialable };
   }
 
   /**
@@ -259,6 +451,14 @@ export class OrdersService {
         ),
       );
     }
+    if (input.startDate) {
+      conditions.push(gte(schema.orders.createdAt, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.orders.createdAt, end));
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -267,9 +467,19 @@ export class OrdersService {
       updatedAt: schema.orders.updatedAt,
       status: schema.orders.status,
       totalAmount: schema.orders.totalAmount,
+      preferredDeliveryDate: schema.orders.preferredDeliveryDate,
     }[input.sortBy];
 
     const orderDirection = input.sortOrder === 'asc' ? asc : desc;
+
+    // For preferredDeliveryDate, push NULLs to the end so orders with a date come first
+    const orderByClauses =
+      input.sortBy === 'preferredDeliveryDate'
+        ? [
+            sql`${schema.orders.preferredDeliveryDate} IS NULL ASC`,
+            orderDirection(orderByColumn),
+          ]
+        : [orderDirection(orderByColumn)];
 
     const offset = (input.page - 1) * input.limit;
 
@@ -278,7 +488,7 @@ export class OrdersService {
         .select()
         .from(schema.orders)
         .where(whereClause)
-        .orderBy(orderDirection(orderByColumn))
+        .orderBy(...orderByClauses)
         .limit(input.limit)
         .offset(offset),
       this.db
@@ -289,10 +499,32 @@ export class OrdersService {
 
     const total = totalRows[0]?.count ?? 0;
 
+    const mediaBuyerIds = [...new Set(orders.map((o) => o.mediaBuyerId).filter(Boolean))] as string[];
+    let mediaBuyerNames: Map<string, string> = new Map();
+    if (mediaBuyerIds.length > 0) {
+      const users = await this.db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.users)
+        .where(inArray(schema.users.id, mediaBuyerIds));
+      users.forEach((u) => mediaBuyerNames.set(u.id, u.name));
+    }
+
+    const assignedCsIds = [...new Set(orders.map((o) => o.assignedCsId).filter(Boolean))] as string[];
+    let assignedCsNames: Map<string, string> = new Map();
+    if (assignedCsIds.length > 0) {
+      const csUsers = await this.db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.users)
+        .where(inArray(schema.users.id, assignedCsIds));
+      csUsers.forEach((u) => assignedCsNames.set(u.id, u.name));
+    }
+
     return {
       orders: orders.map((order) => ({
         ...order,
         customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
+        mediaBuyerName: order.mediaBuyerId ? mediaBuyerNames.get(order.mediaBuyerId) ?? null : null,
+        assignedCsName: order.assignedCsId ? assignedCsNames.get(order.assignedCsId) ?? null : null,
       })),
       pagination: {
         page: input.page,
@@ -334,6 +566,46 @@ export class OrdersService {
       });
     }
 
+    // Role check: CS-only transitions (engagement, confirm, cancel) require CS_AGENT (assigned when applicable) or HEAD_OF_CS or SUPER_ADMIN
+    const csOnlyTransitions =
+      (currentStatus === 'UNPROCESSED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
+      (currentStatus === 'CS_ASSIGNED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
+      (currentStatus === 'CS_ENGAGED' && (newStatus === 'CONFIRMED' || newStatus === 'CANCELLED'));
+    if (csOnlyTransitions) {
+      const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+      if ((currentStatus === 'UNPROCESSED' || currentStatus === 'CS_ASSIGNED') && newStatus === 'CS_ENGAGED') {
+        if (!isElevated && actor.role !== 'CS_AGENT') {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Only CS or Head of CS can take an order',
+          });
+        }
+      } else {
+        const isAssignedCs = actor.role === 'CS_AGENT' && order.assignedCsId === actor.id;
+        if (!isElevated && !isAssignedCs) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Only the assigned CS agent or Head of CS can perform this transition',
+          });
+        }
+      }
+    }
+
+    // Role check: only Head of Logistics or SuperAdmin can transition IN_TRANSIT → DELIVERED/PARTIALLY_DELIVERED.
+    // Riders and TPL_MANAGER must submit a delivery confirmation request for HOL approval.
+    if (
+      currentStatus === 'IN_TRANSIT' &&
+      (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED')
+    ) {
+      if (actor.role !== 'HEAD_OF_LOGISTICS' && actor.role !== 'SUPER_ADMIN') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Delivery confirmation requires Head of Logistics approval. Submit a delivery confirmation request instead.',
+        });
+      }
+    }
+
     // Validate gates based on the transition
     await this.validateTransitionGates(order, newStatus, input.metadata, actor);
 
@@ -354,6 +626,11 @@ export class OrdersService {
       const lockExpiry = new Date(Date.now() + 15 * 60 * 1000);
       updateFields['lockedUntil'] = lockExpiry;
       updateFields['lockedBy'] = actor.id;
+    }
+
+    // Save preferred delivery date on CONFIRMED (set by CS agent via confirm modal)
+    if (newStatus === 'CONFIRMED' && input.metadata?.preferredDeliveryDate) {
+      updateFields['preferredDeliveryDate'] = input.metadata.preferredDeliveryDate;
     }
 
     // Clear lock when order moves past CS engagement
@@ -379,7 +656,7 @@ export class OrdersService {
       updateFields['deliveryOtp'] = otp;
     }
 
-    // Persist GPS and clear OTP on DELIVERED (prevents replay)
+    // Persist GPS and clear OTP on DELIVERED (v2 may reintroduce OTP)
     if (newStatus === 'DELIVERED') {
       if (input.metadata?.gpsLat !== undefined) {
         updateFields['deliveryGpsLat'] = input.metadata.gpsLat.toString();
@@ -387,10 +664,15 @@ export class OrdersService {
       if (input.metadata?.gpsLng !== undefined) {
         updateFields['deliveryGpsLng'] = input.metadata.gpsLng.toString();
       }
-      updateFields['deliveryOtp'] = null; // single-use — clear after verification
+      updateFields['deliveryOtp'] = null;
     }
 
-    // Delivery fee add-on when marking DELIVERED or PARTIALLY_DELIVERED (3PL can add tolls, fuel, remote area surcharge)
+    // v1: persist delivery proof URL when 3PL marks DELIVERED or PARTIALLY_DELIVERED
+    if ((newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED') && input.metadata?.deliveryProofUrl) {
+      updateFields['deliveryProofUrl'] = String(input.metadata.deliveryProofUrl).trim();
+    }
+
+    // Delivery fee add-on when marking DELIVERED or PARTIALLY_DELIVERED (3PL records delivery cost; required in v1)
     if (
       (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED') &&
       input.metadata?.deliveryFeeAddOn !== undefined
@@ -482,14 +764,30 @@ export class OrdersService {
       .where(eq(schema.orders.id, input.orderId))
       .limit(1);
 
-    if (!existingRows[0]) {
+    const order = existingRows[0];
+    if (!order) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    if (input.items !== undefined) {
+      const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'];
+      if (!allowedStatuses.includes(order.status)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Order items can only be adjusted when order is UNPROCESSED, CS_ASSIGNED, or CS_ENGAGED.',
+        });
+      }
     }
 
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
     if (input.customerAddress !== undefined) updateFields['customerAddress'] = input.customerAddress;
     if (input.deliveryAddress !== undefined) updateFields['deliveryAddress'] = input.deliveryAddress;
     if (input.deliveryNotes !== undefined) updateFields['deliveryNotes'] = input.deliveryNotes;
+    if (input.deliveryState !== undefined) updateFields['deliveryState'] = input.deliveryState;
+    if (input.customerGender !== undefined) updateFields['customerGender'] = input.customerGender;
+    if (input.preferredDeliveryDate !== undefined) updateFields['preferredDeliveryDate'] = input.preferredDeliveryDate;
+    if (input.paymentMethod !== undefined) updateFields['paymentMethod'] = input.paymentMethod;
+    if (input.customerEmail !== undefined) updateFields['customerEmail'] = input.customerEmail;
     if (input.totalAmount !== undefined) updateFields['totalAmount'] = String(input.totalAmount);
     if (input.items !== undefined) updateFields['items'] = input.items;
 
@@ -527,7 +825,140 @@ export class OrdersService {
   }
 
   /**
+   * Verify Paystack transaction by reference and mark order as PAID.
+   * If reference was from preparePaystackOrder (payment-first), creates the order from Redis payload then deletes the key.
+   * If order already existed (legacy flow), updates payment_status to PAID. Idempotent.
+   */
+  async completePaymentByReference(reference: string): Promise<{ orderId: string; success: boolean } | null> {
+    if (!this.paystackService.isConfigured()) return null;
+    const verified = await this.paystackService.verifyTransaction(reference);
+    if (!verified || verified.status !== 'success') return null;
+
+    // Payment-first flow: create order from pending payload stored in Redis
+    const pendingKey = PENDING_PAYMENT_PREFIX + reference;
+    const pendingRaw = await this.redis.get(pendingKey);
+    if (pendingRaw) {
+      let payload: CreateOrderInput & { cartId?: string };
+      try {
+        payload = JSON.parse(pendingRaw) as CreateOrderInput & { cartId?: string };
+      } catch {
+        await this.redis.del(pendingKey);
+        return null;
+      }
+      // Derive order amount from payload (totalAmount or sum of items) for verification
+      let orderAmountKobo = Math.round((parseFloat(String(payload.totalAmount ?? 0)) || 0) * 100);
+      if (orderAmountKobo <= 0 && payload.items?.length) {
+        const sum = payload.items.reduce(
+          (acc, item) => acc + (Number(item.quantity) || 0) * (parseFloat(String(item.unitPrice)) || 0),
+          0,
+        );
+        orderAmountKobo = Math.round(sum * 100);
+      }
+      if (verified.amount !== orderAmountKobo && verified.amount > 0 && orderAmountKobo > 0) {
+        return null;
+      }
+      const actorId = '00000000-0000-0000-0000-000000000001'; // EDGE_FORM_ACTOR_ID
+      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+
+      const { cartId, ...orderInput } = payload;
+      const rows = await this.db
+        .insert(schema.orders)
+        .values({
+          campaignId: orderInput.campaignId ?? null,
+          mediaBuyerId: orderInput.mediaBuyerId ?? null,
+          customerName: orderInput.customerName,
+          customerPhoneHash: orderInput.customerPhoneHash,
+          customerPhone: orderInput.customerPhone ?? null,
+          customerAddress: orderInput.customerAddress ?? null,
+          deliveryAddress: orderInput.deliveryAddress ?? null,
+          deliveryNotes: orderInput.deliveryNotes ?? null,
+          deliveryState: orderInput.deliveryState ?? null,
+          customerGender: orderInput.customerGender ?? null,
+          preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
+          customerEmail: orderInput.customerEmail ?? null,
+          paymentMethod: 'PAY_ONLINE',
+          paymentStatus: 'PAID',
+          paymentReference: reference,
+          paymentProvider: 'PAYSTACK',
+          items: orderInput.items,
+          totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
+          status: 'UNPROCESSED',
+        })
+        .returning();
+
+      const order = rows[0];
+      if (!order) {
+        return null;
+      }
+
+      if (orderInput.items.length > 0) {
+        await this.db.insert(schema.orderItems).values(
+          orderInput.items.map((item) => ({
+            orderId: order.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: String(item.unitPrice),
+            offerLabel: item.offerLabel ?? null,
+          })),
+        );
+      }
+
+      await this.redis.del(pendingKey);
+
+      this.events.emitNewOrder({ orderId: order.id, productName: 'Order created' });
+      this.notifications.createForRole('SUPER_ADMIN', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
+      this.notifications.createForRole('HEAD_OF_CS', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
+      this.notifications.createForRole('HEAD_OF_MARKETING', { type: 'order:new', title: 'New order received', body: 'A new order has been created.', data: { orderId: order.id } }).catch(() => {});
+      this.notifications.createForRole('CS_AGENT', { type: 'order:new', title: 'New order in queue', body: 'A new order has been received and may be assigned to you.', data: { orderId: order.id } }).catch(() => {});
+      if (order.mediaBuyerId) {
+        this.notifications.create({ userId: order.mediaBuyerId, type: 'order:new_campaign', title: 'New order from your campaign', body: 'A new order has been created from your campaign.', data: { orderId: order.id } }).catch(() => {});
+      }
+      this.autoDispatchToCS(order.id).catch(() => {});
+      if (cartId) {
+        this.cartService.convert(cartId, order.id).catch(() => {});
+      }
+
+      return { orderId: order.id, success: true };
+    }
+
+    // Legacy flow: order was already created with payment_reference
+    let orderId: string | null = null;
+    const byRef = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(eq(schema.orders.paymentReference, reference))
+      .limit(1);
+    if (byRef[0]) orderId = byRef[0].id;
+    else if (reference.startsWith('order-')) {
+      const id = reference.slice(6);
+      const byId = await this.db.select({ id: schema.orders.id }).from(schema.orders).where(eq(schema.orders.id, id)).limit(1);
+      if (byId[0]) orderId = byId[0].id;
+    }
+    if (!orderId) return null;
+
+    const orderRow = await this.db
+      .select({ totalAmount: schema.orders.totalAmount, paymentStatus: schema.orders.paymentStatus })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    const order = orderRow[0];
+    if (!order) return null;
+    if (order.paymentStatus === 'PAID') return { orderId, success: true };
+
+    const orderAmountKobo = Math.round((parseFloat(String(order.totalAmount ?? 0)) || 0) * 100);
+    if (verified.amount !== orderAmountKobo && verified.amount > 0) return null;
+
+    await this.db
+      .update(schema.orders)
+      .set({ paymentStatus: 'PAID', updatedAt: new Date() })
+      .where(eq(schema.orders.id, orderId));
+    return { orderId, success: true };
+  }
+
+  /**
    * Manually assign an order to a CS agent.
+   * Only Head of CS or SuperAdmin may call this for direct assignment; CS agents must use requestTransfer
+   * (assignee accepts). This is also used when an assignee accepts a transfer request.
    */
   async assignToCS(orderId: string, csAgentId: string, actor: SessionUser) {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
@@ -546,6 +977,7 @@ export class OrdersService {
       .update(schema.orders)
       .set({
         assignedCsId: csAgentId,
+        status: 'CS_ASSIGNED',
         updatedAt: new Date(),
       })
       .where(eq(schema.orders.id, orderId))
@@ -558,6 +990,11 @@ export class OrdersService {
 
     // Notify the assigned agent (real-time + persistent)
     this.events.emitToUser(csAgentId, 'order:assigned', {
+      orderId,
+      customerName: updated.customerName,
+    });
+    // Notify cs-all so CS overview (Head of CS) refreshes
+    this.events.emitToRoom('cs-all', 'order:assigned', {
       orderId,
       customerName: updated.customerName,
     });
@@ -589,6 +1026,7 @@ export class OrdersService {
       .update(schema.orders)
       .set({
         assignedCsId: toAgentId,
+        status: 'CS_ASSIGNED',
         updatedAt: new Date(),
       })
       .where(
@@ -627,21 +1065,398 @@ export class OrdersService {
       })
       .catch(() => {});
 
+    // Notify cs-all so CS overview refreshes
+    this.events.emitToRoom('cs-all', 'order:reassigned', {
+      count: updated.length,
+      fromAgentId,
+      toAgentId,
+    });
+    this.events.emitToRoom('cs-all', 'order:assigned_bulk', {
+      count: updated.length,
+      fromAgentId,
+      toAgentId,
+    });
+
     return { reassignedCount: updated.length };
+  }
+
+  /**
+   * Redistribute CS_ASSIGNED orders across agents using the same load-balanced or
+   * performance strategy as auto-dispatch. Only Head of CS or SuperAdmin.
+   * Returns the number of orders whose assignment was changed.
+   */
+  async redistributeCSOrders(actor: SessionUser): Promise<{ redistributed: number }> {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    await this.releaseExpiredLocks();
+
+    const workloads = await this.getCSAgentWorkloads();
+    const workloadMap = new Map(
+      workloads.map((w) => [
+        w.agentId,
+        { pendingCount: w.pendingCount, capacity: w.capacity, lastActionAt: w.lastActionAt },
+      ]),
+    );
+
+    const csAssignedOrders = await this.db
+      .select({
+        id: schema.orders.id,
+        assignedCsId: schema.orders.assignedCsId,
+        createdAt: schema.orders.createdAt,
+      })
+      .from(schema.orders)
+      .where(eq(schema.orders.status, 'CS_ASSIGNED'))
+      .orderBy(asc(schema.orders.createdAt));
+
+    if (csAssignedOrders.length === 0) {
+      return { redistributed: 0 };
+    }
+
+    const dispatchSetting = await this.settingsService.get('CS_DISPATCH_STRATEGY');
+    const strategy = dispatchSetting?.strategy === 'performance' ? 'performance' : 'load_balanced';
+    let perfMap: Map<string, { deliveryRate: number; confirmationRate: number }> = new Map();
+    if (strategy === 'performance') {
+      const leaderboard = await this.getCSAgentLeaderboard('this_month');
+      perfMap = new Map(
+        leaderboard.map((e) => [e.agentId, { deliveryRate: e.deliveryRate, confirmationRate: e.confirmationRate }]),
+      );
+    }
+
+    function sortAvailable(
+      available: Array<{ agentId: string; pendingCount: number; capacity: number; lastActionAt: Date | null }>,
+    ) {
+      if (strategy === 'performance') {
+        available.sort((a, b) => {
+          const aPerf = perfMap.get(a.agentId) ?? { deliveryRate: 0, confirmationRate: 0 };
+          const bPerf = perfMap.get(b.agentId) ?? { deliveryRate: 0, confirmationRate: 0 };
+          if (bPerf.deliveryRate !== aPerf.deliveryRate) return bPerf.deliveryRate - aPerf.deliveryRate;
+          if (bPerf.confirmationRate !== aPerf.confirmationRate)
+            return bPerf.confirmationRate - aPerf.confirmationRate;
+          if (a.pendingCount !== b.pendingCount) return a.pendingCount - b.pendingCount;
+          const aTime = a.lastActionAt?.getTime() ?? 0;
+          const bTime = b.lastActionAt?.getTime() ?? 0;
+          return aTime - bTime;
+        });
+      } else {
+        available.sort((a, b) => {
+          if (a.pendingCount !== b.pendingCount) return a.pendingCount - b.pendingCount;
+          const aTime = a.lastActionAt?.getTime() ?? 0;
+          const bTime = b.lastActionAt?.getTime() ?? 0;
+          return aTime - bTime;
+        });
+      }
+    }
+
+    let redistributed = 0;
+    for (const order of csAssignedOrders) {
+      const currentAssignedId = order.assignedCsId ?? null;
+      const available = workloads
+        .map((w) => {
+          const state = workloadMap.get(w.agentId)!;
+          return { agentId: w.agentId, ...state };
+        })
+        .filter((s) => s.pendingCount < s.capacity);
+
+      sortAvailable(available);
+      const target = available[0];
+      if (!target || target.agentId === currentAssignedId) continue;
+
+      await this.assignToCS(order.id, target.agentId, actor);
+
+      if (currentAssignedId) {
+        const prev = workloadMap.get(currentAssignedId);
+        if (prev) workloadMap.set(currentAssignedId, { ...prev, pendingCount: Math.max(0, prev.pendingCount - 1) });
+      }
+      const next = workloadMap.get(target.agentId);
+      if (next) workloadMap.set(target.agentId, { ...next, pendingCount: next.pendingCount + 1 });
+      redistributed++;
+    }
+
+    if (redistributed > 0) {
+      this.events.emitToRoom('cs-all', 'order:assignments_changed', { redistributed });
+    }
+    return { redistributed };
+  }
+
+  /**
+   * Request to transfer an order to another CS agent (pending accept/reject).
+   * Allowed when actor is the current assigned CS of the order, or HoS/SuperAdmin.
+   */
+  async requestTransfer(orderId: string, toCsAgentId: string, actor: SessionUser, reason?: string) {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+
+    const orderRows = await this.db
+      .select()
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    const order = orderRows[0];
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    const isHoSOrAdmin = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+    if (!isHoSOrAdmin && order.assignedCsId !== actor.id) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the assigned CS agent or Head of CS can request a transfer for this order',
+      });
+    }
+
+    if (order.assignedCsId === toCsAgentId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Cannot transfer to the same agent',
+      });
+    }
+
+    const existing = await this.db
+      .select()
+      .from(schema.orderTransferRequests)
+      .where(
+        and(
+          eq(schema.orderTransferRequests.orderId, orderId),
+          eq(schema.orderTransferRequests.status, 'PENDING'),
+        ),
+      )
+      .limit(1);
+    if (existing.length > 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'A transfer request is already pending for this order',
+      });
+    }
+
+    const [row] = await this.db
+      .insert(schema.orderTransferRequests)
+      .values({
+        orderId,
+        fromCsId: order.assignedCsId ?? actor.id,
+        toCsId: toCsAgentId,
+        status: 'PENDING',
+        ...(reason != null && reason.trim() !== '' && { reason: reason.trim() }),
+      })
+      .returning();
+
+    if (!row) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create transfer request' });
+    }
+
+    this.events.emitToUser(toCsAgentId, 'order:transfer_requested', {
+      orderId,
+      fromCsId: row.fromCsId,
+      requestId: row.id,
+    });
+    this.notifications
+      .create({
+        userId: toCsAgentId,
+        type: 'order:transfer_requested',
+        title: 'Order transfer requested',
+        body: row.reason
+          ? `A colleague has requested to transfer an order to you. Reason: ${row.reason}`
+          : 'A colleague has requested to transfer an order to you. Accept or reject in CS Orders.',
+        data: { orderId, fromCsId: row.fromCsId, requestId: row.id },
+      })
+      .catch(() => {});
+
+    return row;
+  }
+
+  /**
+   * Accept a transfer request (target agent or HoS). Assigns order to target agent.
+   */
+  async acceptTransfer(requestId: string, actor: SessionUser) {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+
+    const reqRows = await this.db
+      .select()
+      .from(schema.orderTransferRequests)
+      .where(eq(schema.orderTransferRequests.id, requestId))
+      .limit(1);
+    const req = reqRows[0];
+    if (!req) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer request not found' });
+    }
+    if (req.status !== 'PENDING') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer request is no longer pending' });
+    }
+
+    const canRespond = actor.id === req.toCsId || actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+    if (!canRespond) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the target agent or Head of CS can accept this transfer',
+      });
+    }
+
+    await this.assignToCS(req.orderId, req.toCsId, actor);
+
+    await this.db
+      .update(schema.orderTransferRequests)
+      .set({
+        status: 'ACCEPTED',
+        respondedAt: new Date(),
+        respondedById: actor.id,
+      })
+      .where(eq(schema.orderTransferRequests.id, requestId));
+
+    this.events.emitToUser(req.fromCsId, 'order:transfer_accepted', {
+      orderId: req.orderId,
+      toCsId: req.toCsId,
+      requestId,
+    });
+    this.notifications
+      .create({
+        userId: req.fromCsId,
+        type: 'order:transfer_accepted',
+        title: 'Transfer accepted',
+        body: 'Your order transfer request was accepted.',
+        data: { orderId: req.orderId, toCsId: req.toCsId, requestId },
+      })
+      .catch(() => {});
+
+    return { success: true, orderId: req.orderId };
+  }
+
+  /**
+   * Reject a transfer request (target agent or HoS).
+   */
+  async rejectTransfer(requestId: string, actor: SessionUser) {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+
+    const reqRows = await this.db
+      .select()
+      .from(schema.orderTransferRequests)
+      .where(eq(schema.orderTransferRequests.id, requestId))
+      .limit(1);
+    const req = reqRows[0];
+    if (!req) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer request not found' });
+    }
+    if (req.status !== 'PENDING') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer request is no longer pending' });
+    }
+
+    const canRespond = actor.id === req.toCsId || actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+    if (!canRespond) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the target agent or Head of CS can reject this transfer',
+      });
+    }
+
+    await this.db
+      .update(schema.orderTransferRequests)
+      .set({
+        status: 'REJECTED',
+        respondedAt: new Date(),
+        respondedById: actor.id,
+      })
+      .where(eq(schema.orderTransferRequests.id, requestId));
+
+    this.events.emitToUser(req.fromCsId, 'order:transfer_rejected', {
+      orderId: req.orderId,
+      requestId,
+    });
+    this.notifications
+      .create({
+        userId: req.fromCsId,
+        type: 'order:transfer_rejected',
+        title: 'Transfer rejected',
+        body: 'Your order transfer request was rejected.',
+        data: { orderId: req.orderId, requestId },
+      })
+      .catch(() => {});
+
+    return { success: true };
+  }
+
+  /**
+   * List PENDING transfer requests where the current user is the target (toCsId).
+   */
+  async listTransferRequestsForMe(actor: SessionUser) {
+    const rows = await this.db
+      .select()
+      .from(schema.orderTransferRequests)
+      .where(
+        and(
+          eq(schema.orderTransferRequests.toCsId, actor.id),
+          eq(schema.orderTransferRequests.status, 'PENDING'),
+        ),
+      )
+      .orderBy(desc(schema.orderTransferRequests.requestedAt));
+
+    const orderIds = [...new Set(rows.map((r) => r.orderId))];
+    const orders =
+      orderIds.length > 0
+        ? await this.db
+            .select({
+              id: schema.orders.id,
+              customerName: schema.orders.customerName,
+              status: schema.orders.status,
+            })
+            .from(schema.orders)
+            .where(inArray(schema.orders.id, orderIds))
+        : [];
+    const orderMap = new Map(orders.map((o) => [o.id, o]));
+
+    const fromIds = [...new Set(rows.map((r) => r.fromCsId))];
+    const users =
+      fromIds.length > 0
+        ? await this.db
+            .select({ id: schema.users.id, name: schema.users.name })
+            .from(schema.users)
+            .where(inArray(schema.users.id, fromIds))
+        : [];
+    const userMap = new Map(users.map((u) => [u.id, u.name]));
+
+    return rows.map((r) => ({
+      id: r.id,
+      orderId: r.orderId,
+      fromCsId: r.fromCsId,
+      fromCsName: userMap.get(r.fromCsId) ?? null,
+      toCsId: r.toCsId,
+      status: r.status,
+      requestedAt: r.requestedAt,
+      reason: r.reason ?? null,
+      order: orderMap.get(r.orderId) ?? null,
+    }));
+  }
+
+  /**
+   * List active CS agents (id + name) for transfer dropdown.
+   * Used by CS_AGENT and HoS when opening "Transfer to agent" modal.
+   */
+  async listCSAgents(): Promise<Array<{ agentId: string; agentName: string }>> {
+    const agents = await this.db
+      .select({ id: schema.users.id, name: schema.users.name })
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.role, 'CS_AGENT'),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      );
+    return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
   }
 
   /**
    * Get order counts by status — for dashboard stats.
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
+   * Optional assignedCsId filters to that CS agent's orders (for CS Orders page).
+   * Optional logisticsLocationId filters to that 3PL location (for Logistics Orders page / TPL_MANAGER scoping).
    * Optional startDate/endDate filter by orders.createdAt (when provided: counts = orders created in period).
    */
   async getStatusCounts(
     mediaBuyerId?: string,
     startDate?: string,
     endDate?: string,
+    assignedCsId?: string,
+    logisticsLocationId?: string,
   ) {
     const conditions: Parameters<typeof and>[0][] = [];
     if (mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+    if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
+    if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);
@@ -664,6 +1479,28 @@ export class OrdersService {
       counts[row.status] = row.count;
     }
     return counts;
+  }
+
+  /**
+   * Get order pipeline chart data — Volume, CS Engaged, Confirmed, Logistics distributed, Delivered.
+   * For the CEO Executive Overview order funnel chart. Same date filter as getStatusCounts (created_at).
+   */
+  async getOrderPipelineChart(startDate?: string, endDate?: string): Promise<{
+    volume: number;
+    csEngaged: number;
+    confirmed: number;
+    logisticsDistributed: number;
+    delivered: number;
+  }> {
+    const counts = await this.getStatusCounts(undefined, startDate, endDate);
+    const volume = Object.values(counts).reduce((sum, c) => sum + (c ?? 0), 0);
+    return {
+      volume,
+      csEngaged: counts['CS_ENGAGED'] ?? 0,
+      confirmed: counts['CONFIRMED'] ?? 0,
+      logisticsDistributed: (counts['ALLOCATED'] ?? 0) + (counts['DISPATCHED'] ?? 0),
+      delivered: counts['DELIVERED'] ?? 0,
+    };
   }
 
   /**
@@ -690,6 +1527,7 @@ export class OrdersService {
               eq(schema.orders.assignedCsId, agent.id),
               or(
                 eq(schema.orders.status, 'UNPROCESSED'),
+                eq(schema.orders.status, 'CS_ASSIGNED'),
                 eq(schema.orders.status, 'CS_ENGAGED'),
               ),
             ),
@@ -706,6 +1544,123 @@ export class OrdersService {
     );
 
     return workloads;
+  }
+
+  /**
+   * Get workload for the current CS agent — for \"My Orders\" page.
+   * Returns null for non–CS agents or inactive users.
+   */
+  async getMyCSWorkload(actor: SessionUser) {
+    if (actor.role !== 'CS_AGENT') {
+      return null;
+    }
+
+    const userRows = await this.db
+      .select()
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.id, actor.id),
+          eq(schema.users.role, 'CS_AGENT'),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      )
+      .limit(1);
+
+    const user = userRows[0];
+    if (!user) {
+      return null;
+    }
+
+    const pendingRows = await this.db
+      .select({ count: count() })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.assignedCsId, actor.id),
+          or(
+            eq(schema.orders.status, 'UNPROCESSED'),
+            eq(schema.orders.status, 'CS_ASSIGNED'),
+            eq(schema.orders.status, 'CS_ENGAGED'),
+          ),
+        ),
+      );
+
+    return {
+      agentId: user.id,
+      agentName: user.name,
+      capacity: user.capacity ?? 10,
+      pendingCount: pendingRows[0]?.count ?? 0,
+      lastActionAt: user.lastActionAt,
+    };
+  }
+
+  /**
+   * Get delivered orders aggregated by day — for CEO overview time-series chart.
+   * Returns { date: YYYY-MM-DD, revenue, orderCount }[] for the given date range (delivered_at).
+   */
+  async getDeliveredOrdersTimeSeries(startDate?: string, endDate?: string): Promise<{ date: string; revenue: number; orderCount: number }[]> {
+    const conditions: Parameters<typeof and>[0][] = [
+      eq(schema.orders.status, 'DELIVERED'),
+      sql`${schema.orders.deliveredAt} IS NOT NULL`,
+    ];
+    if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.orders.deliveredAt, end));
+    }
+    const whereClause = and(...conditions);
+    const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.deliveredAt})::date`;
+
+    const rows = await this.db
+      .select({
+        date: dateTrunc,
+        revenue: sql<string>`COALESCE(SUM(CAST(${schema.orders.totalAmount} AS numeric)), 0)`,
+        orderCount: count(),
+      })
+      .from(schema.orders)
+      .where(whereClause)
+      .groupBy(dateTrunc)
+      .orderBy(asc(dateTrunc));
+
+    return rows.map((r) => ({
+      date: typeof r.date === 'string' ? r.date.split('T')[0]! : (r.date as Date).toISOString().split('T')[0]!,
+      revenue: Number(r.revenue ?? 0),
+      orderCount: r.orderCount ?? 0,
+    }));
+  }
+
+  /**
+   * Get order volume by creation date — for CEO overview time-series chart.
+   * Returns { date: YYYY-MM-DD, orderCount }[] for the given date range (created_at).
+   */
+  async getOrdersTimeSeriesByCreated(startDate?: string, endDate?: string): Promise<{ date: string; orderCount: number }[]> {
+    const conditions: Parameters<typeof and>[0][] = [];
+    if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.orders.createdAt, end));
+    }
+    const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.createdAt})::date`;
+
+    let query = this.db
+      .select({
+        date: dateTrunc,
+        orderCount: count(),
+      })
+      .from(schema.orders)
+      .$dynamic();
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+    const rows = await query.groupBy(dateTrunc).orderBy(asc(dateTrunc));
+
+    return rows.map((r) => ({
+      date: typeof r.date === 'string' ? r.date.split('T')[0]! : (r.date as Date).toISOString().split('T')[0]!,
+      orderCount: r.orderCount ?? 0,
+    }));
   }
 
   /**
@@ -751,13 +1706,14 @@ export class OrdersService {
         .select({ count: count() })
         .from(schema.orders)
         .where(
-          and(
-            eq(schema.orders.assignedCsId, agent.id),
-            or(
-              eq(schema.orders.status, 'UNPROCESSED'),
-              eq(schema.orders.status, 'CS_ENGAGED'),
-            ),
+        and(
+          eq(schema.orders.assignedCsId, agent.id),
+          or(
+            eq(schema.orders.status, 'UNPROCESSED'),
+            eq(schema.orders.status, 'CS_ASSIGNED'),
+            eq(schema.orders.status, 'CS_ENGAGED'),
           ),
+        ),
         );
 
       const hasPending = (pendingRows[0]?.count ?? 0) > 0;
@@ -778,14 +1734,17 @@ export class OrdersService {
 
   /**
    * Get CS agent leaderboard — performance metrics for ranking.
-   * Metrics: orders engaged, confirmed, cancelled, delivered, calls made,
-   * confirmation rate, delivery rate, avg call duration.
-   * period: 'this_month' (default) or 'all_time'
+   * period: 'this_month' (default) or 'all_time'; optional startDate/endDate override for custom range.
    */
-  async getCSAgentLeaderboard(period: 'this_month' | 'all_time' = 'this_month') {
-    const periodStart = period === 'this_month'
-      ? new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-      : null;
+  async getCSAgentLeaderboard(period: 'this_month' | 'all_time' = 'this_month', startDate?: string, endDate?: string) {
+    const useCustomRange = startDate && endDate;
+    const periodStart = useCustomRange
+      ? new Date(startDate)
+      : period === 'this_month'
+        ? new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+        : null;
+    let periodEnd: Date | null = useCustomRange ? new Date(endDate) : null;
+    if (periodEnd) periodEnd.setHours(23, 59, 59, 999);
 
     const agents = await this.db
       .select({ id: schema.users.id, name: schema.users.name })
@@ -797,37 +1756,49 @@ export class OrdersService {
         ),
       );
 
+    const orderDateFilter = periodStart
+      ? periodEnd
+        ? and(gte(schema.orders.createdAt, periodStart), lte(schema.orders.createdAt, periodEnd))
+        : gte(schema.orders.createdAt, periodStart)
+      : undefined;
+    const deliveredDateFilter = periodStart
+      ? periodEnd
+        ? and(gte(schema.orders.deliveredAt, periodStart), lte(schema.orders.deliveredAt, periodEnd))
+        : gte(schema.orders.deliveredAt, periodStart)
+      : undefined;
+    const callLogsDateFilter = periodStart
+      ? periodEnd
+        ? and(gte(schema.callLogs.startedAt, periodStart), lte(schema.callLogs.startedAt, periodEnd))
+        : gte(schema.callLogs.startedAt, periodStart)
+      : undefined;
+
     const leaderboard = await Promise.all(
       agents.map(async (agent) => {
         const agentId = agent.id;
-        const dateFilter = periodStart ? gte(schema.orders.createdAt, periodStart) : undefined;
-        const baseOrderConditions = periodStart
-          ? and(eq(schema.orders.assignedCsId, agentId), dateFilter)
+        const baseOrderConditions = orderDateFilter
+          ? and(eq(schema.orders.assignedCsId, agentId), orderDateFilter)
           : eq(schema.orders.assignedCsId, agentId);
 
-        const deliveredWhere = periodStart
+        const deliveredWhere = deliveredDateFilter
           ? and(
               eq(schema.orders.assignedCsId, agentId),
               eq(schema.orders.status, 'DELIVERED'),
-              gte(schema.orders.deliveredAt, periodStart),
+              deliveredDateFilter,
             )
           : and(
               eq(schema.orders.assignedCsId, agentId),
               eq(schema.orders.status, 'DELIVERED'),
             );
 
-        const callLogsWhere = periodStart
-          ? and(
-              eq(schema.callLogs.agentId, agentId),
-              gte(schema.callLogs.startedAt, periodStart),
-            )
+        const callLogsWhere = callLogsDateFilter
+          ? and(eq(schema.callLogs.agentId, agentId), callLogsDateFilter)
           : eq(schema.callLogs.agentId, agentId);
 
-        const callLogsAvgWhere = periodStart
+        const callLogsAvgWhere = callLogsDateFilter
           ? and(
               eq(schema.callLogs.agentId, agentId),
               eq(schema.callLogs.callStatus, 'COMPLETED'),
-              gte(schema.callLogs.startedAt, periodStart),
+              callLogsDateFilter,
             )
           : and(
               eq(schema.callLogs.agentId, agentId),
@@ -911,45 +1882,52 @@ export class OrdersService {
   // ============================================
 
   /**
-   * Auto-dispatch a new order to the least-loaded CS agent.
-   * Weighted dispatch: lowest active_pending_count wins.
+   * Assign a single UNPROCESSED order to the best available CS agent using the configured
+   * dispatch strategy. Used by auto-dispatch on creation and by distributeUnassignedOrders.
+   * Returns true if the order was assigned, false if no capacity.
    */
-  private async autoDispatchToCS(orderId: string) {
-    // Release expired locks first
-    await this.releaseExpiredLocks();
-
+  private async assignOrderToBestAvailableAgent(orderId: string): Promise<boolean> {
     const workloads = await this.getCSAgentWorkloads();
-
-    // Filter agents with available capacity
     const available = workloads.filter((w) => w.pendingCount < w.capacity);
+    if (available.length === 0) return false;
 
-    if (available.length === 0) return;
+    const dispatchSetting = await this.settingsService.get('CS_DISPATCH_STRATEGY');
+    const strategy = dispatchSetting?.strategy === 'performance' ? 'performance' : 'load_balanced';
 
-    // Sort by pending count (ascending), then by lastActionAt (ascending = most idle first)
-    // This is the tiebreaker: when two agents have the same pendingCount,
-    // the one who hasn't acted in the longest time gets the order.
-    available.sort((a, b) => {
-      if (a.pendingCount !== b.pendingCount) {
-        return a.pendingCount - b.pendingCount;
-      }
-      // Tiebreaker: oldest lastActionAt first (most idle)
-      const aTime = a.lastActionAt?.getTime() ?? 0;
-      const bTime = b.lastActionAt?.getTime() ?? 0;
-      return aTime - bTime;
-    });
+    if (strategy === 'performance') {
+      const leaderboard = await this.getCSAgentLeaderboard('this_month');
+      const perfMap = new Map(
+        leaderboard.map((e) => [e.agentId, { deliveryRate: e.deliveryRate, confirmationRate: e.confirmationRate }]),
+      );
+      available.sort((a, b) => {
+        const aPerf = perfMap.get(a.agentId) ?? { deliveryRate: 0, confirmationRate: 0 };
+        const bPerf = perfMap.get(b.agentId) ?? { deliveryRate: 0, confirmationRate: 0 };
+        if (bPerf.deliveryRate !== aPerf.deliveryRate) return bPerf.deliveryRate - aPerf.deliveryRate;
+        if (bPerf.confirmationRate !== aPerf.confirmationRate) return bPerf.confirmationRate - aPerf.confirmationRate;
+        if (a.pendingCount !== b.pendingCount) return a.pendingCount - b.pendingCount;
+        const aTime = a.lastActionAt?.getTime() ?? 0;
+        const bTime = b.lastActionAt?.getTime() ?? 0;
+        return aTime - bTime;
+      });
+    } else {
+      available.sort((a, b) => {
+        if (a.pendingCount !== b.pendingCount) return a.pendingCount - b.pendingCount;
+        const aTime = a.lastActionAt?.getTime() ?? 0;
+        const bTime = b.lastActionAt?.getTime() ?? 0;
+        return aTime - bTime;
+      });
+    }
 
     const targetAgent = available[0];
-    if (!targetAgent) return;
+    if (!targetAgent) return false;
 
     await this.db
       .update(schema.orders)
-      .set({ assignedCsId: targetAgent.agentId, updatedAt: new Date() })
+      .set({ assignedCsId: targetAgent.agentId, status: 'CS_ASSIGNED', updatedAt: new Date() })
       .where(eq(schema.orders.id, orderId));
 
-    // Notify the assigned agent (real-time + persistent)
-    this.events.emitToUser(targetAgent.agentId, 'order:assigned', {
-      orderId,
-    });
+    this.events.emitToUser(targetAgent.agentId, 'order:assigned', { orderId });
+    this.events.emitToRoom('cs-all', 'order:assigned', { orderId });
     this.notifications
       .create({
         userId: targetAgent.agentId,
@@ -959,6 +1937,46 @@ export class OrdersService {
         data: { orderId },
       })
       .catch(() => {});
+
+    return true;
+  }
+
+  /**
+   * Auto-dispatch a new order to a CS agent.
+   * Strategy is configurable via system setting CS_DISPATCH_STRATEGY:
+   * - load_balanced (default): lowest pending count first, then most idle.
+   * - performance: prioritise agents with higher delivery rate and confirmation rate (this month).
+   */
+  private async autoDispatchToCS(orderId: string) {
+    await this.releaseExpiredLocks();
+    await this.assignOrderToBestAvailableAgent(orderId);
+  }
+
+  /**
+   * Distribute all UNPROCESSED (unassigned) orders to CS agents using the same algorithm as
+   * auto-dispatch. Manual fallback when assignment on order creation did not run or failed.
+   * Restricted to Head of CS and SuperAdmin.
+   */
+  async distributeUnassignedOrders(actor: SessionUser): Promise<{ distributed: number }> {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    await this.releaseExpiredLocks();
+
+    const unassigned = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(eq(schema.orders.status, 'UNPROCESSED'))
+      .orderBy(asc(schema.orders.createdAt));
+
+    let distributed = 0;
+    for (const row of unassigned) {
+      const assigned = await this.assignOrderToBestAvailableAgent(row.id);
+      if (assigned) distributed++;
+    }
+
+    if (distributed > 0) {
+      this.events.emitToRoom('cs-all', 'order:assignments_changed', { distributed });
+    }
+    return { distributed };
   }
 
   /**
@@ -1052,6 +2070,15 @@ export class OrdersService {
             message: 'Must specify a logistics location for allocation',
           });
         }
+        const locationId = metadata.logisticsLocationId as string;
+        const isLocked = await this.inventoryService.isDispatchLocked(locationId);
+        if (isLocked) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'Dispatch is locked at this location. Resolve pending stock reconciliations in Returns & Restock to unlock.',
+          });
+        }
         break;
       }
 
@@ -1066,24 +2093,23 @@ export class OrdersService {
       }
 
       case 'DELIVERED': {
-        // SuperAdmin can bypass OTP (manual correction — still audited via temporal trail)
-        if (actor.role !== 'SUPER_ADMIN') {
-          if (!metadata?.otp) {
+        // 3PL marks delivered independently; proof/cost collected later in delivery remittance
+        if (metadata?.deliveryProofUrl && typeof metadata.deliveryProofUrl === 'string' && metadata.deliveryProofUrl.trim() !== '') {
+          try {
+            new URL(metadata.deliveryProofUrl as string);
+          } catch {
             throw new TRPCError({
               code: 'BAD_REQUEST',
-              message: 'Delivery confirmation requires a 4-digit OTP from the customer',
+              message: 'Delivery proof must be a valid URL (upload the screenshot first).',
             });
           }
-          if (!order.deliveryOtp) {
+        }
+        if (metadata?.deliveryFeeAddOn !== undefined && metadata.deliveryFeeAddOn !== null) {
+          const cost = Number(metadata.deliveryFeeAddOn);
+          if (Number.isNaN(cost) || cost < 0) {
             throw new TRPCError({
               code: 'BAD_REQUEST',
-              message: 'No OTP has been generated for this order. Dispatch must occur first.',
-            });
-          }
-          if (metadata.otp !== order.deliveryOtp) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: 'OTP does not match. Please verify with the customer.',
+              message: 'Delivery cost must be a number greater than or equal to 0.',
             });
           }
         }
@@ -1099,6 +2125,25 @@ export class OrdersService {
             code: 'BAD_REQUEST',
             message: 'Partial delivery requires delivered and returned quantities',
           });
+        }
+        if (metadata?.deliveryProofUrl && typeof metadata.deliveryProofUrl === 'string' && metadata.deliveryProofUrl.trim() !== '') {
+          try {
+            new URL(metadata.deliveryProofUrl as string);
+          } catch {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'Delivery proof must be a valid URL (upload the screenshot first).',
+            });
+          }
+        }
+        if (metadata?.deliveryFeeAddOn !== undefined && metadata.deliveryFeeAddOn !== null) {
+          const costPartial = Number(metadata.deliveryFeeAddOn);
+          if (Number.isNaN(costPartial) || costPartial < 0) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'Delivery cost must be a number greater than or equal to 0.',
+            });
+          }
         }
         break;
       }
@@ -1406,8 +2451,8 @@ export class OrdersService {
         callbackScheduledAt: scheduledAt,
         callbackAttempts: currentAttempts + 1,
         callbackNotes: options?.notes ?? null,
-        // Move back to UNPROCESSED so it re-enters the queue
-        status: 'UNPROCESSED',
+        // Move to CS_ASSIGNED so order stays in same agent's queue
+        status: 'CS_ASSIGNED',
         lockedUntil: null,
         lockedBy: null,
         updatedAt: new Date(),
@@ -1417,12 +2462,26 @@ export class OrdersService {
     this.events.emitOrderStatusChange({
       orderId,
       oldStatus: order.status,
-      newStatus: 'UNPROCESSED',
+      newStatus: 'CS_ASSIGNED',
       assignedCsId: order.assignedCsId,
       mediaBuyerId: order.mediaBuyerId,
       logisticsLocationId: order.logisticsLocationId,
       riderId: order.riderId,
     });
+
+    // Notify assigned agent about the scheduled callback
+    if (order.assignedCsId) {
+      const timeLabel = scheduledAt.toLocaleString('en-NG', {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      });
+      this.notifications.create({
+        userId: order.assignedCsId,
+        type: 'order:callback_scheduled',
+        title: 'Callback scheduled',
+        body: `Order ${orderId.slice(0, 8)}... callback scheduled for ${timeLabel}. Attempt ${currentAttempts + 1}/${maxAttempts}.`,
+        data: { orderId, scheduledAt: scheduledAt.toISOString() },
+      }).catch(() => {});
+    }
 
     return {
       action: 'scheduled',
@@ -1445,6 +2504,7 @@ export class OrdersService {
           sql`${schema.orders.callbackScheduledAt} <= NOW()`,
           or(
             eq(schema.orders.status, 'UNPROCESSED'),
+            eq(schema.orders.status, 'CS_ASSIGNED'),
             eq(schema.orders.status, 'CS_ENGAGED'),
           ),
         ),
@@ -1470,6 +2530,7 @@ export class OrdersService {
           sql`${schema.orders.callbackAttempts} > 0`,
           or(
             eq(schema.orders.status, 'UNPROCESSED'),
+            eq(schema.orders.status, 'CS_ASSIGNED'),
             eq(schema.orders.status, 'CS_ENGAGED'),
           ),
         ),
@@ -1480,6 +2541,40 @@ export class OrdersService {
       ...order,
       customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
     }));
+  }
+
+  /**
+   * Cron: every 2 minutes, check for callbacks that are due and notify the assigned CS agent.
+   * Uses a Redis set to avoid duplicate notifications for the same order.
+   */
+  @Cron('0 */2 * * * *')
+  async handleDueCallbacks(): Promise<void> {
+    try {
+      const dueOrders = await this.getCallbackQueue();
+      for (const order of dueOrders) {
+        if (!order.assignedCsId) continue;
+
+        // Prevent duplicate notifications — Redis key expires after 30 minutes
+        const dedupKey = `callback_notified:${order.id}:${order.callbackAttempts ?? 0}`;
+        const alreadyNotified = await this.redis.get(dedupKey);
+        if (alreadyNotified) continue;
+
+        await this.redis.set(dedupKey, '1', 'EX', 1800);
+
+        this.notifications.create({
+          userId: order.assignedCsId,
+          type: 'order:callback_due',
+          title: 'Callback due now',
+          body: `Order ${order.id.slice(0, 8)}... is due for a callback. Attempt ${order.callbackAttempts ?? 0}/3.`,
+          data: { orderId: order.id },
+        }).catch(() => {});
+
+        // Also push to the CS room so the queue tab refreshes
+        this.events.emitToRoom('cs-all', 'order:callback_due', { orderId: order.id });
+      }
+    } catch {
+      // Cron failure is non-fatal — will retry in 2 minutes
+    }
   }
 
   // ============================================
@@ -1609,6 +2704,7 @@ export class OrdersService {
       })
       .where(eq(schema.orders.id, duplicateId));
 
+    this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {});
     return { merged: true, originalId, duplicateId };
   }
 
@@ -1627,6 +2723,7 @@ export class OrdersService {
       })
       .where(eq(schema.orders.id, orderId));
 
+    this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {});
     return { dismissed: true };
   }
 

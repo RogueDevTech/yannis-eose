@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, useNavigation } from '@remix-run/react';
 import { Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { FileUpload } from '~/components/ui/file-upload';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { Spinner } from '~/components/ui/spinner';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 
 const FUNDING_COLORS: Record<string, string> = {
@@ -32,6 +34,8 @@ export interface DisbursementsPageData {
   canDisburseToHoM: boolean;
   canDisburseToMediaBuyers: boolean;
   preselectedReceiverId?: string | null;
+  filters?: { startDate: string; endDate: string; periodAllTime: boolean };
+  recipientBalances?: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>;
 }
 
 export function DisbursementsPage({
@@ -41,8 +45,12 @@ export function DisbursementsPage({
   canDisburseToHoM,
   canDisburseToMediaBuyers,
   preselectedReceiverId = null,
+  filters = { startDate: '', endDate: '', periodAllTime: false },
+  recipientBalances = [],
 }: DisbursementsPageData) {
   const fetcher = useFetcher();
+  const navigation = useNavigation();
+  const isFilterLoading = navigation.state === 'loading';
   const [showForm, setShowForm] = useState(!!preselectedReceiverId);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
@@ -70,11 +78,23 @@ export function DisbursementsPage({
             Tier 1: Super Admin / Finance → Head of Marketing. Tier 2: HoM → Media Buyers
           </p>
         </div>
-        {canCreate && (
-          <Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>
-            + New Disbursement
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <DateFilterBar
+            startDate={filters.startDate}
+            endDate={filters.endDate}
+            periodAllTime={filters.periodAllTime}
+          />
+          {isFilterLoading && (
+            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+              <Spinner size="sm" className="shrink-0" />
+            </span>
+          )}
+          {canCreate && (
+            <Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Close' : '+ New Disbursement'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {actionError && (
@@ -97,11 +117,15 @@ export function DisbursementsPage({
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Recipient</label>
               <select name="receiverId" required className="input" defaultValue={preselectedReceiverId ?? ''}>
                 <option value="">Select recipient...</option>
-                {recipients.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'Media Buyer'})
-                  </option>
-                ))}
+                {recipients.map((u) => {
+                  const bal = recipientBalances.find((b) => b.userId === u.id);
+                  const balanceLabel = bal != null ? ` — Balance: ₦${Number(bal.balance).toLocaleString()}` : '';
+                  return (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'Media Buyer'}){balanceLabel}
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div>
@@ -127,6 +151,45 @@ export function DisbursementsPage({
             </Button>
           </div>
         </fetcher.Form>
+      )}
+
+      {recipientBalances.length > 0 && (
+        <div className="card p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
+            <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Recipient balances</h2>
+            <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">Funding received (confirmed) minus approved ad spend</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr>
+                  <th className="table-header">Recipient</th>
+                  <th className="table-header">Role</th>
+                  <th className="table-header text-right">Received</th>
+                  <th className="table-header text-right">Spent</th>
+                  <th className="table-header text-right">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recipientBalances.map((b) => (
+                  <tr key={b.userId} className="table-row">
+                    <td className="table-cell">
+                      <Link to={`/hr/users/${b.userId}`} className="text-brand-500 hover:text-brand-600 text-sm">
+                        {b.name}
+                      </Link>
+                    </td>
+                    <td className="table-cell text-sm text-surface-700 dark:text-surface-300">
+                      {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}
+                    </td>
+                    <td className="table-cell text-right text-sm">₦{Number(b.totalReceived).toLocaleString()}</td>
+                    <td className="table-cell text-right text-sm">₦{Number(b.totalSpend).toLocaleString()}</td>
+                    <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400">₦{Number(b.balance).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       <div className="card p-0 overflow-hidden">

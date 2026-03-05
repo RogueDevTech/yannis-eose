@@ -160,15 +160,15 @@ export class FinanceService {
     orderConditions.push(eq(schema.orders.status, 'DELIVERED'));
     const orderWhere = and(...orderConditions);
 
-    // ── 2. Ad spend date range ───────────────────────────
-    const adSpendConditions = [];
+    // ── 2. Ad spend date range (only APPROVED counts toward profit) ───────────────────────────
+    const adSpendConditions = [eq(schema.adSpendLogs.status, 'APPROVED')];
     if (input.startDate) {
       adSpendConditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
     }
     if (input.endDate) {
       adSpendConditions.push(lte(schema.adSpendLogs.spendDate, new Date(input.endDate)));
     }
-    const adSpendWhere = adSpendConditions.length > 0 ? and(...adSpendConditions) : undefined;
+    const adSpendWhere = and(...adSpendConditions);
 
     // ── 3. Commission — approved/paid payouts overlapping period ──
     const commissionConditions = [

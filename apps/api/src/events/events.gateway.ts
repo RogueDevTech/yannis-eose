@@ -25,9 +25,18 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
  * - 3pl-{locationId}  → 3PL location-specific events
  * - hr              → HR dashboard
  */
+/**
+ * CORS origins for API and WebSocket (comma-separated in env).
+ */
+function getCorsOrigins(): string | string[] {
+  const corsOrigin = process.env['CORS_ORIGIN'] ?? 'http://localhost:5173';
+  const list = corsOrigin.split(',').map((o) => o.trim()).filter(Boolean);
+  return list.length > 1 ? list : list[0] || 'http://localhost:5173';
+}
+
 @WebSocketGateway({
   cors: {
-    origin: process.env['CORS_ORIGIN'] ?? 'http://localhost:5173',
+    origin: getCorsOrigins(),
     credentials: true,
   },
 })

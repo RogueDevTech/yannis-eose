@@ -646,14 +646,14 @@ Implement the strict order lifecycle state machine.
 `[x]` Status: Complete
 **Dependencies:** None
 **PRD Ref:** Section 5.2 (Permission Matrix)
-**Why:** Any logged-in user can navigate to any admin page. A CS Agent can open `/admin/finance`. PRD Section 5.2 has an explicit permission matrix that is not enforced on the frontend.
+**Why:** Any logged-in user can navigate to any admin page. A CS Agent can open `/admin/finance/overview`. PRD Section 5.2 has an explicit permission matrix that is not enforced on the frontend.
 
 **Implementation Steps:**
 1. Create a `requireRole(...roles)` utility for Remix loaders:
    - Get current user from session
    - If user's role not in allowed roles, redirect to `/admin` with error flash
 2. Apply role checks to every admin route loader per PRD 5.2:
-   - `/admin/finance` → SUPER_ADMIN, FINANCE_OFFICER
+   - `/admin/finance/overview` → SUPER_ADMIN, FINANCE_OFFICER
    - `/admin/hr` → SUPER_ADMIN, HR_MANAGER
    - `/admin/marketing` → SUPER_ADMIN, HEAD_OF_MARKETING, MEDIA_BUYER
    - `/admin/logistics` → SUPER_ADMIN, HEAD_OF_LOGISTICS, LOGISTICS_MANAGER
@@ -668,7 +668,7 @@ Implement the strict order lifecycle state machine.
 4. Create role-specific redirect on login (CS Agent → `/admin/orders`, Media Buyer → `/admin/campaigns`, etc.)
 
 **Acceptance Criteria:**
-- [x] CS Agent navigating to `/admin/finance` is redirected with "Access denied"
+- [x] CS Agent navigating to `/admin/finance/overview` is redirected with "Access denied"
 - [x] Sidebar only shows links relevant to the user's role
 - [x] Each role lands on their relevant dashboard after login
 - [x] SuperAdmin sees all sidebar links

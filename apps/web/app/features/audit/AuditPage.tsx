@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
+import { Link, useSearchParams, useFetcher, useRevalidator, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { Spinner } from '~/components/ui/spinner';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { exportToCsv } from '~/lib/csv-export';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -15,9 +17,16 @@ const AUDITABLE_TABLES = [
   'users', 'products', 'product_categories', 'stock_batches',
   'logistics_providers', 'logistics_locations', 'inventory_levels',
   'offer_templates', 'campaigns',
-  'orders', 'order_items', 'stock_transfers',
-  'marketing_funding', 'invoices',
+  'orders', 'order_items', 'stock_transfers', 'stock_movements',
+  'marketing_funding', 'marketing_funding_requests', 'ad_spend_logs',
+  'call_logs', 'order_transfer_requests',
+  'invoices', 'approval_requests', 'budgets', 'settlement_configs',
+  'delivery_confirmation_requests',
   'commission_plans', 'payout_records', 'earnings_adjustments',
+  'stock_reconciliations',
+  'email_change_requests', 'user_product_assignments',
+  'permission_requests', 'system_settings', 'cart_abandonments',
+  'permissions', 'user_permissions',
 ];
 
 // ── Human-friendly table labels ──────────────────────────────────
@@ -34,11 +43,28 @@ const TABLE_LABELS: Record<string, string> = {
   orders: 'Orders',
   order_items: 'Order Items',
   stock_transfers: 'Stock Transfers',
+  stock_movements: 'Stock Movements',
   marketing_funding: 'Marketing Funding',
+  marketing_funding_requests: 'Marketing Funding Requests',
+  ad_spend_logs: 'Ad Spend Logs',
+  call_logs: 'Call Logs',
+  order_transfer_requests: 'Order Transfer Requests',
   invoices: 'Invoices',
+  approval_requests: 'Approval Requests',
+  delivery_confirmation_requests: 'Delivery Confirmation Requests',
+  budgets: 'Budgets',
+  settlement_configs: 'Settlement Configs',
   commission_plans: 'Commission Plans',
   payout_records: 'Payout Records',
   earnings_adjustments: 'Earnings Adjustments',
+  stock_reconciliations: 'Stock Reconciliations',
+  email_change_requests: 'Email Change Requests',
+  user_product_assignments: 'User Product Assignments',
+  permission_requests: 'Permission Requests',
+  system_settings: 'System Settings',
+  cart_abandonments: 'Cart Abandonments',
+  permissions: 'Permissions',
+  user_permissions: 'User Permissions',
 };
 
 // ── Human-friendly field labels ──────────────────────────────────
@@ -143,6 +169,24 @@ const FIELD_LABELS: Record<string, string> = {
   qty: 'Quantity',
   label: 'Label',
   price: 'Price',
+  funding_request_status: 'Funding Request Status',
+  ad_spend_status: 'Ad Spend Status',
+  order_transfer_request_status: 'Transfer Request Status',
+  reconciliation_status: 'Reconciliation Status',
+  call_status: 'Call Status',
+  spend_amount: 'Spend Amount',
+  movement_type: 'Movement Type',
+  requester_id: 'Requester',
+  submitted_by: 'Submitted By',
+  resolved_by: 'Resolved By',
+  digital_count: 'Digital Count',
+  physical_count: 'Physical Count',
+  discrepancy: 'Discrepancy',
+  reason_code: 'Reason Code',
+  total_budget: 'Total Budget',
+  department_or_campaign: 'Department / Campaign',
+  window_type: 'Settlement Window',
+  start_day: 'Start Day',
 };
 
 // Fields to hide from the detail modal (sensitive/internal)
@@ -153,6 +197,40 @@ const HIDDEN_FIELDS = new Set([
   '_table_name',
   '_row_data',
 ]);
+
+// Field keys that hold image/file URLs — show View + Preview in audit detail
+const IMAGE_URL_FIELD_KEYS = new Set(['receipt_url', 'screenshot_url', 'image_url']);
+
+function isImageUrlValue(val: unknown): val is string {
+  return typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://'));
+}
+
+function AttachedFileDisplay({ url, onPreview }: { url: string; onPreview?: (url: string) => void }) {
+  return (
+    <span className="inline-flex items-center gap-2 flex-wrap">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 text-sm underline underline-offset-2"
+      >
+        View
+      </a>
+      {onPreview && (
+        <>
+          <span className="text-surface-400 dark:text-surface-500">|</span>
+          <button
+            type="button"
+            onClick={() => onPreview(url)}
+            className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 text-sm underline underline-offset-2 cursor-pointer"
+          >
+            Preview
+          </button>
+        </>
+      )}
+    </span>
+  );
+}
 
 // ── Role labels ──────────────────────────────────────────────────
 const ROLE_LABELS: Record<string, string> = {
@@ -175,6 +253,7 @@ const STATUS_LABELS: Record<string, string> = {
   INACTIVE: 'Inactive',
   ARCHIVED: 'Archived',
   UNPROCESSED: 'Unprocessed',
+  CS_ASSIGNED: 'CS Assigned',
   CS_ENGAGED: 'CS Engaged',
   CONFIRMED: 'Confirmed',
   CANCELLED: 'Cancelled',
@@ -198,6 +277,15 @@ const STATUS_LABELS: Record<string, string> = {
   OVERDUE: 'Overdue',
   PENDING_APPROVAL: 'Pending Approval',
   QUERIED: 'Queried',
+  ACCEPTED: 'Accepted',
+  INITIATED: 'Initiated',
+  RINGING: 'Ringing',
+  IN_PROGRESS: 'In Progress',
+  FAILED: 'Failed',
+  NO_ANSWER: 'No Answer',
+  BUSY: 'Busy',
+  MANUAL_CALL: 'Manual Call',
+  RESOLVED: 'Resolved',
 };
 
 // ── Formatting helpers ───────────────────────────────────────────
@@ -235,7 +323,7 @@ const CURRENCY_FIELDS = new Set([
   'cost_price', 'selling_price', 'landing_cost', 'unit_price', 'total_price',
   'delivery_fee', 'tpl_handling_fee', 'factory_cost', 'freight_duty',
   'amount', 'daily_spend', 'base_salary', 'commission_total', 'deductions',
-  'net_amount', 'base_sale_price',
+  'net_amount', 'base_sale_price', 'total_budget', 'spend_amount',
 ]);
 
 function formatCurrency(val: unknown): string {
@@ -464,6 +552,7 @@ function getDescriptionParts(
         ? `for ${data.customer_name}`
         : 'order';
     if (status === 'UNPROCESSED') return { prefix: 'New order created', entityLabel: data.customer_name ? `for ${data.customer_name}` : null, suffix: '' };
+    if (status === 'CS_ASSIGNED') return { prefix: 'Order assigned to CS agent', entityLabel: data.customer_name ? ` for ${data.customer_name}` : null, suffix: '' };
     if (status === 'CS_ENGAGED') return { prefix: `${actor} engaged CS call on `, entityLabel: `order${customer}`, suffix: '' };
     if (status === 'CONFIRMED') return { prefix: `${actor} confirmed order `, entityLabel, suffix: '' };
     if (status === 'CANCELLED') {
@@ -584,6 +673,100 @@ function getDescriptionParts(
     return { prefix: `${actor} updated earnings adjustment`, entityLabel: null, suffix: amount };
   }
 
+  if (table === 'marketing_funding_requests') {
+    const status = (data.funding_request_status ?? data.status) as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
+    return { prefix: `${actor} updated funding request${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+  }
+
+  if (table === 'ad_spend_logs') {
+    const status = (data.ad_spend_status ?? data.status) as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    const amount = data.spend_amount ? ` — ${formatCurrency(data.spend_amount)}` : '';
+    return { prefix: `${actor} updated ad spend${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+  }
+
+  if (table === 'call_logs') {
+    const status = data.call_status as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    const duration = data.duration_seconds != null ? ` (${data.duration_seconds}s)` : '';
+    return { prefix: `${actor} call log — ${statusLabel}${duration}`, entityLabel: null, suffix: '' };
+  }
+
+  if (table === 'order_transfer_requests') {
+    const status = (data.order_transfer_request_status ?? data.status) as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    return { prefix: `${actor} updated order transfer request — ${statusLabel}`, entityLabel: null, suffix: '' };
+  }
+
+  if (table === 'stock_reconciliations') {
+    const status = data.reconciliation_status as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    const disc = data.discrepancy != null ? ` — discrepancy ${data.discrepancy}` : '';
+    return { prefix: `${actor} updated stock reconciliation${disc}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+  }
+
+  if (table === 'approval_requests') {
+    const status = (data.approval_status ?? data.status) as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
+    return { prefix: `${actor} updated approval request${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+  }
+
+  if (table === 'budgets') {
+    const amount = data.total_budget ? ` — ${formatCurrency(data.total_budget)}` : '';
+    return { prefix: `${actor} updated budget${amount}`, entityLabel: recordLabel, suffix: '' };
+  }
+
+  if (table === 'settlement_configs') {
+    return { prefix: `${actor} updated settlement config`, entityLabel: null, suffix: '' };
+  }
+
+  if (table === 'stock_movements') {
+    const qty = data.quantity ?? '';
+    const moveType = data.movement_type as string | undefined;
+    const typeLabel = moveType ? moveType.replace(/_/g, ' ') : '';
+    return { prefix: `${actor} stock movement — ${typeLabel}`, entityLabel: null, suffix: qty ? ` ${qty} units` : '' };
+  }
+
+  if (table === 'email_change_requests') {
+    const status = data.status as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    return { prefix: `${actor} updated email change request`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+  }
+
+  if (table === 'user_product_assignments') {
+    return { prefix: `${actor} updated user product assignment`, entityLabel: recordLabel, suffix: '' };
+  }
+
+  if (table === 'permission_requests') {
+    const status = (data.permission_request_status ?? data.status) as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    const typeLabel = (data.type as string) ?? '';
+    return { prefix: `${actor} updated permission request — ${typeLabel}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+  }
+
+  if (table === 'system_settings') {
+    const key = data.key as string | undefined;
+    return { prefix: `${actor} updated system setting`, entityLabel: key ?? null, suffix: '' };
+  }
+
+  if (table === 'cart_abandonments') {
+    const status = (data.cart_status ?? data.status) as string | undefined;
+    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+    return { prefix: `${actor} updated cart abandonment`, entityLabel: recordLabel, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+  }
+
+  if (table === 'permissions') {
+    const code = data.code as string | undefined;
+    return { prefix: `${actor} updated permission`, entityLabel: code ?? null, suffix: '' };
+  }
+
+  if (table === 'user_permissions') {
+    return { prefix: `${actor} updated user permission`, entityLabel: recordLabel, suffix: '' };
+  }
+
   const full = `${actor} updated ${formatTableName(table).toLowerCase()} record`;
   return { prefix: full, entityLabel: null, suffix: '' };
 }
@@ -609,7 +792,7 @@ function AuditDescription({
 
   if (href && entityLabel) {
     return (
-      <>
+      <span className="break-words whitespace-normal">
         {prefix}
         <Link
           to={href}
@@ -618,12 +801,12 @@ function AuditDescription({
           {entityLabel}
         </Link>
         {suffix}
-      </>
+      </span>
     );
   }
 
   const label = entityLabel ? `"${entityLabel}"` : '';
-  return <>{prefix}{label}{suffix}</>;
+  return <span className="break-words whitespace-normal">{prefix}{label}{suffix}</span>;
 }
 
 // ── Structured display for deep objects/arrays (no raw JSON) ──────
@@ -787,11 +970,13 @@ function DetailModal({
   actorNames,
   onClose,
   onUnknownActorClick,
+  onPreviewImage,
 }: {
   entry: AuditEntry;
   actorNames: Record<string, { name: string; role: string }>;
   onClose: () => void;
   onUnknownActorClick?: (changedBy: string | null, displayName: string) => void;
+  onPreviewImage?: (url: string) => void;
 }) {
   const fields = Object.entries(entry.data).filter(
     ([key]) => !HIDDEN_FIELDS.has(key) && key !== 'id',
@@ -886,9 +1071,11 @@ function DetailModal({
                   <td className="table-cell font-medium text-surface-700 dark:text-surface-300">
                     {formatFieldName(key)}
                   </td>
-                  <td className="table-cell text-surface-900 dark:text-surface-100 break-all">
+                  <td className="table-cell text-surface-900 dark:text-surface-100 break-words whitespace-normal min-w-0">
                     {key === 'offers' ? (
                       <OffersDisplay value={value} />
+                    ) : IMAGE_URL_FIELD_KEYS.has(key) && isImageUrlValue(value) ? (
+                      <AttachedFileDisplay url={value} onPreview={onPreviewImage} />
                     ) : (typeof value === 'object' && value !== null) || (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) ? (
                       <div className="py-1.5 min-w-0">
                         <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} />
@@ -967,8 +1154,10 @@ function PollingStatusIndicator({
 
 function TimeTravelPanel({
   actorNames,
+  onPreviewImage,
 }: {
   actorNames: Record<string, { name: string; role: string }>;
+  onPreviewImage?: (url: string) => void;
 }) {
   const fetcher = useFetcher();
   const [ttTable, setTtTable] = useState(AUDITABLE_TABLES[0]);
@@ -1052,9 +1241,11 @@ function TimeTravelPanel({
                   <td className="table-cell font-medium text-surface-700 dark:text-surface-300">
                     {formatFieldName(key)}
                   </td>
-                  <td className="table-cell text-surface-900 dark:text-surface-100 break-all">
+                  <td className="table-cell text-surface-900 dark:text-surface-100 break-words whitespace-normal min-w-0">
                     {key === 'offers' ? (
                       <OffersDisplay value={value} />
+                    ) : IMAGE_URL_FIELD_KEYS.has(key) && isImageUrlValue(value) ? (
+                      <AttachedFileDisplay url={value} onPreview={onPreviewImage} />
                     ) : (typeof value === 'object' && value !== null) || (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) ? (
                       <div className="py-1.5 min-w-0">
                         <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} />
@@ -1077,8 +1268,11 @@ function TimeTravelPanel({
 
 export function AuditPage({ rows, total, filters, actorNames, error }: AuditPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = useNavigation();
+  const isFilterLoading = navigation.state === 'loading';
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
   const [unknownActorModal, setUnknownActorModal] = useState<{ changedBy: string | null; displayName: string } | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const { revalidate, state: revalidatorState } = useRevalidator();
 
   // Polling state: idle (yellow) → fetching (spinner) → success (green 2s) → idle
@@ -1225,26 +1419,21 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
           </div>
           <div>
             <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
-              Start Date
+              Date range
             </label>
-            <input
-              type="datetime-local"
-              value={filters.startDate}
-              onChange={(e) => updateFilter('startDate', e.target.value)}
-              className="input text-sm"
+            <DateFilterBar
+              startDate={filters.startDate}
+              endDate={filters.endDate}
+              periodAllTime={filters.periodAllTime ?? false}
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
-              End Date
-            </label>
-            <input
-              type="datetime-local"
-              value={filters.endDate}
-              onChange={(e) => updateFilter('endDate', e.target.value)}
-              className="input text-sm"
-            />
-          </div>
+          {isFilterLoading && (
+            <div className="flex items-end">
+              <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+                <Spinner size="sm" className="shrink-0" />
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1320,7 +1509,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                       {formatTableName(entry.tableName)}
                     </span>
                   </td>
-                  <td className="table-cell text-xs text-surface-700 dark:text-surface-300 max-w-xs">
+                  <td className="table-cell text-xs text-surface-700 dark:text-surface-300 max-w-[180px] sm:max-w-xs md:max-w-sm break-words whitespace-normal min-w-0">
                     <DeferredSection resolve={actorNames} skeleton="inline">
                       {(resolvedActorNames) => (
                         <AuditDescription entry={entry} actorNames={resolvedActorNames} />
@@ -1410,7 +1599,10 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
       {/* Time Travel Panel — uses resolved actorNames */}
       <DeferredSection resolve={actorNames} skeleton="card">
         {(resolvedActorNames) => (
-          <TimeTravelPanel actorNames={resolvedActorNames} />
+          <TimeTravelPanel
+            actorNames={resolvedActorNames}
+            onPreviewImage={(url) => setPreviewImageUrl(url)}
+          />
         )}
       </DeferredSection>
 
@@ -1426,6 +1618,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                 setSelectedEntry(null);
                 setUnknownActorModal({ changedBy, displayName });
               }}
+              onPreviewImage={(url) => setPreviewImageUrl(url)}
             />
           )}
         </DeferredSection>
@@ -1438,6 +1631,21 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
           displayName={unknownActorModal.displayName}
           onClose={() => setUnknownActorModal(null)}
         />
+      )}
+
+      {/* Image preview modal — for receipt_url, screenshot_url, image_url in audit detail */}
+      {previewImageUrl && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setPreviewImageUrl(null)}>
+          <div className="fixed inset-0 bg-black/70" />
+          <div className="relative max-w-2xl max-h-[90vh] w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-end mb-2">
+              <button type="button" onClick={() => setPreviewImageUrl(null)} className="text-surface-100 hover:text-white p-1 rounded">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <img src={previewImageUrl} alt="Attachment" className="w-full h-auto max-h-[85vh] object-contain rounded-lg bg-white shadow-xl" />
+          </div>
+        </div>
       )}
     </div>
   );

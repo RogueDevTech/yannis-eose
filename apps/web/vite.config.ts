@@ -9,6 +9,9 @@ declare module '@remix-run/node' {
 }
 
 export default defineConfig({
+  ssr: {
+    noExternal: ['@remix-run/react'],
+  },
   plugins: [
     remix({
       future: {
@@ -24,5 +27,11 @@ export default defineConfig({
   server: {
     port: 4000,
     strictPort: false,
+    allowedHosts: ['.trycloudflare.com'],
+    hmr: {
+      protocol: 'ws',
+      host: 'localhost',
+      port: 4000,
+    },
   },
 });

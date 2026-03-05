@@ -1,9 +1,8 @@
-import { defer, json } from '@remix-run/node';
+import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
-import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrdersListPage } from '~/features/orders/OrdersListPage';
 import type { Order } from '~/features/orders/types';
 
@@ -11,61 +10,173 @@ export const meta: MetaFunction = () => [
   { title: 'CS Orders — Yannis EOSE' },
 ];
 
+const CS_ORDERS_LIVE_EVENTS = [
+  'order:new',
+  'order:status_changed',
+  'order:assigned',
+  'order:transfer_requested',
+  'order:transfer_accepted',
+  'order:transfer_rejected',
+] as const;
+
 const ORDERS_PER_PAGE = 40;
 
+function defaultThisMonth(): { startDate: string; endDate: string } {
+  const now = new Date();
+  const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
+  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+  return { startDate, endDate };
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'orders.read');
+  const user = await requirePermission(request, 'orders.read');
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const status = url.searchParams.get('status') || undefined;
   const search = url.searchParams.get('search') || undefined;
-  const input = encodeURIComponent(JSON.stringify({ page, limit: ORDERS_PER_PAGE, status: status || undefined, search: search || undefined }));
+  const csAgentIdParam = url.searchParams.get('csAgentId') || undefined;
 
-  const ordersPromise = Promise.all([
-    apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/orders.statusCounts?input=%7B%7D', { method: 'GET', cookie }),
-  ]).then(([res, countsRes]) => {
-    const trpcData = res.ok
-      ? (res.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
-      : null;
-    const countsData = countsRes.ok
-      ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-      : {};
-    const total = trpcData?.pagination?.total ?? 0;
-    const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
-    return {
-      orders: trpcData?.orders ?? [],
-      total,
-      totalPages,
-      page,
-      limit: ORDERS_PER_PAGE,
-      statusCounts: countsData,
-      statusFilter: status,
-      searchFilter: search,
-    };
-  }).catch(() => ({
-    orders: [] as Order[],
-    total: 0,
-    totalPages: 0,
+  let startDate = url.searchParams.get('startDate') ?? undefined;
+  let endDate = url.searchParams.get('endDate') ?? undefined;
+  const period = url.searchParams.get('period') ?? undefined;
+  const periodAllTime = period === 'all_time';
+  if (!periodAllTime && !startDate && !endDate) {
+    const def = defaultThisMonth();
+    startDate = def.startDate;
+    endDate = def.endDate;
+  }
+  if (periodAllTime) {
+    startDate = undefined;
+    endDate = undefined;
+  }
+
+  const isCSAgent = user.role === 'CS_AGENT';
+  const assignedCsId = isCSAgent ? user.id : csAgentIdParam;
+
+  const listInput = {
     page,
     limit: ORDERS_PER_PAGE,
-    statusCounts: {} as Record<string, number>,
+    status: status || undefined,
+    search: search || undefined,
+    ...(assignedCsId && { assignedCsId }),
+    ...(startDate && { startDate }),
+    ...(endDate && { endDate }),
+  };
+  const countsInput: { assignedCsId?: string; startDate?: string; endDate?: string } = assignedCsId ? { assignedCsId } : {};
+  if (startDate) countsInput.startDate = startDate;
+  if (endDate) countsInput.endDate = endDate;
+
+  const input = encodeURIComponent(JSON.stringify(listInput));
+  const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
+
+  const [res, countsRes, myWorkloadRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
+    isCSAgent ? apiRequest<unknown>('/trpc/orders.myCSWorkload', { method: 'GET', cookie }) : Promise.resolve(null),
+  ]);
+
+  const trpcData = res.ok
+    ? (res.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
+    : null;
+  const countsData = countsRes.ok
+    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+    : {};
+  const total = trpcData?.pagination?.total ?? 0;
+  const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+
+  const showCSAgentColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN';
+  const myWorkload =
+    isCSAgent && myWorkloadRes && (myWorkloadRes as { ok: boolean }).ok
+      ? ((myWorkloadRes as { data?: { result?: { data?: { agentId: string; agentName: string; capacity: number; pendingCount: number; lastActionAt: string | null } } } }).data?.result?.data ??
+        null)
+      : null;
+
+  let csAgentsForFilter: Array<{ agentId: string; agentName: string }> = [];
+  let csAgentsForTransfer: Array<{ agentId: string; agentName: string }> = [];
+  if (showCSAgentColumn) {
+    const workloadsRes = await apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
+      '/trpc/orders.csWorkloads?input=%7B%7D',
+      { method: 'GET', cookie },
+    );
+    if (workloadsRes.ok && Array.isArray(workloadsRes.data?.result?.data)) {
+      csAgentsForFilter = workloadsRes.data.result.data.map((w) => ({ agentId: w.agentId, agentName: w.agentName }));
+      csAgentsForTransfer = csAgentsForFilter;
+    }
+  } else if (isCSAgent) {
+    const agentsRes = await apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
+      '/trpc/orders.listCSAgents?input=%7B%7D',
+      { method: 'GET', cookie },
+    );
+    if (agentsRes.ok && Array.isArray(agentsRes.data?.result?.data)) {
+      csAgentsForTransfer = agentsRes.data.result.data;
+    }
+  }
+
+  let pendingTransferRequests: Array<{
+    id: string;
+    orderId: string;
+    fromCsId: string;
+    fromCsName: string | null;
+    toCsId: string;
+    status: string;
+    requestedAt: string;
+    reason: string | null;
+    order: { id: string; customerName: string; status: string } | null;
+  }> = [];
+  if (isCSAgent || showCSAgentColumn) {
+    const trRes = await apiRequest<{ result?: { data?: Array<{
+      id: string;
+      orderId: string;
+      fromCsId: string;
+      fromCsName: string | null;
+      toCsId: string;
+      status: string;
+      requestedAt: string;
+      reason: string | null;
+      order: { id: string; customerName: string; status: string } | null;
+    }> } }>('/trpc/orders.listTransferRequestsForMe?input=%7B%7D', { method: 'GET', cookie });
+    if (trRes.ok && Array.isArray(trRes.data?.result?.data)) {
+      pendingTransferRequests = trRes.data.result.data;
+    }
+  }
+
+  return {
+    orders: trpcData?.orders ?? [],
+    total,
+    totalPages,
+    page,
+    limit: ORDERS_PER_PAGE,
+    statusCounts: countsData,
     statusFilter: status,
     searchFilter: search,
-  }));
-
-  return defer({ orders: ordersPromise });
+    isCSAgent,
+    showCSAgentColumn,
+    canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN',
+    currentUserId: user.id,
+    myWorkload,
+    csAgentsForFilter,
+    csAgentsForTransfer,
+    pendingTransferRequests,
+    filters: {
+      startDate: startDate ?? '',
+      endDate: endDate ?? '',
+      periodAllTime,
+    },
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermission(request, 'orders.bulkTransition');
   const cookie = getSessionCookie(request);
+  if (!cookie) {
+    return json({ success: false, error: 'Not authenticated' }, { status: 401 });
+  }
   const form = await request.formData();
   const intent = form.get('intent') as string;
 
   if (intent === 'bulkTransition') {
+    await requirePermission(request, 'orders.bulkTransition');
     const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
     const newStatus = form.get('newStatus') as string;
 
@@ -92,6 +203,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'bulkAssign') {
+    await requirePermission(request, 'orders.bulkAssign');
     const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
     const csAgentId = form.get('csAgentId') as string;
 
@@ -117,17 +229,83 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
+  if (intent === 'transfer') {
+    const user = await requirePermission(request, 'orders.requestTransfer');
+    const orderId = form.get('orderId') as string;
+    const toCsAgentId = form.get('toCsAgentId') as string;
+    const direct = form.get('direct') === 'true'; // HoS/SuperAdmin direct assign — no approval
+
+    if (direct) {
+      // Only HoS/SuperAdmin may direct-assign; CS agents must use request transfer (assignee approval).
+      if (user.role !== 'HEAD_OF_CS' && user.role !== 'SUPER_ADMIN') {
+        return json({ success: false, error: 'Only Head of CS can assign orders directly. Use request transfer for approval.' }, { status: 403 });
+      }
+      const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
+        method: 'POST',
+        cookie,
+        body: { orderId, csAgentId: toCsAgentId },
+      });
+      if (!res.ok) {
+        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Assign failed';
+        return json({ success: false, error: err });
+      }
+      return json({ success: true, direct: true });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.requestTransfer', {
+      method: 'POST',
+      cookie,
+      body: { orderId, toCsAgentId, reason: (form.get('reason') as string) || undefined },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Transfer request failed';
+      return json({ success: false, error: err });
+    }
+    return json({ success: true, direct: false });
+  }
+
+  if (intent === 'acceptTransfer') {
+    await requirePermission(request, 'orders.read');
+    const requestId = form.get('requestId') as string;
+    const res = await apiRequest<unknown>('/trpc/orders.acceptTransfer', {
+      method: 'POST',
+      cookie,
+      body: { requestId },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Accept failed';
+      return json({ success: false, error: err });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'rejectTransfer') {
+    await requirePermission(request, 'orders.read');
+    const requestId = form.get('requestId') as string;
+    const res = await apiRequest<unknown>('/trpc/orders.rejectTransfer', {
+      method: 'POST',
+      cookie,
+      body: { requestId },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Reject failed';
+      return json({ success: false, error: err });
+    }
+    return json({ success: true });
+  }
+
   return json({ success: false, error: 'Unknown intent' });
 }
 
 export default function CSOrdersRoute() {
-  const { orders } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
   const parentData = useRouteLoaderData('routes/admin') as { user: { role: string } } | undefined;
   const userRole = parentData?.user?.role;
-  usePageRefreshOnEvent(['order:new', 'order:status_changed']);
+  usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
   return (
-    <DeferredSection resolve={orders} skeleton="table">
-      {(data) => <OrdersListPage {...data} userRole={userRole} />}
-    </DeferredSection>
+    <OrdersListPage
+      {...data}
+      userRole={userRole}
+      liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
+    />
   );
 }

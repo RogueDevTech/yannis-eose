@@ -40,6 +40,7 @@ export const emailChangeRequests = pgTable('email_change_requests', {
   approverId: text('approver_id').references(() => users.id),
   approvalReason: text('approval_reason'),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
+  ...temporalColumns,
   ...timestampColumns,
 });
 
@@ -52,5 +53,6 @@ export const userProductAssignments = pgTable('user_product_assignments', {
   productId: text('product_id')
     .notNull()
     .references(() => products.id),
+  ...temporalColumns,
   ...timestampColumns,
 });

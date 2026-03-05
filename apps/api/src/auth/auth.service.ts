@@ -64,7 +64,11 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    if (user.status !== 'ACTIVE') {
+    // Only PENDING (invited, never logged in) and ACTIVE can log in
+    if (user.status === 'DEACTIVATED') {
+      throw new ForbiddenException('Account is deactivated. Contact admin to be re-invited.');
+    }
+    if (user.status !== 'ACTIVE' && user.status !== 'PENDING') {
       throw new ForbiddenException('Account is deactivated');
     }
 
@@ -77,6 +81,14 @@ export class AuthService {
 
     // Clear rate limit on successful login
     await this.redis.del(`${RATE_LIMIT_PREFIX}${clientIp}`);
+
+    // Option B: first login — move PENDING → ACTIVE
+    if (user.status === 'PENDING') {
+      await this.db
+        .update(schema.users)
+        .set({ status: 'ACTIVE', updatedAt: new Date() })
+        .where(eq(schema.users.id, user.id));
+    }
 
     // Generate session token
     const token = randomBytes(32).toString('hex');
@@ -151,7 +163,7 @@ export class AuthService {
       .where(eq(schema.users.email, email))
       .limit(1);
 
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || (user.status !== 'ACTIVE' && user.status !== 'PENDING')) {
       // Don't reveal if user exists — silently return
       this.logger.warn(`Password reset requested for unknown/inactive email: ${email}`);
       return;
@@ -219,7 +231,7 @@ export class AuthService {
       .where(eq(schema.users.id, userId))
       .limit(1);
 
-    if (!user || user.status !== 'ACTIVE') {
+    if (!user || (user.status !== 'ACTIVE' && user.status !== 'PENDING')) {
       throw new BadRequestException('Account not found or deactivated.');
     }
 

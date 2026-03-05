@@ -55,7 +55,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
           </p>
         </div>
         <Button variant="primary" size="sm" onClick={() => setShowInitiateForm(!showInitiateForm)}>
-          + Initiate Transfer
+          {showInitiateForm ? 'Close' : '+ Initiate Transfer'}
         </Button>
       </div>
 

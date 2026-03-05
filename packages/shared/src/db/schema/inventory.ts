@@ -1,5 +1,5 @@
 import { pgTable, text, integer, numeric, timestamp } from 'drizzle-orm/pg-core';
-import { stockStateEnum, movementTypeEnum, transferStatusEnum } from './enums';
+import { stockStateEnum, movementTypeEnum, transferStatusEnum, remittanceStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { products } from './products';
 import { users } from './users';
@@ -54,6 +54,7 @@ export const stockMovements = pgTable('stock_movements', {
     .notNull()
     .references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  ...temporalColumns,
 });
 
 // Table 13: stock_transfers — warehouse-to-3PL transfers
@@ -75,5 +76,31 @@ export const stockTransfers = pgTable('stock_transfers', {
   transferCost: numeric('transfer_cost', { precision: 12, scale: 2 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  ...temporalColumns,
+});
+
+// Table: transfer_remittances — 3PL sends stock back to main warehouse (manual); receipt required; HoL marks received
+export const transferRemittances = pgTable('transfer_remittances', {
+  id: uuidv7Pk(),
+  fromLocationId: text('from_location_id')
+    .notNull()
+    .references(() => logisticsLocations.id),
+  toLocationId: text('to_location_id')
+    .notNull()
+    .references(() => logisticsLocations.id),
+  productId: text('product_id')
+    .notNull()
+    .references(() => products.id),
+  quantitySent: integer('quantity_sent').notNull(),
+  quantityReceived: integer('quantity_received'),
+  receiptUrl: text('receipt_url').notNull(),
+  status: remittanceStatusEnum('status').default('SENT').notNull(),
+  sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
+  sentBy: text('sent_by')
+    .notNull()
+    .references(() => users.id),
+  receivedAt: timestamp('received_at', { withTimezone: true }),
+  receivedBy: text('received_by').references(() => users.id),
+  shrinkageReason: text('shrinkage_reason'),
   ...temporalColumns,
 });

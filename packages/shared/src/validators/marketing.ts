@@ -24,10 +24,36 @@ export const listFundingSchema = z.object({
   status: z.enum(['SENT', 'COMPLETED', 'DISPUTED']).optional(),
   receiverId: z.string().uuid().optional(),
   senderId: z.string().uuid().optional(),
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });
 export type ListFundingInput = z.infer<typeof listFundingSchema>;
+
+export const listFundingRequestsSchema = z.object({
+  requesterId: z.string().uuid().optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(50),
+});
+export type ListFundingRequestsInput = z.infer<typeof listFundingRequestsSchema>;
+
+export const getFundingBalanceSchema = z.object({
+  userId: z.string().uuid(),
+});
+export type GetFundingBalanceInput = z.infer<typeof getFundingBalanceSchema>;
+
+export const approveFundingRequestSchema = z.object({
+  requestId: z.string().uuid(),
+  receiptUrl: z.string().url().min(1),
+});
+export type ApproveFundingRequestInput = z.infer<typeof approveFundingRequestSchema>;
+
+export const rejectFundingRequestSchema = z.object({
+  requestId: z.string().uuid(),
+  reason: z.string().max(500).optional(),
+});
+export type RejectFundingRequestInput = z.infer<typeof rejectFundingRequestSchema>;
 
 // ============================================
 // Ad Spend Log Validators
@@ -53,6 +79,11 @@ export const listAdSpendSchema = z.object({
   limit: z.number().int().min(1).max(100).default(20),
 });
 export type ListAdSpendInput = z.infer<typeof listAdSpendSchema>;
+
+export const approveAdSpendSchema = z.object({
+  adSpendId: z.string().uuid(),
+});
+export type ApproveAdSpendInput = z.infer<typeof approveAdSpendSchema>;
 
 // ============================================
 // Offer Template Validators
@@ -98,6 +129,16 @@ export const createCampaignSchema = z.object({
     buttonText: z.string().max(50).optional(),
     accentColor: z.string().max(20).optional(),
     successMessage: z.string().max(500).optional(),
+    // Optional field visibility toggles
+    showDeliveryAddress: z.boolean().optional(),
+    showDeliveryNotes: z.boolean().optional(),
+    showDeliveryState: z.boolean().optional(),
+    showGender: z.boolean().optional(),
+    showPreferredDeliveryDate: z.boolean().optional(),
+    showPaymentMethod: z.boolean().optional(),
+    // Custom options for select fields
+    deliveryStateOptions: z.array(z.string().max(100)).max(50).optional(),
+    preferredDeliveryDateOptions: z.array(z.string().max(100)).max(20).optional(),
     // Advanced form config
     fields: z.array(z.object({
       name: z.string(),
@@ -125,6 +166,6 @@ export const listCampaignsSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(500).default(20),
 });
 export type ListCampaignsInput = z.infer<typeof listCampaignsSchema>;

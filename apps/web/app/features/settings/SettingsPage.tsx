@@ -42,6 +42,12 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'system' | 'notifications'>('profile');
   const [profileName, setProfileName] = useState(user?.name ?? '');
 
+  // CS dispatch strategy: derived from settings, local state for form selection
+  const csDispatchSetting = systemSettings.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
+  const dispatchStrategyFromSettings =
+    csDispatchSetting?.value?.strategy === 'performance' ? 'performance' : 'load_balanced';
+  const [selectedDispatchStrategy, setSelectedDispatchStrategy] = useState<'load_balanced' | 'performance'>(dispatchStrategyFromSettings);
+
   // Local state for notification email toggles (configurable types only)
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>({});
 
@@ -61,6 +67,22 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
 
   const voipSetting = systemSettings.find((s) => s.key === 'VOIP_ENABLED');
   const isVoipEnabled = voipSetting?.value?.['enabled'] === true;
+
+  // Local state for System tab: user can toggle all then submit once
+  const [localStrictMode, setLocalStrictMode] = useState(isStrictMode);
+  const [localVoipEnabled, setLocalVoipEnabled] = useState(isVoipEnabled);
+  useEffect(() => {
+    setLocalStrictMode(isStrictMode);
+    setLocalVoipEnabled(isVoipEnabled);
+  }, [isStrictMode, isVoipEnabled]);
+  useEffect(() => {
+    setSelectedDispatchStrategy(dispatchStrategyFromSettings);
+  }, [dispatchStrategyFromSettings]);
+
+  const hasSystemChanges =
+    localStrictMode !== isStrictMode ||
+    localVoipEnabled !== isVoipEnabled ||
+    selectedDispatchStrategy !== dispatchStrategyFromSettings;
 
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
@@ -183,314 +205,282 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             </div>
           </fetcher.Form>
 
-          <div className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Session Information</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Authentication</span>
-                <span className="badge-success">Active</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Session Type</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">Redis-backed</span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Security Level</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">HTTP-only Cookie</span>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
-      {/* System Tab */}
+      {/* System Tab — grouped form: toggle Data Security, VOIP, CS distribution then submit once */}
       {activeTab === 'system' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Strict Data Mode Toggle — SuperAdmin Only */}
-          <div className="card lg:col-span-2">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Data Security</h3>
-                <p className="text-sm text-surface-800 dark:text-surface-200">
-                  Control how CS agents communicate with customers
-                </p>
-              </div>
-            </div>
+          {isSuperAdmin ? (
+            <fetcher.Form method="post" className="contents">
+              <input type="hidden" name="intent" value="updateSystemSettings" />
+              <input type="hidden" name="strictDataMode" value={localStrictMode ? 'true' : 'false'} />
+              <input type="hidden" name="voipEnabled" value={localVoipEnabled ? 'true' : 'false'} />
+              <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
 
-            <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <p className="text-sm font-semibold text-surface-900 dark:text-white">
-                      Strict Data Mode (VOIP)
-                    </p>
-                    {isStrictMode ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
-                        <span className="w-1.5 h-1.5 rounded-full bg-success-500" />
-                        VOIP Active
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-warning-50 dark:bg-warning-700/20 px-2.5 py-0.5 text-xs font-medium text-warning-700 dark:text-warning-400">
-                        <span className="w-1.5 h-1.5 rounded-full bg-warning-500" />
-                        Manual Call Mode
-                      </span>
-                    )}
+              {/* Data Security */}
+              <div className="card lg:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                    </svg>
                   </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-200 leading-relaxed">
-                    {isStrictMode
-                      ? 'CS agents connect via secure VOIP bridge (Twilio). Customer phone numbers are never visible. Call duration is tracked and the 15-second confirm gate is enforced.'
-                      : 'CS agents can reveal customer phone numbers for manual calling. Call duration is not tracked by the system. Confirm is enabled after clicking Call.'}
-                  </p>
+                  <div>
+                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Data Security</h3>
+                    <p className="text-sm text-surface-800 dark:text-surface-200">
+                      Control how CS agents communicate with customers
+                    </p>
+                  </div>
                 </div>
-
-                {isSuperAdmin ? (
-                  <fetcher.Form method="post" className="flex-shrink-0">
-                    <input type="hidden" name="intent" value="updateSystemSetting" />
-                    <input type="hidden" name="key" value="STRICT_DATA_MODE" />
-                    <input
-                      type="hidden"
-                      name="value"
-                      value={JSON.stringify({ enabled: !isStrictMode })}
-                    />
+                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                        <p className="text-sm font-semibold text-surface-900 dark:text-white">Strict Data Mode (VOIP)</p>
+                        {localStrictMode ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-success-500" /> VOIP Active
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-warning-50 dark:bg-warning-700/20 px-2.5 py-0.5 text-xs font-medium text-warning-700 dark:text-warning-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-warning-500" /> Manual Call Mode
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-surface-800 dark:text-surface-200 leading-relaxed">
+                        {localStrictMode
+                          ? 'CS agents connect via secure VOIP bridge (Twilio). Customer phone numbers are never visible. Call duration is tracked and the 15-second confirm gate is enforced.'
+                          : 'CS agents can reveal customer phone numbers for manual calling. Call duration is not tracked by the system. Confirm is enabled after clicking Call.'}
+                      </p>
+                    </div>
                     <button
-                      type="submit"
+                      type="button"
+                      onClick={() => setLocalStrictMode(!localStrictMode)}
                       className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
-                        isStrictMode ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
+                        localStrictMode ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
                       }`}
                       disabled={fetcher.state === 'submitting'}
                       role="switch"
-                      aria-checked={isStrictMode}
+                      aria-checked={localStrictMode}
                       aria-label="Toggle Strict Data Mode"
                     >
                       <span
                         className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                          isStrictMode ? 'translate-x-5' : 'translate-x-0'
+                          localStrictMode ? 'translate-x-5' : 'translate-x-0'
                         }`}
                       />
                     </button>
-                  </fetcher.Form>
-                ) : (
-                  <div className="flex-shrink-0">
-                    <div
-                      className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent opacity-50 cursor-not-allowed ${
-                        isStrictMode ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
-                      }`}
-                      title="Only Super Admin can toggle this setting"
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 ${
-                          isStrictMode ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                      />
-                    </div>
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* VOIP Feature Flag Toggle — SuperAdmin Only */}
-          <div className="card lg:col-span-2">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-surface-900 dark:text-white">VOIP Integration</h3>
-                <p className="text-sm text-surface-800 dark:text-surface-200">
-                  Twilio-powered voice calls for CS agents
-                </p>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <p className="text-sm font-semibold text-surface-900 dark:text-white">
-                      VOIP Calling (Twilio)
-                    </p>
-                    {isVoipEnabled ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
-                        <span className="w-1.5 h-1.5 rounded-full bg-success-500" />
-                        Enabled
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-0.5 text-xs font-medium text-surface-600 dark:text-surface-200">
-                        <span className="w-1.5 h-1.5 rounded-full bg-surface-400" />
-                        Disabled
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-200 leading-relaxed">
-                    {isVoipEnabled
-                      ? 'Agents use Twilio WebRTC to call customers. Calls are tracked, recorded, and the 15-second confirm gate is enforced. Orders are locked for 15 minutes during calls.'
-                      : 'VOIP is off. Agents will log manual calls. Less control over the call process.'}
-                  </p>
                 </div>
+              </div>
 
-                {isSuperAdmin ? (
-                  <fetcher.Form method="post" className="flex-shrink-0">
-                    <input type="hidden" name="intent" value="updateSystemSetting" />
-                    <input type="hidden" name="key" value="VOIP_ENABLED" />
-                    <input
-                      type="hidden"
-                      name="value"
-                      value={JSON.stringify({ enabled: !isVoipEnabled })}
-                    />
+              {/* VOIP Integration */}
+              <div className="card lg:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">VOIP Integration</h3>
+                    <p className="text-sm text-surface-800 dark:text-surface-200">Twilio-powered voice calls for CS agents</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                        <p className="text-sm font-semibold text-surface-900 dark:text-white">VOIP Calling (Twilio)</p>
+                        {localVoipEnabled ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-success-500" /> Enabled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-0.5 text-xs font-medium text-surface-600 dark:text-surface-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-surface-400" /> Disabled
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-surface-800 dark:text-surface-200 leading-relaxed">
+                        {localVoipEnabled
+                          ? 'Agents use Twilio WebRTC to call customers. Calls are tracked, recorded, and the 15-second confirm gate is enforced. Orders are locked for 15 minutes during calls.'
+                          : 'VOIP is off. Agents will log manual calls. Less control over the call process.'}
+                      </p>
+                    </div>
                     <button
-                      type="submit"
+                      type="button"
+                      onClick={() => setLocalVoipEnabled(!localVoipEnabled)}
                       className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
-                        isVoipEnabled ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
+                        localVoipEnabled ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
                       }`}
                       disabled={fetcher.state === 'submitting'}
                       role="switch"
-                      aria-checked={isVoipEnabled}
+                      aria-checked={localVoipEnabled}
                       aria-label="Toggle VOIP"
                     >
                       <span
                         className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                          isVoipEnabled ? 'translate-x-5' : 'translate-x-0'
+                          localVoipEnabled ? 'translate-x-5' : 'translate-x-0'
                         }`}
                       />
                     </button>
-                  </fetcher.Form>
-                ) : (
-                  <div className="flex-shrink-0">
+                  </div>
+                </div>
+              </div>
+
+              {/* CS Order Distribution */}
+              <div className="card lg:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 006 3.75h2.25A2.25 2.25 0 0010.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">CS order distribution</h3>
+                    <p className="text-sm text-surface-800 dark:text-surface-200">How new orders are assigned to CS agents when they come in</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                  <div className="space-y-3">
+                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-surface-200 dark:border-surface-700 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
+                      <input
+                        type="radio"
+                        name="strategy"
+                        value="load_balanced"
+                        checked={selectedDispatchStrategy === 'load_balanced'}
+                        onChange={() => setSelectedDispatchStrategy('load_balanced')}
+                        className="mt-1 text-brand-600 border-surface-300 focus:ring-brand-500"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Load balanced</p>
+                        <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
+                          Distribute by current workload: agents with fewer pending orders get new orders first. Tie-break: most idle.
+                        </p>
+                      </div>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-surface-200 dark:border-surface-700 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
+                      <input
+                        type="radio"
+                        name="strategy"
+                        value="performance"
+                        checked={selectedDispatchStrategy === 'performance'}
+                        onChange={() => setSelectedDispatchStrategy('performance')}
+                        className="mt-1 text-brand-600 border-surface-300 focus:ring-brand-500"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Performance</p>
+                        <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
+                          Prioritise higher performers: agents with better delivery rate and confirmation rate get more orders, even if they already have more pending. Capacity limit still applies.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                  <p className="text-xs text-surface-600 dark:text-surface-400 mt-3">
+                    Saved: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : 'Load balanced'}</strong>
+                    {hasSystemChanges && ' — you have unsaved changes'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="card lg:col-span-2 pt-4 border-t border-surface-200 dark:border-surface-700">
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  disabled={!hasSystemChanges || fetcher.state === 'submitting'}
+                  loading={fetcher.state === 'submitting'}
+                  loadingText="Saving..."
+                >
+                  Save system settings
+                </Button>
+              </div>
+            </fetcher.Form>
+          ) : (
+            <>
+              {/* Read-only cards for non–SuperAdmin */}
+              <div className="card lg:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Data Security</h3>
+                    <p className="text-sm text-surface-800 dark:text-surface-200">Control how CS agents communicate with customers</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-surface-900 dark:text-white">Strict Data Mode (VOIP)</p>
+                      <p className="text-xs text-surface-800 dark:text-surface-200 mt-1">
+                        {isStrictMode ? 'VOIP Active' : 'Manual Call Mode'}
+                      </p>
+                    </div>
+                    <div
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent opacity-50 cursor-not-allowed ${
+                        isStrictMode ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
+                      }`}
+                      title="Only Super Admin can change this"
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 ${isStrictMode ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="card lg:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">VOIP Integration</h3>
+                    <p className="text-sm text-surface-800 dark:text-surface-200">Twilio-powered voice calls for CS agents</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-surface-900 dark:text-white">VOIP Calling (Twilio)</p>
+                      <p className="text-xs text-surface-800 dark:text-surface-200 mt-1">{isVoipEnabled ? 'Enabled' : 'Disabled'}</p>
+                    </div>
                     <div
                       className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent opacity-50 cursor-not-allowed ${
                         isVoipEnabled ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
                       }`}
-                      title="Only Super Admin can toggle this setting"
+                      title="Only Super Admin can change this"
                     >
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 ${
-                          isVoipEnabled ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                      />
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 ${isVoipEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
                     </div>
                   </div>
-                )}
+                </div>
               </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Application</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Platform</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">Yannis EOSE v1.0</span>
+              <div className="card lg:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 006 3.75h2.25A2.25 2.25 0 0010.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">CS order distribution</h3>
+                    <p className="text-sm text-surface-800 dark:text-surface-200">How new orders are assigned to CS agents when they come in</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                  <p className="text-sm text-surface-800 dark:text-surface-200">
+                    Only Super Admin can configure CS order distribution. Current: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : 'Load balanced'}</strong>.
+                  </p>
+                </div>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Frontend</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">Remix + React</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Backend</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">NestJS + tRPC</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Database</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">PostgreSQL 18 + Drizzle</span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Cache</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">Redis</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Business Configuration</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Virtual Stock Buffer</span>
-                <span className="text-sm font-medium text-brand-600 dark:text-brand-400">10%</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Dedup Window</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">6 hours</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">CS Confirm Gate</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">
-                  {isStrictMode ? 'Call > 15s (VOIP)' : 'Click to Call (Manual)'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">VOIP Integration</span>
-                <span className={isVoipEnabled ? 'badge-success' : 'badge'}>
-                  {isVoipEnabled ? 'Twilio Active' : 'Disabled'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Rate Limit</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">5 attempts / 15 min</span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Circuit Breaker Timeout</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">2000ms</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Audit &amp; Compliance</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Temporal Audit</span>
-                <span className="badge-success">Enabled</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Row-Level Security</span>
-                <span className="badge-success">Enforced</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Phone Masking</span>
-                <span className={isStrictMode ? 'badge-success' : 'badge-warning'}>
-                  {isStrictMode ? 'Always Masked' : 'Revealable'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-200">FIFO Batch Costing</span>
-                <span className="badge-success">Active</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Performance Targets</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Edge Form Load</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 400ms</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">VOIP Connection</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 1.5s</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">Dashboard Staleness</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 60s</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-surface-100 dark:border-surface-800">
-                <span className="text-sm text-surface-800 dark:text-surface-200">State Transition</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 500ms</span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-sm text-surface-800 dark:text-surface-200">P/L Report (100k)</span>
-                <span className="text-sm font-medium text-surface-900 dark:text-surface-100">&lt; 3s</span>
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       )}
 
@@ -546,7 +536,36 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
 
                 {/* Configurable — toggles */}
                 <div>
-                  <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-3">Configurable (toggle to enable/disable email)</h4>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300">Configurable (toggle to enable/disable email)</h4>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-surface-500 dark:text-surface-400">Toggle all:</span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          const allOn: Record<string, boolean> = {};
+                          notificationEmailConfig.configurable.forEach((c) => { allOn[c.type] = true; });
+                          setEnabledTypes(allOn);
+                        }}
+                      >
+                        Enable all
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          const allOff: Record<string, boolean> = {};
+                          notificationEmailConfig.configurable.forEach((c) => { allOff[c.type] = false; });
+                          setEnabledTypes(allOff);
+                        }}
+                      >
+                        Disable all
+                      </Button>
+                    </div>
+                  </div>
                   <div className="space-y-3">
                     {notificationEmailConfig.configurable.map((item) => (
                       <div

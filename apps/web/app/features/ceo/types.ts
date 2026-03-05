@@ -1,3 +1,10 @@
+export interface CEODashboardFilters {
+  startDate: string;
+  endDate: string;
+  periodAllTime?: boolean;
+  topic?: 'orders' | 'media_buyers' | 'cs';
+}
+
 export interface CEODashboardData {
   // Revenue & Profit
   revenue: number;
@@ -46,4 +53,39 @@ export interface CEODashboardData {
 
   // Invoices
   invoiceSummary: Record<string, unknown>;
+
+  /** Daily buckets for Revenue & orders over time chart (Phase 2). */
+  timeSeries?: { date: string; revenue: number; orderCount: number; createdCount?: number }[];
+
+  /** Order pipeline chart: Volume, CS Engaged, Confirmed, Logistics distributed, Delivered. */
+  orderPipelineChart?: {
+    volume: number;
+    csEngaged: number;
+    confirmed: number;
+    logisticsDistributed: number;
+    delivered: number;
+  };
+
+  /** Topic-specific data for chart view (Media buyers / CS). */
+  chartTopicData?: {
+    mediaBuyerLeaderboard?: Array<{
+      mediaBuyerId: string;
+      name: string;
+      email?: string;
+      totalSpend: number;
+      totalOrders: number;
+      deliveredOrders: number;
+      deliveredRevenue: number;
+      cpa: number;
+      trueRoas: number;
+      deliveryRate: number;
+    }>;
+    csWorkloads?: Array<{
+      agentId: string;
+      agentName: string;
+      capacity: number;
+      pendingCount: number;
+      lastActionAt?: string | null;
+    }>;
+  };
 }

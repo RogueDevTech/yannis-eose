@@ -1,5 +1,5 @@
 import { pgTable, text, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
-import { deploymentTypeEnum, fundingStatusEnum, recordStatusEnum } from './enums';
+import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, recordStatusEnum, adSpendStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
@@ -54,6 +54,22 @@ export const marketingFunding = pgTable('marketing_funding', {
   ...temporalColumns,
 });
 
+// Table: marketing_funding_requests — Media Buyer requests for funds (HoM approves by sending actual funding)
+export const marketingFundingRequests = pgTable('marketing_funding_requests', {
+  id: uuidv7Pk(),
+  requesterId: text('requester_id')
+    .notNull()
+    .references(() => users.id),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  reason: text('reason'),
+  status: fundingRequestStatusEnum('status').default('PENDING').notNull(),
+  receiptUrl: text('receipt_url'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedBy: text('resolved_by').references(() => users.id),
+  ...temporalColumns,
+});
+
 // Table 15: ad_spend_logs — daily ad spend records
 export const adSpendLogs = pgTable('ad_spend_logs', {
   id: uuidv7Pk(),
@@ -69,5 +85,9 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
   spendAmount: numeric('spend_amount', { precision: 12, scale: 2 }).notNull(),
   screenshotUrl: text('screenshot_url').notNull(),
   spendDate: timestamp('spend_date', { withTimezone: true }).notNull(),
+  status: adSpendStatusEnum('status').default('PENDING').notNull(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  approvedBy: text('approved_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  ...temporalColumns,
 });

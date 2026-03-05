@@ -3,12 +3,15 @@ import type { LoaderFunctionArgs } from '@remix-run/node';
 import { getCurrentUser } from '~/lib/api.server';
 
 /**
- * Root index — redirects authenticated users to /admin, others to /auth.
+ * Root index — redirects authenticated users by role: TPL_MANAGER → /tpl, TPL_RIDER → /rider, others → /admin.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const user = await getCurrentUser(request);
-    return redirect(user ? '/admin' : '/auth');
+    if (!user) return redirect('/auth');
+    if (user.role === 'TPL_MANAGER') return redirect('/tpl');
+    if (user.role === 'TPL_RIDER') return redirect('/rider');
+    return redirect('/admin');
   } catch {
     return redirect('/auth');
   }

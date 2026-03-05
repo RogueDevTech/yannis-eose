@@ -1,6 +1,6 @@
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { cartStatusEnum } from './enums';
-import { uuidv7Pk, timestampColumns } from './helpers';
+import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { campaigns } from './marketing';
 import { products } from './products';
 import { users } from './users';
@@ -21,5 +21,6 @@ export const cartAbandonments = pgTable('cart_abandonments', {
   offerLabel: text('offer_label'),
   status: cartStatusEnum('status').default('PENDING').notNull(),
   convertedOrderId: text('converted_order_id').references(() => orders.id),
+  ...temporalColumns,
   ...timestampColumns,
 });

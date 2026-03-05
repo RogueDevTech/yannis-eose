@@ -1,7 +1,7 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { AuthPage } from '~/features/auth/AuthPage';
 
 export const meta: MetaFunction = () => {
@@ -12,14 +12,15 @@ export const meta: MetaFunction = () => {
 };
 
 /**
- * Loader — if already authenticated, redirect to admin dashboard.
- * Also checks if setup has been completed (any users exist).
+ * Loader — if already authenticated, redirect by role: TPL_MANAGER → /tpl, TPL_RIDER → /rider, others → /admin.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const user = await getCurrentUser(request);
     if (user) {
-      return redirect(getRoleRedirect(user.role));
+      if (user.role === 'TPL_MANAGER') return redirect('/tpl');
+      if (user.role === 'TPL_RIDER') return redirect('/rider');
+      return redirect('/admin');
     }
   } catch {
     // API unreachable — continue to show login/setup
@@ -51,33 +52,6 @@ export async function action({ request }: ActionFunctionArgs) {
   return handleLogin(formData);
 }
 
-function getRoleRedirect(role?: string): string {
-  switch (role) {
-    case 'TPL_RIDER':
-      return '/rider';
-    case 'CS_AGENT':
-      return '/admin/cs';
-    case 'HEAD_OF_CS':
-      return '/admin/cs';
-    case 'MEDIA_BUYER':
-      return '/admin/forms';
-    case 'HEAD_OF_MARKETING':
-      return '/admin/marketing';
-    case 'FINANCE_OFFICER':
-      return '/admin/finance';
-    case 'HR_MANAGER':
-      return '/hr/payroll';
-    case 'WAREHOUSE_MANAGER':
-      return '/admin/inventory';
-    case 'HEAD_OF_LOGISTICS':
-      return '/admin/logistics';
-    case 'TPL_MANAGER':
-      return '/admin/logistics';
-    default:
-      return '/admin';
-  }
-}
-
 async function handleLogin(formData: FormData) {
   const email = formData.get('email')?.toString() ?? '';
   const password = formData.get('password')?.toString() ?? '';
@@ -86,17 +60,29 @@ async function handleLogin(formData: FormData) {
     return json({ error: 'Email and password are required' }, { status: 400 });
   }
 
-  const res = await apiRequest<{
-    message: string;
-    user?: { id: string; name: string; role: string; email: string };
-  }>('/auth/login', {
-    method: 'POST',
-    body: { email, password },
-  });
+  let res: Awaited<ReturnType<typeof apiRequest<{ message: string; user?: { id: string; name: string; role: string; email: string } }>>>;
+  try {
+    res = await apiRequest<{
+      message: string;
+      user?: { id: string; name: string; role: string; email: string };
+    }>('/auth/login', {
+      method: 'POST',
+      body: { email, password },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Request failed';
+    if (message === 'API_REQUEST_TIMEOUT') {
+      return json({ error: 'Request timed out. Please try again.' }, { status: 504 });
+    }
+    if (message === 'API_UNREACHABLE') {
+      return json({ error: 'Unable to reach the server. Please check your connection and try again.' }, { status: 503 });
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     const errorData = res.data as { message?: string };
-    return json({ error: errorData.message ?? 'Invalid credentials' }, { status: res.status });
+    return json({ error: errorData.message ?? 'Invalid credentials' }, { status: safeStatus(res.status) });
   }
 
   const headers = new Headers();
@@ -104,11 +90,9 @@ async function handleLogin(formData: FormData) {
     headers.set('Set-Cookie', res.setCookie);
   }
 
-  // Role-based redirect after login
   const role = res.data?.user?.role;
-  const redirectTo = getRoleRedirect(role);
-
-  return redirect(redirectTo, { headers });
+  const target = role === 'TPL_MANAGER' ? '/tpl' : role === 'TPL_RIDER' ? '/rider' : '/admin';
+  return redirect(target, { headers });
 }
 
 async function handleSetup(formData: FormData) {
@@ -136,7 +120,7 @@ async function handleSetup(formData: FormData) {
 
   if (!res.ok) {
     const errorData = res.data as { message?: string };
-    return json({ error: errorData.message ?? 'Setup failed' }, { status: res.status });
+    return json({ error: errorData.message ?? 'Setup failed' }, { status: safeStatus(res.status) });
   }
 
   // Auto-login after setup

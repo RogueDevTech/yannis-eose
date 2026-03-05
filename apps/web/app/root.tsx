@@ -15,6 +15,7 @@ import stylesheet from '~/tailwind.css?url';
 
 declare global {
   interface Window {
+    __playNotificationSound?: () => void;
     __ENV: {
       API_URL: string;
       EDGE_WORKER_URL: string;
@@ -31,7 +32,7 @@ declare global {
 export async function loader() {
   return json({
     ENV: {
-      API_URL: process.env.API_URL ?? 'http://localhost:4000',
+      API_URL: process.env.API_URL ?? 'http://localhost:4444',
       EDGE_WORKER_URL: process.env.EDGE_WORKER_URL ?? '',
       S3_BUCKET: process.env.S3_BUCKET ?? '',
       S3_REGION: process.env.S3_REGION ?? 'us-east-1',
@@ -55,9 +56,10 @@ export const links: LinksFunction = () => [
 
 export default function App() {
   const { ENV } = useLoaderData<typeof loader>();
+  const envScript = JSON.stringify(ENV).replace(/<\/script>/gi, '<\\/script>');
 
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -71,8 +73,8 @@ export default function App() {
       <body className="h-full">
         <Outlet />
         <ScrollRestoration />
+        <script dangerouslySetInnerHTML={{ __html: `window.__ENV = ${envScript};` }} />
         <Scripts />
-        <script dangerouslySetInnerHTML={{ __html: `window.__ENV = ${JSON.stringify(ENV)};` }} />
         <script dangerouslySetInnerHTML={{ __html: `
           if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
@@ -95,6 +97,9 @@ export default function App() {
                 }
                 if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
                   window.location.href = event.data.url;
+                }
+                if (event.data && event.data.type === 'PLAY_NOTIFICATION_SOUND' && typeof window.__playNotificationSound === 'function') {
+                  window.__playNotificationSound();
                 }
               });
             });
@@ -125,11 +130,11 @@ export function ErrorBoundary() {
     : 'An unexpected error occurred. Please try refreshing the page.';
 
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{title} | Yannis EOSE</title>
+        <title>{`${title} | Yannis EOSE`}</title>
         <link rel="stylesheet" href={stylesheet} />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Links />

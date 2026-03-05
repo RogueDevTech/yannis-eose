@@ -1,5 +1,5 @@
 import { pgTable, text, integer, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
-import { orderStatusEnum, callStatusEnum } from './enums';
+import { orderStatusEnum, callStatusEnum, orderTransferRequestStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
@@ -20,16 +20,29 @@ export const orders = pgTable('orders', {
   items: jsonb('items'),
   customerName: text('customer_name').notNull(),
   customerPhoneHash: text('customer_phone_hash').notNull(),
+  /** Raw phone for manual-call reveal when VOIP is off. Set by Edge on create; never exposed except via revealPhoneForManualCall. */
+  customerPhone: text('customer_phone'),
   customerAddress: text('customer_address'),
   deliveryAddress: text('delivery_address'),
   totalAmount: numeric('total_amount', { precision: 12, scale: 2 }),
   landedCost: numeric('landed_cost', { precision: 12, scale: 2 }),
   deliveryFee: numeric('delivery_fee', { precision: 12, scale: 2 }),
   deliveryNotes: text('delivery_notes'),
+  deliveryState: text('delivery_state'),
+  customerGender: text('customer_gender'),
+  preferredDeliveryDate: text('preferred_delivery_date'),
   deliveryOtp: text('delivery_otp'),
   deliveryGpsLat: numeric('delivery_gps_lat', { precision: 10, scale: 7 }),
   deliveryGpsLng: numeric('delivery_gps_lng', { precision: 10, scale: 7 }),
+  /** URL to screenshot from 3PL delivery app (required when marking DELIVERED in v1). */
+  deliveryProofUrl: text('delivery_proof_url'),
   parentOrderId: text('parent_order_id'),
+  // Payment: method (PAY_ON_DELIVERY | PAY_ONLINE), status when online (PENDING | PAID | FAILED), Paystack reference
+  paymentMethod: text('payment_method'),
+  paymentStatus: text('payment_status'),
+  paymentReference: text('payment_reference'),
+  paymentProvider: text('payment_provider'),
+  customerEmail: text('customer_email'),
   // Callback reschedule queue: auto-retry on "No Answer"
   callbackScheduledAt: timestamp('callback_scheduled_at', { withTimezone: true }),
   callbackAttempts: integer('callback_attempts').default(0).notNull(),
@@ -81,4 +94,25 @@ export const callLogs = pgTable('call_logs', {
   recordingUrl: text('recording_url'),
   transcript: text('transcript'),
   startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+  ...temporalColumns,
+});
+
+// Table: order_transfer_requests — CS agent requests to transfer order to another agent (pending accept/reject)
+export const orderTransferRequests = pgTable('order_transfer_requests', {
+  id: uuidv7Pk(),
+  orderId: text('order_id')
+    .notNull()
+    .references(() => orders.id),
+  fromCsId: text('from_cs_id')
+    .notNull()
+    .references(() => users.id),
+  toCsId: text('to_cs_id')
+    .notNull()
+    .references(() => users.id),
+  status: orderTransferRequestStatusEnum('status').default('PENDING').notNull(),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
+  respondedAt: timestamp('responded_at', { withTimezone: true }),
+  respondedById: text('responded_by_id').references(() => users.id),
+  reason: text('reason'),
+  ...temporalColumns,
 });

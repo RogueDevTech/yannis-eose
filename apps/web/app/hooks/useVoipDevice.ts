@@ -36,7 +36,7 @@ export interface UseVoipDeviceReturn extends VoipDeviceState {
  * useVoipDevice — manages a Twilio WebRTC Voice Device in the browser.
  *
  * Usage:
- *   const voip = useVoipDevice({ fetchTokenUrl: '/trpc/voip.generateToken' });
+ *   const voip = useVoipDevice(); // token URL defaults to API + /trpc/voip.generateToken
  *   // On mount or when agent enters order page:
  *   voip.initDevice();
  *   // While on a call:
@@ -48,11 +48,60 @@ export interface UseVoipDeviceReturn extends VoipDeviceState {
  * When running without real Twilio creds (mock mode), the hook detects mock tokens
  * and simulates the device lifecycle.
  */
+/**
+ * URL used by the browser to fetch the VOIP token.
+ * Always same-origin so the session cookie is sent (required when web and API
+ * are on different domains, e.g. separate Cloudflare tunnels).
+ */
+const BROWSER_VOIP_TOKEN_URL = '/api/voip-token';
+
+function getDefaultVoipTokenUrl(): string {
+  if (typeof window === 'undefined') return 'http://localhost:4444/trpc/voip.generateToken';
+  return BROWSER_VOIP_TOKEN_URL;
+}
+
+/** Turn a failed token response into a short, user-friendly message (no HTML dump). */
+function formatVoipTokenError(status: number, bodyText: string): string {
+  if (status === 401) {
+    return 'Session expired. Please sign in again and try calling.';
+  }
+  if (status === 403) {
+    return 'You don’t have permission to use the call service.';
+  }
+  if (status === 404 || status === 405) {
+    return 'Call service is not reachable. Please ensure the API server is running and try again.';
+  }
+  if (status >= 500) {
+    return 'The call service is temporarily unavailable. Please try again in a moment.';
+  }
+  // Avoid showing HTML or long technical messages
+  const isHtml = bodyText.trimStart().startsWith('<');
+  const looksLikeRemixError =
+    bodyText.includes('routes/$') ||
+    bodyText.includes('Method Not Allowed') ||
+    bodyText.includes('action');
+  if (isHtml || looksLikeRemixError || bodyText.length > 200) {
+    return 'Could not connect to the call service. Please check that the API is running and try again.';
+  }
+  // Try to use a short JSON error message if present
+  try {
+    const json = JSON.parse(bodyText) as { message?: string; error?: string };
+    const msg = json.message ?? json.error;
+    if (typeof msg === 'string' && msg.length < 150) return msg;
+  } catch {
+    // ignore
+  }
+  return 'Could not connect to the call service. Please try again.';
+}
+
 export function useVoipDevice(opts: {
   fetchTokenUrl?: string;
   onCallStatusChange?: (status: string) => void;
 }): UseVoipDeviceReturn {
-  const { fetchTokenUrl = '/trpc/voip.generateToken', onCallStatusChange } = opts;
+  const { fetchTokenUrl = getDefaultVoipTokenUrl(), onCallStatusChange } = opts;
+  // In browser, always use same-origin proxy so cookie is sent (ignore any override to API URL)
+  const tokenUrl =
+    typeof window !== 'undefined' ? BROWSER_VOIP_TOKEN_URL : fetchTokenUrl;
 
   const [state, setState] = useState<VoipDeviceState>({
     ready: false,
@@ -96,7 +145,7 @@ export function useVoipDevice(opts: {
 
     try {
       // Fetch the access token from the API
-      const res = await fetch(fetchTokenUrl, {
+      const res = await fetch(tokenUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -104,7 +153,8 @@ export function useVoipDevice(opts: {
 
       if (!res.ok) {
         const errBody = await res.text();
-        throw new Error(`Failed to fetch VOIP token: ${errBody}`);
+        const message = formatVoipTokenError(res.status, errBody);
+        throw new Error(message);
       }
 
       const data = await res.json();
@@ -202,7 +252,7 @@ export function useVoipDevice(opts: {
         error: err instanceof Error ? err.message : 'Failed to initialize VOIP device',
       }));
     }
-  }, [fetchTokenUrl, onCallStatusChange, startDurationTimer, stopDurationTimer]);
+  }, [tokenUrl, onCallStatusChange, startDurationTimer, stopDurationTimer]);
 
   // ── Toggle mute ────────────────────────────────────────────────
   const toggleMute = useCallback(() => {

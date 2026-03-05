@@ -3,6 +3,7 @@ import { Form, useActionData, useNavigation, Link } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { Checkbox } from '~/components/ui/checkbox';
 import type { UserCreateLoaderData, UserCreateProduct, UserCreateLocation, UserCreateCommissionPlan } from './types';
 
 // ─── Constants ──────────────────────────────────────────
@@ -21,22 +22,6 @@ const ROLES = [
   { value: 'SUPER_ADMIN', label: 'Super Admin', description: 'Full system access — use with caution' },
 ];
 
-const ORDER_STATUSES = [
-  { value: 'UNPROCESSED', label: 'Unprocessed', color: 'bg-surface-500' },
-  { value: 'CS_ENGAGED', label: 'CS Engaged', color: 'bg-blue-500' },
-  { value: 'CONFIRMED', label: 'Confirmed', color: 'bg-green-500' },
-  { value: 'CANCELLED', label: 'Cancelled', color: 'bg-red-500' },
-  { value: 'ALLOCATED', label: 'Allocated', color: 'bg-indigo-500' },
-  { value: 'DISPATCHED', label: 'Dispatched', color: 'bg-purple-500' },
-  { value: 'IN_TRANSIT', label: 'In Transit', color: 'bg-amber-500' },
-  { value: 'DELIVERED', label: 'Delivered', color: 'bg-emerald-500' },
-  { value: 'PARTIALLY_DELIVERED', label: 'Partial Delivery', color: 'bg-teal-500' },
-  { value: 'RETURNED', label: 'Returned', color: 'bg-orange-500' },
-  { value: 'RESTOCKED', label: 'Restocked', color: 'bg-cyan-500' },
-  { value: 'WRITTEN_OFF', label: 'Written Off', color: 'bg-rose-500' },
-  { value: 'COMPLETED', label: 'Completed', color: 'bg-green-700' },
-];
-
 // ─── Component ──────────────────────────────────────────
 
 export function UserCreatePage({ products, locations, plans }: UserCreateLoaderData) {
@@ -52,24 +37,15 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
   }, [actionData?.error]);
 
   const [selectedRole, setSelectedRole] = useState('');
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(
-    ORDER_STATUSES.map((s) => s.value), // all selected by default
-  );
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
 
   // Role-conditional visibility
   const showCapacity = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
-  const showOrderStatuses = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
   const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
-  const showProductAssignment = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
-  const showCompensation = ['CS_AGENT', 'MEDIA_BUYER', 'TPL_RIDER'].includes(selectedRole);
-
-  const toggleStatus = (value: string) => {
-    setSelectedStatuses((prev) =>
-      prev.includes(value) ? prev.filter((s) => s !== value) : [...prev, value],
-    );
-  };
+  const is3PLRole = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
+  const showProductAssignment = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(selectedRole);
+  const showCompensation = !!selectedRole;
 
   const toggleProduct = (id: string) => {
     setSelectedProductIds((prev) =>
@@ -119,9 +95,6 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
 
       <Form method="post" className="space-y-6">
         {/* Hidden fields for JSON arrays */}
-        {showOrderStatuses && (
-          <input type="hidden" name="visibleOrderStatuses" value={JSON.stringify(selectedStatuses)} />
-        )}
         {showProductAssignment && selectedProductIds.length > 0 && (
           <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
         )}
@@ -177,24 +150,18 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
 
             <div>
               <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Status *
+                Status
               </label>
-              <div className="flex items-center gap-4 mt-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="status" value="ACTIVE" defaultChecked className="text-brand-500 focus:ring-brand-500" />
-                  <span className="text-sm text-surface-700 dark:text-surface-300">Active</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="status" value="INACTIVE" className="text-brand-500 focus:ring-brand-500" />
-                  <span className="text-sm text-surface-700 dark:text-surface-300">Inactive</span>
-                </label>
-              </div>
+              <p className="text-sm text-surface-600 dark:text-surface-400">
+                New users are created as <strong>Pending</strong> and become <strong>Active</strong> after they log in for the first time.
+              </p>
+              <input type="hidden" name="status" value="PENDING" />
             </div>
           </div>
         </div>
 
         {/* Section 2: Role-Specific Settings */}
-        {(showCapacity || showOrderStatuses || showLogisticsLocation || showProductAssignment) && (
+        {(showCapacity || showLogisticsLocation || showProductAssignment) && (
           <div className="card space-y-4">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Role Settings</h2>
 
@@ -216,42 +183,6 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                 <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                   Maximum concurrent orders this agent can handle.
                 </p>
-              </div>
-            )}
-
-            {/* Visible Order Statuses (CS roles) */}
-            {showOrderStatuses && (
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Active Tabs
-                </label>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mb-2">
-                  Select which order statuses this user can see. Click to toggle.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {ORDER_STATUSES.map((status) => {
-                    const isActive = selectedStatuses.includes(status.value);
-                    return (
-                      <button
-                        key={status.value}
-                        type="button"
-                        onClick={() => toggleStatus(status.value)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 ${
-                          isActive
-                            ? `${status.color} text-white shadow-sm`
-                            : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300'
-                        }`}
-                      >
-                        {status.label}
-                        {isActive && (
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
               </div>
             )}
 
@@ -296,11 +227,9 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                         key={product.id}
                         className="flex items-center gap-3 px-3 py-2 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer border-b border-surface-100 dark:border-surface-800 last:border-b-0"
                       >
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={selectedProductIds.includes(product.id)}
                           onChange={() => toggleProduct(product.id)}
-                          className="rounded border-surface-300 dark:border-surface-600 text-brand-500 focus:ring-brand-500"
                         />
                         <span className="text-sm text-surface-900 dark:text-surface-100">{product.name}</span>
                         <span className="text-xs text-surface-700 dark:text-surface-300 ml-auto">{product.category ?? ''}</span>
@@ -314,11 +243,9 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                 {selectedProductIds.length > 0 && (
                   <div className="mt-3">
                     <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         name="restrictProductAccess"
                         value="true"
-                        className="rounded border-surface-300 dark:border-surface-600 text-brand-500 focus:ring-brand-500"
                       />
                       <span className="text-sm text-surface-700 dark:text-surface-300">
                         Restrict access to only assigned products
@@ -410,52 +337,60 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                   </div>
                 </div>
 
-                {/* Commission for Main Products */}
-                <div>
-                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Commission for Main Products
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <select name="commissionType" className="input w-36" defaultValue="FLAT">
-                      <option value="FLAT">&#8358; Flat</option>
-                      <option value="PERCENTAGE">% Percentage</option>
-                    </select>
-                    <AmountInput
-                      name="commissionValue"
-                      className="input flex-1"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
-                    Per delivered order. Leave blank if none.
-                  </p>
-                </div>
+                <p className="text-xs text-surface-600 dark:text-surface-400">
+                  Fixed salary, bonus, and flat commission amounts are monthly.
+                </p>
 
-                {/* Commission for Upsells */}
-                <div>
-                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Commission for Bump Offers & Upsells
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <select name="upsellCommissionType" className="input w-36" defaultValue="FLAT">
-                      <option value="FLAT">&#8358; Flat</option>
-                      <option value="PERCENTAGE">% Percentage</option>
-                    </select>
-                    <AmountInput
-                      name="upsellCommissionValue"
-                      className="input flex-1"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
-                    Leave blank if none.
-                  </p>
-                </div>
+                {!is3PLRole && (
+                  <>
+                    {/* Commission for Main Products */}
+                    <div>
+                      <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                        Commission for Main Products
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <select name="commissionType" className="input w-36" defaultValue="FLAT">
+                          <option value="FLAT">&#8358; Flat</option>
+                          <option value="PERCENTAGE">% Percentage</option>
+                        </select>
+                        <AmountInput
+                          name="commissionValue"
+                          className="input flex-1"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                        Per delivered order. Leave blank if none.
+                      </p>
+                    </div>
 
-                {/* Sales Target */}
-                <div className="border-t border-surface-100 dark:border-surface-800 pt-4">
-                  <SalesTargetSection />
-                </div>
+                    {/* Commission for Upsells */}
+                    <div>
+                      <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                        Commission for Bump Offers & Upsells
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <select name="upsellCommissionType" className="input w-36" defaultValue="FLAT">
+                          <option value="FLAT">&#8358; Flat</option>
+                          <option value="PERCENTAGE">% Percentage</option>
+                        </select>
+                        <AmountInput
+                          name="upsellCommissionValue"
+                          className="input flex-1"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                        Leave blank if none.
+                      </p>
+                    </div>
+
+                    {/* Sales Target */}
+                    <div className="border-t border-surface-100 dark:border-surface-800 pt-4">
+                      <SalesTargetSection />
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

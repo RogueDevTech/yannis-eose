@@ -3,7 +3,7 @@ import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, Link, useActionData, useLoaderData, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
-import { apiRequest, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getCurrentUser, safeStatus } from '~/lib/api.server';
 
 export const meta: MetaFunction = () => {
   return [
@@ -51,7 +51,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (!res.ok) {
     const msg = (res.data as { message?: string }).message ?? 'Failed to reset password. The link may have expired.';
-    return json({ error: msg }, { status: res.status });
+    return json({ error: msg }, { status: safeStatus(res.status) });
   }
 
   return json({ success: res.data.message ?? 'Password has been reset successfully.' });
@@ -87,7 +87,7 @@ export default function ResetPasswordRoute() {
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
             <img
-              src="/assets/yannis-logo1.png"
+              src="/assets/yannis-logo-white-bg.png"
               alt="Yannis"
               className="h-14 w-auto max-w-full object-contain"
             />
@@ -96,14 +96,14 @@ export default function ResetPasswordRoute() {
         </div>
       </div>
 
-      {/* Right panel — form */}
-      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white lg:dark:bg-surface-950">
+      {/* Right panel — form (always light-mode on auth) */}
+      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
           <div className="lg:hidden text-center">
             <div className="flex items-center justify-center mb-2">
               <img
-                src="/assets/yannis-logo1.png"
+                src="/assets/yannis-logo-white-bg.png"
                 alt="Yannis"
                 className="h-10 w-auto max-w-full object-contain"
               />
@@ -114,10 +114,10 @@ export default function ResetPasswordRoute() {
           {actionData?.success ? (
             <>
               <div>
-                <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
+                <h2 className="text-2xl font-bold text-white lg:text-surface-900">
                   Password reset
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
+                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
                   {actionData.success} You can now sign in with your new password.
                 </p>
               </div>
@@ -132,10 +132,10 @@ export default function ResetPasswordRoute() {
           ) : !hasToken ? (
             <>
               <div>
-                <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
+                <h2 className="text-2xl font-bold text-white lg:text-surface-900">
                   Invalid reset link
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
+                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
                   This password reset link is invalid or has expired. Please request a new one.
                 </p>
               </div>
@@ -159,17 +159,17 @@ export default function ResetPasswordRoute() {
           ) : (
             <>
               <div>
-                <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
+                <h2 className="text-2xl font-bold text-white lg:text-surface-900">
                   Set new password
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
+                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
                   Enter your new password below. Must be at least 8 characters.
                 </p>
               </div>
 
               {actionData?.error && !hideError && (
-                <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 lg:dark:bg-danger-700/20 border border-danger-700/50 lg:border-danger-200 lg:dark:border-danger-700/50 px-4 py-3">
-                  <p className="text-sm text-danger-400 lg:text-danger-700 lg:dark:text-danger-500">{actionData.error}</p>
+                <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 border border-danger-700/50 lg:border-danger-200 px-4 py-3">
+                  <p className="text-sm text-danger-400 lg:text-danger-700">{actionData.error}</p>
                 </div>
               )}
 
@@ -179,7 +179,7 @@ export default function ResetPasswordRoute() {
                 <div>
                   <label
                     htmlFor="newPassword"
-                    className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+                    className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
                   >
                     New password
                   </label>
@@ -199,7 +199,7 @@ export default function ResetPasswordRoute() {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600 lg:dark:hover:text-surface-300"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600"
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
                       {showPassword ? (
@@ -243,7 +243,7 @@ export default function ResetPasswordRoute() {
                 <div>
                   <label
                     htmlFor="confirmPassword"
-                    className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+                    className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
                   >
                     Confirm new password
                   </label>

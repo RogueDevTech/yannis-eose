@@ -6,6 +6,7 @@ import type { AuthActionData, AuthPageProps } from './types';
 /**
  * Shared mobile-only input class — dark inputs for the surface-900 mobile background.
  * Desktop inputs use the default .input styles (white bg, dark text).
+ * Auth page is always light mode — no dark: variants.
  */
 const mobileInput =
   'max-lg:!bg-surface-800 max-lg:!border-surface-700 max-lg:!text-surface-100 max-lg:!placeholder-surface-500';
@@ -31,8 +32,8 @@ export function AuthPage({ needsSetup }: AuthPageProps) {
         </div>
       </div>
 
-      {/* Right panel — form */}
-      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white lg:dark:bg-surface-950">
+      {/* Right panel — form (always light-mode styling) */}
+      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
           <div className="lg:hidden text-center">
@@ -81,23 +82,23 @@ function LoginForm({
   return (
     <>
       <div>
-        <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">
+        <h2 className="text-2xl font-bold text-white lg:text-surface-900">
           Sign in to your account
         </h2>
-        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
+        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
           Enter your credentials to access the dashboard
         </p>
       </div>
 
       {actionData?.error && !hideError && (
-        <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 lg:dark:bg-danger-700/20 border border-danger-700/50 lg:border-danger-200 lg:dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-400 lg:text-danger-700 lg:dark:text-danger-500">{actionData.error}</p>
+        <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 border border-danger-700/50 lg:border-danger-200 px-4 py-3">
+          <p className="text-sm text-danger-400 lg:text-danger-700">{actionData.error}</p>
         </div>
       )}
 
       {actionData?.success && (
-        <div className="rounded-lg bg-success-700/20 lg:bg-success-50 lg:dark:bg-success-700/20 border border-success-700/50 lg:border-success-200 lg:dark:border-success-700/50 px-4 py-3">
-          <p className="text-sm text-success-400 lg:text-success-700 lg:dark:text-success-500">{actionData.success}</p>
+        <div className="rounded-lg bg-success-700/20 lg:bg-success-50 border border-success-700/50 lg:border-success-200 px-4 py-3">
+          <p className="text-sm text-success-400 lg:text-success-700">{actionData.success}</p>
         </div>
       )}
 
@@ -107,7 +108,7 @@ function LoginForm({
         <div>
           <label
             htmlFor="email"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
           >
             Email address
           </label>
@@ -127,7 +128,7 @@ function LoginForm({
           <div className="flex items-center justify-between mb-1.5">
             <label
               htmlFor="password"
-              className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300"
+              className="block text-sm font-medium text-surface-300 lg:text-surface-700"
             >
               Password
             </label>
@@ -152,7 +153,7 @@ function LoginForm({
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600 lg:dark:hover:text-surface-300"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? (
@@ -226,19 +227,19 @@ function SetupForm({
     <>
       <div>
         <div className="flex items-center gap-2 mb-3">
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-800/30 text-brand-300 lg:bg-brand-100 lg:text-brand-800 lg:dark:bg-brand-800/30 lg:dark:text-brand-300">
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-800/30 text-brand-300 lg:bg-brand-100 lg:text-brand-800">
             First Time Setup
           </span>
         </div>
-        <h2 className="text-2xl font-bold text-white lg:text-surface-900 lg:dark:text-white">Create Super Admin</h2>
-        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500 lg:dark:text-surface-200">
+        <h2 className="text-2xl font-bold text-white lg:text-surface-900">Create Super Admin</h2>
+        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
           Set up the first administrator account. This can only be done once.
         </p>
       </div>
 
       {actionData?.error && !hideError && (
-        <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 lg:dark:bg-danger-700/20 border border-danger-700/50 lg:border-danger-200 lg:dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-400 lg:text-danger-700 lg:dark:text-danger-500">{actionData.error}</p>
+        <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 border border-danger-700/50 lg:border-danger-200 px-4 py-3">
+          <p className="text-sm text-danger-400 lg:text-danger-700">{actionData.error}</p>
         </div>
       )}
 
@@ -248,7 +249,7 @@ function SetupForm({
         <div>
           <label
             htmlFor="name"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
           >
             Full Name
           </label>
@@ -267,7 +268,7 @@ function SetupForm({
         <div>
           <label
             htmlFor="email"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
           >
             Email Address
           </label>
@@ -286,7 +287,7 @@ function SetupForm({
         <div>
           <label
             htmlFor="password"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
           >
             Password
           </label>
@@ -304,7 +305,7 @@ function SetupForm({
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600 lg:dark:hover:text-surface-300"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? (
@@ -348,7 +349,7 @@ function SetupForm({
         <div>
           <label
             htmlFor="confirmPassword"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 lg:dark:text-surface-300 mb-1.5"
+            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
           >
             Confirm Password
           </label>
