@@ -7,14 +7,18 @@ import { redirect } from '@remix-run/node';
 
 const API_URL = process.env['API_URL'] ?? 'http://localhost:4444';
 
-/** Request timeout in ms. Deferred promises must resolve before Remix single-fetch timeout (~5s).
- *  Awaited (critical) requests in loaders can take longer since the page waits for them anyway. */
-const API_REQUEST_TIMEOUT_MS = 8_000;
+/** Default request timeout in ms. Deferred promises must resolve before Remix single-fetch timeout (~5s). */
+const DEFAULT_API_TIMEOUT_MS = 8_000;
+
+/** Timeout used for deferred loader requests so they resolve before server timeout. */
+export const DEFERRED_LOADER_TIMEOUT_MS = 4_000;
 
 interface ApiOptions {
   method?: string;
   body?: unknown;
   cookie?: string;
+  /** Override timeout in ms (used by deferred loaders to stay under Remix server timeout). */
+  timeoutMs?: number;
 }
 
 interface ApiResponse<T> {
@@ -32,7 +36,7 @@ export async function apiRequest<T = unknown>(
   path: string,
   options: ApiOptions = {},
 ): Promise<ApiResponse<T>> {
-  const { method = 'GET', body, cookie } = options;
+  const { method = 'GET', body, cookie, timeoutMs = DEFAULT_API_TIMEOUT_MS } = options;
 
   // tRPC GET queries need ?input={} even when all fields are optional,
   // otherwise Zod receives undefined instead of an object and fails.
@@ -51,7 +55,7 @@ export async function apiRequest<T = unknown>(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   let response: Response;
   try {

@@ -2,13 +2,14 @@ import { Suspense } from 'react';
 import { useLoaderData, useRouteLoaderData, Await } from '@remix-run/react';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { defer } from '@remix-run/node';
-import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS } from '~/lib/api.server';
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
-import { RouteLoader } from '~/components/ui/route-loader';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
+import { DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
+import { CEODashboardSkeleton } from '~/features/ceo/CEODashboardSkeleton';
 import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
 import type { CEODashboardData, CEODashboardFilters } from '~/features/ceo/types';
 
@@ -43,21 +44,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   const role = user?.role ?? null;
 
-  // #region agent log
-  fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aaca2c' },
-    body: JSON.stringify({
-      sessionId: 'aaca2c',
-      location: 'admin._index/route.tsx:loader',
-      message: 'Admin index loader ran',
-      data: { path: new URL(request.url).pathname, role },
-      timestamp: Date.now(),
-      hypothesisId: 'H3',
-    }),
-  }).catch(() => {});
-  // #endregion
-
   const url = new URL(request.url);
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
@@ -85,23 +71,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // SuperAdmin: CEO Executive Overview — deferred for navigate-first
   if (role === 'SUPER_ADMIN') {
+    const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
     const ceoPromise = apiRequest<{ result?: { data?: CEODashboardData } }>(
       `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(ceoInput)}`,
-      { method: 'GET', cookie },
+      deferredOpt,
     ).then((res) =>
       res.ok && res.data?.result?.data ? res.data.result.data : defaultCEOData
     ).catch(() => defaultCEOData);
 
     const timeSeriesPromise = apiRequest<{ result?: { data?: { date: string; revenue: number; orderCount: number; createdCount: number }[] } }>(
       `/trpc/dashboard.ceoOverviewTimeSeries?input=${encodeURIComponent(ceoInput)}`,
-      { method: 'GET', cookie },
+      deferredOpt,
     ).then((res) =>
       res.ok && Array.isArray(res.data?.result?.data) ? res.data.result.data : []
     ).catch(() => []);
 
     const orderPipelineChartPromise = apiRequest<{ result?: { data?: { volume: number; csEngaged: number; confirmed: number; logisticsDistributed: number; delivered: number } } }>(
       `/trpc/dashboard.orderPipelineChart?input=${encodeURIComponent(ceoInput)}`,
-      { method: 'GET', cookie },
+      deferredOpt,
     ).then((res) =>
       res.ok && res.data?.result?.data ? res.data.result.data : { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 }
     ).catch(() => ({ volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 }));
@@ -111,7 +98,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       topic === 'media_buyers'
         ? apiRequest<{ result?: { data?: Array<{ mediaBuyerId: string; name: string; email?: string; totalSpend: number; totalOrders: number; deliveredOrders: number; deliveredRevenue: number; cpa: number; trueRoas: number; deliveryRate: number }> } }>(
             `/trpc/marketing.leaderboard?input=${encodeURIComponent(leaderboardInput)}`,
-            { method: 'GET', cookie },
+            deferredOpt,
           ).then((res) =>
             res.ok && Array.isArray(res.data?.result?.data) ? res.data.result.data : []
           ).catch(() => [])
@@ -121,7 +108,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       topic === 'cs'
         ? apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string; capacity: number; pendingCount: number; lastActionAt?: string | null }> } }>(
             '/trpc/orders.csWorkloads?input=%7B%7D',
-            { method: 'GET', cookie },
+            deferredOpt,
           ).then((res) =>
             res.ok && Array.isArray(res.data?.result?.data) ? res.data.result.data : []
           ).catch(() => [])
@@ -169,8 +156,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   // All other roles: role-specific dashboard — all deferred for navigate-first
-  const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 10 })), { method: 'GET', cookie });
-  const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, { method: 'GET', cookie });
+  const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
+  const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 10 })), deferredOpt);
+  const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, deferredOpt);
 
   const needsMetrics = role && ROLES_NEED_METRICS.includes(role);
   const needsProfit = role && ROLES_NEED_PROFIT.includes(role);
@@ -179,19 +167,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const needsPayout = role && ROLES_NEED_PAYOUT.includes(role);
 
   const metricsP = needsMetrics
-    ? apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, { method: 'GET', cookie })
+    ? apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, deferredOpt)
     : Promise.resolve({ ok: true, data: { result: { data: defaultMetrics } } });
   const profitP = needsProfit
-    ? apiRequest<unknown>(`/trpc/finance.profitReport?input=${encodeURIComponent(profitInput)}`, { method: 'GET', cookie })
+    ? apiRequest<unknown>(`/trpc/finance.profitReport?input=${encodeURIComponent(profitInput)}`, deferredOpt)
     : Promise.resolve({ ok: true, data: { result: { data: defaultProfit } } });
   const usersP = needsUsers
-    ? apiRequest<unknown>('/trpc/users.list?input=%7B%22limit%22%3A1%7D', { method: 'GET', cookie })
+    ? apiRequest<unknown>('/trpc/users.list?input=%7B%22limit%22%3A1%7D', deferredOpt)
     : Promise.resolve({ ok: false, data: {} });
   const productsP = needsProducts
-    ? apiRequest<unknown>('/trpc/products.list?input=%7B%22limit%22%3A1%7D', { method: 'GET', cookie })
+    ? apiRequest<unknown>('/trpc/products.list?input=%7B%22limit%22%3A1%7D', deferredOpt)
     : Promise.resolve({ ok: false, data: {} });
   const payoutP = needsPayout
-    ? apiRequest<unknown>('/trpc/hr.payoutSummary', { method: 'GET', cookie })
+    ? apiRequest<unknown>('/trpc/hr.payoutSummary', deferredOpt)
     : Promise.resolve({ ok: false, data: {} });
 
   const ordersAndCountsPromise = Promise.all([ordersP, countsP]).then(([ordersRes, countsRes]): OrdersAndCounts => {
@@ -239,7 +227,7 @@ export default function AdminDashboard() {
 
   if (loaderData.variant === 'ceo') {
     return (
-      <Suspense fallback={<RouteLoader />}>
+      <Suspense fallback={<CEODashboardSkeleton />}>
         <Await resolve={loaderData.data} errorElement={<DeferredError />}>
           {(data) => (
             <CEODashboardPage
@@ -254,7 +242,7 @@ export default function AdminDashboard() {
   }
   const { ordersAndCounts: _ordersPromise, ...restData } = loaderData.data;
   return (
-    <Suspense fallback={<RouteLoader />}>
+    <Suspense fallback={<DashboardSkeleton />}>
       <Await resolve={_ordersPromise} errorElement={<DeferredError />}>
         {(ordersAndCounts) => (
           <DashboardPage
