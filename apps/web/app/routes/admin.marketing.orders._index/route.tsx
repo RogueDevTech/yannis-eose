@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { MarketingOrdersPage } from '~/features/marketing/MarketingOrdersPage';
 import type { Order } from '~/features/orders/types';
@@ -13,12 +13,7 @@ const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed'] as co
 
 const ORDERS_PER_PAGE = 40;
 
-function getDefaultThisMonthRange(): { startDate: string; endDate: string } {
-  const now = new Date();
-  const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
-  return { startDate, endDate };
-}
+const getDefaultThisMonthRange = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.orders');

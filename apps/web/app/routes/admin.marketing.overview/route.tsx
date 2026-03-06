@@ -1,6 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { MarketingOverviewPage } from '~/features/marketing/MarketingOverviewPage';
 import type {
@@ -53,12 +53,7 @@ function parseRecentOrders(res: { ok: boolean; data: unknown }): MarketingOvervi
   }));
 }
 
-function defaultThisMonth(): { startDate: string; endDate: string } {
-  const now = new Date();
-  const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
-  return { startDate, endDate };
-}
+const defaultThisMonth = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {

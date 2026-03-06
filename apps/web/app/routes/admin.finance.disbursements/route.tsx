@@ -1,7 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { DisbursementsPage } from '~/features/disbursements/DisbursementsPage';
 import type { DisbursementRecord, DisbursementsPageData } from '~/features/disbursements/DisbursementsPage';
 
@@ -41,16 +41,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
-    const now = new Date();
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+    const range = defaultThisMonthRange();
+    startDate = range.startDate;
+    endDate = range.endDate;
   }
   if (periodAllTime) {
     startDate = undefined;
     endDate = undefined;
   }
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
-  const listFundingInput: { page: number; limit: number; startDate?: string; endDate?: string } = { page: 1, limit: 100 };
+  const listFundingInput: { page: number; limit: number; startDate?: string; endDate?: string } = { page: 1, limit: 20 };
   if (startDate) listFundingInput.startDate = startDate;
   if (endDate) listFundingInput.endDate = endDate;
 
@@ -60,7 +60,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 200 }))}`,
+      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 20 }))}`,
       { method: 'GET', cookie },
     ),
   ]);

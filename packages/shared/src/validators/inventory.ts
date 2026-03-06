@@ -80,7 +80,7 @@ export const listMovementsSchema = z.object({
     'TRANSFER_OUT', 'TRANSFER_IN', 'ADJUSTMENT',
   ]).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  limit: z.number().int().min(1).max(100).default(20),
 });
 
 export type ListMovementsInput = z.infer<typeof listMovementsSchema>;

@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, defaultThisMonthRange } from '~/lib/api.server';
 import type { ChartDataPayload } from '~/features/ceo/types';
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -18,9 +18,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const topic = rawTopic === 'media_buyers' || rawTopic === 'cs' ? rawTopic : 'orders';
 
   if (!periodAllTime && !startDate && !endDate) {
-    const now = new Date();
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+    const range = defaultThisMonthRange();
+    startDate = range.startDate;
+    endDate = range.endDate;
   }
   if (periodAllTime) {
     startDate = undefined;
@@ -41,7 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
     topic === 'media_buyers'
       ? apiRequest<{ result?: { data?: Array<{ mediaBuyerId: string; name: string; email?: string; totalSpend: number; totalOrders: number; deliveredOrders: number; deliveredRevenue: number; cpa: number; trueRoas: number; deliveryRate: number }> } }>(
-          `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify({ period: 'this_month', startDate, endDate }))}`,
+          `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify({ period: startDate && endDate ? 'this_month' : 'all_time', startDate, endDate }))}`,
           opts,
         )
       : Promise.resolve({ ok: false, data: null }),

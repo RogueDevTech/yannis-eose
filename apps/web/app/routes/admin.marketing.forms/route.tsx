@@ -19,13 +19,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const listInput = {
     page: 1,
-    limit: 500,
+    limit: 20,
     ...(mediaBuyerId && { mediaBuyerId }),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
   const formsPromise = apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${listInputStr}`, { method: 'GET', cookie });
-  const productsPromise = apiRequest<unknown>('/trpc/products.list?input=%7B%22limit%22%3A100%7D', { method: 'GET', cookie });
+  const productsPromise = apiRequest<unknown>('/trpc/products.list?input=%7B%22limit%22%3A20%7D', { method: 'GET', cookie });
 
   const formsRes = await formsPromise;
 

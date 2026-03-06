@@ -15,7 +15,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const statusParam = url.searchParams.get('status') || undefined;
   const roleParam = url.searchParams.get('role') || undefined;
-  const input: Record<string, unknown> = { page: 1, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' };
+  const input: Record<string, unknown> = { page: 1, limit: 20, sortBy: 'createdAt', sortOrder: 'desc' };
   if (statusParam && statusParam !== 'ALL') input.status = statusParam;
   if (roleParam && roleParam !== 'ALL') input.role = roleParam;
 

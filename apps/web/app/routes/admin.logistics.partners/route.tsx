@@ -15,7 +15,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const canViewEscalations = ['SUPER_ADMIN', 'HEAD_OF_LOGISTICS'].includes(user.role);
 
-  const listInput = JSON.stringify({ page: 1, limit: 100 });
+  const listInput = JSON.stringify({ page: 1, limit: 20 });
   const providersPromise = apiRequest<unknown>(`/trpc/logistics.listProviders?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
   const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
   const healthPromise = canViewEscalations

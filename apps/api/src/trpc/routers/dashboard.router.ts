@@ -48,6 +48,11 @@ export const dashboardRouter = router({
       const endDate = input?.endDate;
 
       // Fetch all data in parallel for performance
+      const logErr = (label: string) => (err: unknown) => {
+        console.error(`[ceoOverview] ${label} failed:`, err instanceof Error ? err.message : err);
+        return undefined;
+      };
+
       const [
         statusCounts,
         profitReport,
@@ -56,39 +61,28 @@ export const dashboardRouter = router({
         payoutSummary,
         csWorkloads,
       ] = await Promise.all([
-        ordersService.getStatusCounts(undefined, startDate, endDate),
-        financeService.getProfitReport({ groupBy: 'product', startDate, endDate }).catch(() => ({
-        revenue: 0,
-        landedCost: 0,
-        deliveryFee: 0,
-        adSpend: 0,
-        commission: 0,
-        fulfillmentCost: 0,
-        operationalLoss: 0,
-        trueProfit: 0,
-        orderCount: 0,
-        margin: 0,
-      })),
-      financeService.getInvoiceSummary().catch(() => ({})),
-      marketingService.getPerformanceMetrics(undefined, 'this_month', startDate, endDate).catch(() => ({
-        totalSpend: 0,
-        totalOrders: 0,
-        deliveredOrders: 0,
-        deliveredRevenue: 0,
-        cpa: 0,
-        trueRoas: 0,
-        deliveryRate: 0,
-      })),
-      hrService.getPayoutSummary().catch(() => ({
-        totalPaid: 0,
-        totalPending: 0,
-        staffCount: 0,
-      })),
-      ordersService.getCSAgentWorkloads().catch(() => []),
-    ]);
+        ordersService.getStatusCounts(undefined, startDate, endDate).catch(logErr('statusCounts')),
+        financeService.getProfitReport({ groupBy: 'product', startDate, endDate }).catch(logErr('profitReport')),
+        financeService.getInvoiceSummary().catch(logErr('invoiceSummary')),
+        marketingService.getPerformanceMetrics(undefined, startDate && endDate ? 'this_month' : 'all_time', startDate, endDate).catch(logErr('marketingMetrics')),
+        hrService.getPayoutSummary().catch(logErr('payoutSummary')),
+        ordersService.getCSAgentWorkloads().catch(logErr('csWorkloads')),
+      ]);
+
+      const safeProfitReport = profitReport ?? {
+        revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0,
+        commission: 0, fulfillmentCost: 0, operationalLoss: 0,
+        trueProfit: 0, orderCount: 0, margin: 0,
+      };
+      const safeMarketingMetrics = marketingMetrics ?? {
+        totalSpend: 0, totalOrders: 0, deliveredOrders: 0,
+        deliveredRevenue: 0, cpa: 0, trueRoas: 0, deliveryRate: 0,
+      };
+      const safePayoutSummary = payoutSummary ?? { totalPaid: 0, totalPending: 0, staffCount: 0 };
+      const safeCSWorkloads = csWorkloads ?? [];
 
     // Calculate order pipeline counts
-    const counts = statusCounts as Record<string, number>;
+    const counts = (statusCounts ?? {}) as Record<string, number>;
     const totalOrders = Object.values(counts).reduce(
       (sum, count) => sum + (count ?? 0),
       0,
@@ -108,32 +102,32 @@ export const dashboardRouter = router({
     const returnedOrders = counts['RETURNED'] ?? 0;
 
     // CS team metrics
-    const totalCSAgents = csWorkloads.length;
-    const totalCSPending = csWorkloads.reduce(
+    const totalCSAgents = safeCSWorkloads.length;
+    const totalCSPending = safeCSWorkloads.reduce(
       (sum: number, w: { pendingCount: number }) => sum + w.pendingCount,
       0,
     );
     const csUtilization =
-      csWorkloads.length > 0
-        ? csWorkloads.reduce(
+      safeCSWorkloads.length > 0
+        ? safeCSWorkloads.reduce(
             (sum: number, w: { pendingCount: number; capacity: number }) =>
               sum + w.pendingCount / Math.max(w.capacity, 1),
             0,
-          ) / csWorkloads.length
+          ) / safeCSWorkloads.length
         : 0;
 
     return {
       // Revenue & Profit
-      revenue: profitReport.revenue ?? 0,
-      trueProfit: profitReport.trueProfit ?? 0,
-      margin: profitReport.margin ?? 0,
+      revenue: safeProfitReport.revenue ?? 0,
+      trueProfit: safeProfitReport.trueProfit ?? 0,
+      margin: safeProfitReport.margin ?? 0,
       costBreakdown: {
-        landedCost: profitReport.landedCost ?? 0,
-        deliveryFee: profitReport.deliveryFee ?? 0,
-        adSpend: profitReport.adSpend ?? 0,
-        commission: profitReport.commission ?? 0,
-        fulfillmentCost: profitReport.fulfillmentCost ?? 0,
-        operationalLoss: profitReport.operationalLoss ?? 0,
+        landedCost: safeProfitReport.landedCost ?? 0,
+        deliveryFee: safeProfitReport.deliveryFee ?? 0,
+        adSpend: safeProfitReport.adSpend ?? 0,
+        commission: safeProfitReport.commission ?? 0,
+        fulfillmentCost: safeProfitReport.fulfillmentCost ?? 0,
+        operationalLoss: safeProfitReport.operationalLoss ?? 0,
       },
 
       // Order Pipeline
@@ -148,10 +142,10 @@ export const dashboardRouter = router({
 
       // Marketing
       marketing: {
-        totalSpend: marketingMetrics.totalSpend ?? 0,
-        cpa: marketingMetrics.cpa ?? 0,
-        roas: marketingMetrics.trueRoas ?? 0,
-        deliveryRate: marketingMetrics.deliveryRate ?? 0,
+        totalSpend: safeMarketingMetrics.totalSpend ?? 0,
+        cpa: safeMarketingMetrics.cpa ?? 0,
+        roas: safeMarketingMetrics.trueRoas ?? 0,
+        deliveryRate: safeMarketingMetrics.deliveryRate ?? 0,
       },
 
       // CS Team
@@ -163,13 +157,13 @@ export const dashboardRouter = router({
 
       // HR / Payroll
       payroll: {
-        totalPaid: payoutSummary.totalPaid ?? 0,
-        totalPending: payoutSummary.totalPending ?? 0,
-        staffCount: payoutSummary.staffCount ?? 0,
+        totalPaid: safePayoutSummary.totalPaid ?? 0,
+        totalPending: safePayoutSummary.totalPending ?? 0,
+        staffCount: safePayoutSummary.staffCount ?? 0,
       },
 
       // Invoices
-      invoiceSummary,
+      invoiceSummary: invoiceSummary ?? {},
     };
   }),
 

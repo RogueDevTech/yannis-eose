@@ -55,7 +55,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       .catch(() => null);
 
     const history: Promise<HistoryEntry[]> = apiRequest<unknown>(
-      `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 50 }))}`,
+      `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 20 }))}`,
       { method: 'GET', cookie },
     )
       .then((historyRes) => {

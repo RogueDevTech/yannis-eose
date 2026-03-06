@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
 import type { Order } from '~/features/orders/types';
@@ -13,12 +13,7 @@ export const meta: MetaFunction = () => [
 
 const ORDERS_PER_PAGE = 40;
 
-function defaultThisMonth(): { startDate: string; endDate: string } {
-  const now = new Date();
-  const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
-  return { startDate, endDate };
-}
+const defaultThisMonth = defaultThisMonthRange;
 
 export interface LogisticsOrder extends Order {
   logisticsLocationId?: string | null;
@@ -76,7 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(
-      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),

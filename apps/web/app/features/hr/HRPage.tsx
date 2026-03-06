@@ -43,6 +43,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
   const [showGenerate, setShowGenerate] = useState(false);
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
+  const [viewPlan, setViewPlan] = useState<CommissionPlan | null>(null);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
@@ -562,7 +563,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
               </thead>
               <tbody>
                 {plans.map((plan: CommissionPlan) => (
-                  <tr key={plan.id} className="table-row">
+                  <tr key={plan.id} className="table-row cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/50" onClick={() => setViewPlan(plan)}>
                     <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{plan.planName}</td>
                     <td className="table-cell">
                       <span className="badge-info">{plan.role.replace(/_/g, ' ')}</span>
@@ -586,7 +587,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
           {/* Mobile plans */}
           <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
             {plans.map((plan: CommissionPlan) => (
-              <div key={plan.id} className="p-4 space-y-2">
+              <div key={plan.id} className="p-4 space-y-2 cursor-pointer active:bg-surface-50 dark:active:bg-surface-800/50" onClick={() => setViewPlan(plan)}>
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-surface-900 dark:text-white text-sm">{plan.planName}</span>
                   <span className="badge-info text-xs">{plan.role.replace(/_/g, ' ')}</span>
@@ -603,6 +604,185 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             )}
           </div>
         </div>
+      )}
+
+      {/* Plan Detail Modal */}
+      {viewPlan && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setViewPlan(null)} aria-hidden />
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setViewPlan(null)}>
+            <div
+              className="bg-white dark:bg-surface-900 rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto flex flex-col gap-5 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-surface-900 dark:text-white">{viewPlan.planName}</h3>
+                  <span className="badge-info text-xs mt-1 inline-block">{viewPlan.role.replace(/_/g, ' ')}</span>
+                </div>
+                <button type="button" onClick={() => setViewPlan(null)} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 p-1">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Status & Dates */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wide">Status</p>
+                  {(() => {
+                    const now = new Date();
+                    const from = new Date(viewPlan.effectiveFrom);
+                    const to = viewPlan.effectiveTo ? new Date(viewPlan.effectiveTo) : null;
+                    if (from > now) return <span className="badge-warning text-xs mt-1 inline-block">Upcoming</span>;
+                    if (to && to < now) return <span className="badge-danger text-xs mt-1 inline-block">Expired</span>;
+                    return <span className="badge-success text-xs mt-1 inline-block">Active</span>;
+                  })()}
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wide">Effective Period</p>
+                  <p className="text-sm text-surface-900 dark:text-white mt-1">
+                    {new Date(viewPlan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {viewPlan.effectiveTo
+                      ? ` — ${new Date(viewPlan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                      : ' — Ongoing'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Rules Breakdown */}
+              <div>
+                <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wide mb-3">Commission Rules</p>
+                <div className="space-y-2">
+                  {viewPlan.rules.baseSalary != null && (
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Base Salary</p>
+                        <p className="text-xs text-surface-500 dark:text-surface-400">
+                          Fixed pay when delivered orders {'\u2265'} {viewPlan.rules.baseThreshold ?? 0}
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold text-surface-900 dark:text-white">&#8358;{Number(viewPlan.rules.baseSalary).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {viewPlan.rules.baseThreshold != null && (
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Base Threshold</p>
+                        <p className="text-xs text-surface-500 dark:text-surface-400">Minimum delivered orders to earn base salary</p>
+                      </div>
+                      <span className="text-sm font-semibold text-surface-900 dark:text-white">{Number(viewPlan.rules.baseThreshold)} orders</span>
+                    </div>
+                  )}
+                  {viewPlan.rules.perOrderRate != null && (
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Per Order Commission</p>
+                        <p className="text-xs text-surface-500 dark:text-surface-400">Earned for every delivered order</p>
+                      </div>
+                      <span className="text-sm font-semibold text-success-600 dark:text-success-400">&#8358;{Number(viewPlan.rules.perOrderRate).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {viewPlan.rules.bonusPerExtraOrder != null && (
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Extra Order Bonus</p>
+                        <p className="text-xs text-surface-500 dark:text-surface-400">
+                          Additional bonus per order above {viewPlan.rules.baseThreshold ?? 0} threshold
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold text-success-600 dark:text-success-400">&#8358;{Number(viewPlan.rules.bonusPerExtraOrder).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {viewPlan.rules.deliveryRateThreshold != null && (
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Delivery Rate Bonus</p>
+                        <p className="text-xs text-surface-500 dark:text-surface-400">
+                          50% extra on bonus when delivery rate exceeds threshold
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold text-brand-600 dark:text-brand-400">&gt;{Number(viewPlan.rules.deliveryRateThreshold)}%</span>
+                    </div>
+                  )}
+                  {viewPlan.rules.penaltyPerReturn != null && (
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Return Penalty</p>
+                        <p className="text-xs text-surface-500 dark:text-surface-400">Clawback deducted per returned order</p>
+                      </div>
+                      <span className="text-sm font-semibold text-danger-600 dark:text-danger-400">-&#8358;{Number(viewPlan.rules.penaltyPerReturn).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {Object.keys(viewPlan.rules).length === 0 && (
+                    <p className="text-sm text-surface-500 dark:text-surface-400 text-center py-4">No rules configured for this plan</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Example Calculation */}
+              {(viewPlan.rules.baseSalary != null || viewPlan.rules.perOrderRate != null) && (() => {
+                const base = Number(viewPlan.rules.baseSalary ?? 0);
+                const threshold = Number(viewPlan.rules.baseThreshold ?? 0);
+                const perOrder = Number(viewPlan.rules.perOrderRate ?? 0);
+                const extraBonus = Number(viewPlan.rules.bonusPerExtraOrder ?? 0);
+                const penalty = Number(viewPlan.rules.penaltyPerReturn ?? 0);
+                const exampleOrders = Math.max(threshold + 5, 25);
+                const exampleReturns = 2;
+                const earnedBase = exampleOrders >= threshold ? base : 0;
+                const earnedPerOrder = perOrder * exampleOrders;
+                const extraOrders = Math.max(exampleOrders - threshold, 0);
+                const earnedExtraBonus = extraBonus * extraOrders;
+                const earnedPenalty = penalty * exampleReturns;
+                const total = earnedBase + earnedPerOrder + earnedExtraBonus - earnedPenalty;
+
+                return (
+                  <div>
+                    <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wide mb-2">Example Calculation</p>
+                    <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-1.5 text-sm">
+                      <p className="text-xs text-surface-500 dark:text-surface-400 mb-2">
+                        If a staff member delivers {exampleOrders} orders with {exampleReturns} returns:
+                      </p>
+                      {earnedBase > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-surface-700 dark:text-surface-300">Base Salary</span>
+                          <span className="font-medium text-surface-900 dark:text-white">&#8358;{earnedBase.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {earnedPerOrder > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-surface-700 dark:text-surface-300">Per Order ({exampleOrders} x &#8358;{perOrder.toLocaleString()})</span>
+                          <span className="font-medium text-surface-900 dark:text-white">&#8358;{earnedPerOrder.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {earnedExtraBonus > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-surface-700 dark:text-surface-300">Extra Bonus ({extraOrders} x &#8358;{extraBonus.toLocaleString()})</span>
+                          <span className="font-medium text-surface-900 dark:text-white">&#8358;{earnedExtraBonus.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {earnedPenalty > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-surface-700 dark:text-surface-300">Return Penalty ({exampleReturns} x &#8358;{penalty.toLocaleString()})</span>
+                          <span className="font-medium text-danger-600 dark:text-danger-400">-&#8358;{earnedPenalty.toLocaleString()}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-surface-200 dark:border-surface-700 pt-1.5 flex justify-between font-semibold">
+                        <span className="text-surface-900 dark:text-white">Estimated Total</span>
+                        <span className="text-success-600 dark:text-success-400">&#8358;{total.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <Button variant="secondary" size="sm" className="w-full" onClick={() => setViewPlan(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Adjustments Tab — deferred data */}

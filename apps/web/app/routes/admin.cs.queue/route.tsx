@@ -29,8 +29,19 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'cs.teamOverview');
+  const user = await requirePermission(request, 'cs.teamOverview');
   const cookie = getSessionCookie(request);
+  const canCreateOffline = true;
+  let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
+  {
+    const productsRes = await apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
+      `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+      { method: 'GET', cookie },
+    );
+    if (productsRes.ok && productsRes.data?.result?.data?.products) {
+      productsForOfflineOrder = productsRes.data.result.data.products;
+    }
+  }
 
   const url = new URL(request.url);
   const leaderboardPeriod = url.searchParams.get('period') === 'all_time' ? 'all_time' : 'this_month';
@@ -39,12 +50,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const [workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes] = await Promise.all([
     apiRequest<unknown>('/trpc/orders.csWorkloads', { method: 'GET', cookie }),
     apiRequest<unknown>(
-      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'UNPROCESSED', limit: 50 }))}`,
+      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'UNPROCESSED', limit: 20 }))}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>('/trpc/orders.statusCounts', { method: 'GET', cookie }),
     apiRequest<unknown>(
-      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'CS_ENGAGED', limit: 50 }))}`,
+      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'CS_ENGAGED', limit: 20 }))}`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -137,6 +148,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboardPeriod,
     cartStats,
     pendingCarts,
+    canCreateOffline,
+    productsForOfflineOrder,
   };
 }
 
@@ -279,6 +292,57 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'createOffline') {
+    await requirePermission(request, 'cs.teamOverview');
+    const customerName = formData.get('customerName')?.toString()?.trim() ?? '';
+    const customerPhone = formData.get('customerPhone')?.toString()?.trim() ?? '';
+    const itemsRaw = formData.get('items')?.toString() ?? '[]';
+    let items: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
+    try {
+      items = JSON.parse(itemsRaw) as Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
+    } catch {
+      return json({ error: 'Invalid items' }, { status: 400 });
+    }
+    if (!customerName || customerName.length < 2) {
+      return json({ error: 'Customer name is required (min 2 characters)' }, { status: 400 });
+    }
+    if (!customerPhone) {
+      return json({ error: 'Customer phone is required' }, { status: 400 });
+    }
+    if (!items.length || items.some((i) => !i.productId || i.quantity < 1 || i.unitPrice == null)) {
+      return json({ error: 'At least one valid item (product, quantity, unit price) is required' }, { status: 400 });
+    }
+    const paymentMethod = (formData.get('paymentMethod') as string) === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY';
+    const customerEmail = formData.get('customerEmail')?.toString()?.trim();
+    if (paymentMethod === 'PAY_ONLINE' && (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail))) {
+      return json({ error: 'Valid email is required for Pay online' }, { status: 400 });
+    }
+    const res = await apiRequest<{ result?: { data?: { id: string } } }>('/trpc/orders.createOffline', {
+      method: 'POST',
+      cookie,
+      body: {
+        customerName,
+        customerPhone,
+        customerAddress: formData.get('customerAddress')?.toString()?.trim() || undefined,
+        deliveryAddress: formData.get('deliveryAddress')?.toString()?.trim() || undefined,
+        deliveryNotes: formData.get('deliveryNotes')?.toString()?.trim() || undefined,
+        deliveryState: formData.get('deliveryState')?.toString()?.trim() || undefined,
+        customerGender: (formData.get('customerGender') as string) || undefined,
+        preferredDeliveryDate: formData.get('preferredDeliveryDate')?.toString()?.trim() || undefined,
+        paymentMethod,
+        customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
+        items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
+        totalAmount: parseFloat((formData.get('totalAmount') as string) || '0') || undefined,
+      },
+    });
+    if (!res.ok) {
+      const err = res.data as { error?: { message?: string } };
+      return json({ error: err?.error?.message ?? 'Failed to create offline order' }, { status: safeStatus(res.status) });
+    }
+    const orderId = res.data?.result?.data?.id;
+    return json({ success: true, orderId });
+  }
+
   if (intent === 'transition') {
     const orderId = formData.get('orderId')?.toString() ?? '';
     const newStatus = formData.get('newStatus')?.toString() ?? '';
@@ -324,6 +388,8 @@ export default function CSQueueRoute() {
       leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
       cartStats={data.cartStats}
       pendingCarts={data.pendingCarts}
+      canCreateOffline={data.canCreateOffline}
+      productsForOfflineOrder={data.productsForOfflineOrder}
     />
   );
 }

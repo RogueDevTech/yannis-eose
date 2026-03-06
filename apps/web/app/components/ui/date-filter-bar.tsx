@@ -40,10 +40,13 @@ function formatPeriodLabel(startDate: string, endDate: string, periodAllTime: bo
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   if (startDate === toYMD(firstOfMonth) && endDate === toYMD(lastOfMonth)) return 'This month';
+  const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  if (startDate === toYMD(firstOfLastMonth) && endDate === toYMD(lastOfLastMonth)) return 'Last month';
   return `${s.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })} – ${e.toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
-type DatePreset = 'today' | 'yesterday' | 'last_week' | 'this_month';
+type DatePreset = 'today' | 'yesterday' | 'last_week' | 'this_month' | 'last_month';
 
 function getPresetRange(preset: DatePreset): { startDate: string; endDate: string } {
   const now = new Date();
@@ -72,6 +75,11 @@ function getPresetRange(preset: DatePreset): { startDate: string; endDate: strin
     case 'this_month': {
       const first = new Date(now.getFullYear(), now.getMonth(), 1);
       const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return { startDate: toYMD(first), endDate: toYMD(last) };
+    }
+    case 'last_month': {
+      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const last = new Date(now.getFullYear(), now.getMonth(), 0);
       return { startDate: toYMD(first), endDate: toYMD(last) };
     }
     default:
@@ -218,6 +226,7 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
                     { id: 'yesterday' as const, label: 'Yesterday' },
                     { id: 'last_week' as const, label: 'Last week' },
                     { id: 'this_month' as const, label: 'This month' },
+                    { id: 'last_month' as const, label: 'Last month' },
                     { id: 'all_time' as const, label: 'All time' },
                   ] as const
                 ).map(({ id, label }) => (

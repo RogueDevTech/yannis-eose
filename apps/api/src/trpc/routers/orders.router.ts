@@ -1,5 +1,6 @@
 import {
   createOrderSchema,
+  createOfflineOrderSchema,
   EDGE_FORM_ACTOR_ID,
   transitionOrderSchema,
   updateOrderSchema,
@@ -53,11 +54,29 @@ export const ordersRouter = router({
       const actorId =
         ctx.user?.id ??
         (input.source === 'edge-form' ? EDGE_FORM_ACTOR_ID : null);
+      const source = input.source === 'edge-form' ? 'edge-form' : undefined;
       const { source: _source, cartId: _cartId, ...orderInput } = input;
       return getOrdersService().create(
         { ...orderInput, cartId: input.cartId },
         actorId,
+        source,
       );
+    }),
+
+  /**
+   * Create an offline order (CS manual entry). Creator is set as assignee. Any CS role can use (no permission required).
+   */
+  createOffline: authedProcedure
+    .input(createOfflineOrderSchema)
+    .mutation(async ({ input, ctx }) => {
+      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'];
+      if (!ctx.user?.id || !allowedRoles.includes(ctx.user.role)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only CS agents and Head of CS can create offline orders',
+        });
+      }
+      return getOrdersService().createOffline(input, ctx.user.id);
     }),
 
   /**

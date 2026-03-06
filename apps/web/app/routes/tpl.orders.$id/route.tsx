@@ -28,7 +28,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
@@ -61,7 +61,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     : [];
 
   const historyPromise: Promise<HistoryEntry[]> = apiRequest<unknown>(
-    `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 50 }))}`,
+    `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 20 }))}`,
     { method: 'GET', cookie },
   )
     .then((historyRes) => {
