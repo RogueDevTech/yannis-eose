@@ -89,3 +89,17 @@ export interface CEODashboardData {
     }>;
   };
 }
+
+/** Payload returned by the /admin/chart-data resource route for chart view. */
+export interface ChartDataPayload {
+  error?: string;
+  timeSeries?: { date: string; revenue: number; orderCount: number; createdCount?: number }[];
+  orderPipelineChart?: {
+    volume: number;
+    csEngaged: number;
+    confirmed: number;
+    logisticsDistributed: number;
+    delivered: number;
+  };
+  chartTopicData?: CEODashboardData['chartTopicData'];
+}

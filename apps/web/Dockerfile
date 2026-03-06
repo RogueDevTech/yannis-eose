@@ -32,23 +32,25 @@ COPY apps/web/ apps/web/
 RUN pnpm turbo build --filter=@yannis/web
 
 # ── Stage 3: Production runtime ──────────────────────────────────────────────
+# Preserve monorepo layout so pnpm symlinks (root .pnpm, apps/web node_modules) resolve.
 FROM node:20-alpine AS runtime
 
 WORKDIR /app
 
-# Copy built output and production dependencies
-COPY --from=build /app/apps/web/build ./build
+# Root node_modules (has .pnpm store); web node_modules (has .bin/remix-serve and symlinks)
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=build /app/packages/shared ./packages/shared
 COPY --from=build /app/packages/ui ./packages/ui
-COPY --from=build /app/apps/web/package.json ./package.json
+COPY --from=build /app/apps/web/build ./apps/web/build
+COPY --from=build /app/apps/web/package.json ./apps/web/package.json
 
 ENV NODE_ENV=production
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
   CMD wget -qO- http://localhost:3000 || exit 1
 
-# Use web app's node_modules so remix-serve is found (root node_modules doesn't have @remix-run/serve)
-CMD ["node", "apps/web/node_modules/.bin/remix-serve", "./build/server/index.js"]
+# Run from web app dir so npx finds remix-serve and pnpm symlinks resolve
+WORKDIR /app/apps/web
+CMD ["npx", "remix-serve", "./build/server/index.js"]

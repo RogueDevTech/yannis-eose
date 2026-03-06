@@ -75,7 +75,7 @@ export function TplLayout({
   return (
     <div className="min-h-screen w-full bg-surface-50 dark:bg-surface-950">
       {/* Constrained content: max 1200px, centered */}
-      <div className="mx-auto w-full max-w-[1200px] min-h-screen flex flex-col">
+      <div className="mx-auto w-full max-w-tpl min-h-screen flex flex-col">
         {/* Top bar: logo + nav + actions */}
         <header className="sticky top-0 z-40 shrink-0 bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800">
           <div className="flex items-center justify-between gap-4 px-4 py-2">
