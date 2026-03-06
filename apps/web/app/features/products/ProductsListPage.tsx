@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from '@remix-run/react';
 import type { Product } from './types';
 import { PRODUCT_STATUS_COLORS } from './types';
+import { ProductViewModal } from './ProductViewModal';
 
 interface ProductsListPageProps {
   products: Product[];
   total: number;
+  canEditProduct?: boolean;
 }
 
 function formatPriceRange(product: Product): string {
@@ -62,9 +64,19 @@ const ViewIcon = (
   </svg>
 );
 
-export function ProductsListPage({ products, total }: ProductsListPageProps) {
+export function ProductsListPage({ products, total, canEditProduct = false }: ProductsListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [viewProduct, setViewProduct] = useState<Product | null>(null);
+
+  useEffect(() => {
+    if (!viewProduct) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewProduct(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [viewProduct]);
 
   const filteredProducts = products.filter((product) => {
     if (statusFilter !== 'ALL' && product.status !== statusFilter) return false;
@@ -204,13 +216,14 @@ export function ProductsListPage({ products, total }: ProductsListPageProps) {
             )}
 
             <div className="flex items-center gap-2 pt-3 border-t border-surface-100 dark:border-surface-800">
-              <Link
-                to={`/admin/products/${product.id}`}
+              <button
+                type="button"
+                onClick={() => setViewProduct(product)}
                 className="btn-primary btn-sm inline-flex items-center gap-1.5 shrink-0"
               >
                 {ViewIcon}
                 <span>View</span>
-              </Link>
+              </button>
             </div>
           </article>
         ))}
@@ -232,6 +245,15 @@ export function ProductsListPage({ products, total }: ProductsListPageProps) {
           Showing {filteredProducts.length} of {total} products
         </p>
       </div>
+
+      {/* View product modal */}
+      {viewProduct && (
+        <ProductViewModal
+          product={viewProduct}
+          canEditProduct={canEditProduct}
+          onClose={() => setViewProduct(null)}
+        />
+      )}
     </div>
   );
 }

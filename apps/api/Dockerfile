@@ -44,6 +44,7 @@ COPY --from=build /app/packages/shared ./packages/shared
 COPY --from=build /app/apps/api/package.json ./package.json
 
 ENV NODE_ENV=production
+ENV NODE_PATH=/app/node_modules:/app/apps/api/node_modules
 EXPOSE 4444
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

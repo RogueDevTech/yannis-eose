@@ -84,7 +84,7 @@ export interface CEODashboardPageProps {
 }
 
 export function CEODashboardPage({ data, filters = { startDate: '', endDate: '', periodAllTime: false }, showBackToDashboard = true }: CEODashboardPageProps) {
-  const [showChartView, setShowChartView] = useState(false);
+  const [showChartView, setShowChartView] = useState(true);
   const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const topic = filters?.topic ?? 'orders';

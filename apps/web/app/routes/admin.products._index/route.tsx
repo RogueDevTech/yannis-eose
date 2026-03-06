@@ -11,8 +11,11 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'products.read');
+  const user = await requirePermission(request, 'products.read');
   const cookie = getSessionCookie(request);
+
+  const canEditProduct =
+    user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.update');
 
   const input = { page: 1, limit: 50, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
   const productsPromise = apiRequest<unknown>(
@@ -25,14 +28,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return { products: data?.products ?? [], total: data?.pagination?.total ?? 0 };
   }).catch(() => ({ products: [] as Product[], total: 0 }));
 
-  return defer({ products: productsPromise });
+  return defer({ products: productsPromise, canEditProduct });
 }
 
 export default function ProductsRoute() {
-  const { products } = useLoaderData<typeof loader>();
+  const { products, canEditProduct } = useLoaderData<typeof loader>();
   return (
     <DeferredSection resolve={products} skeleton="table">
-      {(data) => <ProductsListPage products={data.products} total={data.total} />}
+      {(data) => (
+        <ProductsListPage
+          products={data.products}
+          total={data.total}
+          canEditProduct={canEditProduct}
+        />
+      )}
     </DeferredSection>
   );
 }
