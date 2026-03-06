@@ -130,88 +130,97 @@ export class AuditService {
    * Query audit log across all (or a specific) history tables.
    */
   async getGlobalAuditLog(filters: AuditLogFilters): Promise<{ rows: AuditEntry[]; total: number }> {
-    const { tableName, actorId, startDate, endDate, page = 1, limit = 20 } = filters;
-    const offset = (page - 1) * limit;
+    try {
+      const { tableName, actorId, startDate, endDate, page = 1, limit = 20 } = filters;
+      const offset = (page - 1) * limit;
 
-    // Determine which tables to query
-    const tables: AuditableTable[] = tableName
-      ? isAuditableTable(tableName)
-        ? [tableName]
-        : (() => { throw new TRPCError({ code: 'BAD_REQUEST', message: `Table '${tableName}' is not auditable` }); })()
-      : [...AUDITABLE_TABLES];
+      // Determine which tables to query
+      const tables: AuditableTable[] = tableName
+        ? isAuditableTable(tableName)
+          ? [tableName]
+          : (() => { throw new TRPCError({ code: 'BAD_REQUEST', message: `Table '${tableName}' is not auditable` }); })()
+        : [...AUDITABLE_TABLES];
 
-    // Build UNION ALL query across selected history tables
-    const unionParts: string[] = [];
-    const params: (string | number)[] = [];
-    let paramIdx = 1;
+      // Build UNION ALL query across selected history tables
+      const unionParts: string[] = [];
+      const params: (string | number)[] = [];
+      let paramIdx = 1;
 
-    for (const table of tables) {
-      const conditions: string[] = [];
+      for (const table of tables) {
+        const conditions: string[] = [];
 
-      if (actorId) {
-        conditions.push(`modified_by = $${paramIdx}`);
-        params.push(actorId);
-        paramIdx++;
+        if (actorId) {
+          conditions.push(`modified_by = $${paramIdx}`);
+          params.push(actorId);
+          paramIdx++;
+        }
+        if (startDate) {
+          conditions.push(`valid_from >= $${paramIdx}::timestamptz`);
+          params.push(startDate);
+          paramIdx++;
+        }
+        if (endDate) {
+          conditions.push(`valid_from <= $${paramIdx}::timestamptz`);
+          params.push(endDate);
+          paramIdx++;
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        unionParts.push(
+          `SELECT '${table}' AS _table_name, id, modified_by,
+                  valid_from, valid_to,
+                  row_to_json(${table}_history.*) AS _row_data
+           FROM ${table}_history
+           ${whereClause}`,
+        );
       }
-      if (startDate) {
-        conditions.push(`valid_from >= $${paramIdx}::timestamptz`);
-        params.push(startDate);
-        paramIdx++;
-      }
-      if (endDate) {
-        conditions.push(`valid_from <= $${paramIdx}::timestamptz`);
-        params.push(endDate);
-        paramIdx++;
-      }
 
-      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      const unionQuery = unionParts.join('\n UNION ALL \n');
 
-      unionParts.push(
-        `SELECT '${table}' AS _table_name, id, modified_by,
-                valid_from, valid_to,
-                row_to_json(${table}_history.*) AS _row_data
-         FROM ${table}_history
-         ${whereClause}`,
-      );
+      // Count total
+      const countQuery = `SELECT COUNT(*)::int AS total FROM (${unionQuery}) AS _audit_union`;
+      const countResult = await this.sql.unsafe(countQuery, params);
+      const total = ((countResult[0] as Record<string, unknown> | undefined)?.total ?? 0) as number;
+
+      // Fetch paginated
+      const dataQuery = `SELECT * FROM (${unionQuery}) AS _audit_union
+                         ORDER BY valid_from DESC
+                         LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
+      params.push(limit, offset);
+
+      const rows = await this.sql.unsafe(dataQuery, params);
+
+      return {
+        rows: rows.map((row) => {
+          const rawRow = row as Record<string, unknown>;
+          const data = (rawRow._row_data ?? {}) as Record<string, unknown>;
+          // Remove temporal/internal fields from data display
+          delete data.valid_from;
+          delete data.valid_to;
+          delete data.modified_by;
+
+          return {
+            id: String(rawRow.id ?? ''),
+            tableName: String(rawRow._table_name ?? ''),
+            recordId: String(rawRow.id ?? ''),
+            action: this.inferAction(rawRow.valid_to),
+            changedBy: rawRow.modified_by ? String(rawRow.modified_by) : null,
+            validFrom: rawRow.valid_from ? new Date(rawRow.valid_from as string).toISOString() : '',
+            validTo: rawRow.valid_to ? new Date(rawRow.valid_to as string).toISOString() : null,
+            data,
+          };
+        }),
+        total,
+      };
+    } catch (err) {
+      if (err instanceof TRPCError) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: `Audit log query failed: ${message}. Ensure all _history tables exist and have valid_from, valid_to, modified_by columns.`,
+      });
     }
-
-    const unionQuery = unionParts.join('\n UNION ALL \n');
-
-    // Count total
-    const countQuery = `SELECT COUNT(*)::int AS total FROM (${unionQuery}) AS _audit_union`;
-    const countResult = await this.sql.unsafe(countQuery, params);
-    const total = ((countResult[0] as Record<string, unknown> | undefined)?.total ?? 0) as number;
-
-    // Fetch paginated
-    const dataQuery = `SELECT * FROM (${unionQuery}) AS _audit_union
-                       ORDER BY valid_from DESC
-                       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
-    params.push(limit, offset);
-
-    const rows = await this.sql.unsafe(dataQuery, params);
-
-    return {
-      rows: rows.map((row) => {
-        const rawRow = row as Record<string, unknown>;
-        const data = (rawRow._row_data ?? {}) as Record<string, unknown>;
-        // Remove temporal/internal fields from data display
-        delete data.valid_from;
-        delete data.valid_to;
-        delete data.modified_by;
-
-        return {
-          id: String(rawRow.id ?? ''),
-          tableName: String(rawRow._table_name ?? ''),
-          recordId: String(rawRow.id ?? ''),
-          action: this.inferAction(rawRow.valid_to),
-          changedBy: rawRow.modified_by ? String(rawRow.modified_by) : null,
-          validFrom: rawRow.valid_from ? new Date(rawRow.valid_from as string).toISOString() : '',
-          validTo: rawRow.valid_to ? new Date(rawRow.valid_to as string).toISOString() : null,
-          data,
-        };
-      }),
-      total,
-    };
   }
 
   /**

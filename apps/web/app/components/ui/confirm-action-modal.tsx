@@ -105,7 +105,6 @@ export function ConfirmActionModal({
 
   const handleConfirm = () => {
     onConfirm();
-    onClose();
   };
 
   const borderBottomClass =

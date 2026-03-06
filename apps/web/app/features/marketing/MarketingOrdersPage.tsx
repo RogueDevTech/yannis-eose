@@ -25,6 +25,10 @@ interface MarketingOrdersPageProps {
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
+  /** CPA (Cost Per Acquisition) = Total Ad Spend / Total Orders — from marketing.metrics for current date range. */
+  cpa?: number | null;
+  /** Total approved ad spend in the period — from marketing.metrics. */
+  totalAdSpend?: number | null;
 }
 
 export function MarketingOrdersPage({
@@ -40,6 +44,8 @@ export function MarketingOrdersPage({
   showMediaBuyerColumn = false,
   filters,
   liveEvents,
+  cpa,
+  totalAdSpend: _totalAdSpend,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const liveState = useLiveIndicator(liveEvents ?? []);
@@ -146,7 +152,7 @@ export function MarketingOrdersPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
         <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
@@ -166,6 +172,12 @@ export function MarketingOrdersPage({
         <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivery Rate</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{deliveryRate}%</p>
+        </div>
+        <div className="card">
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">CPA</p>
+          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
+            {cpa != null ? `\u20A6${Number(cpa).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '\u2014'}
+          </p>
         </div>
       </div>
 

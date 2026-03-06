@@ -38,12 +38,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   if (!res.ok) {
+    const data = res.data as Record<string, unknown> | undefined;
+    const tRpcError = data?.error as { message?: string; code?: string } | undefined;
+    const apiMessage = typeof tRpcError?.message === 'string' ? tRpcError.message : undefined;
+    const fallback =
+      res.status === 401
+        ? 'Not authenticated. Please sign in again.'
+        : res.status === 403
+          ? 'You do not have permission to view the audit trail (audit.read required).'
+          : 'Failed to load audit log. Check that the API is reachable and that history tables exist.';
+    const error = apiMessage ?? fallback;
+
     return {
       rows: [] as AuditEntry[],
       total: 0,
       filters,
       actorNames: Promise.resolve({} as Record<string, { name: string; role: string }>),
-      error: 'Failed to load audit log. Ensure you have SuperAdmin access.',
+      error,
     } satisfies AuditStreamData;
   }
 

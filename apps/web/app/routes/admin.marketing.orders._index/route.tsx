@@ -58,9 +58,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (endDate) countsInput.endDate = endDate;
   const countsInputStr = encodeURIComponent(JSON.stringify(countsInput));
 
-  const [res, countsRes] = await Promise.all([
+  const metricsInput: { mediaBuyerId?: string; startDate?: string; endDate?: string } = {};
+  if (mediaBuyerId) metricsInput.mediaBuyerId = mediaBuyerId;
+  if (startDate) metricsInput.startDate = startDate;
+  if (endDate) metricsInput.endDate = endDate;
+  const metricsInputStr = encodeURIComponent(JSON.stringify(metricsInput));
+
+  const [res, countsRes, metricsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/marketing.metrics?input=${metricsInputStr}`, { method: 'GET', cookie }),
   ]);
 
   const trpcData = res.ok
@@ -70,6 +77,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const countsData = countsRes.ok
     ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
     : {};
+
+  const metricsData = metricsRes.ok
+    ? (metricsRes.data as { result?: { data?: { cpa: number; totalSpend: number } } })?.result?.data
+    : null;
 
   const total = trpcData?.pagination?.total ?? 0;
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
@@ -86,6 +97,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isMediaBuyer,
     showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN',
     filters,
+    cpa: metricsData?.cpa ?? null,
+    totalAdSpend: metricsData?.totalSpend ?? null,
   };
 }
 

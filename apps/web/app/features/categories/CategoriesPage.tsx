@@ -34,12 +34,14 @@ function CategoryModal({
   const formWrapperRef = useRef<HTMLDivElement>(null);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
 
-  // Close modal on successful submission
+  // Close archive confirm modal on successful submission
+  const prevNavState = useRef(navigation.state);
   useEffect(() => {
-    if (navigation.state === 'idle' && navigation.formData) {
-      // Form just finished submitting
+    if (prevNavState.current === 'submitting' && navigation.state === 'idle' && showArchiveConfirm) {
+      setShowArchiveConfirm(false);
     }
-  }, [navigation.state, navigation.formData]);
+    prevNavState.current = navigation.state;
+  }, [navigation.state, showArchiveConfirm]);
 
   const isEdit = category !== null;
 
