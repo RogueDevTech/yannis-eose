@@ -121,8 +121,20 @@ jobs:
               docker compose -f docker-compose.prod.yml pull || docker-compose -f docker-compose.prod.yml pull
               echo "→ Starting containers..."
               docker compose -f docker-compose.prod.yml up -d || docker-compose -f docker-compose.prod.yml up -d
-              sleep 10
-              echo "→ Health checks..."
+              echo "→ Waiting for services (health checks with retries)..."
+              for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                if curl -sf http://localhost:4444/health >/dev/null && curl -sf http://localhost:3000 >/dev/null; then
+                  echo "→ Health checks passed."
+                  break
+                fi
+                if [ "$i" -eq 12 ]; then
+                  echo "→ Health check timeout after 60s"
+                  curl -sf http://localhost:4444/health || echo "API not ready"
+                  curl -sf http://localhost:3000 || echo "Web not ready"
+                  exit 1
+                fi
+                sleep 5
+              done
               curl -sf http://localhost:4444/health || (echo "API health check failed" && exit 1)
               curl -sf http://localhost:3000 || (echo "Web health check failed" && exit 1)
               docker image prune -f

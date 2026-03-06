@@ -1,8 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Link, useSearchParams, useNavigation } from '@remix-run/react';
+import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import type { CEODashboardData, CEODashboardFilters } from './types';
+import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
+
+function buildChartDataUrl(filters: CEODashboardFilters): string {
+  const params = new URLSearchParams();
+  if (filters.startDate) params.set('startDate', filters.startDate);
+  if (filters.endDate) params.set('endDate', filters.endDate);
+  if (filters.periodAllTime) params.set('period', 'all_time');
+  if (filters.topic) params.set('topic', filters.topic);
+  const qs = params.toString();
+  return `/admin/chart-data${qs ? `?${qs}` : ''}`;
+}
 
 /** Renders children only on the client to avoid Recharts SSR dimension warnings. */
 function ClientOnly({ children, fallback }: { children: React.ReactNode; fallback?: React.ReactNode }) {
@@ -87,7 +97,19 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
   const [showChartView, setShowChartView] = useState(false);
   const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
+  const fetcher = useFetcher<ChartDataPayload>();
   const topic = filters?.topic ?? 'orders';
+
+  useEffect(() => {
+    if (showChartView) {
+      fetcher.load(buildChartDataUrl(filters));
+    }
+  }, [showChartView, filters.startDate, filters.endDate, filters.periodAllTime, filters.topic]);
+
+  const chartDisplayData: CEODashboardData =
+    showChartView && fetcher.data && !fetcher.data.error
+      ? { ...data, ...fetcher.data }
+      : data;
   const isLoadingTopic = navigation.state === 'loading';
   const revenue = data?.revenue ?? 0;
   const trueProfit = data?.trueProfit ?? 0;
@@ -178,12 +200,12 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
             <strong>Revenue</strong> and <strong>Orders delivered</strong> are by delivery date. <strong>Orders created</strong> shows daily order volume (any status) so the chart has data even before deliveries.
           </p>
-          {data.timeSeries && data.timeSeries.length > 0 ? (
+          {chartDisplayData.timeSeries && chartDisplayData.timeSeries.length > 0 ? (
             <div className="h-72 min-h-[288px] w-full min-w-0">
               <ClientOnly fallback={<div className="h-72 min-h-[288px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
               <div className="h-full min-h-[288px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={data.timeSeries} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}>
+                  <ComposedChart data={chartDisplayData.timeSeries} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-surface-200 dark:stroke-surface-700" />
                     <XAxis
                       dataKey="date"
@@ -397,11 +419,11 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
               <BarChart
                 layout="vertical"
                 data={[
-                  { stage: 'Volume', count: data.orderPipelineChart?.volume ?? 0, fill: PIPELINE_CHART_COLORS[0] },
-                  { stage: 'CS Engaged', count: data.orderPipelineChart?.csEngaged ?? 0, fill: PIPELINE_CHART_COLORS[1] },
-                  { stage: 'Confirmed', count: data.orderPipelineChart?.confirmed ?? 0, fill: PIPELINE_CHART_COLORS[2] },
-                  { stage: 'Logistics distributed', count: data.orderPipelineChart?.logisticsDistributed ?? 0, fill: PIPELINE_CHART_COLORS[3] },
-                  { stage: 'Delivered', count: data.orderPipelineChart?.delivered ?? 0, fill: PIPELINE_CHART_COLORS[4] },
+                  { stage: 'Volume', count: chartDisplayData.orderPipelineChart?.volume ?? 0, fill: PIPELINE_CHART_COLORS[0] },
+                  { stage: 'CS Engaged', count: chartDisplayData.orderPipelineChart?.csEngaged ?? 0, fill: PIPELINE_CHART_COLORS[1] },
+                  { stage: 'Confirmed', count: chartDisplayData.orderPipelineChart?.confirmed ?? 0, fill: PIPELINE_CHART_COLORS[2] },
+                  { stage: 'Logistics distributed', count: chartDisplayData.orderPipelineChart?.logisticsDistributed ?? 0, fill: PIPELINE_CHART_COLORS[3] },
+                  { stage: 'Delivered', count: chartDisplayData.orderPipelineChart?.delivered ?? 0, fill: PIPELINE_CHART_COLORS[4] },
                 ]}
                 margin={{ top: 8, right: 24, left: 100, bottom: 8 }}
               >
@@ -768,11 +790,11 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
               <BarChart
                 layout="vertical"
                 data={[
-                  { stage: 'Volume', count: data.orderPipelineChart?.volume ?? 0, fill: PIPELINE_CHART_COLORS[0] },
-                  { stage: 'CS Engaged', count: data.orderPipelineChart?.csEngaged ?? 0, fill: PIPELINE_CHART_COLORS[1] },
-                  { stage: 'Confirmed', count: data.orderPipelineChart?.confirmed ?? 0, fill: PIPELINE_CHART_COLORS[2] },
-                  { stage: 'Logistics distributed', count: data.orderPipelineChart?.logisticsDistributed ?? 0, fill: PIPELINE_CHART_COLORS[3] },
-                  { stage: 'Delivered', count: data.orderPipelineChart?.delivered ?? 0, fill: PIPELINE_CHART_COLORS[4] },
+                  { stage: 'Volume', count: chartDisplayData.orderPipelineChart?.volume ?? 0, fill: PIPELINE_CHART_COLORS[0] },
+                  { stage: 'CS Engaged', count: chartDisplayData.orderPipelineChart?.csEngaged ?? 0, fill: PIPELINE_CHART_COLORS[1] },
+                  { stage: 'Confirmed', count: chartDisplayData.orderPipelineChart?.confirmed ?? 0, fill: PIPELINE_CHART_COLORS[2] },
+                  { stage: 'Logistics distributed', count: chartDisplayData.orderPipelineChart?.logisticsDistributed ?? 0, fill: PIPELINE_CHART_COLORS[3] },
+                  { stage: 'Delivered', count: chartDisplayData.orderPipelineChart?.delivered ?? 0, fill: PIPELINE_CHART_COLORS[4] },
                 ]}
                 margin={{ top: 8, right: 24, left: 100, bottom: 8 }}
               >
@@ -800,14 +822,14 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
             Ad spend, delivered orders, and True ROAS by media buyer for the selected period.
           </p>
-          {data.chartTopicData?.mediaBuyerLeaderboard && data.chartTopicData.mediaBuyerLeaderboard.length > 0 ? (
+          {chartDisplayData.chartTopicData?.mediaBuyerLeaderboard && chartDisplayData.chartTopicData.mediaBuyerLeaderboard.length > 0 ? (
             <div className="h-96 min-h-[320px] w-full min-w-0">
               <ClientOnly fallback={<div className="h-96 min-h-[320px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
               <div className="h-full min-h-[320px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   layout="vertical"
-                  data={data.chartTopicData.mediaBuyerLeaderboard.map((b) => ({
+                  data={chartDisplayData.chartTopicData.mediaBuyerLeaderboard.map((b) => ({
                     name: b.name,
                     spend: b.totalSpend,
                     orders: b.deliveredOrders,
@@ -846,14 +868,14 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
             Pending orders per agent (Unprocessed, CS Assigned, CS Engaged).
           </p>
-          {data.chartTopicData?.csWorkloads && data.chartTopicData.csWorkloads.length > 0 ? (
+          {chartDisplayData.chartTopicData?.csWorkloads && chartDisplayData.chartTopicData.csWorkloads.length > 0 ? (
             <div className="h-80 min-h-[280px] w-full min-w-0">
               <ClientOnly fallback={<div className="h-80 min-h-[280px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
               <div className="h-full min-h-[280px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   layout="vertical"
-                  data={data.chartTopicData.csWorkloads.map((w) => ({
+                  data={chartDisplayData.chartTopicData.csWorkloads.map((w) => ({
                     name: w.agentName,
                     pending: w.pendingCount,
                     capacity: w.capacity,
