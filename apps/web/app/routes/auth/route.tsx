@@ -5,7 +5,7 @@ import { Outlet } from '@remix-run/react';
 function restoreTheme() {
   try {
     const t = localStorage.getItem('yannis_theme');
-    if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    if (t === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');

@@ -51,7 +51,7 @@ ENV HOST=0.0.0.0
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
-  CMD wget -qO- http://localhost:3000 || exit 1
+  CMD wget -qO- http://127.0.0.1:3000 || exit 1
 
 # Run from web app dir so npx finds remix-serve and pnpm symlinks resolve
 WORKDIR /app/apps/web

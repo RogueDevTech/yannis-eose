@@ -45,7 +45,7 @@ export async function loader() {
 }
 
 /** Theme init script — runs before paint so error boundaries and standalone pages respect dark mode */
-const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('yannis_theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');else document.documentElement.classList.remove('dark');}catch(e){}})();`;
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('yannis_theme');if(t==='dark')document.documentElement.classList.add('dark');else document.documentElement.classList.remove('dark');}catch(e){}})();`;
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
