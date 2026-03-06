@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigation } from '@remix-run/react';
 import { Sidebar, SidebarIcons, type SidebarGroup } from './sidebar';
 import { Header } from './header';
+import { BottomNav, type BottomNavItem } from './bottom-nav';
 import { useSocket, useRealtimeNotifications } from '~/hooks/useSocket';
 import { ToastProvider } from '~/components/ui/toast';
 import { NotificationsStateProvider, useNotificationsState } from '~/contexts/notifications-state';
@@ -177,6 +178,56 @@ function getNavGroupsForUser(user: { role: string; permissions?: string[] } | nu
   return result;
 }
 
+/** Priority hrefs for bottom nav per role (max 5). Order matters. */
+const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
+  SUPER_ADMIN: ['/admin', '/admin/marketing/overview', '/admin/cs/queue', '/admin/logistics/orders', '/admin/finance/overview'],
+  HEAD_OF_MARKETING: ['/admin', '/admin/marketing/overview', '/admin/marketing/team', '/admin/marketing/orders', '/admin/marketing/funding'],
+  MEDIA_BUYER: ['/admin', '/admin/marketing/overview', '/admin/marketing/orders', '/admin/marketing/funding', '/admin/marketing/leaderboard'],
+  HEAD_OF_CS: ['/admin', '/admin/cs/queue', '/admin/cs/team', '/admin/cs/orders', '/admin/cs/leaderboard'],
+  CS_AGENT: ['/admin', '/admin/cs/queue', '/admin/cs/orders', '/admin/cs/leaderboard'],
+  HEAD_OF_LOGISTICS: ['/admin', '/admin/logistics/orders', '/admin/logistics/partners', '/admin/logistics/delivery-confirmations', '/admin/logistics/remittances'],
+  TPL_MANAGER: ['/admin', '/admin/logistics/orders', '/admin/logistics/partners', '/admin/logistics/delivery-confirmations', '/admin/logistics/remittances'],
+  FINANCE_OFFICER: ['/admin', '/admin/finance/overview', '/admin/finance/delivery-remittances', '/admin/finance/disbursements'],
+  WAREHOUSE_MANAGER: ['/admin', '/admin/inventory', '/admin/transfers', '/admin/returns'],
+  HR_MANAGER: ['/admin', '/hr/payroll', '/hr/users'],
+};
+
+const FLAT_NAV_ITEMS = navStructure.flatMap((g) => g.items);
+
+function getBottomNavItemsForUser(user: { role: string; permissions?: string[] } | null): BottomNavItem[] {
+  if (!user) return [];
+  const role = user.role ?? '';
+  const priorityHrefs = BOTTOM_NAV_PRIORITY_BY_ROLE[role];
+  if (priorityHrefs) {
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    const perms = user.permissions ?? [];
+    const result: BottomNavItem[] = [];
+    const hrefToItem = new Map(FLAT_NAV_ITEMS.map((item) => [item.href, item]));
+    for (const href of priorityHrefs) {
+      if (result.length >= 5) break;
+      const item = hrefToItem.get(href);
+      if (!item) continue;
+      const allowed =
+        !item.permission ||
+        isSuperAdmin ||
+        (item.roles?.includes(role) ?? false) ||
+        perms.includes(item.permission);
+      if (allowed) {
+        result.push({
+          label: getDisplayLabel(item, user),
+          href: item.href,
+          icon: item.icon,
+        });
+      }
+    }
+    if (result.length > 0) return result;
+  }
+  // Fallback: first 5 items from visible sidebar groups
+  const groups = getNavGroupsForUser(user);
+  const flat: BottomNavItem[] = groups.flatMap((g) => g.items);
+  return flat.slice(0, 5);
+}
+
 function DashboardLayoutInner({ user, notificationsPromise, notificationsActionUrl: _notificationsActionUrl = '/admin' }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -271,6 +322,9 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
   };
 
   const navGroups = getNavGroupsForUser(user);
+  const bottomNavItems = getBottomNavItemsForUser(user);
+  const allNavItemsForModal: BottomNavItem[] = navGroups.flatMap((g) => g.items);
+  const barItems = bottomNavItems.slice(0, 4);
 
   // Show a global content loader only during real route transitions
   const isAdminShellPath = location.pathname.startsWith('/admin') || location.pathname.startsWith('/hr');
@@ -316,7 +370,7 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
 
       {/* Main content area */}
       <main
-        className={`pt-[var(--header-height)] min-h-screen transition-all duration-300
+        className={`pt-[var(--header-height)] min-h-screen transition-all duration-300 pb-[var(--bottom-nav-height)] md:pb-0
           ${collapsed
             ? 'lg:pl-[var(--sidebar-collapsed-width)]'
             : 'lg:pl-[var(--sidebar-width)]'
@@ -344,6 +398,7 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
           </div>
         </div>
       </main>
+      <BottomNav barItems={barItems} allItems={allNavItemsForModal} currentPathname={location.pathname} />
       </div>
   );
 }

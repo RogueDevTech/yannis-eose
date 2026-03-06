@@ -1,3 +1,7 @@
+/**
+ * @deprecated Use PageNotification from ~/components/ui/page-notification for new code.
+ * PageNotification provides progress bar, pause/resume, and consistent styling.
+ */
 import { useEffect, useRef, useCallback } from 'react';
 
 type Variant = 'danger' | 'warning' | 'info';

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Form, useNavigation, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { PageNotification } from '~/components/ui/page-notification';
 import { Spinner } from '~/components/ui/spinner';
 
 interface Category {
@@ -58,7 +59,7 @@ function CategoryModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-surface-900 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-white dark:bg-surface-900 rounded-xl shadow-2xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
           <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
@@ -200,7 +201,7 @@ function CategoryModal({
           )}
 
           {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-2 border-t border-surface-200 dark:border-surface-700">
+          <div className="flex items-center justify-end gap-3 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-surface-200 dark:border-surface-700">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
@@ -244,6 +245,11 @@ function CategoryModal({
 export function CategoriesPage({ categories, total, actionData }: CategoriesPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [modalCategory, setModalCategory] = useState<Category | null | undefined>(undefined); // undefined = closed
+  const [dismissedError, setDismissedError] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+  }, [actionData?.error]);
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
 
@@ -271,25 +277,30 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Product Categories</h1>
           <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
             Manage brand categories for products. Brand info appears on invoices and SMS.
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" className="flex items-center gap-2" onClick={() => setModalCategory(null)}>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
           New Category
         </Button>
+        </div>
       </div>
 
-      {actionData?.error && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionData.error}</p>
-        </div>
+      {actionData?.error && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionData.error}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
       {/* Stats */}

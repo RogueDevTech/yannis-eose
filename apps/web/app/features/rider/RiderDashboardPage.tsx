@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { PageNotification } from '~/components/ui/page-notification';
 import { Tabs } from '~/components/ui/tabs';
 import { useOnlineStatus, usePendingCount } from '~/hooks/useOnlineStatus';
 import { queueDeliveryConfirmation } from '~/lib/offline-sync';
@@ -48,6 +49,13 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
       { enableHighAccuracy: true, timeout: 10000 },
     );
   }, []);
+
+  const fetcherError = fetcher.data?.error ?? null;
+  const [dismissedError, setDismissedError] = useState(false);
+
+  useEffect(() => {
+    if (fetcherError) setDismissedError(false);
+  }, [fetcherError]);
 
   // Reset form when fetcher succeeds
   useEffect(() => {
@@ -132,10 +140,14 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
       )}
 
       {/* Error from action */}
-      {fetcher.data?.error && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-          {fetcher.data.error}
-        </div>
+      {fetcherError && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={fetcherError}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+          className="mb-4"
+        />
       )}
 
       {/* Empty state */}

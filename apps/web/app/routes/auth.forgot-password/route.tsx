@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { PageNotification } from '~/components/ui/page-notification';
 import { apiRequest, getCurrentUser } from '~/lib/api.server';
 
 export const meta: MetaFunction = () => {
@@ -47,6 +49,13 @@ export default function ForgotPasswordRoute() {
   const actionData = useActionData<{ error?: string; success?: string }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
+  const [dismissedError, setDismissedError] = useState(false);
+  const [dismissedSuccess, setDismissedSuccess] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+    if (actionData?.success) setDismissedSuccess(false);
+  }, [actionData?.error, actionData?.success]);
 
   return (
     <div className="flex min-h-screen">
@@ -88,17 +97,25 @@ export default function ForgotPasswordRoute() {
             </p>
           </div>
 
-          {actionData?.error && (
-            <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 border border-danger-700/50 lg:border-danger-200 px-4 py-3">
-              <p className="text-sm text-danger-400 lg:text-danger-700">{actionData.error}</p>
-            </div>
+          {actionData?.error && !dismissedError && (
+            <PageNotification
+              variant="error"
+              message={actionData.error}
+              durationMs={5000}
+              onDismiss={() => setDismissedError(true)}
+            />
           )}
 
           {actionData?.success ? (
             <>
-              <div className="rounded-lg bg-success-700/20 lg:bg-success-50 border border-success-700/50 lg:border-success-200 px-4 py-3">
-                <p className="text-sm text-success-400 lg:text-success-700">{actionData.success}</p>
-              </div>
+              {!dismissedSuccess && (
+                <PageNotification
+                  variant="success"
+                  message={actionData.success}
+                  durationMs={5000}
+                  onDismiss={() => setDismissedSuccess(true)}
+                />
+              )}
 
               <Link
                 to="/auth"

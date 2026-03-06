@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useFetcher, useNavigation } from '@remix-run/react';
 import { Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { PageNotification } from '~/components/ui/page-notification';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { FileUpload } from '~/components/ui/file-upload';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Spinner } from '~/components/ui/spinner';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 
@@ -55,7 +57,12 @@ export function DisbursementsPage({
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
+  const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'Disbursement sent successfully' });
+
+  useEffect(() => {
+    if (actionError) setDismissedError(false);
+  }, [actionError]);
 
   if (actionSuccess && showForm) setShowForm(false);
 
@@ -71,14 +78,14 @@ export function DisbursementsPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Disbursements</h1>
           <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Tier 1: Super Admin / Finance → Head of Marketing. Tier 2: HoM → Media Buyers
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <DateFilterBar
             startDate={filters.startDate}
             endDate={filters.endDate}
@@ -97,60 +104,65 @@ export function DisbursementsPage({
         </div>
       </div>
 
-      {actionError && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionError}</p>
-        </div>
+      {actionError && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionError}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
-      {showForm && canCreate && (
-        <fetcher.Form method="post" className="card space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Send Disbursement</h3>
-            <button type="button" onClick={() => setShowForm(false)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </div>
-          <input type="hidden" name="intent" value="createFunding" />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Recipient</label>
-              <select name="receiverId" required className="input" defaultValue={preselectedReceiverId ?? ''}>
-                <option value="">Select recipient...</option>
-                {recipients.map((u) => {
-                  const bal = recipientBalances.find((b) => b.userId === u.id);
-                  const balanceLabel = bal != null ? ` — Balance: ₦${Number(bal.balance).toLocaleString()}` : '';
-                  return (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'Media Buyer'}){balanceLabel}
-                    </option>
-                  );
-                })}
-              </select>
+      {canCreate && (
+        <ResponsiveFormPanel open={showForm} onClose={() => setShowForm(false)}>
+          <fetcher.Form method="post" className="card space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Send Disbursement</h3>
+              <button type="button" onClick={() => setShowForm(false)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Amount (₦)</label>
-              <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input" />
+            <input type="hidden" name="intent" value="createFunding" />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Recipient</label>
+                <select name="receiverId" required className="input" defaultValue={preselectedReceiverId ?? ''}>
+                  <option value="">Select recipient...</option>
+                  {recipients.map((u) => {
+                    const bal = recipientBalances.find((b) => b.userId === u.id);
+                    const balanceLabel = bal != null ? ` — Balance: ₦${Number(bal.balance).toLocaleString()}` : '';
+                    return (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'Media Buyer'}){balanceLabel}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Amount (₦)</label>
+                <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input" />
+              </div>
+              <div>
+                <FileUpload
+                  folder={S3_FOLDERS.RECEIPTS}
+                  name="receiptUrl"
+                  label="Receipt Upload"
+                  required
+                  onUpload={() => {}}
+                />
+              </div>
             </div>
-            <div>
-              <FileUpload
-                folder={S3_FOLDERS.RECEIPTS}
-                name="receiptUrl"
-                label="Receipt Upload"
-                required
-                onUpload={() => {}}
-              />
+            <div className="flex gap-2">
+              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Sending...">
+                Send Disbursement
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
+                Cancel
+              </Button>
             </div>
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Sending...">
-              Send Disbursement
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
-              Cancel
-            </Button>
-          </div>
-        </fetcher.Form>
+          </fetcher.Form>
+        </ResponsiveFormPanel>
       )}
 
       {recipientBalances.length > 0 && (

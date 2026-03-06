@@ -3,6 +3,7 @@ import { Form, useActionData, useNavigation, Link } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { PageNotification } from '~/components/ui/page-notification';
 import { Checkbox } from '~/components/ui/checkbox';
 import type { UserCreateLoaderData, UserCreateProduct, UserCreateLocation, UserCreateCommissionPlan } from './types';
 
@@ -29,6 +30,11 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
   const errorRef = useRef<HTMLDivElement>(null);
+  const [dismissedError, setDismissedError] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+  }, [actionData?.error]);
 
   useEffect(() => {
     if (actionData?.error && errorRef.current) {
@@ -87,9 +93,14 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
       )}
 
       {/* Error */}
-      {actionData?.error && (
-        <div ref={errorRef} className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionData.error}</p>
+      {actionData?.error && !dismissedError && (
+        <div ref={errorRef}>
+          <PageNotification
+            variant="error"
+            message={actionData.error}
+            durationMs={5000}
+            onDismiss={() => setDismissedError(true)}
+          />
         </div>
       )}
 

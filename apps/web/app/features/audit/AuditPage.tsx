@@ -2,10 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { PageNotification } from '~/components/ui/page-notification';
 import { Spinner } from '~/components/ui/spinner';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { exportToCsv } from '~/lib/csv-export';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import type { AuditEntry, AuditPageProps } from './types';
 
 // ── Polling config ───────────────────────────────────────────────
@@ -989,9 +991,9 @@ function DetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-surface-900 rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
+      <div className="relative bg-white dark:bg-surface-900 rounded-xl shadow-2xl w-full max-w-2xl max-h-[80dvh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700 shrink-0">
           <div>
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
               Record Detail
@@ -1011,7 +1013,7 @@ function DetailModal({
         </div>
 
         {/* Meta */}
-        <div className="px-6 py-3 bg-surface-50 dark:bg-surface-800/50 border-b border-surface-200 dark:border-surface-700">
+        <div className="px-6 py-3 bg-surface-50 dark:bg-surface-800/50 border-b border-surface-200 dark:border-surface-700 shrink-0">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
             <div>
               <span className="text-surface-800 dark:text-surface-200">Changed By</span>
@@ -1057,7 +1059,7 @@ function DetailModal({
         </div>
 
         {/* Data fields */}
-        <div className="px-6 py-4 overflow-y-auto max-h-[50vh]">
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
           <table className="w-full text-sm">
             <thead>
               <tr>
@@ -1168,6 +1170,11 @@ function TimeTravelPanel({
   const ttResult = fetcherData?.result ?? null;
   const ttError = fetcherData?.error ?? '';
   const ttLoading = fetcher.state === 'submitting';
+  const [dismissedTtError, setDismissedTtError] = useState(false);
+
+  useEffect(() => {
+    if (ttError) setDismissedTtError(false);
+  }, [ttError]);
 
   return (
     <div className="card">
@@ -1218,10 +1225,14 @@ function TimeTravelPanel({
         </div>
       </fetcher.Form>
 
-      {ttError && (
-        <div className="mt-3 rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{ttError}</p>
-        </div>
+      {ttError && !dismissedTtError && (
+        <PageNotification
+          variant="error"
+          message={ttError}
+          durationMs={5000}
+          onDismiss={() => setDismissedTtError(true)}
+          className="mt-3"
+        />
       )}
 
       {ttResult && (
@@ -1273,7 +1284,12 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
   const [unknownActorModal, setUnknownActorModal] = useState<{ changedBy: string | null; displayName: string } | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [dismissedError, setDismissedError] = useState(false);
   const { revalidate, state: revalidatorState } = useRevalidator();
+
+  useEffect(() => {
+    if (error) setDismissedError(false);
+  }, [error]);
 
   // Polling state: idle (yellow) → fetching (spinner) → success (green 2s) → idle
   const [pollState, setPollState] = useState<PollState>('idle');
@@ -1352,15 +1368,19 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             Complete history of all data changes. Every mutation is permanently recorded.
           </p>
         </div>
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <PageRefreshButton />
           <PollingStatusIndicator state={pollState} countdown={countdown} />
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{error}</p>
-        </div>
+      {error && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={error}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
       {/* Filters — Actor dropdown streams in via DeferredSection */}
@@ -1637,13 +1657,13 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
       {previewImageUrl && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setPreviewImageUrl(null)}>
           <div className="fixed inset-0 bg-black/70" />
-          <div className="relative max-w-2xl max-h-[90vh] w-full" onClick={(e) => e.stopPropagation()}>
+          <div className="relative max-w-2xl max-h-[90dvh] w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-end mb-2">
               <button type="button" onClick={() => setPreviewImageUrl(null)} className="text-surface-100 hover:text-white p-1 rounded">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <img src={previewImageUrl} alt="Attachment" className="w-full h-auto max-h-[85vh] object-contain rounded-lg bg-white shadow-xl" />
+            <img src={previewImageUrl} alt="Attachment" className="w-full h-auto max-h-[85dvh] object-contain rounded-lg bg-white shadow-xl" />
           </div>
         </div>
       )}

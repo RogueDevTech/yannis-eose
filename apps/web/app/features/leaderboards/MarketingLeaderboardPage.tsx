@@ -25,23 +25,25 @@ export function MarketingLeaderboardPage({
 
   return (
     <div className="space-y-6 px-3 sm:px-0">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Marketing Leaderboard</h1>
           <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
             Media buyer performance ranked by True ROAS ({periodLabel}).
           </p>
         </div>
-        <DateFilterBar
-          startDate={dateFilters.startDate}
-          endDate={dateFilters.endDate}
-          periodAllTime={dateFilters.periodAllTime}
-        />
-        {isFilterLoading && (
-          <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
-            <Spinner size="sm" className="shrink-0" />
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <DateFilterBar
+            startDate={dateFilters.startDate}
+            endDate={dateFilters.endDate}
+            periodAllTime={dateFilters.periodAllTime}
+          />
+          {isFilterLoading && (
+            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+              <Spinner size="sm" className="shrink-0" />
+            </span>
+          )}
+        </div>
       </div>
 
       <DeferredSection resolve={mediaBuyerLeaderboard} skeleton="list">

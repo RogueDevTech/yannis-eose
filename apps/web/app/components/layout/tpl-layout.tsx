@@ -1,16 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Form, useLocation, useNavigation } from '@remix-run/react';
 import { RouteLoader } from '~/components/ui/route-loader';
+import { BottomNav, type BottomNavItem } from './bottom-nav';
+import { SidebarIcons } from './sidebar';
 
 const TPL_NAV = [
-  { label: 'Dashboard', href: '/tpl' },
-  { label: 'Orders', href: '/tpl/orders' },
-  { label: 'Transfers', href: '/tpl/transfers' },
-  { label: 'Returns', href: '/tpl/returns' },
-  { label: 'Remit to warehouse', href: '/tpl/remit' },
-  { label: 'Notifications', href: '/tpl/notifications' },
-  { label: 'Settings', href: '/tpl/settings' },
+  { label: 'Dashboard', href: '/tpl', icon: SidebarIcons.dashboard },
+  { label: 'Orders', href: '/tpl/orders', icon: SidebarIcons.orders },
+  { label: 'Transfers', href: '/tpl/transfers', icon: SidebarIcons.transfers },
+  { label: 'Returns', href: '/tpl/returns', icon: SidebarIcons.returns },
+  { label: 'Remit', href: '/tpl/remit', icon: SidebarIcons.logistics },
+  { label: 'Notifications', href: '/tpl/notifications', icon: SidebarIcons.notifications },
+  { label: 'Settings', href: '/tpl/settings', icon: SidebarIcons.settings },
 ];
+
+const TPL_BAR_ITEMS: BottomNavItem[] = TPL_NAV.slice(0, 4).map(({ label, href, icon }) => ({ label, href, icon }));
+const TPL_ALL_ITEMS: BottomNavItem[] = TPL_NAV.map(({ label, href, icon }) => ({ label, href, icon }));
 
 function isActiveFromPath(path: string, href: string): boolean {
   if (!path) return false;
@@ -234,7 +239,7 @@ export function TplLayout({
         </nav>
         </div>
 
-        <main className="flex-1 p-4 lg:p-6">
+        <main className="flex-1 p-4 lg:p-6 pb-[var(--bottom-nav-height)] md:pb-6">
           <div
             className={`relative transition-all duration-300 ${isRouteLoading ? 'min-h-[60vh]' : ''}`}
             aria-busy={isRouteLoading}
@@ -250,6 +255,7 @@ export function TplLayout({
             </div>
           </div>
         </main>
+        <BottomNav barItems={TPL_BAR_ITEMS} allItems={TPL_ALL_ITEMS} currentPathname={effectivePath} />
       </div>
     </div>
   );

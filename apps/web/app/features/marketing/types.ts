@@ -146,4 +146,6 @@ export interface MarketingStreamData {
   viewMode?: 'admin' | 'media_buyer';
   /** True for Head of Marketing, SuperAdmin, Finance Officer — can use Send Funding */
   canSendFunding?: boolean;
+  /** Current user id — used to show Received/Not Received only for the funding recipient */
+  currentUserId?: string;
 }

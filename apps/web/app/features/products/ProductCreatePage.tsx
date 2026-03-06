@@ -3,6 +3,7 @@ import { Form, useNavigation, Link } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { PageNotification } from '~/components/ui/page-notification';
 
 interface CategoryOption {
   id: string;
@@ -25,6 +26,11 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
   const errorRef = useRef<HTMLDivElement>(null);
+  const [dismissedError, setDismissedError] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+  }, [actionData?.error]);
 
   useEffect(() => {
     if (actionData?.error && errorRef.current) {
@@ -70,9 +76,14 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
         </p>
       </div>
 
-      {actionData?.error && (
-        <div ref={errorRef} className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionData.error}</p>
+      {actionData?.error && !dismissedError && (
+        <div ref={errorRef}>
+          <PageNotification
+            variant="error"
+            message={actionData.error}
+            durationMs={5000}
+            onDismiss={() => setDismissedError(true)}
+          />
         </div>
       )}
 

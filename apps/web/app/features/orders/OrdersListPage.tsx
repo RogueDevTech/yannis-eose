@@ -4,6 +4,7 @@ import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Spinner } from '~/components/ui/spinner';
 import { ActionDropdown, type ActionDropdownItem } from '~/components/ui/action-dropdown';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -359,7 +360,7 @@ export function OrdersListPage({
         />
       )}
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
             {isCSAgent ? 'My Orders' : 'CS Orders'}
@@ -369,6 +370,7 @@ export function OrdersListPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <PageRefreshButton />
           {canCreateOffline && (
             <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
               Create offline order

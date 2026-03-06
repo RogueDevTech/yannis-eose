@@ -1,5 +1,6 @@
 import { useFetcher, Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 
 export interface DeliveryRemittanceListItem {
@@ -48,11 +49,16 @@ export function DeliveryRemittancesPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Delivery remittances</h1>
-        <p className="text-sm text-surface-600 dark:text-surface-400 mt-0.5">
-          3PL submit batches of delivered orders with payment receipts. Review and mark as received to confirm payment.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Delivery remittances</h1>
+          <p className="text-sm text-surface-600 dark:text-surface-400 mt-0.5">
+            3PL submit batches of delivered orders with payment receipts. Review and mark as received to confirm payment.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <PageRefreshButton />
+        </div>
       </div>
 
       {pending.length > 0 && (

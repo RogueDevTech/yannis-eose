@@ -10,6 +10,7 @@
     --sidebar-width: 260px;
     --sidebar-collapsed-width: 72px;
     --header-height: 56px;
+    --bottom-nav-height: 4.5rem;
   }
 
   html {
@@ -265,6 +266,15 @@
   @keyframes slideInRight {
     from { opacity: 0; transform: translateX(100%); }
     to { opacity: 1; transform: translateX(0); }
+  }
+
+  @keyframes slideUpFromBottom {
+    from { opacity: 0; transform: translateY(100%); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-slide-up-from-bottom {
+    animation: slideUpFromBottom 0.3s ease-out forwards;
   }
 
   /* New/updated row highlight — 3s fade from tint to normal */

@@ -1,4 +1,5 @@
 import { Link } from '@remix-run/react';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PRODUCT_STATUS_COLORS } from './types';
 import type { Product } from './types';
 
@@ -30,6 +31,7 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <PageRefreshButton />
           <span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>
             {product.status}
           </span>

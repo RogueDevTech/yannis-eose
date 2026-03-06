@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { PageNotification } from '~/components/ui/page-notification';
 import { exportToCsv } from '~/lib/csv-export';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import type { CommissionPlan, Payout, Adjustment, HRUser, HRStreamData, PayoutSummary, SettlementConfig, SettlementPeriod } from './types';
 
@@ -44,14 +48,30 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
   const [viewPlan, setViewPlan] = useState<CommissionPlan | null>(null);
+  const [markPaidConfirm, setMarkPaidConfirm] = useState<{ payoutId: string; staffName: string; amount: number } | null>(null);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
+  const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'HR action completed' });
+
+  useEffect(() => {
+    if (actionError) setDismissedError(false);
+  }, [actionError]);
 
   if (actionSuccess && showAddPlan) setShowAddPlan(false);
   if (actionSuccess && showGenerate) setShowGenerate(false);
   if (actionSuccess && showAddAdjustment) setShowAddAdjustment(false);
+
+  // Close Mark Paid confirmation modal on success
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcher.data) {
+      const result = fetcher.data as { success?: boolean };
+      if (result.success && markPaidConfirm) {
+        setMarkPaidConfirm(null);
+      }
+    }
+  }, [fetcher.state, fetcher.data]);
 
   const formatRules = (rules: Record<string, unknown>) => {
     const parts: string[] = [];
@@ -66,14 +86,15 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">HR & Payroll</h1>
           <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Commission plans, payout management, and staff earnings
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <PageRefreshButton />
           <Button
             variant="secondary"
             size="sm"
@@ -115,10 +136,13 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
         </div>
       </div>
 
-      {actionError && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionError}</p>
-        </div>
+      {actionError && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionError}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
       {/* Clawback Alert — deferred (depends on adjustments) */}
@@ -189,7 +213,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
       </DeferredSection>
 
       {/* Generate Payouts Form */}
-      {showGenerate && (
+      <ResponsiveFormPanel open={showGenerate} onClose={() => setShowGenerate(false)}>
         <fetcher.Form method="post" className="card space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Generate Payouts</h3>
@@ -221,10 +245,10 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </Button>
           </div>
         </fetcher.Form>
-      )}
+      </ResponsiveFormPanel>
 
       {/* Add Plan Form */}
-      {showAddPlan && (
+      <ResponsiveFormPanel open={showAddPlan} onClose={() => setShowAddPlan(false)}>
         <fetcher.Form method="post" className="card space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">New Commission Plan</h3>
@@ -295,10 +319,10 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </Button>
           </div>
         </fetcher.Form>
-      )}
+      </ResponsiveFormPanel>
 
       {/* Add Adjustment Form — user dropdown is deferred */}
-      {showAddAdjustment && (
+      <ResponsiveFormPanel open={showAddAdjustment} onClose={() => setShowAddAdjustment(false)}>
         <fetcher.Form method="post" className="card space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Add Earning Adjustment</h3>
@@ -348,7 +372,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             </Button>
           </div>
         </fetcher.Form>
-      )}
+      </ResponsiveFormPanel>
 
       <Tabs
         value={activeTab}
@@ -430,14 +454,17 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                                 </div>
                               )}
                               {p.status === 'APPROVED' && (
-                                <fetcher.Form method="post" className="inline" onClick={(e) => e.stopPropagation()}>
-                                  <input type="hidden" name="intent" value="approvePayout" />
-                                  <input type="hidden" name="payoutId" value={p.id} />
-                                  <input type="hidden" name="status" value="PAID" />
-                                  <Button type="submit" variant="success" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Updating...">
-                                    Mark Paid
-                                  </Button>
-                                </fetcher.Form>
+                                <Button
+                                  variant="success"
+                                  size="sm"
+                                  className="text-xs"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setMarkPaidConfirm({ payoutId: p.id, staffName: getStaffName(p.staffId), amount: Number(p.netPay) });
+                                  }}
+                                >
+                                  Mark Paid
+                                </Button>
                               )}
                             </td>
                           </tr>
@@ -529,12 +556,14 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                         </div>
                       )}
                       {p.status === 'APPROVED' && (
-                        <fetcher.Form method="post">
-                          <input type="hidden" name="intent" value="approvePayout" />
-                          <input type="hidden" name="payoutId" value={p.id} />
-                          <input type="hidden" name="status" value="PAID" />
-                          <Button type="submit" variant="success" size="sm" className="text-xs w-full">Mark Paid</Button>
-                        </fetcher.Form>
+                        <Button
+                          variant="success"
+                          size="sm"
+                          className="text-xs w-full"
+                          onClick={() => setMarkPaidConfirm({ payoutId: p.id, staffName: getStaffName(p.staffId), amount: Number(p.netPay) })}
+                        >
+                          Mark Paid
+                        </Button>
                       )}
                     </div>
                   ))}
@@ -612,7 +641,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setViewPlan(null)} aria-hidden />
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setViewPlan(null)}>
             <div
-              className="bg-white dark:bg-surface-900 rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto flex flex-col gap-5 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5"
+              className="bg-white dark:bg-surface-900 rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto flex flex-col gap-5 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between">
@@ -995,6 +1024,32 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             )}
           </DeferredSection>
         </div>
+      )}
+      {/* Mark Paid confirmation modal */}
+      {markPaidConfirm && (
+        <ConfirmActionModal
+          open={!!markPaidConfirm}
+          onClose={() => setMarkPaidConfirm(null)}
+          title="Mark payout as paid?"
+          description={
+            <>
+              Confirm that <strong>{markPaidConfirm.staffName}</strong> has been paid <strong>&#8358;{markPaidConfirm.amount.toLocaleString()}</strong>. This action cannot be undone.
+            </>
+          }
+          confirmLabel="Mark Paid"
+          variant="warning"
+          loading={fetcher.state === 'submitting'}
+          onConfirm={() => {
+            fetcher.submit(
+              {
+                intent: 'approvePayout',
+                payoutId: markPaidConfirm.payoutId,
+                status: 'PAID',
+              },
+              { method: 'post' },
+            );
+          }}
+        />
       )}
     </div>
   );
