@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { Spinner } from '~/components/ui/spinner';
 import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
 
 function buildChartDataUrl(filters: CEODashboardFilters): string {
@@ -110,6 +111,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
     showChartView && fetcher.data && !fetcher.data.error
       ? { ...data, ...fetcher.data }
       : data;
+  const isChartLoading = showChartView && fetcher.state === 'loading' && !fetcher.data;
   const isLoadingTopic = navigation.state === 'loading';
   const revenue = data?.revenue ?? 0;
   const trueProfit = data?.trueProfit ?? 0;
@@ -191,7 +193,15 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         </div>
       </div>
 
-      {/* ── Revenue & orders over time chart (always visible) ───────────────── */}
+      {/* ── Chart view: all charts (Revenue & orders over time, pipeline, topic, cost, etc.) ───────────────── */}
+      {showChartView && (
+      <>
+      {isChartLoading ? (
+        <div className="card flex flex-col items-center justify-center gap-4 py-20">
+          <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
+          <p className="text-sm font-medium text-surface-700 dark:text-surface-300">Loading charts...</p>
+        </div>
+      ) : (
       <div>
         <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
           Revenue & orders over time
@@ -267,8 +277,11 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           )}
         </div>
       </div>
+      )}
+      </>
+      )}
 
-      {/* ── Data view: KPIs, lists, grids ─────────────────────── */}
+      {/* ── Data view: KPIs, lists, grids (no charts) ─────────────────────── */}
       {!showChartView && (
         <>
       {/* ── Section 1: Revenue & Profit KPIs ────────────────── */}
@@ -305,7 +318,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">
             Cost Breakdown
           </h2>
-          {showChartView && (
+          {showChartView && !isChartLoading && (
           <div className="mb-4 h-48 min-h-[192px] w-full">
             <ClientOnly fallback={<div className="h-full min-h-[192px] animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
             <div className="h-full min-h-[192px] w-full">
@@ -406,7 +419,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         </h2>
 
         {/* Order pipeline chart: Volume → CS Engaged → Confirmed → Logistics distributed → Delivered (chart view only) */}
-        {showChartView && (
+        {showChartView && !isChartLoading && (
         <div className="card mb-4">
           <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-2">Order funnel</h3>
           <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
@@ -476,7 +489,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
         <div className="card">
           <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Status Distribution</h3>
-          {showChartView && (
+          {showChartView && !isChartLoading && (
           <div className="mb-4 h-52 min-h-[208px] w-full">
             <ClientOnly fallback={<div className="h-full min-h-[208px] animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
             <div className="h-full min-h-[208px] w-full">
@@ -647,7 +660,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
       </> )}
 
       {/* ── Chart view only: content by topic (Orders / Media buyers / CS) ───────────────── */}
-      {showChartView && (
+      {showChartView && !isChartLoading && (
       <>
         {/* Topic filter: only visible in chart section */}
         <div className="flex items-center gap-3 flex-wrap">

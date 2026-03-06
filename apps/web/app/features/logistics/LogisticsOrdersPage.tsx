@@ -37,11 +37,15 @@ interface LogisticsOrdersPageProps {
   statusFilter?: string;
   searchFilter?: string;
   locations: Location[];
+  /** When provided (e.g. TPL), only these locations in allocate dropdown; else locations where !dispatchLocked */
+  allocatableLocations?: Location[];
   riders: RiderOption[];
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   isTplManagerScoped?: boolean;
   /** Override page title (e.g. "Orders" for 3PL layout) */
   pageTitle?: string;
+  /** Base path for order detail links (e.g. "/tpl/orders" for TPL, "/admin/logistics/orders" for admin) */
+  orderDetailBasePath?: string;
 }
 
 export function LogisticsOrdersPage({
@@ -54,10 +58,12 @@ export function LogisticsOrdersPage({
   statusFilter,
   searchFilter,
   locations,
+  allocatableLocations: allocatableLocationsProp,
   riders,
   filters,
   isTplManagerScoped = false,
   pageTitle = 'Logistics Orders',
+  orderDetailBasePath = '/admin/logistics/orders',
 }: LogisticsOrdersPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -152,8 +158,8 @@ export function LogisticsOrdersPage({
     ? riders.filter((r) => r.logisticsLocationId === bulkDispatchLocationId)
     : [];
 
-  /** Locations available for allocation (dispatch not locked by reconciliation) */
-  const allocatableLocations = locations.filter((loc) => !loc.dispatchLocked);
+  /** Locations available for allocation; TPL passes only their location */
+  const allocatableLocations = allocatableLocationsProp ?? locations.filter((loc) => !loc.dispatchLocked);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -429,7 +435,7 @@ export function LogisticsOrdersPage({
                     </td>
                     <td className="table-cell">
                       <Link
-                        to={`/admin/logistics/orders/${order.id}`}
+                        to={`${orderDetailBasePath}/${order.id}`}
                         className="text-brand-500 hover:text-brand-600 font-medium"
                       >
                         {order.id.slice(0, 8)}...
@@ -448,7 +454,7 @@ export function LogisticsOrdersPage({
                     <td className="table-cell text-surface-800 dark:text-surface-200">{order.riderName}</td>
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                        <Link to={`/admin/logistics/orders/${order.id}`}>
+                        <Link to={`${orderDetailBasePath}/${order.id}`}>
                           <Button variant="secondary" size="sm">
                             View
                           </Button>
@@ -531,7 +537,7 @@ export function LogisticsOrdersPage({
               <div key={order.id} className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <Link
-                    to={`/admin/logistics/orders/${order.id}`}
+                    to={`${orderDetailBasePath}/${order.id}`}
                     className="font-medium text-brand-500 hover:text-brand-600"
                   >
                     {order.id.slice(0, 8)}...
@@ -548,7 +554,7 @@ export function LogisticsOrdersPage({
                   )}
                 </div>
                 <div className="flex gap-2 pt-2">
-                  <Link to={`/admin/logistics/orders/${order.id}`}>
+                  <Link to={`${orderDetailBasePath}/${order.id}`}>
                     <Button variant="secondary" size="sm">
                       View
                     </Button>

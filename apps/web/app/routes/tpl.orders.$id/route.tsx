@@ -1,0 +1,255 @@
+import { useMemo } from 'react';
+import { useLoaderData } from '@remix-run/react';
+import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { defer, json } from '@remix-run/node';
+import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { DeferredSection } from '~/components/ui/deferred-section';
+import { LogisticsOrderDetailPage } from '~/features/logistics/LogisticsOrderDetailPage';
+import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
+import type { Location } from '~/features/logistics/types';
+
+export const meta: MetaFunction = () => [
+  { title: 'Order — Yannis EOSE' },
+];
+
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  const user = await requirePermission(request, 'logistics.read');
+  const cookie = getSessionCookie(request);
+  const orderId = params['id'];
+
+  if (!orderId) {
+    throw new Response('Order ID required', { status: 400 });
+  }
+
+  const [orderRes, locationsRes, ridersRes] = await Promise.all([
+    apiRequest<unknown>(
+      `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
+  ]);
+
+  if (!orderRes.ok) {
+    return defer({ orderDetail: Promise.resolve({ notFound: true }), locations: [], riders: [], allocatableLocations: [] });
+  }
+
+  const trpcData = orderRes.data as { result?: { data?: OrderDetail } };
+  const order = trpcData?.result?.data;
+  if (!order) {
+    return defer({ orderDetail: Promise.resolve({ notFound: true }), locations: [], riders: [], allocatableLocations: [] });
+  }
+
+  // TPL_MANAGER: only allow orders at their location or CONFIRMED (unallocated) so they can allocate
+  if (user.role === 'TPL_MANAGER' && user.logisticsLocationId) {
+    const atMyLocation = order.logisticsLocationId === user.logisticsLocationId;
+    const unallocatedConfirmed = order.status === 'CONFIRMED' && !order.logisticsLocationId;
+    if (!atMyLocation && !unallocatedConfirmed) {
+      return defer({ orderDetail: Promise.resolve({ notFound: true }), locations: [], riders: [], allocatableLocations: [] });
+    }
+  }
+
+  const locationsData = locationsRes.ok
+    ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
+    : null;
+  const ridersData = ridersRes.ok
+    ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })?.result?.data ?? []
+    : [];
+
+  const historyPromise: Promise<HistoryEntry[]> = apiRequest<unknown>(
+    `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 50 }))}`,
+    { method: 'GET', cookie },
+  )
+    .then((historyRes) => {
+      if (!historyRes.ok) return [];
+      const historyData = historyRes.data as { result?: { data?: { rows: HistoryEntry[] } } };
+      return historyData?.result?.data?.rows ?? [];
+    })
+    .catch(() => [] as HistoryEntry[]);
+
+  const orderDetail = Promise.resolve({
+    order,
+    history: historyPromise,
+  });
+
+  const locations = locationsData?.locations ?? [];
+  const allocatableLocations =
+    user.role === 'TPL_MANAGER' && user.logisticsLocationId
+      ? locations.filter((l) => l.id === user.logisticsLocationId)
+      : locations;
+
+  return defer({
+    orderDetail,
+    locations,
+    riders: ridersData,
+    allocatableLocations,
+  });
+}
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  const cookie = getSessionCookie(request);
+  const formData = await request.formData();
+  const intent = formData.get('intent')?.toString();
+  const orderId = params['id'];
+
+  if (!orderId) {
+    return json({ error: 'Order ID required' }, { status: 400 });
+  }
+
+  const user = await getCurrentUser(request);
+  if (!user) {
+    return json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  if (intent === 'allocate') {
+    await requirePermission(request, 'logistics.read');
+    const logisticsLocationId = formData.get('logisticsLocationId')?.toString();
+    if (!logisticsLocationId) {
+      return json({ error: 'Location is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.transition', {
+      method: 'POST',
+      cookie,
+      body: {
+        orderId,
+        newStatus: 'ALLOCATED',
+        metadata: { logisticsLocationId },
+      },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Allocation failed';
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'dispatch') {
+    await requirePermission(request, 'logistics.read');
+    const riderId = formData.get('riderId')?.toString();
+    if (!riderId) {
+      return json({ error: 'Rider is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.transition', {
+      method: 'POST',
+      cookie,
+      body: {
+        orderId,
+        newStatus: 'DISPATCHED',
+        metadata: { riderId },
+      },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Dispatch failed';
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'transition') {
+    const newStatus = (formData.get('newStatus')?.toString() ?? '').trim();
+    if (!newStatus) {
+      return json({ error: 'Status is required' }, { status: 400 });
+    }
+    const reason = formData.get('reason')?.toString() || undefined;
+    const deliveredQtyStr = formData.get('deliveredQuantity')?.toString();
+    const returnedQtyStr = formData.get('returnedQuantity')?.toString();
+    const deliveryFeeAddOnStr = formData.get('deliveryFeeAddOn')?.toString();
+    const deliveryProofUrl = formData.get('deliveryProofUrl')?.toString()?.trim() || undefined;
+
+    const metadata: Record<string, unknown> = {};
+    if (reason) metadata['reason'] = reason;
+    const deliveredQty = deliveredQtyStr != null ? parseInt(deliveredQtyStr, 10) : NaN;
+    if (!Number.isNaN(deliveredQty) && Number.isInteger(deliveredQty) && deliveredQty >= 0) {
+      metadata['deliveredQuantity'] = deliveredQty;
+    }
+    const returnedQty = returnedQtyStr != null ? parseInt(returnedQtyStr, 10) : NaN;
+    if (!Number.isNaN(returnedQty) && Number.isInteger(returnedQty) && returnedQty >= 0) {
+      metadata['returnedQuantity'] = returnedQty;
+    }
+    if (deliveryFeeAddOnStr !== undefined && deliveryFeeAddOnStr !== '') {
+      const addOn = parseFloat(deliveryFeeAddOnStr);
+      if (!Number.isNaN(addOn) && addOn >= 0) metadata['deliveryFeeAddOn'] = addOn;
+    }
+    if (deliveryProofUrl) metadata['deliveryProofUrl'] = deliveryProofUrl;
+
+    const isDeliveryConfirmation = newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED';
+    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN';
+
+    if (isDeliveryConfirmation && !canTransitionDirect) {
+      const res = await apiRequest<unknown>('/trpc/logistics.submitDeliveryConfirmation', {
+        method: 'POST',
+        cookie,
+        body: {
+          orderId,
+          newStatus,
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        },
+      });
+      if (!res.ok) {
+        const errorData = res.data as { error?: { message?: string } };
+        const message = errorData?.error?.message ?? 'Submit failed';
+        return json({ error: message }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/orders.transition', {
+      method: 'POST',
+      cookie,
+      body: {
+        orderId,
+        newStatus,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+      },
+    });
+
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      const message = errorData?.error?.message ?? 'Transition failed';
+      return json({ error: message }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  return json({ error: 'Unknown action' }, { status: 400 });
+}
+
+const ORDER_DETAIL_EVENTS = ['order:status_changed'] as const;
+
+export default function TplOrderDetailRoute() {
+  const { orderDetail, locations, riders, allocatableLocations } = useLoaderData<typeof loader>();
+  const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
+  usePageRefreshOnEvent(orderEvents);
+
+  return (
+    <DeferredSection resolve={orderDetail as Promise<{ notFound: boolean } | { order: OrderDetail; history: Promise<HistoryEntry[]> }>} skeleton="card">
+      {(data) =>
+        'notFound' in data && data.notFound ? (
+          <div className="card text-center py-12">
+            <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
+            <h2 className="text-xl font-bold text-surface-900 dark:text-white">Order not found</h2>
+            <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
+              The order you&apos;re looking for doesn&apos;t exist or you don&apos;t have access.
+            </p>
+            <a href="/tpl/orders" className="btn-primary mt-4 inline-block">
+              Back to Orders
+            </a>
+          </div>
+        ) : (
+          <LogisticsOrderDetailPage
+            order={(data as unknown as { order: OrderDetail; history: Promise<HistoryEntry[]> }).order}
+            history={(data as unknown as { order: OrderDetail; history: Promise<HistoryEntry[]> }).history}
+            locations={locations}
+            riders={riders}
+            backLink="/tpl/orders"
+            allocatableLocations={allocatableLocations.length > 0 ? allocatableLocations : undefined}
+          />
+        )
+      }
+    </DeferredSection>
+  );
+}

@@ -46,6 +46,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     endDate = undefined;
   }
 
+  // TPL_MANAGER: when viewing CONFIRMED, omit location so we see unallocated CONFIRMED orders to allocate to our location
+  const useLocationFilter =
+    effectiveLogisticsLocationId && !(isTplManager && status === 'CONFIRMED');
   const listInput = {
     page,
     limit: ORDERS_PER_PAGE,
@@ -55,12 +58,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortOrder: 'asc' as const,
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
-    ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
+    ...(useLocationFilter && { logisticsLocationId: effectiveLogisticsLocationId }),
   };
   const countsInput: { startDate?: string; endDate?: string; logisticsLocationId?: string } = {};
   if (startDate) countsInput.startDate = startDate;
   if (endDate) countsInput.endDate = endDate;
-  if (effectiveLogisticsLocationId) countsInput.logisticsLocationId = effectiveLogisticsLocationId;
+  if (useLocationFilter) countsInput.logisticsLocationId = effectiveLogisticsLocationId;
 
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
@@ -104,6 +107,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     riderName: o.riderId ? riderById.get(o.riderId as string)?.name ?? '—' : '—',
   }));
 
+  // TPL: only their location can be selected for allocate; admin uses all locations
+  const allocatableLocations =
+    effectiveLogisticsLocationId
+      ? locations.filter((l) => l.id === effectiveLogisticsLocationId)
+      : locations.filter((l) => !l.dispatchLocked);
+
   return {
     orders: enrichedOrders,
     total,
@@ -114,6 +123,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusFilter: status,
     searchFilter: search ?? '',
     locations,
+    allocatableLocations,
     riders: ridersData,
     filters: {
       startDate: startDate ?? '',
@@ -122,6 +132,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     isTplManagerScoped: !!effectiveLogisticsLocationId,
     pageTitle: 'Orders' as const,
+    orderDetailBasePath: '/tpl/orders',
   };
 }
 
@@ -178,6 +189,40 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
+  }
+
+  if (intent === 'bulkDispatch') {
+    await requirePermission(request, 'logistics.read');
+    let orderIds: string[] = [];
+    try {
+      const raw = formData.get('orderIds')?.toString();
+      if (raw) orderIds = JSON.parse(raw) as string[];
+    } catch {
+      return json({ success: false, error: 'Invalid order IDs', succeeded: 0, failed: 0, results: [] }, { status: 400 });
+    }
+    const riderId = formData.get('riderId')?.toString();
+    if (!orderIds.length || !riderId) {
+      return json({ success: false, error: 'Select at least one order and a rider', succeeded: 0, failed: orderIds.length, results: [] }, { status: 400 });
+    }
+    const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
+    let succeeded = 0;
+    let failed = 0;
+    for (const orderId of orderIds) {
+      const res = await apiRequest<unknown>('/trpc/orders.transition', {
+        method: 'POST',
+        cookie,
+        body: { orderId, newStatus: 'DISPATCHED', metadata: { riderId } },
+      });
+      if (res.ok) {
+        succeeded++;
+        results.push({ orderId, success: true });
+      } else {
+        failed++;
+        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Dispatch failed';
+        results.push({ orderId, success: false, error: err });
+      }
+    }
+    return json({ success: true, succeeded, failed, results });
   }
 
   return json({ success: false, error: 'Unknown action' }, { status: 400 });
