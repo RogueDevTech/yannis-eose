@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { ReturnsPage } from '~/features/returns/ReturnsPage';
 import type {
   ReturnedOrder,
@@ -17,7 +17,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'returns.read');
+  await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'returns.read' });
   const cookie = getSessionCookie(request);
 
   const returnedPromise = apiRequest<unknown>('/trpc/inventory.returnedOrders', { method: 'GET', cookie });

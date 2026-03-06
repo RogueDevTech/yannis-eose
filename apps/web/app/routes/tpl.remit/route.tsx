@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { RemitPage } from '~/features/remittances/RemitPage';
 import type {
   RemittanceRecord,
@@ -14,7 +14,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'logistics.remit');
+  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.remit' });
   const cookie = getSessionCookie(request);
 
   const [remittancesRes, productsRes, locationsRes, deliveryRemittancesRes, eligibleOrdersRes] = await Promise.all([

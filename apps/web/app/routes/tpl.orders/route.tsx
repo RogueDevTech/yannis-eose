@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type LogisticsOrderRow } from '~/features/logistics/LogisticsOrdersPage';
 import type { Location } from '~/features/logistics/types';
@@ -15,7 +15,7 @@ const ORDERS_PER_PAGE = 40;
 const defaultThisMonth = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'logistics.read');
+  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
   const cookie = getSessionCookie(request);
 
   const isTplManager = user.role === 'TPL_MANAGER';

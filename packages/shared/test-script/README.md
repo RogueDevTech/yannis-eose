@@ -38,7 +38,7 @@ All scripts load `.env` from the repo root. Every variable has a sensible defaul
 |---|---|---|
 | `API_URL` | `http://localhost:4000` | All |
 | `DATABASE_URL` | *(required)* | order-simulate |
-| `SIMULATE_INTERVAL_MS` | `3000` | All (ms between each API request) |
+| `SIMULATE_INTERVAL_MS` | `3000` | order-simulate: ms between each submit (cart saves within a round are parallel with no delay); other scripts: ms between API requests |
 | `SIMULATE_ORDER_COUNT` | `30` | order-simulate |
 | `SIMULATE_CS_COUNT` | `20` | cs-simulation |
 | `SIMULATE_LOGISTICS_COUNT` | `20` | logistics-simulation |
@@ -55,9 +55,9 @@ All scripts load `.env` from the repo root. Every variable has a sensible defaul
 ### 1. order-simulate
 
 - Queries the database for active campaigns and products
-- Generates random Nigerian customers (name, phone, address) using Faker
-- Creates orders via `orders.create` (public, no auth needed)
-- Each order is tied to a real campaign and media buyer from the DB
+- For each order round: saves **3 carts** in parallel via `cart.save` (same customer, 3 different campaign/product targets), then **submits one order** via `orders.create` with one of the 3 cart IDs so that cart is marked CONVERTED; the other 2 remain PENDING (abandoned)
+- The 3-second interval (`SIMULATE_INTERVAL_MS`) applies **between submits** only; the 3 cart saves in each round run with no delay
+- Generates random Nigerian customers (name, phone, address) using Faker; each order is tied to a real campaign and media buyer from the DB
 
 ### 2. cs-simulation
 
