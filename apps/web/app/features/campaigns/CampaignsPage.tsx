@@ -149,6 +149,16 @@ export function FormsPage({
   useFetcherToast(fetcher.data, { successMessage: 'Saved successfully' });
   useFetcherToast(statusFetcher.data, { successMessage: 'Status updated' });
 
+  // Close confirm modal (deactivate/archive) when statusFetcher returns success
+  useEffect(() => {
+    if (statusFetcher.state === 'idle' && statusFetcher.data) {
+      const result = statusFetcher.data as { success?: boolean };
+      if (result.success && confirmAction) {
+        setConfirmAction(null);
+      }
+    }
+  }, [statusFetcher.state, statusFetcher.data]);
+
   // Close Edit Form modal (and Add Form panel) when fetcher returns success
   useEffect(() => {
     if (actionSuccess && fetcher.state === 'idle') {

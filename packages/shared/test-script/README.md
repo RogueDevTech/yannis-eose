@@ -36,10 +36,11 @@ All scripts load `.env` from the repo root. Every variable has a sensible defaul
 
 | Variable | Default | Script |
 |---|---|---|
-| `API_URL` | `http://localhost:4000` | All |
+| `API_URL` | `http://localhost:4444` | All |
 | `DATABASE_URL` | *(required)* | order-simulate |
-| `SIMULATE_INTERVAL_MS` | `3000` | order-simulate: ms between each submit (cart saves within a round are parallel with no delay); other scripts: ms between API requests |
+| `SIMULATE_INTERVAL_MS` | `0` (order-simulate), `3000` (others) | order-simulate: ms between rounds (0 = no delay); other scripts: ms between API requests |
 | `SIMULATE_ORDER_COUNT` | `30` | order-simulate |
+| `SIMULATE_CONCURRENCY` | `5` | order-simulate: parallel orders (1–20) |
 | `SIMULATE_CS_COUNT` | `20` | cs-simulation |
 | `SIMULATE_LOGISTICS_COUNT` | `20` | logistics-simulation |
 | `SIMULATE_3PL_COUNT` | `20` | 3pl-simulation |
@@ -55,9 +56,9 @@ All scripts load `.env` from the repo root. Every variable has a sensible defaul
 ### 1. order-simulate
 
 - Queries the database for active campaigns and products
-- For each order round: saves **3 carts** in parallel via `cart.save` (same customer, 3 different campaign/product targets), then **submits one order** via `orders.create` with one of the 3 cart IDs so that cart is marked CONVERTED; the other 2 remain PENDING (abandoned)
-- The 3-second interval (`SIMULATE_INTERVAL_MS`) applies **between submits** only; the 3 cart saves in each round run with no delay
-- Generates random Nigerian customers (name, phone, address) using Faker; each order is tied to a real campaign and media buyer from the DB
+- For each round: saves **one cart** via `cart.save`, then **submits one order** via `orders.create` with that cart ID (one cart → one order per user). **One order per user:** each round uses a unique phone number (no duplicates).
+- Runs **concurrently** by default (`SIMULATE_CONCURRENCY=5`); use `SIMULATE_INTERVAL_MS` (default `0`) to add delay between rounds if needed.
+- Generates random Nigerian customers (name, phone, address) using Faker; each order is tied to a real campaign and media buyer from the DB.
 
 ### 2. cs-simulation
 
@@ -89,8 +90,11 @@ Scripts never crash on a single failed request. On any error (duplicate, validat
 ## Examples
 
 ```bash
-# Create 100 orders with 1s interval
-SIMULATE_ORDER_COUNT=100 SIMULATE_INTERVAL_MS=1000 pnpm simulate:orders
+# Create 100 orders (5 concurrent, no delay)
+SIMULATE_ORDER_COUNT=100 pnpm simulate:orders
+
+# Slower: 50 orders, 10 concurrent, 100ms between rounds
+SIMULATE_ORDER_COUNT=50 SIMULATE_CONCURRENCY=10 SIMULATE_INTERVAL_MS=100 pnpm simulate:orders
 
 # Process 50 orders through CS
 SIMULATE_CS_COUNT=50 pnpm simulate:cs

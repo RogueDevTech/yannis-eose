@@ -45,6 +45,15 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
 
   const [offers, setOffers] = useState<OfferRow[]>(() => parseOffers(product.offers));
 
+  // Close archive confirm modal on successful submission
+  const prevNavState = useRef(navigation.state);
+  useEffect(() => {
+    if (prevNavState.current === 'submitting' && navigation.state === 'idle' && showArchiveConfirm) {
+      setShowArchiveConfirm(false);
+    }
+    prevNavState.current = navigation.state;
+  }, [navigation.state, showArchiveConfirm]);
+
   useEffect(() => {
     if (actionData?.error && errorRef.current) {
       errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });

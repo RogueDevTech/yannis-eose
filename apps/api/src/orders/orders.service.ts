@@ -1147,7 +1147,7 @@ export class OrdersService {
       })
       .where(
         and(
-          sql`${schema.orders.id} = ANY(${orderIds})`,
+          inArray(schema.orders.id, orderIds),
           eq(schema.orders.assignedCsId, fromAgentId),
         ),
       )

@@ -820,22 +820,23 @@ export function OrderDetailPage({
   // - VOIP disabled: require at least one call log (agent clicked Call)
   const canConfirm = voipEnabled ? hasQualifyingVoipCall : hasAnyCallLog;
 
-  // Poll for call status updates while a call is active
-  // This is a fallback until Socket.io frontend hooks are wired.
+  // Poll for call status updates only while order is in a call-related state (CS_ENGAGED, etc.).
+  // Stop polling once order is CONFIRMED or beyond so we don't refetch in a loop after confirm.
   const revalidate = useCallback(() => {
     if (revalidator.state === 'idle') {
       revalidator.revalidate();
     }
   }, [revalidator]);
 
+  const needsCallStatusPolling =
+    Boolean(callInitiated) &&
+    (order.status === 'CS_ENGAGED' || order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED');
+
   useEffect(() => {
-    // If we just initiated a call, start polling
-    if (callInitiated) {
-      const interval = setInterval(revalidate, 3000);
-      return () => clearInterval(interval);
-    }
-    return undefined;
-  }, [callInitiated, revalidate]);
+    if (!needsCallStatusPolling) return;
+    const interval = setInterval(revalidate, 3000);
+    return () => clearInterval(interval);
+  }, [needsCallStatusPolling, revalidate]);
 
   const revealData = revealFetcher.data as {
     phoneRevealed?: boolean;
@@ -859,17 +860,28 @@ export function OrderDetailPage({
     revalidatedForRecordCallRef.current = false;
   }, [order.id]);
 
-  // Close confirm modal when confirm transition succeeds
+  // Close modals when fetcher returns success
   const fetcherSuccess = (fetcher.data as { success?: boolean })?.success;
   const prevFetcherState = useRef(fetcher.state);
   useEffect(() => {
     // Detect transition from submitting/loading → idle with success
-    if (prevFetcherState.current !== 'idle' && fetcher.state === 'idle' && fetcherSuccess && confirmModalOpen) {
-      setConfirmModalOpen(false);
-      setDeliveryDate('');
+    if (prevFetcherState.current !== 'idle' && fetcher.state === 'idle' && fetcherSuccess) {
+      if (confirmModalOpen) {
+        setConfirmModalOpen(false);
+        setDeliveryDate('');
+      }
+      if (cancelModalOpen) {
+        setCancelModalOpen(false);
+        setCancelReason('');
+      }
+      if (transferModalOpen) {
+        setTransferModalOpen(false);
+        setTransferToId('');
+        setTransferReason('');
+      }
     }
     prevFetcherState.current = fetcher.state;
-  }, [fetcher.state, fetcherSuccess, confirmModalOpen]);
+  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen, transferModalOpen]);
 
   // Close confirm modal and revalidate when schedule callback succeeds
   const scheduleData = scheduleFetcher.data as { success?: boolean; scheduled?: boolean; error?: string } | undefined;
@@ -1463,10 +1475,6 @@ export function OrderDetailPage({
               </Button>
               <fetcher.Form
                 method="post"
-                onSubmit={() => {
-                  setCancelModalOpen(false);
-                  setCancelReason('');
-                }}
               >
                 <input type="hidden" name="intent" value="transition" />
                 <input type="hidden" name="newStatus" value="CANCELLED" />
@@ -1535,11 +1543,6 @@ export function OrderDetailPage({
               </Button>
               <fetcher.Form
                 method="post"
-                onSubmit={() => {
-                  setTransferModalOpen(false);
-                  setTransferToId('');
-                  setTransferReason('');
-                }}
               >
                 <input type="hidden" name="intent" value="requestTransfer" />
                 <input type="hidden" name="toCsAgentId" value={transferToId} />
@@ -1642,6 +1645,7 @@ export function OrderDetailPage({
                         setCopyFeedback(true);
                         setTimeout(() => setCopyFeedback(false), 2000);
                       }
+                      setCallCustomerModalOpen(false);
                     }}
                     disabled={recordCallFetcher.state === 'submitting'}
                   >
@@ -1661,6 +1665,7 @@ export function OrderDetailPage({
                       if (phone) {
                         window.location.href = `tel:${phone}`;
                       }
+                      setCallCustomerModalOpen(false);
                     }}
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

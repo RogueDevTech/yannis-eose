@@ -499,7 +499,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   data={
                     orderPipeline.total > 0
                       ? Object.entries(orderPipeline.statusCounts)
-                          .filter(([, count]) => count > 0)
+                          .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
                           .sort(([, a], [, b]) => b - a)
                           .map(([status, value]) => ({
                             name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
@@ -518,7 +518,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                 >
                   {orderPipeline.total > 0
                     ? Object.entries(orderPipeline.statusCounts)
-                        .filter(([, count]) => count > 0)
+                        .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
                         .sort(([, a], [, b]) => b - a)
                         .map(([status]) => (
                           <Cell key={status} fill={STATUS_COLORS_HEX[status] ?? '#64748b'} />
@@ -538,7 +538,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           )}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {Object.entries(orderPipeline.statusCounts)
-              .filter(([, count]) => count > 0)
+              .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
               .sort(([, a], [, b]) => b - a)
               .map(([status, count]) => (
                 <div key={status} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
@@ -754,7 +754,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                     data={
                       orderPipeline.total > 0
                         ? Object.entries(orderPipeline.statusCounts)
-                            .filter(([, count]) => count > 0)
+                            .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
                             .sort(([, a], [, b]) => b - a)
                             .map(([status, value]) => ({
                               name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
@@ -773,7 +773,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   >
                     {orderPipeline.total > 0
                       ? Object.entries(orderPipeline.statusCounts)
-                          .filter(([, count]) => count > 0)
+                          .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
                           .sort(([, a], [, b]) => b - a)
                           .map(([status]) => (
                             <Cell key={status} fill={STATUS_COLORS_HEX[status] ?? '#64748b'} />

@@ -188,15 +188,27 @@ export function MarketingPage({
           if (highCpaBuyers.length === 0) return null;
           return (
             <div className="rounded-lg bg-warning-50 dark:bg-warning-700/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3">
-              <div className="flex items-start gap-2">
+              <div className="flex items-start gap-3">
                 <svg className="w-5 h-5 text-warning-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                 </svg>
-                <div>
-                  <p className="text-sm font-medium text-warning-800 dark:text-warning-300">High CPA Warning</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-warning-800 dark:text-warning-300">High CPA Warning</p>
                   <p className="text-xs text-warning-600 dark:text-warning-400 mt-0.5">
-                    {highCpaBuyers.map((b: LeaderboardEntry) => `${b.name} (CPA: \u20A6${Math.round(b.cpa).toLocaleString()})`).join(', ')} — exceeds threshold of {'\u20A6'}{HIGH_CPA_THRESHOLD.toLocaleString()}
+                    {highCpaBuyers.length} media buyer{highCpaBuyers.length !== 1 ? 's' : ''} exceed the threshold of ₦{HIGH_CPA_THRESHOLD.toLocaleString()}. Review ad performance.
                   </p>
+                  <ul className="mt-2 space-y-1 text-xs text-warning-700 dark:text-warning-300">
+                    {[...highCpaBuyers]
+                      .sort((a: LeaderboardEntry, b: LeaderboardEntry) => b.cpa - a.cpa)
+                      .map((b: LeaderboardEntry) => (
+                        <li key={b.mediaBuyerId} className="flex items-center justify-between gap-3">
+                          <Link to={`/hr/users/${b.mediaBuyerId}`} prefetch="intent" className="font-medium truncate hover:text-warning-800 dark:hover:text-warning-200">
+                            {b.name}
+                          </Link>
+                          <span className="shrink-0 font-mono tabular-nums">₦{Math.round(b.cpa).toLocaleString()}</span>
+                        </li>
+                      ))}
+                  </ul>
                 </div>
               </div>
             </div>

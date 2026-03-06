@@ -284,8 +284,26 @@ export class NotificationsService {
 
     const notification = rows[0];
     if (notification) {
-      // Push real-time notification to the user
-      this.events.emitToUser(input.userId, 'notification:new', notification);
+      // Push real-time notification to the user (serialize so client gets plain JSON, e.g. createdAt as string)
+      const payload = {
+        id: notification.id,
+        userId: notification.userId,
+        type: notification.type,
+        title: notification.title,
+        body: notification.body,
+        data: notification.data,
+        read: notification.read,
+        createdAt:
+          notification.createdAt instanceof Date
+            ? notification.createdAt.toISOString()
+            : String(notification.createdAt ?? ''),
+      };
+      this.events.emitToUser(input.userId, 'notification:new', payload);
+      if (process.env['LOG_NOTIFICATIONS'] === '1') {
+        this.logger.log(
+          `notification:new emitted for user=${input.userId} orderId=${(notification.data as Record<string, unknown>)?.orderId ?? 'n/a'}`,
+        );
+      }
 
       // Send email if configured (mandatory types always; configurable per settings)
       this.shouldSendEmailForType(input.type)

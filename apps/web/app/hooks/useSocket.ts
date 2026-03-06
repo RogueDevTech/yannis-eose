@@ -21,6 +21,10 @@ function getSocket(): Socket {
       withCredentials: true,
       autoConnect: false,
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
     // Prevent unhandled errors when API is down or WebSocket fails
     socketInstance.on('connect_error', () => {
@@ -169,24 +173,25 @@ export function useLiveIndicator(events: string[]): { isConnected: boolean; show
  * Auto-refresh page data (revalidate Remix loaders) when any of the listed events fire.
  * Debounces by 500ms to avoid rapid-fire revalidations.
  * Only revalidates when socket is connected so we don't trigger loaders while API is unreachable.
+ * Uses a ref for revalidate to avoid effect re-runs when revalidator identity changes (prevents refetch loops).
  */
 export function usePageRefreshOnEvent(events: string[]): void {
   const { revalidate } = useRevalidator();
+  const revalidateRef = useRef(revalidate);
+  revalidateRef.current = revalidate;
+
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isConnected } = useSocket();
-
-  const debouncedRevalidate = useCallback(() => {
-    if (!isConnected) return;
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      revalidate();
-    }, 500);
-  }, [revalidate, isConnected]);
 
   useEffect(() => {
     if (!isConnected) return;
     const socket = getSocket();
-    const listener = () => debouncedRevalidate();
+    const listener = () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => {
+        revalidateRef.current();
+      }, 500);
+    };
 
     events.forEach((event) => socket.on(event, listener));
 
@@ -194,5 +199,5 @@ export function usePageRefreshOnEvent(events: string[]): void {
       events.forEach((event) => socket.off(event, listener));
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [events, debouncedRevalidate, isConnected]);
+  }, [events, isConnected]);
 }

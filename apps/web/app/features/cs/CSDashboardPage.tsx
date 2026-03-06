@@ -132,6 +132,23 @@ export function CSDashboardPage({
         : `${distributeResult.distributed} order(s) distributed to agents`
       : 'CS action completed';
   useFetcherToast(fetcher.data, { successMessage });
+
+  // Close reassign / cancel modals only after a successful response
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcher.data) {
+      const result = fetcher.data as { success?: boolean };
+      if (result.success) {
+        if (reassignOrder) {
+          setReassignOrder(null);
+          setReassignToAgentId('');
+        }
+        if (cancelConfirmOrder) {
+          setCancelConfirmOrder(null);
+        }
+      }
+    }
+  }, [fetcher.state, fetcher.data]);
+
   const totalPending = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
   const totalCapacity = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
   const confirmedCount = (statusCounts as Record<string, number>)['CONFIRMED'] ?? 0;
@@ -175,8 +192,6 @@ export function CSDashboardPage({
       },
       { method: 'post' },
     );
-    setReassignOrder(null);
-    setReassignToAgentId('');
   }
 
   function toggleHotSwapOrder(orderId: string) {
