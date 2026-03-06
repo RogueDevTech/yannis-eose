@@ -1,6 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { MarketingLeaderboardPage } from '~/features/leaderboards/MarketingLeaderboardPage';
 import type { LeaderboardEntry } from '~/features/marketing/types';
 
@@ -24,9 +24,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
-    const now = new Date();
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+    const range = defaultThisMonthRange();
+    startDate = range.startDate;
+    endDate = range.endDate;
   }
   if (periodAllTime) {
     startDate = undefined;

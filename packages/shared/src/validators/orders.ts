@@ -75,6 +75,30 @@ export const createOrderSchema = z.object({
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
 /**
+ * Create offline order — used by CS agent or Head of CS.
+ * Accepts raw customerPhone; API hashes it server-side. Creator is set as assignee (no auto-dispatch).
+ */
+export const createOfflineOrderSchema = z.object({
+  campaignId: z.string().uuid().optional(),
+  mediaBuyerId: z.string().uuid().optional(),
+  customerName: z.string().min(2, 'Customer name is required'),
+  /** Raw phone — API hashes server-side; never send pre-hashed from CS UI */
+  customerPhone: z.string().min(1, 'Customer phone is required').max(50),
+  customerAddress: z.string().optional(),
+  deliveryAddress: z.string().optional(),
+  deliveryNotes: z.string().optional(),
+  deliveryState: z.string().max(100).optional(),
+  customerGender: z.enum(['male', 'female']).optional(),
+  preferredDeliveryDate: z.string().max(100).optional(),
+  items: z.array(orderItemSchema).min(1, 'At least one item is required'),
+  totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),
+  customerEmail: z.string().email().max(255).optional(),
+});
+
+export type CreateOfflineOrderInput = z.infer<typeof createOfflineOrderSchema>;
+
+/**
  * Transition order — move order to a new status.
  * Metadata varies by transition (e.g. cancel reason, delivery qty).
  */

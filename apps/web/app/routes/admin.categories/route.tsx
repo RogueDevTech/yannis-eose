@@ -33,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const search = url.searchParams.get('search') || undefined;
   const status = url.searchParams.get('status') || undefined;
 
-  const input: Record<string, unknown> = { page: 1, limit: 100 };
+  const input: Record<string, unknown> = { page: 1, limit: 20 };
   if (search) input.search = search;
   if (status) input.status = status;
 

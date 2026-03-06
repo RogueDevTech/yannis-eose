@@ -10,6 +10,7 @@ export {
   orderStatusSchema,
   orderItemSchema,
   createOrderSchema,
+  createOfflineOrderSchema,
   transitionOrderSchema,
   updateOrderSchema,
   assignOrderSchema,
@@ -23,6 +24,7 @@ export type { SaveCartInput } from './cart';
 export type {
   OrderStatusInput,
   CreateOrderInput,
+  CreateOfflineOrderInput,
   TransitionOrderInput,
   UpdateOrderInput,
   AssignOrderInput,

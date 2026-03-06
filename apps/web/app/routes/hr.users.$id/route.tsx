@@ -80,8 +80,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // ── Deferred: all secondary data in parallel ───────────
-  const productsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' }));
-  const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }));
+  const productsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20, sortBy: 'name', sortOrder: 'asc' }));
+  const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
   const products: Promise<UserCreateProduct[]> = apiRequest<unknown>(

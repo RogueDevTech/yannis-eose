@@ -1,7 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { MarketingPage } from '~/features/marketing/MarketingPage';
 import type {
   FundingRecord,
@@ -107,9 +107,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
-    const now = new Date();
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+    const range = defaultThisMonthRange();
+    startDate = range.startDate;
+    endDate = range.endDate;
   }
   if (periodAllTime) {
     startDate = undefined;
@@ -122,14 +122,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const fundingInput = JSON.stringify({
     page: 1,
-    limit: 100,
+    limit: 20,
     ...(isMediaBuyer ? { receiverId: user.id } : {}),
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
   });
   const adSpendInput = JSON.stringify({
     page: 1,
-    limit: 100,
+    limit: 20,
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
@@ -144,7 +144,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fundingP = apiRequest<unknown>(`/trpc/marketing.listFunding?input=${encodeURIComponent(fundingInput)}`, { method: 'GET', cookie });
   const adSpendP = apiRequest<unknown>(`/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`, { method: 'GET', cookie });
   const metricsP = apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, { method: 'GET', cookie });
-  const campaignsInput = JSON.stringify(isMediaBuyer ? { mediaBuyerId: user.id, page: 1, limit: 100 } : { page: 1, limit: 100 });
+  const campaignsInput = JSON.stringify(isMediaBuyer ? { mediaBuyerId: user.id, page: 1, limit: 20 } : { page: 1, limit: 20 });
   const campaignsP = apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`, { method: 'GET', cookie });
 
   // Admin-only: funding summary, users (for Send Funding dropdown), leaderboard
@@ -185,13 +185,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let fundingRequests: FundingRequestRecord[] = [];
   if (isMediaBuyer) {
     const reqRes = await apiRequest<unknown>(
-      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 50 }))}`,
+      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }))}`,
       { method: 'GET', cookie },
     );
     fundingRequests = parseFundingRequests(reqRes);
   } else if (isFundingAdmin) {
     const reqRes = await apiRequest<unknown>(
-      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
+      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }))}`,
       { method: 'GET', cookie },
     );
     fundingRequests = parseFundingRequests(reqRes);

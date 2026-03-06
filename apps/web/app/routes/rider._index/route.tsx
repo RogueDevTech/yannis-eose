@@ -17,11 +17,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Fetch both DISPATCHED (pickup) and IN_TRANSIT (delivery) orders for the rider
   const [dispatchedRes, inTransitRes] = await Promise.all([
     apiRequest<unknown>(
-      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ riderId: user.id, status: 'DISPATCHED', limit: 50 }))}`,
+      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ riderId: user.id, status: 'DISPATCHED', limit: 20 }))}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ riderId: user.id, status: 'IN_TRANSIT', limit: 50 }))}`,
+      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ riderId: user.id, status: 'IN_TRANSIT', limit: 20 }))}`,
       { method: 'GET', cookie },
     ),
   ]);

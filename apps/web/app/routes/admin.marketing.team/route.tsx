@@ -62,7 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (teamMembers.length === 0 && (user.role === 'SUPER_ADMIN' || user.role === 'HEAD_OF_MARKETING')) {
     const listInput = (input: { role: string }) =>
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ role: input.role, limit: 50 }))}`;
+      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ role: input.role, limit: 20 }))}`;
     const [mbRes, homRes] = await Promise.all([
       apiRequest<unknown>(listInput({ role: 'MEDIA_BUYER' }), { method: 'GET', cookie }),
       apiRequest<unknown>(listInput({ role: 'HEAD_OF_MARKETING' }), { method: 'GET', cookie }),

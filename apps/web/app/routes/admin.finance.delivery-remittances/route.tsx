@@ -17,7 +17,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const listRes = await apiRequest<unknown>(
     '/trpc/logistics.listDeliveryRemittances?input=' +
-      encodeURIComponent(JSON.stringify({ page: 1, limit: 100 })),
+      encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })),
     { method: 'GET', cookie },
   );
 

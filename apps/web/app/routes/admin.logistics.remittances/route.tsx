@@ -14,7 +14,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const res = await apiRequest<unknown>(
-    '/trpc/logistics.listRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 100 })),
+    '/trpc/logistics.listRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })),
     { method: 'GET', cookie },
   );
 

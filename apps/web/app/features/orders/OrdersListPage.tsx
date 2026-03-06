@@ -7,6 +7,7 @@ import { LiveIndicator } from '~/components/ui/live-indicator';
 import { Spinner } from '~/components/ui/spinner';
 import { ActionDropdown, type ActionDropdownItem } from '~/components/ui/action-dropdown';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
@@ -66,6 +67,10 @@ interface OrdersListPageProps {
   }>;
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
+  /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */
+  canCreateOffline?: boolean;
+  /** Products list for offline order form (when canCreateOffline). */
+  productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
 }
 
 export function OrdersListPage({
@@ -88,8 +93,11 @@ export function OrdersListPage({
   csAgentsForTransfer = [],
   pendingTransferRequests = [],
   liveEvents,
+  canCreateOffline = false,
+  productsForOfflineOrder = [],
 }: OrdersListPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const liveState = useLiveIndicator(liveEvents ?? []);
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -342,6 +350,14 @@ export function OrdersListPage({
 
   return (
     <div className="space-y-4">
+      {canCreateOffline && (
+        <CreateOfflineOrderModal
+          open={createOfflineOpen}
+          onClose={() => setCreateOfflineOpen(false)}
+          onSuccess={() => setCreateOfflineOpen(false)}
+          products={productsForOfflineOrder}
+        />
+      )}
       {/* Page header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -353,6 +369,11 @@ export function OrdersListPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canCreateOffline && (
+            <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
+              Create offline order
+            </Button>
+          )}
           {liveEvents != null && liveEvents.length > 0 && (
             <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
           )}

@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { NavLink, Form } from '@remix-run/react';
+import { NavLink, Form, useLocation, useNavigation } from '@remix-run/react';
+import { RouteLoader } from '~/components/ui/route-loader';
+
 const TPL_NAV = [
   { label: 'Dashboard', href: '/tpl' },
   { label: 'Orders', href: '/tpl/orders' },
@@ -9,6 +11,12 @@ const TPL_NAV = [
   { label: 'Notifications', href: '/tpl/notifications' },
   { label: 'Settings', href: '/tpl/settings' },
 ];
+
+function isActiveFromPath(path: string, href: string): boolean {
+  if (!path) return false;
+  if (href === '/tpl') return path === '/tpl' || path === '/tpl/';
+  return path === href || path.startsWith(href + '/');
+}
 
 interface TplLayoutProps {
   user: { name: string; role: string; email: string };
@@ -25,10 +33,20 @@ export function TplLayout({
   onToggleDarkMode,
   children,
 }: TplLayoutProps) {
+  const location = useLocation();
+  const navigation = useNavigation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [resolvedDark, setResolvedDark] = useState(darkMode);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const isNavigatingWithinTpl =
+    navigation.state !== 'idle' &&
+    navigation.location != null &&
+    navigation.location.pathname.startsWith('/tpl') &&
+    navigation.location.pathname !== location.pathname;
+  const effectivePath = isNavigatingWithinTpl && navigation.location ? navigation.location.pathname : location.pathname;
+  const isRouteLoading = isNavigatingWithinTpl;
 
   useEffect(() => {
     notificationsPromise.then((data) => {
@@ -89,27 +107,40 @@ export function TplLayout({
               <span className="hidden sm:inline text-sm font-medium text-surface-700 dark:text-surface-300">3PL</span>
             </NavLink>
             <nav className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
-              {TPL_NAV.map((item) => (
-                <NavLink
-                  key={item.href}
-                  to={item.href}
-                  className={({ isActive }) =>
-                    `px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
-                      isActive
-                        ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
-                        : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-surface-200'
-                    }`
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
+              {TPL_NAV.map((item) => {
+                const active = isActiveFromPath(effectivePath, item.href);
+                return (
+                  <NavLink
+                    key={item.href}
+                    to={item.href}
+                    end={item.href === '/tpl'}
+                    prefetch="intent"
+                    className={() =>
+                      `px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
+                        active
+                          ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
+                          : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-surface-200'
+                      }`
+                    }
+                  >
+                    {item.label}
+                  </NavLink>
+                );
+              })}
             </nav>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <NavLink
               to="/tpl/notifications"
-              className="relative p-2 rounded-lg text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800"
+              prefetch="intent"
+              className={() => {
+                const active = isActiveFromPath(effectivePath, '/tpl/notifications');
+                return `relative p-2 rounded-lg transition-colors ${
+                  active
+                    ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
+                    : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800'
+                }`;
+              }}
               title="Notifications"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -173,7 +204,20 @@ export function TplLayout({
       </header>
 
         <main className="flex-1 p-4 lg:p-6">
-          {children}
+          <div
+            className={`relative transition-all duration-300 ${isRouteLoading ? 'min-h-[60vh]' : ''}`}
+            aria-busy={isRouteLoading}
+            aria-live="polite"
+          >
+            {isRouteLoading && (
+              <div className="absolute inset-0 z-20 bg-surface-50 dark:bg-surface-950 p-4 lg:p-6">
+                <RouteLoader />
+              </div>
+            )}
+            <div className={isRouteLoading ? 'absolute inset-0 opacity-0 pointer-events-none' : ''}>
+              {children}
+            </div>
+          </div>
         </main>
       </div>
     </div>

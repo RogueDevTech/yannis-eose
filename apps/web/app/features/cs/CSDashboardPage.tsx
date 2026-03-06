@@ -9,6 +9,7 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import type {
   CSDashboardStreamData,
@@ -82,9 +83,12 @@ export function CSDashboardPage({
   cartStats,
   pendingCarts,
   liveEvents,
+  canCreateOffline = false,
+  productsForOfflineOrder = [],
 }: CSDashboardStreamData) {
   const fetcher = useFetcher();
   const liveState = useLiveIndicator(liveEvents ?? []);
+  const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'queue' | 'active' | 'callbacks' | 'duplicates' | 'carts' | 'hotswap' | 'performance'>('active');
   const [assignAgent, setAssignAgent] = useState<Record<string, string>>({});
   const [hotSwapFrom, setHotSwapFrom] = useState('');
@@ -200,10 +204,26 @@ export function CSDashboardPage({
             Manage agents, dispatch orders, and monitor workloads
           </p>
         </div>
-        {liveEvents != null && liveEvents.length > 0 && (
-          <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-        )}
+        <div className="flex items-center gap-2">
+          {canCreateOffline && (
+            <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
+              Create offline order
+            </Button>
+          )}
+          {liveEvents != null && liveEvents.length > 0 && (
+            <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+          )}
+        </div>
       </div>
+
+      {canCreateOffline && (
+        <CreateOfflineOrderModal
+          open={createOfflineOpen}
+          onClose={() => setCreateOfflineOpen(false)}
+          onSuccess={() => setCreateOfflineOpen(false)}
+          products={productsForOfflineOrder}
+        />
+      )}
 
       {actionError && (
         <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">

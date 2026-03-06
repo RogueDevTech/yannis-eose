@@ -152,9 +152,9 @@
     @apply px-6 py-3 text-base;
   }
 
-  /* Input styling */
+  /* Input styling — use text-base (16px) on mobile to prevent iOS Safari zoom, text-sm on desktop */
   .input {
-    @apply w-full rounded-lg border border-surface-300 bg-white px-3 py-2 text-sm text-surface-900 placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition-colors duration-150;
+    @apply w-full rounded-lg border border-surface-300 bg-white px-3 py-2 text-base sm:text-sm text-surface-900 placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition-colors duration-150;
   }
 
   .dark .input {

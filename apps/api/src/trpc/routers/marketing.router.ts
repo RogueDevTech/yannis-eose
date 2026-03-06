@@ -168,7 +168,7 @@ export const marketingRouter = router({
     .query(async ({ input }) => {
       return getMarketingService().getPerformanceMetrics(
         input.mediaBuyerId,
-        'this_month',
+        input.startDate && input.endDate ? 'this_month' : 'all_time',
         input.startDate,
         input.endDate,
       );

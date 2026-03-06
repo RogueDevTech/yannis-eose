@@ -2,7 +2,7 @@ import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Suspense } from 'react';
 import { useLoaderData, useRouteLoaderData, Await } from '@remix-run/react';
-import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, defaultThisMonthRange } from '~/lib/api.server';
 import { RouteLoader } from '~/components/ui/route-loader';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
@@ -24,9 +24,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
-    const now = new Date();
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+    const range = defaultThisMonthRange();
+    startDate = range.startDate;
+    endDate = range.endDate;
   }
   if (periodAllTime) {
     startDate = undefined;

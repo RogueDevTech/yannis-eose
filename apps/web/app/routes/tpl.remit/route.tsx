@@ -18,10 +18,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const [remittancesRes, productsRes, locationsRes, deliveryRemittancesRes, eligibleOrdersRes] = await Promise.all([
-    apiRequest<unknown>('/trpc/logistics.listRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 50 })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/products.list?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 500 })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/logistics.listLocations?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 50 })), { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/logistics.listRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/products.list?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/logistics.listLocations?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' })), { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/logistics.listDeliveryRemittanceEligibleOrders', { method: 'GET', cookie }),
   ]);
 

@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { useLoaderData, useRouteLoaderData, Await } from '@remix-run/react';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { defer } from '@remix-run/node';
-import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS, defaultThisMonthRange } from '~/lib/api.server';
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
@@ -53,9 +53,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const topic = rawTopic === 'media_buyers' || rawTopic === 'cs' ? rawTopic : 'orders';
 
   if (!periodAllTime && !startDate && !endDate) {
-    const now = new Date();
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
+    const range = defaultThisMonthRange();
+    startDate = range.startDate;
+    endDate = range.endDate;
   }
   if (periodAllTime) {
     startDate = undefined;
@@ -93,7 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       res.ok && res.data?.result?.data ? res.data.result.data : { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 }
     ).catch(() => ({ volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 }));
 
-    const leaderboardInput = JSON.stringify({ period: 'this_month', startDate, endDate });
+    const leaderboardInput = JSON.stringify({ period: startDate && endDate ? 'this_month' : 'all_time', startDate, endDate });
     const mediaBuyersPromise =
       topic === 'media_buyers'
         ? apiRequest<{ result?: { data?: Array<{ mediaBuyerId: string; name: string; email?: string; totalSpend: number; totalOrders: number; deliveredOrders: number; deliveredRevenue: number; cpa: number; trueRoas: number; deliveryRate: number }> } }>(

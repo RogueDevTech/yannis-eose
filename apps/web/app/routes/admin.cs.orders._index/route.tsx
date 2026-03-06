@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { OrdersListPage } from '~/features/orders/OrdersListPage';
 import type { Order } from '~/features/orders/types';
@@ -21,12 +21,7 @@ const CS_ORDERS_LIVE_EVENTS = [
 
 const ORDERS_PER_PAGE = 40;
 
-function defaultThisMonth(): { startDate: string; endDate: string } {
-  const now = new Date();
-  const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]!;
-  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]!;
-  return { startDate, endDate };
-}
+const defaultThisMonth = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'orders.read');
@@ -54,6 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const isCSAgent = user.role === 'CS_AGENT';
   const assignedCsId = isCSAgent ? user.id : csAgentIdParam;
+  const canCreateOffline = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'].includes(user.role);
 
   const listInput = {
     page,
@@ -125,6 +121,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     reason: string | null;
     order: { id: string; customerName: string; status: string } | null;
   }> = [];
+  let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
+  if (canCreateOffline) {
+    const productsRes = await apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
+      `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+      { method: 'GET', cookie },
+    );
+    if (productsRes.ok && productsRes.data?.result?.data?.products) {
+      productsForOfflineOrder = productsRes.data.result.data.products;
+    }
+  }
+
   if (isCSAgent || showCSAgentColumn) {
     const trRes = await apiRequest<{ result?: { data?: Array<{
       id: string;
@@ -159,6 +166,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     csAgentsForFilter,
     csAgentsForTransfer,
     pendingTransferRequests,
+    canCreateOffline,
+    productsForOfflineOrder,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
@@ -174,6 +183,60 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   const form = await request.formData();
   const intent = form.get('intent') as string;
+
+  if (intent === 'createOffline') {
+    const createOfflineUser = await requirePermission(request, 'orders.read');
+    if (!['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'].includes(createOfflineUser.role)) {
+      return json({ error: 'Only CS agents and Head of CS can create offline orders' }, { status: 403 });
+    }
+    const customerName = form.get('customerName')?.toString()?.trim() ?? '';
+    const customerPhone = form.get('customerPhone')?.toString()?.trim() ?? '';
+    const itemsRaw = form.get('items')?.toString() ?? '[]';
+    let items: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
+    try {
+      items = JSON.parse(itemsRaw) as Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
+    } catch {
+      return json({ error: 'Invalid items' }, { status: 400 });
+    }
+    if (!customerName || customerName.length < 2) {
+      return json({ error: 'Customer name is required (min 2 characters)' }, { status: 400 });
+    }
+    if (!customerPhone) {
+      return json({ error: 'Customer phone is required' }, { status: 400 });
+    }
+    if (!items.length || items.some((i) => !i.productId || i.quantity < 1 || i.unitPrice == null)) {
+      return json({ error: 'At least one valid item (product, quantity, unit price) is required' }, { status: 400 });
+    }
+    const paymentMethod = (form.get('paymentMethod') as string) === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY';
+    const customerEmail = form.get('customerEmail')?.toString()?.trim();
+    if (paymentMethod === 'PAY_ONLINE' && (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail))) {
+      return json({ error: 'Valid email is required for Pay online' }, { status: 400 });
+    }
+    const res = await apiRequest<{ result?: { data?: { id: string } } }>('/trpc/orders.createOffline', {
+      method: 'POST',
+      cookie,
+      body: {
+        customerName,
+        customerPhone,
+        customerAddress: form.get('customerAddress')?.toString()?.trim() || undefined,
+        deliveryAddress: form.get('deliveryAddress')?.toString()?.trim() || undefined,
+        deliveryNotes: form.get('deliveryNotes')?.toString()?.trim() || undefined,
+        deliveryState: form.get('deliveryState')?.toString()?.trim() || undefined,
+        customerGender: (form.get('customerGender') as string) || undefined,
+        preferredDeliveryDate: form.get('preferredDeliveryDate')?.toString()?.trim() || undefined,
+        paymentMethod,
+        customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
+        items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
+        totalAmount: parseFloat((form.get('totalAmount') as string) || '0') || undefined,
+      },
+    });
+    if (!res.ok) {
+      const err = res.data as { error?: { message?: string } };
+      return json({ error: err?.error?.message ?? 'Failed to create offline order' }, { status: safeStatus(res.status) });
+    }
+    const orderId = res.data?.result?.data?.id;
+    return json({ success: true, orderId });
+  }
 
   if (intent === 'bulkTransition') {
     await requirePermission(request, 'orders.bulkTransition');
@@ -306,6 +369,8 @@ export default function CSOrdersRoute() {
       {...data}
       userRole={userRole}
       liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
+      canCreateOffline={data.canCreateOffline}
+      productsForOfflineOrder={data.productsForOfflineOrder}
     />
   );
 }

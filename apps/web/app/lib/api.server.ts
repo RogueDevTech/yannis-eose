@@ -7,6 +7,23 @@ import { redirect } from '@remix-run/node';
 
 const API_URL = process.env['API_URL'] ?? 'http://localhost:4444';
 
+/** Format a Date as YYYY-MM-DD in local time (avoids UTC offset bugs from toISOString). */
+export function toLocalDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Returns { startDate, endDate } for the current month in local time. */
+export function defaultThisMonthRange(): { startDate: string; endDate: string } {
+  const now = new Date();
+  return {
+    startDate: toLocalDateString(new Date(now.getFullYear(), now.getMonth(), 1)),
+    endDate: toLocalDateString(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+  };
+}
+
 /** Default request timeout in ms. Deferred promises must resolve before Remix single-fetch timeout (~5s). */
 const DEFAULT_API_TIMEOUT_MS = 8_000;
 

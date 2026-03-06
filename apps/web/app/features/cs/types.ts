@@ -99,4 +99,8 @@ export interface CSDashboardStreamData {
   pendingCarts?: Promise<PendingCart[]>;
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
+  /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */
+  canCreateOffline?: boolean;
+  /** Products list for offline order form (when canCreateOffline). */
+  productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
 }

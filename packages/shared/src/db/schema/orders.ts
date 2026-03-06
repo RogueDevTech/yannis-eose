@@ -53,6 +53,8 @@ export const orders = pgTable('orders', {
   // 15-min order lock: when an agent clicks Call, order is locked to them
   lockedUntil: timestamp('locked_until', { withTimezone: true }),
   lockedBy: text('locked_by').references(() => users.id),
+  /** Order source for reporting: 'edge-form' (sales form) or 'offline' (CS manual entry) */
+  orderSource: text('order_source'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),

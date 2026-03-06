@@ -17,7 +17,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canEditProduct =
     user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.update');
 
-  const input = { page: 1, limit: 50, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
+  const input = { page: 1, limit: 20, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
   const productsPromise = apiRequest<unknown>(
     `/trpc/products.list?input=${encodeURIComponent(JSON.stringify(input))}`,
     { method: 'GET', cookie },

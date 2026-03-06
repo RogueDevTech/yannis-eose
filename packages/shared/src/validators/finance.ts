@@ -63,7 +63,7 @@ export const listApprovalRequestsSchema = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'QUERIED']).optional(),
   approverId: z.string().uuid().optional(),
   page: z.number().min(1).default(1),
-  limit: z.number().min(1).max(100).default(50),
+  limit: z.number().min(1).max(100).default(20),
 });
 export type ListApprovalRequestsInput = z.infer<typeof listApprovalRequestsSchema>;
 

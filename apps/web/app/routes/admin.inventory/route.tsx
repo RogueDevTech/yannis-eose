@@ -17,8 +17,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Start fetches concurrently
   const levelsPromise = apiRequest<unknown>('/trpc/inventory.levels', { method: 'GET', cookie });
   const movementsPromise = apiRequest<unknown>('/trpc/inventory.movements', { method: 'GET', cookie });
-  const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 100, status: 'ACTIVE' }))}`, { method: 'GET', cookie });
-  const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 100 }))}`, { method: 'GET', cookie });
+  const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 20, status: 'ACTIVE' }))}`, { method: 'GET', cookie });
+  const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 20 }))}`, { method: 'GET', cookie });
 
   // Await levels (critical for stats)
   const levelsRes = await levelsPromise;

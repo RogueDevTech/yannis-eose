@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
@@ -9,6 +9,7 @@ import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
 import type {
   CreateOrderInput,
+  CreateOfflineOrderInput,
   TransitionOrderInput,
   UpdateOrderInput,
   ListOrdersInput,
@@ -50,7 +51,11 @@ export class OrdersService {
    * Called by Edge Worker or admin manual entry.
    * When paymentMethod is PAY_ONLINE, initializes Paystack and returns authorizationUrl for redirect.
    */
-  async create(input: CreateOrderInput & { cartId?: string }, actorId: string | null): Promise<{ id: string; authorizationUrl?: string }> {
+  async create(
+    input: CreateOrderInput & { cartId?: string },
+    actorId: string | null,
+    orderSource?: 'edge-form' | null,
+  ): Promise<{ id: string; authorizationUrl?: string }> {
     // Set actor for audit trail
     if (actorId) {
       await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
@@ -87,6 +92,7 @@ export class OrdersService {
         items: orderInput.items,
         totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
         status: 'UNPROCESSED',
+        orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
       })
       .returning();
 
@@ -192,6 +198,97 @@ export class OrdersService {
     }
 
     return { id: order.id, authorizationUrl };
+  }
+
+  /**
+   * Create an offline order (CS manual entry). Creator is set as assignee; no auto-dispatch.
+   * Hashes customer phone server-side. Optionally checks for duplicate (same phone + product in 6h).
+   */
+  async createOffline(input: CreateOfflineOrderInput, actorId: string): Promise<{ id: string }> {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+
+    const customerPhoneHash = this.hashPhone(input.customerPhone);
+    const paymentMethod = input.paymentMethod ?? 'PAY_ON_DELIVERY';
+
+    if (paymentMethod === 'PAY_ONLINE' && (!input.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail))) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Email is required for Pay online. Please provide a valid email address.',
+      });
+    }
+
+    // Optional dedup: warn/block if same phone + product in 6h
+    const productIds = input.items.map((i) => i.productId);
+    const duplicates = await this.detectDuplicates(customerPhoneHash, productIds);
+    if (duplicates.length > 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          'Possible duplicate: order(s) with same customer phone in the last 6 hours. Merge or dismiss existing before creating an offline order.',
+      });
+    }
+
+    const rows = await this.db
+      .insert(schema.orders)
+      .values({
+        campaignId: input.campaignId ?? null,
+        mediaBuyerId: input.mediaBuyerId ?? null,
+        assignedCsId: actorId,
+        customerName: input.customerName,
+        customerPhoneHash,
+        customerPhone: input.customerPhone,
+        customerAddress: input.customerAddress ?? null,
+        deliveryAddress: input.deliveryAddress ?? null,
+        deliveryNotes: input.deliveryNotes ?? null,
+        deliveryState: input.deliveryState ?? null,
+        customerGender: input.customerGender ?? null,
+        preferredDeliveryDate: input.preferredDeliveryDate ?? null,
+        customerEmail: input.customerEmail ?? null,
+        paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
+        paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
+        paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
+        items: input.items,
+        totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
+        status: 'CS_ASSIGNED',
+        orderSource: 'offline',
+      })
+      .returning();
+
+    const order = rows[0];
+    if (!order) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offline order' });
+    }
+
+    await this.db.insert(schema.orderItems).values(
+      input.items.map((item) => ({
+        orderId: order.id,
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: String(item.unitPrice),
+        offerLabel: item.offerLabel ?? null,
+      })),
+    );
+
+    this.events.emitNewOrder({ orderId: order.id, productName: 'Offline order created' });
+    this.events.emitToUser(actorId, 'order:assigned', { orderId: order.id });
+    this.events.emitToRoom('cs-all', 'order:new', { orderId: order.id });
+
+    this.notifications
+      .create({
+        userId: actorId,
+        type: 'order:assigned',
+        title: 'Offline order created',
+        body: 'You created an offline order. It is assigned to you.',
+        data: { orderId: order.id },
+      })
+      .catch(() => {});
+
+    return { id: order.id };
+  }
+
+  /** SHA-256 hash of phone for offline order creation (server-side only). */
+  private hashPhone(phone: string): string {
+    return createHash('sha256').update(phone.trim()).digest('hex');
   }
 
   /**

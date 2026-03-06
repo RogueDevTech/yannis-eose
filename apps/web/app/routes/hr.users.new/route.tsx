@@ -20,8 +20,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'users.create');
   const cookie = getSessionCookie(request);
 
-  const productsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' }));
-  const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }));
+  const productsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20, sortBy: 'name', sortOrder: 'asc' }));
+  const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
   const [productsRes, locationsRes, plansRes] = await Promise.all([
