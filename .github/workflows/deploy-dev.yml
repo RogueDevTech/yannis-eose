@@ -117,8 +117,11 @@ jobs:
               aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
               export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
               export IMAGE_TAG=dev-latest
+              echo "→ Freeing disk space (prune unused Docker images/containers)..."
+              df -h /
+              docker system prune -af 2>/dev/null || true
               echo "→ Pulling images..."
-              docker compose -f docker-compose.prod.yml pull || docker-compose -f docker-compose.prod.yml pull
+              docker compose -f docker-compose.prod.yml pull
               echo "→ Starting containers..."
               docker compose -f docker-compose.prod.yml up -d || docker-compose -f docker-compose.prod.yml up -d
               echo "→ Waiting 20s for containers to start..."

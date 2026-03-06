@@ -212,6 +212,42 @@ export function LogisticsOrderDetailPage({
               <span className="font-medium text-surface-900 dark:text-surface-100">{formatDate(order.deliveredAt)}</span>
             </div>
           )}
+          {(order.status === 'DELIVERED' || order.status === 'COMPLETED' || order.status === 'PARTIALLY_DELIVERED') && (
+            <div className="sm:col-span-2 pt-2 border-t border-surface-200 dark:border-surface-700">
+              <span className="text-surface-600 dark:text-surface-400">Remittance: </span>
+              {order.remittanceStatus ? (
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                    order.remittanceStatus === 'RECEIVED'
+                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                      : order.remittanceStatus === 'DISPUTED'
+                        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      order.remittanceStatus === 'RECEIVED'
+                        ? 'bg-green-500'
+                        : order.remittanceStatus === 'DISPUTED'
+                          ? 'bg-red-500'
+                          : 'bg-yellow-500'
+                    }`}
+                  />
+                  {order.remittanceStatus === 'SENT'
+                    ? 'Pending Confirmation'
+                    : order.remittanceStatus === 'RECEIVED'
+                      ? 'Received'
+                      : order.remittanceStatus}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-surface-400" />
+                  Not Remitted
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

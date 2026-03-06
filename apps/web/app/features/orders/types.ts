@@ -90,6 +90,10 @@ export interface OrderDetail {
   logisticsLocationName?: string | null;
   riderName?: string | null;
   lockedByName?: string | null;
+  /** Delivery remittance status (SENT, RECEIVED, DISPUTED) — null if not yet remitted */
+  remittanceStatus?: string | null;
+  /** Delivery remittance batch ID — null if not yet remitted */
+  remittanceId?: string | null;
 }
 
 export interface HistoryEntry {

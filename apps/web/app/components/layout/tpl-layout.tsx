@@ -38,7 +38,7 @@ export function TplLayout({
 
   useEffect(() => {
     const stored = localStorage.getItem('yannis_theme');
-    if (stored === 'dark' || (!stored && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    if (stored === 'dark') {
       setResolvedDark(true);
     } else {
       setResolvedDark(false);

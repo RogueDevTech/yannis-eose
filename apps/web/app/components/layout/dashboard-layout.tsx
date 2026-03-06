@@ -201,7 +201,7 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
   // Initialize dark mode and sidebar collapse from localStorage
   useEffect(() => {
     const stored = localStorage.getItem('yannis_theme');
-    if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    if (stored === 'dark') {
       setDarkMode(true);
       document.documentElement.classList.add('dark');
     }

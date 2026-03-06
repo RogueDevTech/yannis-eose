@@ -350,6 +350,23 @@ export class OrdersService {
     const logisticsProviderName = providerRow[0]?.name ?? null;
     const logisticsLocationName = locationRow[0]?.name ?? null;
 
+    // Look up delivery remittance status for this order (if any)
+    const remittanceRow = await this.db
+      .select({
+        remittanceId: schema.deliveryRemittances.id,
+        remittanceStatus: schema.deliveryRemittances.status,
+      })
+      .from(schema.deliveryRemittanceOrders)
+      .innerJoin(
+        schema.deliveryRemittances,
+        eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id),
+      )
+      .where(eq(schema.deliveryRemittanceOrders.orderId, orderId))
+      .limit(1);
+
+    const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
+    const remittanceId = remittanceRow[0]?.remittanceId ?? null;
+
     const { customerPhone: _rawPhone, ...orderSafe } = order;
     return {
       ...orderSafe,
@@ -364,6 +381,8 @@ export class OrdersService {
       logisticsLocationName,
       riderName,
       lockedByName,
+      remittanceStatus,
+      remittanceId,
     };
   }
 

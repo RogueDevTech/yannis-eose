@@ -21,7 +21,12 @@
     "db:seed": "tsx src/db/seed.ts --",
     "db:seed:heavy": "tsx src/db/seed.ts -- --heavy",
     "db:seed-permissions": "tsx scripts/seed-permissions.ts",
-    "db:baseline": "tsx scripts/baseline-migrations.ts"
+    "db:baseline": "tsx scripts/baseline-migrations.ts",
+    "simulate:orders": "tsx test-script/order-simulate.ts",
+    "simulate:cs": "tsx test-script/cs-simulation.ts",
+    "simulate:logistics": "tsx test-script/logistics-simulation.ts",
+    "simulate:3pl": "tsx test-script/3pl-simulation.ts",
+    "simulate:all": "tsx test-script/order-simulate.ts && tsx test-script/cs-simulation.ts && tsx test-script/logistics-simulation.ts && tsx test-script/3pl-simulation.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",

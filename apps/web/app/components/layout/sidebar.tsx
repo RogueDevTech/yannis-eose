@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink } from '@remix-run/react';
 
 export interface SidebarGroup {
@@ -227,14 +228,46 @@ function SidebarNavLink({
   activePathname?: string;
   badge?: number;
 }) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ left: 0, top: 0 });
+
   const isActiveFromPath = (path: string): boolean => {
     if (!path) return false;
     if (item.href === '/admin') return path === '/admin' || path === '/admin/';
     return path === item.href || path.startsWith(item.href + '/');
   };
 
+  const updateTooltipPosition = useCallback(() => {
+    if (!anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    setTooltipPos({
+      left: rect.right + 8,
+      top: rect.top + rect.height / 2,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (tooltipVisible && isExpanded) updateTooltipPosition();
+  }, [tooltipVisible, isExpanded, updateTooltipPosition]);
+
+  useEffect(() => {
+    if (!tooltipVisible || !isExpanded) return;
+    window.addEventListener('scroll', updateTooltipPosition, true);
+    window.addEventListener('resize', updateTooltipPosition);
+    return () => {
+      window.removeEventListener('scroll', updateTooltipPosition, true);
+      window.removeEventListener('resize', updateTooltipPosition);
+    };
+  }, [tooltipVisible, isExpanded, updateTooltipPosition]);
+
   return (
-    <div className={isExpanded ? 'relative group' : undefined}>
+    <div
+      ref={isExpanded ? anchorRef : undefined}
+      className={isExpanded ? 'relative' : undefined}
+      onMouseEnter={() => isExpanded && setTooltipVisible(true)}
+      onMouseLeave={() => isExpanded && setTooltipVisible(false)}
+    >
       <NavLink
       to={item.href}
       end={item.href === '/admin'}
@@ -265,14 +298,23 @@ function SidebarNavLink({
         </span>
       )}
       </NavLink>
-      {isExpanded && (
-        <div
-          className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-surface-800 dark:bg-surface-700 text-white shadow-lg border border-surface-700 dark:border-surface-600 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 delay-200 pointer-events-none z-[100]"
-          role="tooltip"
-        >
-          {item.label}
-        </div>
-      )}
+      {isExpanded &&
+        tooltipVisible &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed z-[9999] px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-surface-800 dark:bg-surface-700 text-white shadow-lg border border-surface-700 dark:border-surface-600 pointer-events-none"
+            style={{
+              left: tooltipPos.left,
+              top: tooltipPos.top,
+              transform: 'translateY(-50%)',
+            }}
+            role="tooltip"
+          >
+            {item.label}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

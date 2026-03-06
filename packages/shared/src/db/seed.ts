@@ -181,7 +181,7 @@ async function seed() {
       rIds.push(emailToId.get(`kbshowkb+rider${i + 1}@gmail.com`) ?? IDS.riderIds[i]!);
     }
     existingIds.riderIds = rIds;
-    const productNames = ['Slim Fit Waist Trainer', 'Portable Blender Pro', 'LED Ring Light 10"', 'Smart Watch X1', 'Hair Growth Oil Bundle'];
+    const productNames = ['Amoxicillin 500mg Capsules', 'Metformin 850mg Tablets', 'Ibuprofen 400mg Tablets', 'Omeprazole 20mg Capsules', 'Vitamin C 1000mg Effervescent'];
     const productRows = await sql`SELECT id, name FROM products WHERE name = ANY(${productNames})`;
     const nameToProductId = new Map(productRows.map((r: { id: string; name: string }) => [r.name, r.id]));
     const productKeyToName = ['product1', 'product2', 'product3', 'product4', 'product5'] as const;
@@ -263,21 +263,21 @@ async function seed() {
   await sql`SELECT set_config('yannis.current_user_id', ${IDS.superAdmin}, true)`;
 
   // ══════════════════════════════════════════════════════════════════
-  // 2. PRODUCTS (5 products with realistic Nigerian e-commerce items)
+  // 2. PRODUCTS (5 pharmaceutical products)
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating products...');
 
   const products = [
-    { id: IDS.product1, name: 'Slim Fit Waist Trainer', baseSalePrice: '12500.00', costPrice: '3500.00', category: 'Health & Beauty', description: 'Premium waist trainer, adjustable compression, all sizes',
-      offers: JSON.stringify([{ label: 'Buy 1', qty: 1, price: '12500.00' }, { label: 'Buy 2 Get 1 Free', qty: 3, price: '22000.00' }]) },
-    { id: IDS.product2, name: 'Portable Blender Pro', baseSalePrice: '18000.00', costPrice: '6000.00', category: 'Kitchen', description: 'USB-C rechargeable blender, 6-blade, 400ml capacity',
-      offers: JSON.stringify([{ label: 'Single Unit', qty: 1, price: '18000.00' }, { label: 'Double Pack', qty: 2, price: '30000.00' }]) },
-    { id: IDS.product3, name: 'LED Ring Light 10"', baseSalePrice: '8500.00', costPrice: '2800.00', category: 'Electronics', description: '10-inch ring light with tripod stand, 3 color modes',
-      offers: JSON.stringify([{ label: 'Standard', qty: 1, price: '8500.00' }]) },
-    { id: IDS.product4, name: 'Smart Watch X1', baseSalePrice: '22000.00', costPrice: '8500.00', category: 'Electronics', description: 'Fitness tracker, heart rate, blood pressure, IP68 waterproof',
-      offers: JSON.stringify([{ label: 'Buy 1', qty: 1, price: '22000.00' }, { label: 'Buy 1 Get 1 Free', qty: 2, price: '35000.00' }, { label: 'Family Pack (3)', qty: 3, price: '50000.00' }]) },
-    { id: IDS.product5, name: 'Hair Growth Oil Bundle', baseSalePrice: '9500.00', costPrice: '2200.00', category: 'Health & Beauty', description: '3-piece set: growth oil, edge control, scalp treatment',
-      offers: JSON.stringify([{ label: 'Single Set', qty: 1, price: '9500.00' }, { label: 'Buy 3 Get 2 Free', qty: 5, price: '25000.00' }]) },
+    { id: IDS.product1, name: 'Amoxicillin 500mg Capsules', baseSalePrice: '4500.00', costPrice: '1200.00', category: 'Antibiotics', description: 'Broad-spectrum antibiotic, 500mg capsules, 20-pack blister',
+      offers: JSON.stringify([{ label: '1 Pack (20 caps)', qty: 1, price: '4500.00' }, { label: '3 Packs (60 caps)', qty: 3, price: '12000.00' }]) },
+    { id: IDS.product2, name: 'Metformin 850mg Tablets', baseSalePrice: '6500.00', costPrice: '1800.00', category: 'Antidiabetics', description: 'Oral hypoglycemic agent, 850mg film-coated tablets, 30-pack',
+      offers: JSON.stringify([{ label: '1 Pack (30 tabs)', qty: 1, price: '6500.00' }, { label: '2 Packs (60 tabs)', qty: 2, price: '11500.00' }]) },
+    { id: IDS.product3, name: 'Ibuprofen 400mg Tablets', baseSalePrice: '3200.00', costPrice: '800.00', category: 'Analgesics', description: 'Non-steroidal anti-inflammatory, 400mg tablets, 24-pack',
+      offers: JSON.stringify([{ label: '1 Pack (24 tabs)', qty: 1, price: '3200.00' }]) },
+    { id: IDS.product4, name: 'Omeprazole 20mg Capsules', baseSalePrice: '7500.00', costPrice: '2500.00', category: 'Gastrointestinal', description: 'Proton pump inhibitor, 20mg enteric-coated capsules, 28-pack',
+      offers: JSON.stringify([{ label: '1 Pack (28 caps)', qty: 1, price: '7500.00' }, { label: '2 Packs (56 caps)', qty: 2, price: '13500.00' }, { label: '3 Packs (84 caps)', qty: 3, price: '19000.00' }]) },
+    { id: IDS.product5, name: 'Vitamin C 1000mg Effervescent', baseSalePrice: '3800.00', costPrice: '900.00', category: 'Vitamins & Supplements', description: 'Effervescent vitamin C tablets, 1000mg, 20-tube pack, orange flavor',
+      offers: JSON.stringify([{ label: '1 Tube (20 tabs)', qty: 1, price: '3800.00' }, { label: 'Family Pack (5 Tubes)', qty: 5, price: '16000.00' }]) },
   ];
 
   for (const p of products) {
@@ -323,12 +323,12 @@ async function seed() {
   console.log('  Creating stock batches...');
 
   const batches = [
-    { id: IDS.batch1p1, productId: IDS.product1, factoryCost: '3500.00', landingCost: '800.00', totalLandedCost: '4300.00', qty: 200, remaining: 150 },
-    { id: IDS.batch2p1, productId: IDS.product1, factoryCost: '3800.00', landingCost: '900.00', totalLandedCost: '4700.00', qty: 100, remaining: 100 },
-    { id: IDS.batch1p2, productId: IDS.product2, factoryCost: '6000.00', landingCost: '1200.00', totalLandedCost: '7200.00', qty: 150, remaining: 120 },
-    { id: IDS.batch1p3, productId: IDS.product3, factoryCost: '2800.00', landingCost: '600.00', totalLandedCost: '3400.00', qty: 300, remaining: 270 },
-    { id: IDS.batch1p4, productId: IDS.product4, factoryCost: '8500.00', landingCost: '1800.00', totalLandedCost: '10300.00', qty: 100, remaining: 80 },
-    { id: IDS.batch1p5, productId: IDS.product5, factoryCost: '2200.00', landingCost: '500.00', totalLandedCost: '2700.00', qty: 250, remaining: 220 },
+    { id: IDS.batch1p1, productId: IDS.product1, factoryCost: '1200.00', landingCost: '300.00', totalLandedCost: '1500.00', qty: 200, remaining: 150 },
+    { id: IDS.batch2p1, productId: IDS.product1, factoryCost: '1350.00', landingCost: '350.00', totalLandedCost: '1700.00', qty: 100, remaining: 100 },
+    { id: IDS.batch1p2, productId: IDS.product2, factoryCost: '1800.00', landingCost: '400.00', totalLandedCost: '2200.00', qty: 150, remaining: 120 },
+    { id: IDS.batch1p3, productId: IDS.product3, factoryCost: '800.00', landingCost: '200.00', totalLandedCost: '1000.00', qty: 300, remaining: 270 },
+    { id: IDS.batch1p4, productId: IDS.product4, factoryCost: '2500.00', landingCost: '600.00', totalLandedCost: '3100.00', qty: 100, remaining: 80 },
+    { id: IDS.batch1p5, productId: IDS.product5, factoryCost: '900.00', landingCost: '200.00', totalLandedCost: '1100.00', qty: 250, remaining: 220 },
   ];
 
   for (const b of batches) {
@@ -373,14 +373,14 @@ async function seed() {
   console.log('  Creating stock movements...');
 
   const movements = [
-    { productId: IDS.product1, type: 'INTAKE', qty: 200, toLocationId: IDS.locationMain, reason: 'Batch 1 received from supplier', actorId: IDS.warehouseManager },
+    { productId: IDS.product1, type: 'INTAKE', qty: 200, toLocationId: IDS.locationMain, reason: 'Amoxicillin batch received from manufacturer', actorId: IDS.warehouseManager },
     { productId: IDS.product1, type: 'TRANSFER_OUT', qty: -60, fromLocationId: IDS.locationMain, toLocationId: IDS.location1, reason: 'Transfer to Lekki hub', actorId: IDS.warehouseManager },
     { productId: IDS.product1, type: 'TRANSFER_IN', qty: 60, fromLocationId: IDS.locationMain, toLocationId: IDS.location1, reason: 'Received from main warehouse', actorId: IDS.tplManager1 },
-    { productId: IDS.product2, type: 'INTAKE', qty: 150, toLocationId: IDS.locationMain, reason: 'Batch received from factory', actorId: IDS.warehouseManager },
+    { productId: IDS.product2, type: 'INTAKE', qty: 150, toLocationId: IDS.locationMain, reason: 'Metformin batch received from manufacturer', actorId: IDS.warehouseManager },
     { productId: IDS.product1, type: 'RESERVATION', qty: -10, fromLocationId: IDS.locationMain, reason: 'Reserved for confirmed orders', actorId: IDS.csAgentIds[0]! },
-    { productId: IDS.product3, type: 'INTAKE', qty: 300, toLocationId: IDS.locationMain, reason: 'Full batch intake', actorId: IDS.warehouseManager },
-    { productId: IDS.product4, type: 'INTAKE', qty: 100, toLocationId: IDS.locationMain, reason: 'Smart watch batch', actorId: IDS.warehouseManager },
-    { productId: IDS.product5, type: 'INTAKE', qty: 250, toLocationId: IDS.locationMain, reason: 'Hair product bundle batch', actorId: IDS.warehouseManager },
+    { productId: IDS.product3, type: 'INTAKE', qty: 300, toLocationId: IDS.locationMain, reason: 'Ibuprofen full batch intake', actorId: IDS.warehouseManager },
+    { productId: IDS.product4, type: 'INTAKE', qty: 100, toLocationId: IDS.locationMain, reason: 'Omeprazole batch intake', actorId: IDS.warehouseManager },
+    { productId: IDS.product5, type: 'INTAKE', qty: 250, toLocationId: IDS.locationMain, reason: 'Vitamin C effervescent batch', actorId: IDS.warehouseManager },
   ];
 
   for (const m of movements) {
@@ -456,9 +456,9 @@ async function seed() {
   await sql`
     INSERT INTO offer_templates (id, product_id, name, price, variants, created_by, status)
     VALUES
-      (${IDS.offer1}, ${IDS.product1}, 'Waist Trainer Flash Sale', '9999.00', ${JSON.stringify([{ size: 'S/M', price: 9999 }, { size: 'L/XL', price: 10999 }])}::jsonb, ${IDS.warehouseManager}, 'ACTIVE'),
-      (${IDS.offer2}, ${IDS.product2}, 'Blender Pro Combo', '15500.00', null, ${IDS.warehouseManager}, 'ACTIVE'),
-      (${IDS.offer3}, ${IDS.product5}, 'Hair Growth Complete Kit', '8500.00', null, ${IDS.warehouseManager}, 'ACTIVE')
+      (${IDS.offer1}, ${IDS.product1}, 'Amoxicillin Bulk Discount', '3800.00', ${JSON.stringify([{ dosage: '500mg', price: 3800 }, { dosage: '250mg', price: 2500 }])}::jsonb, ${IDS.warehouseManager}, 'ACTIVE'),
+      (${IDS.offer2}, ${IDS.product2}, 'Metformin Monthly Supply', '11500.00', null, ${IDS.warehouseManager}, 'ACTIVE'),
+      (${IDS.offer3}, ${IDS.product5}, 'Vitamin C Family Pack', '16000.00', null, ${IDS.warehouseManager}, 'ACTIVE')
   `;
 
   // ══════════════════════════════════════════════════════════════════
@@ -507,14 +507,14 @@ async function seed() {
       status: 'UNPROCESSED', customerName: 'Blessing Okonkwo', customerPhoneHash: 'hash_08012345001',
       customerAddress: '15 Akin Adesola St, Victoria Island, Lagos',
       deliveryAddress: '15 Akin Adesola St, Victoria Island, Lagos',
-      totalAmount: '9999.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 9999 }]),
+      totalAmount: '3800.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 3800 }]),
     },
     {
       id: IDS.order2, campaignId: campaign3, mediaBuyerId: IDS.mediaBuyerIds[1]!,
       status: 'UNPROCESSED', customerName: 'Emeka Uche', customerPhoneHash: 'hash_08012345002',
       customerAddress: '8 Adeola Odeku, Lekki, Lagos',
       deliveryAddress: '8 Adeola Odeku, Lekki, Lagos',
-      totalAmount: '8500.00', items: JSON.stringify([{ productId: IDS.product5, quantity: 1, unitPrice: 8500 }]),
+      totalAmount: '16000.00', items: JSON.stringify([{ productId: IDS.product5, quantity: 5, unitPrice: 3200 }]),
     },
     {
       id: IDS.order3, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!,
@@ -522,7 +522,7 @@ async function seed() {
       customerName: 'Fatima Abdullahi', customerPhoneHash: 'hash_08012345003',
       customerAddress: '22 Awolowo Road, Ikoyi, Lagos',
       deliveryAddress: '22 Awolowo Road, Ikoyi, Lagos',
-      totalAmount: '10999.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 10999 }]),
+      totalAmount: '4500.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 4500 }]),
     },
     {
       id: IDS.order4, campaignId: campaign2, mediaBuyerId: IDS.mediaBuyerIds[0]!,
@@ -530,7 +530,7 @@ async function seed() {
       customerName: 'Chidinma Okafor', customerPhoneHash: 'hash_08012345004',
       customerAddress: '5 Allen Avenue, Ikeja, Lagos',
       deliveryAddress: '5 Allen Avenue, Ikeja, Lagos',
-      totalAmount: '15500.00', items: JSON.stringify([{ productId: IDS.product2, quantity: 1, unitPrice: 15500 }]),
+      totalAmount: '11500.00', items: JSON.stringify([{ productId: IDS.product2, quantity: 2, unitPrice: 5750 }]),
     },
     {
       id: IDS.order5, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!,
@@ -539,7 +539,7 @@ async function seed() {
       customerName: 'Adaeze Nnamdi', customerPhoneHash: 'hash_08012345005',
       customerAddress: '10 Ajose Adeogun, VI, Lagos',
       deliveryAddress: '10 Ajose Adeogun, VI, Lagos',
-      totalAmount: '9999.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 9999 }]),
+      totalAmount: '4500.00', items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 4500 }]),
     },
     {
       id: IDS.order6, campaignId: campaign2, mediaBuyerId: IDS.mediaBuyerIds[0]!,
@@ -548,7 +548,7 @@ async function seed() {
       customerName: 'Oluwaseun Balogun', customerPhoneHash: 'hash_08012345006',
       customerAddress: '33 Admiralty Way, Lekki Phase 1',
       deliveryAddress: '33 Admiralty Way, Lekki Phase 1',
-      totalAmount: '15500.00', items: JSON.stringify([{ productId: IDS.product2, quantity: 1, unitPrice: 15500 }]),
+      totalAmount: '6500.00', items: JSON.stringify([{ productId: IDS.product2, quantity: 1, unitPrice: 6500 }]),
     },
     {
       id: IDS.order7, campaignId: campaign3, mediaBuyerId: IDS.mediaBuyerIds[1]!,
@@ -557,7 +557,7 @@ async function seed() {
       customerName: 'Hauwa Ibrahim', customerPhoneHash: 'hash_08012345007',
       customerAddress: '14 Gana Street, Maitama, Abuja',
       deliveryAddress: '14 Gana Street, Maitama, Abuja',
-      totalAmount: '8500.00', items: JSON.stringify([{ productId: IDS.product5, quantity: 1, unitPrice: 8500 }]),
+      totalAmount: '3800.00', items: JSON.stringify([{ productId: IDS.product5, quantity: 1, unitPrice: 3800 }]),
     },
     {
       id: IDS.order8, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!,
@@ -567,8 +567,8 @@ async function seed() {
       customerName: 'Grace Okechukwu', customerPhoneHash: 'hash_08012345008',
       customerAddress: '7 Ozumba Mbadiwe, VI, Lagos',
       deliveryAddress: '7 Ozumba Mbadiwe, VI, Lagos',
-      totalAmount: '9999.00', landedCost: '4300.00', deliveryFee: '1500.00',
-      items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 9999 }]),
+      totalAmount: '4500.00', landedCost: '1500.00', deliveryFee: '1500.00',
+      items: JSON.stringify([{ productId: IDS.product1, quantity: 1, unitPrice: 4500 }]),
       deliveredAt: true,
     },
     {
@@ -579,8 +579,8 @@ async function seed() {
       customerName: 'Samuel Taiwo', customerPhoneHash: 'hash_08012345009',
       customerAddress: '20 Ligali Ayorinde, VI, Lagos',
       deliveryAddress: '20 Ligali Ayorinde, VI, Lagos',
-      totalAmount: '18000.00', landedCost: '7200.00', deliveryFee: '1500.00',
-      items: JSON.stringify([{ productId: IDS.product2, quantity: 1, unitPrice: 18000 }]),
+      totalAmount: '6500.00', landedCost: '2200.00', deliveryFee: '1500.00',
+      items: JSON.stringify([{ productId: IDS.product2, quantity: 1, unitPrice: 6500 }]),
       deliveredAt: true,
     },
     {
@@ -589,7 +589,7 @@ async function seed() {
       customerName: 'Mohammed Yusuf', customerPhoneHash: 'hash_08012345010',
       customerAddress: '3 IBB Boulevard, Abuja',
       deliveryAddress: '3 IBB Boulevard, Abuja',
-      totalAmount: '22000.00', items: JSON.stringify([{ productId: IDS.product4, quantity: 1, unitPrice: 22000 }]),
+      totalAmount: '7500.00', items: JSON.stringify([{ productId: IDS.product4, quantity: 1, unitPrice: 7500 }]),
     },
   ];
 
@@ -620,16 +620,16 @@ async function seed() {
   console.log('  Creating order items...');
 
   const orderItems = [
-    { orderId: IDS.order1, productId: IDS.product1, qty: 1, unitPrice: '9999.00', batchId: IDS.batch1p1 },
-    { orderId: IDS.order2, productId: IDS.product5, qty: 1, unitPrice: '8500.00', batchId: IDS.batch1p5 },
-    { orderId: IDS.order3, productId: IDS.product1, qty: 1, unitPrice: '10999.00', batchId: IDS.batch1p1 },
-    { orderId: IDS.order4, productId: IDS.product2, qty: 1, unitPrice: '15500.00', batchId: IDS.batch1p2 },
-    { orderId: IDS.order5, productId: IDS.product1, qty: 1, unitPrice: '9999.00', batchId: IDS.batch1p1 },
-    { orderId: IDS.order6, productId: IDS.product2, qty: 1, unitPrice: '15500.00', batchId: IDS.batch1p2 },
-    { orderId: IDS.order7, productId: IDS.product5, qty: 1, unitPrice: '8500.00', batchId: IDS.batch1p5 },
-    { orderId: IDS.order8, productId: IDS.product1, qty: 1, unitPrice: '9999.00', batchId: IDS.batch1p1 },
-    { orderId: IDS.order9, productId: IDS.product2, qty: 1, unitPrice: '18000.00', batchId: IDS.batch1p2 },
-    { orderId: IDS.order10, productId: IDS.product4, qty: 1, unitPrice: '22000.00', batchId: IDS.batch1p4 },
+    { orderId: IDS.order1, productId: IDS.product1, qty: 1, unitPrice: '3800.00', batchId: IDS.batch1p1 },
+    { orderId: IDS.order2, productId: IDS.product5, qty: 5, unitPrice: '3200.00', batchId: IDS.batch1p5 },
+    { orderId: IDS.order3, productId: IDS.product1, qty: 1, unitPrice: '4500.00', batchId: IDS.batch1p1 },
+    { orderId: IDS.order4, productId: IDS.product2, qty: 2, unitPrice: '5750.00', batchId: IDS.batch1p2 },
+    { orderId: IDS.order5, productId: IDS.product1, qty: 1, unitPrice: '4500.00', batchId: IDS.batch1p1 },
+    { orderId: IDS.order6, productId: IDS.product2, qty: 1, unitPrice: '6500.00', batchId: IDS.batch1p2 },
+    { orderId: IDS.order7, productId: IDS.product5, qty: 1, unitPrice: '3800.00', batchId: IDS.batch1p5 },
+    { orderId: IDS.order8, productId: IDS.product1, qty: 1, unitPrice: '4500.00', batchId: IDS.batch1p1 },
+    { orderId: IDS.order9, productId: IDS.product2, qty: 1, unitPrice: '6500.00', batchId: IDS.batch1p2 },
+    { orderId: IDS.order10, productId: IDS.product4, qty: 1, unitPrice: '7500.00', batchId: IDS.batch1p4 },
   ];
 
   for (const oi of orderItems) {
@@ -800,12 +800,12 @@ async function seed() {
     VALUES
       (gen_random_uuid(), ${IDS.order8},
         ${JSON.stringify({ name: 'Grace Okechukwu', email: 'grace@example.com', address: '7 Ozumba Mbadiwe, VI, Lagos' })}::jsonb,
-        ${JSON.stringify([{ description: 'Slim Fit Waist Trainer', quantity: 1, unitPrice: 9999, amount: 9999 }])}::jsonb,
-        '0.075', '10748.93', 'PAID', NOW() + INTERVAL '30 days'),
+        ${JSON.stringify([{ description: 'Amoxicillin 500mg Capsules', quantity: 1, unitPrice: 4500, amount: 4500 }])}::jsonb,
+        '0.075', '4837.50', 'PAID', NOW() + INTERVAL '30 days'),
       (gen_random_uuid(), ${IDS.order9},
         ${JSON.stringify({ name: 'Samuel Taiwo', email: 'samuel@example.com', address: '20 Ligali Ayorinde, VI, Lagos' })}::jsonb,
-        ${JSON.stringify([{ description: 'Portable Blender Pro', quantity: 1, unitPrice: 18000, amount: 18000 }])}::jsonb,
-        '0.075', '19350.00', 'PAID', NOW() + INTERVAL '30 days')
+        ${JSON.stringify([{ description: 'Metformin 850mg Tablets', quantity: 1, unitPrice: 6500, amount: 6500 }])}::jsonb,
+        '0.075', '6987.50', 'PAID', NOW() + INTERVAL '30 days')
   `;
 
   // ══════════════════════════════════════════════════════════════════
@@ -912,7 +912,7 @@ async function seed() {
       INSERT INTO approval_requests (id, type, requester_id, amount, description, status, budget_id)
       VALUES
         (gen_random_uuid(), 'MEDIA_SPEND', ${IDS.headOfMarketing}, '500000.00', 'Additional ad budget for February blitz campaign', 'APPROVED', ${IDS.budget1}),
-        (gen_random_uuid(), 'PROCUREMENT', ${IDS.warehouseManager}, '350000.00', 'Emergency restock of Waist Trainers — supplier minimum order', 'PENDING', null),
+        (gen_random_uuid(), 'PROCUREMENT', ${IDS.warehouseManager}, '350000.00', 'Emergency restock of Amoxicillin 500mg — supplier minimum order', 'PENDING', null),
         (gen_random_uuid(), 'LOGISTICS_REIMBURSEMENT', ${IDS.headOfLogistics}, '45000.00', 'Fuel reimbursement for Abuja deliveries — January', 'PENDING', ${IDS.budget2})
     `;
   } catch (e) {
@@ -938,7 +938,7 @@ async function seed() {
   console.log('  Creating notifications...');
 
   const notifications: Array<{ userId: string; type: string; title: string; body: string; data: object }> = [
-    { userId: IDS.headOfLogistics, type: 'transfer_pending', title: 'Transfer Pending Verification', body: 'Stock transfer of Smart Watch X1 to GoRide Wuse Hub awaiting verification.', data: {} },
+    { userId: IDS.headOfLogistics, type: 'transfer_pending', title: 'Transfer Pending Verification', body: 'Stock transfer of Omeprazole 20mg Capsules to GoRide Wuse Hub awaiting verification.', data: {} },
     { userId: IDS.financeOfficer, type: 'approval_pending', title: 'Approval Request', body: 'Emergency restock request from Warehouse Manager needs review.', data: {} },
     { userId: IDS.superAdmin, type: 'system', title: 'System Ready', body: 'Yannis EOSE seed data loaded successfully.', data: {} },
   ];
