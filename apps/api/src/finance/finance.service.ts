@@ -634,8 +634,19 @@ export class FinanceService {
         );
       }
 
-      // Get ad spend, commission from their respective MVs
-      const [adSpendRows, commissionRows, pipelineRows] = await Promise.all([
+      const fulfillmentConditions = [
+        inArray(schema.stockTransfers.transferStatus, ['RECEIVED', 'DISPUTED']),
+      ];
+      if (startDate) fulfillmentConditions.push(gte(schema.stockTransfers.verifiedAt, new Date(startDate)));
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        fulfillmentConditions.push(lte(schema.stockTransfers.verifiedAt, end));
+      }
+      const fulfillmentWhere = and(...fulfillmentConditions);
+
+      // Get ad spend, commission, pipeline from MVs; fulfillment from direct sum (lightweight, no correlated subquery)
+      const [adSpendRows, commissionRows, pipelineRows, fulfillmentRows] = await Promise.all([
         this.pgClient.unsafe(
           startDate && endDate
             ? `SELECT COALESCE(SUM(total_spend), 0) AS total FROM mv_ad_spend_summary WHERE spend_date >= $1 AND spend_date <= $2`
@@ -648,6 +659,10 @@ export class FinanceService {
         this.pgClient.unsafe(
           `SELECT status, order_count, total_amount FROM mv_order_pipeline`,
         ),
+        this.db
+          .select({ total: sum(schema.stockTransfers.transferCost) })
+          .from(schema.stockTransfers)
+          .where(fulfillmentWhere),
       ]);
 
       const revenue = Number(profitRows[0]?.revenue ?? 0);
@@ -656,9 +671,10 @@ export class FinanceService {
       const adSpend = Number(adSpendRows[0]?.total ?? 0);
       const commission = Number(commissionRows[0]?.total ?? 0);
       const orderCount = Number(profitRows[0]?.order_count ?? 0);
+      const fulfillmentCost = Number(fulfillmentRows[0]?.total ?? 0);
+      const operationalLoss = 0; // Full report uses correlated subqueries for write-off/shrinkage; keep 0 in fast path
 
-      // For fulfillment and operational loss, use the original queries (these are smaller datasets)
-      const trueProfit = revenue - landedCost - deliveryFee - adSpend - commission;
+      const trueProfit = revenue - landedCost - deliveryFee - adSpend - commission - fulfillmentCost - operationalLoss;
 
       const statusCounts: Record<string, number> = {};
       for (const row of pipelineRows) {
@@ -671,8 +687,8 @@ export class FinanceService {
         deliveryFee,
         adSpend,
         commission,
-        fulfillmentCost: 0, // Calculated separately if needed
-        operationalLoss: 0, // Calculated separately if needed
+        fulfillmentCost,
+        operationalLoss,
         trueProfit,
         orderCount,
         margin: revenue > 0 ? (trueProfit / revenue) * 100 : 0,

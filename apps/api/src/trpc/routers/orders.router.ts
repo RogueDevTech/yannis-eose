@@ -296,8 +296,8 @@ export const ordersRouter = router({
    * Release expired order locks.
    * Can be called periodically or on-demand.
    */
-  releaseExpiredLocks: permissionProcedure('orders.releaseLocks').mutation(async () => {
-    return getOrdersService().releaseExpiredLocks();
+  releaseExpiredLocks: permissionProcedure('orders.releaseLocks').mutation(async ({ ctx }) => {
+    return getOrdersService().releaseExpiredLocks(ctx.user?.id ?? null);
   }),
 
   /**

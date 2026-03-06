@@ -43,6 +43,12 @@ export const orderItemSchema = z.object({
 export const EDGE_FORM_ACTOR_ID = '00000000-0000-0000-0000-000000000001';
 
 /**
+ * Reserved system actor ID for cron and automated actions (e.g. lock release, cart mark abandoned).
+ * Stored in audit trail so automated writes are distinguishable from user actions.
+ */
+export const SYSTEM_ACTOR_ID = '00000000-0000-0000-0000-000000000002';
+
+/**
  * Create order — used by Edge Worker or admin manual entry.
  * Phone number comes pre-hashed from the Edge Worker.
  * When source is 'edge-form', the audit trail uses EDGE_FORM_ACTOR_ID for traceability.

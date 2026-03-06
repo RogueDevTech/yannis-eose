@@ -170,9 +170,9 @@ export class OrdersService {
     // Auto-dispatch to least-loaded CS agent
     await this.autoDispatchToCS(order.id);
 
-    // Mark cart as CONVERTED if cartId was provided
+    // Mark cart as CONVERTED if cartId was provided (same actor as order create for audit)
     if (cartId) {
-      await this.cartService.convert(cartId, order.id);
+      await this.cartService.convert(cartId, order.id, actorId ?? undefined);
     }
 
     let authorizationUrl: string | undefined;
@@ -1031,7 +1031,7 @@ export class OrdersService {
       }
       this.autoDispatchToCS(order.id).catch(() => {});
       if (cartId) {
-        this.cartService.convert(cartId, order.id).catch(() => {});
+        this.cartService.convert(cartId, order.id, actorId).catch(() => {});
       }
 
       return { orderId: order.id, success: true };
@@ -1203,7 +1203,7 @@ export class OrdersService {
    */
   async redistributeCSOrders(actor: SessionUser): Promise<{ redistributed: number }> {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-    await this.releaseExpiredLocks();
+    await this.releaseExpiredLocks(actor.id);
 
     const workloads = await this.getCSAgentWorkloads();
     const workloadMap = new Map(
@@ -1621,45 +1621,48 @@ export class OrdersService {
 
   /**
    * Get CS agent workload — for dispatch algorithm and dashboard.
+   * Single aggregation query + user list (no N+1).
    */
   async getCSAgentWorkloads() {
-    const agents = await this.db
-      .select()
-      .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.role, 'CS_AGENT'),
-          eq(schema.users.status, 'ACTIVE'),
+    const [agents, pendingByAgent] = await Promise.all([
+      this.db
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          capacity: schema.users.capacity,
+          lastActionAt: schema.users.lastActionAt,
+        })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.role, 'CS_AGENT'),
+            eq(schema.users.status, 'ACTIVE'),
+          ),
         ),
-      );
+      this.db
+        .select({
+          assignedCsId: schema.orders.assignedCsId,
+          count: count(),
+        })
+        .from(schema.orders)
+        .where(
+          inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
+        )
+        .groupBy(schema.orders.assignedCsId),
+    ]);
 
-    const workloads = await Promise.all(
-      agents.map(async (agent) => {
-        const pendingRows = await this.db
-          .select({ count: count() })
-          .from(schema.orders)
-          .where(
-            and(
-              eq(schema.orders.assignedCsId, agent.id),
-              or(
-                eq(schema.orders.status, 'UNPROCESSED'),
-                eq(schema.orders.status, 'CS_ASSIGNED'),
-                eq(schema.orders.status, 'CS_ENGAGED'),
-              ),
-            ),
-          );
+    const pendingMap: Record<string, number> = {};
+    for (const row of pendingByAgent) {
+      if (row.assignedCsId) pendingMap[row.assignedCsId] = row.count;
+    }
 
-        return {
-          agentId: agent.id,
-          agentName: agent.name,
-          capacity: agent.capacity ?? 10,
-          pendingCount: pendingRows[0]?.count ?? 0,
-          lastActionAt: agent.lastActionAt,
-        };
-      }),
-    );
-
-    return workloads;
+    return agents.map((agent) => ({
+      agentId: agent.id,
+      agentName: agent.name,
+      capacity: agent.capacity ?? 10,
+      pendingCount: pendingMap[agent.id] ?? 0,
+      lastActionAt: agent.lastActionAt,
+    }));
   }
 
   /**
@@ -1782,8 +1785,12 @@ export class OrdersService {
   /**
    * Release expired order locks (called periodically or before dispatch).
    * Orders locked for > 15 min are auto-released.
+   * When actorId is provided (e.g. from tRPC), audit trail records that user; otherwise system/cron.
    */
-  async releaseExpiredLocks() {
+  async releaseExpiredLocks(actorId?: string | null): Promise<{ releasedCount: number }> {
+    if (actorId) {
+      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    }
     const released = await this.db
       .update(schema.orders)
       .set({ lockedUntil: null, lockedBy: null, updatedAt: new Date() })
@@ -1895,15 +1902,16 @@ export class OrdersService {
           ? and(eq(schema.orders.assignedCsId, agentId), orderDateFilter)
           : eq(schema.orders.assignedCsId, agentId);
 
+        const deliveredOrCompleted = or(eq(schema.orders.status, 'DELIVERED'), eq(schema.orders.status, 'COMPLETED'));
         const deliveredWhere = deliveredDateFilter
           ? and(
               eq(schema.orders.assignedCsId, agentId),
-              eq(schema.orders.status, 'DELIVERED'),
+              deliveredOrCompleted,
               deliveredDateFilter,
             )
           : and(
               eq(schema.orders.assignedCsId, agentId),
-              eq(schema.orders.status, 'DELIVERED'),
+              deliveredOrCompleted,
             );
 
         const callLogsWhere = callLogsDateFilter
@@ -1921,24 +1929,34 @@ export class OrdersService {
               eq(schema.callLogs.callStatus, 'COMPLETED'),
             );
 
+        // Count orders that *passed through* each stage (not just current status).
+        // Any order assigned to this agent counts as "engaged".
+        // Orders that reached CONFIRMED or beyond (except CANCELLED) count as "confirmed".
+        // CANCELLED orders are counted separately.
+        const confirmedOrBeyond = or(
+          eq(schema.orders.status, 'CONFIRMED'),
+          eq(schema.orders.status, 'ALLOCATED'),
+          eq(schema.orders.status, 'DISPATCHED'),
+          eq(schema.orders.status, 'IN_TRANSIT'),
+          eq(schema.orders.status, 'DELIVERED'),
+          eq(schema.orders.status, 'PARTIALLY_DELIVERED'),
+          eq(schema.orders.status, 'COMPLETED'),
+          eq(schema.orders.status, 'RETURNED'),
+          eq(schema.orders.status, 'RESTOCKED'),
+          eq(schema.orders.status, 'WRITTEN_OFF'),
+        );
+
         const [engagedRows, confirmedRows, cancelledRows, deliveredRows, callCountRows, avgCallRows] = await Promise.all([
+          // ordersEngaged = all orders assigned to this agent (any status except UNPROCESSED)
           this.db
             .select({ count: count() })
             .from(schema.orders)
-            .where(
-              and(
-                baseOrderConditions,
-                or(
-                  eq(schema.orders.status, 'CS_ENGAGED'),
-                  eq(schema.orders.status, 'CONFIRMED'),
-                  eq(schema.orders.status, 'CANCELLED'),
-                ),
-              ),
-            ),
+            .where(baseOrderConditions),
+          // ordersConfirmed = orders that reached CONFIRMED or beyond
           this.db
             .select({ count: count() })
             .from(schema.orders)
-            .where(and(baseOrderConditions, eq(schema.orders.status, 'CONFIRMED'))),
+            .where(and(baseOrderConditions, confirmedOrBeyond)),
           this.db
             .select({ count: count() })
             .from(schema.orders)
@@ -2075,7 +2093,7 @@ export class OrdersService {
    */
   async distributeUnassignedOrders(actor: SessionUser): Promise<{ distributed: number }> {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-    await this.releaseExpiredLocks();
+    await this.releaseExpiredLocks(actor.id);
 
     const unassigned = await this.db
       .select({ id: schema.orders.id })

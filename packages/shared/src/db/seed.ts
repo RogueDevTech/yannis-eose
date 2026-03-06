@@ -96,6 +96,14 @@ function buildIds() {
     order9: randomUUID(),
     order10: randomUUID(),
 
+    cartConverted1: randomUUID(),
+    cartConverted2: randomUUID(),
+    cartConverted3: randomUUID(),
+    cartConverted4: randomUUID(),
+    cartConverted5: randomUUID(),
+    cartConverted6: randomUUID(),
+    cartConverted7: randomUUID(),
+
     csPlan: randomUUID(),
     mbPlan: randomUUID(),
     riderPlan: randomUUID(),
@@ -109,6 +117,7 @@ let IDS: ReturnType<typeof buildIds>;
 
 async function truncateAll(sql: postgres.Sql) {
   const tables = [
+    'cart_abandonments',
     'notifications', 'call_logs', 'order_items', 'order_transfer_requests',
     'delivery_remittance_orders', 'delivery_remittances', 'delivery_confirmation_requests',
     'orders', 'invoices', 'earnings_adjustments', 'payout_records', 'approval_requests',
@@ -497,6 +506,95 @@ async function seed() {
   const campaign3 = campaignRows[2]!.id;
 
   // ══════════════════════════════════════════════════════════════════
+  // 9b. CART ABANDONMENTS — 25 carts: 8 PENDING, 10 ABANDONED, 7 CONVERTED
+  // ══════════════════════════════════════════════════════════════════
+  console.log('  Creating cart abandonments...');
+
+  // Nigerian customer names for carts
+  const cartCustomerNames = [
+    // 8 PENDING
+    'Aisha Mohammed', 'Chinwe Eze', 'Tobiloba Adeniyi', 'Khadija Sule',
+    'Obiora Chukwuma', 'Funmilayo Ogun', 'Yakubu Danjuma', 'Nneka Azubuike',
+    // 10 ABANDONED
+    'Temitope Balogun', 'Ifeanyi Nwosu', 'Rukayat Abiodun', 'Godwin Osagie',
+    'Halima Garba', 'Chibueze Okonkwo', 'Lateefat Jimoh', 'Omotola Adesanya',
+    'Uche Ikenna', 'Folashade Akindele',
+  ];
+
+  // PENDING carts — timestamps within last 4 minutes (recent, visible on CS dashboard)
+  const pendingCarts = Array.from({ length: 8 }, (_, i) => ({
+    id: randomUUID(),
+    campaignId: campaignRows[i % campaignRows.length]!.id,
+    mediaBuyerId: campaignRows[i % campaignRows.length]!.mediaBuyerId,
+    customerName: cartCustomerNames[i]!,
+    customerPhoneHash: `hash_cart_pending_${String(i + 1).padStart(3, '0')}`,
+    productId: campaignRows[i % campaignRows.length]!.productIds[0]!,
+    offerLabel: i % 2 === 0 ? '1 Pack' : null,
+    secondsAgo: 30 + i * 30, // 30s, 60s, 90s, 120s, 150s, 180s, 210s, 240s
+  }));
+
+  // ABANDONED carts — 5 within last 24h (for abandonedLast24h stat), 5 older
+  const abandonedCarts = Array.from({ length: 10 }, (_, i) => ({
+    id: randomUUID(),
+    campaignId: campaignRows[(i + 8) % campaignRows.length]!.id,
+    mediaBuyerId: campaignRows[(i + 8) % campaignRows.length]!.mediaBuyerId,
+    customerName: cartCustomerNames[8 + i]!,
+    customerPhoneHash: `hash_cart_abandoned_${String(i + 1).padStart(3, '0')}`,
+    productId: campaignRows[(i + 8) % campaignRows.length]!.productIds[0]!,
+    offerLabel: i % 3 === 0 ? '1 Pack' : null,
+    // First 5: within last 24h (20min to 12h ago). Last 5: 1-7 days ago
+    createdMinutesAgo: i < 5 ? 25 + i * 120 : 1440 + i * 1440,
+    abandonedMinutesAgo: i < 5 ? 20 + i * 120 : 1435 + i * 1440,
+  }));
+
+  // CONVERTED carts — match orders 1-7 by name/phone/campaign
+  const convertedCartData = [
+    { cartId: IDS.cartConverted1, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!, customerName: 'Blessing Okonkwo', phoneHash: 'hash_08012345001', productId: IDS.product1, orderId: IDS.order1 },
+    { cartId: IDS.cartConverted2, campaignId: campaign3, mediaBuyerId: IDS.mediaBuyerIds[1]!, customerName: 'Emeka Uche', phoneHash: 'hash_08012345002', productId: IDS.product5, orderId: IDS.order2 },
+    { cartId: IDS.cartConverted3, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!, customerName: 'Fatima Abdullahi', phoneHash: 'hash_08012345003', productId: IDS.product1, orderId: IDS.order3 },
+    { cartId: IDS.cartConverted4, campaignId: campaign2, mediaBuyerId: IDS.mediaBuyerIds[0]!, customerName: 'Chidinma Okafor', phoneHash: 'hash_08012345004', productId: IDS.product2, orderId: IDS.order4 },
+    { cartId: IDS.cartConverted5, campaignId: campaign1, mediaBuyerId: IDS.mediaBuyerIds[0]!, customerName: 'Adaeze Nnamdi', phoneHash: 'hash_08012345005', productId: IDS.product1, orderId: IDS.order5 },
+    { cartId: IDS.cartConverted6, campaignId: campaign2, mediaBuyerId: IDS.mediaBuyerIds[0]!, customerName: 'Oluwaseun Balogun', phoneHash: 'hash_08012345006', productId: IDS.product2, orderId: IDS.order6 },
+    { cartId: IDS.cartConverted7, campaignId: campaign3, mediaBuyerId: IDS.mediaBuyerIds[1]!, customerName: 'Hauwa Ibrahim', phoneHash: 'hash_08012345007', productId: IDS.product5, orderId: IDS.order7 },
+  ];
+
+  // Insert PENDING carts
+  for (const c of pendingCarts) {
+    await sql`
+      INSERT INTO cart_abandonments (id, campaign_id, media_buyer_id, customer_name, customer_phone_hash, product_id, offer_label, status, created_at, updated_at)
+      VALUES (
+        ${c.id}, ${c.campaignId}, ${c.mediaBuyerId}, ${c.customerName}, ${c.customerPhoneHash},
+        ${c.productId}, ${c.offerLabel}, 'PENDING',
+        NOW() - (${c.secondsAgo} * INTERVAL '1 second'), NOW() - (${c.secondsAgo} * INTERVAL '1 second')
+      )
+    `;
+  }
+
+  // Insert ABANDONED carts
+  for (const c of abandonedCarts) {
+    await sql`
+      INSERT INTO cart_abandonments (id, campaign_id, media_buyer_id, customer_name, customer_phone_hash, product_id, offer_label, status, created_at, updated_at)
+      VALUES (
+        ${c.id}, ${c.campaignId}, ${c.mediaBuyerId}, ${c.customerName}, ${c.customerPhoneHash},
+        ${c.productId}, ${c.offerLabel}, 'ABANDONED',
+        NOW() - (${c.createdMinutesAgo} * INTERVAL '1 minute'), NOW() - (${c.abandonedMinutesAgo} * INTERVAL '1 minute')
+      )
+    `;
+  }
+
+  // Insert CONVERTED carts as PENDING initially (will be updated after orders are inserted)
+  for (const c of convertedCartData) {
+    await sql`
+      INSERT INTO cart_abandonments (id, campaign_id, media_buyer_id, customer_name, customer_phone_hash, product_id, status, created_at, updated_at)
+      VALUES (
+        ${c.cartId}, ${c.campaignId}, ${c.mediaBuyerId}, ${c.customerName}, ${c.phoneHash},
+        ${c.productId}, 'PENDING',
+        NOW() - INTERVAL '3 seconds', NOW() - INTERVAL '3 seconds'
+      )
+    `;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
   // 10. ORDERS (10 base orders in various states)
   // ══════════════════════════════════════════════════════════════════
   console.log('  Creating orders...');
@@ -611,6 +709,15 @@ async function seed() {
         ${o.deliveryOtp ?? null}, ${o.deliveryGpsLat ?? null}, ${o.deliveryGpsLng ?? null},
         ${o.items}::jsonb, ${deliveredAt}
       )
+    `;
+  }
+
+  // Update converted carts now that orders exist
+  for (const c of convertedCartData) {
+    await sql`
+      UPDATE cart_abandonments
+      SET status = 'CONVERTED', converted_order_id = ${c.orderId}, updated_at = NOW()
+      WHERE id = ${c.cartId}
     `;
   }
 
@@ -1025,6 +1132,7 @@ async function seed() {
   console.log(`  Users:              ${users.length}`);
   console.log(`  Products:           ${products.length}`);
   console.log(`  Campaigns:          ${campaignRows.length}`);
+  console.log(`  Cart Abandonments:  25 (8 pending, 10 abandoned, 7 converted)`);
   console.log(`  Orders (base):     ${orders.length}`);
   if (isHeavy) console.log(`  Orders (heavy):    ${heavyOrdersCount}`);
   console.log(`  Call Logs:          ${callLogs.length}`);

@@ -23,7 +23,7 @@ import { trpcPost, hashPhone, sleep, logStep, logSummary } from './lib/api';
 // ═══════════════════════════════════════════════════════════
 
 const INTERVAL_MS = Number(process.env['SIMULATE_INTERVAL_MS'] ?? 3000);
-const API_URL = process.env['API_URL'] ?? 'http://localhost:4000';
+const API_URL = process.env['API_URL'] ?? 'http://localhost:4444';
 const DATABASE_URL = process.env['DATABASE_URL'] ?? '';
 const ORDER_COUNT = Math.min(500, Math.max(1, Number(process.env['SIMULATE_ORDER_COUNT'] ?? 30)));
 

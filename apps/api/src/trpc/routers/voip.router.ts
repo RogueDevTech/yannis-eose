@@ -60,8 +60,8 @@ export const voipRouter = router({
    * Release expired order locks (admin utility).
    */
   releaseExpiredLocks: permissionProcedure('settings.write')
-    .mutation(async () => {
-      const count = await getVoipService().releaseExpiredLocks();
+    .mutation(async ({ ctx }) => {
+      const count = await getVoipService().releaseExpiredLocks(ctx.user?.id ?? null);
       return { released: count };
     }),
 });
