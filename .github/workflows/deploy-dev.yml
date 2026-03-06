@@ -101,7 +101,7 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           command_timeout: 15m
-          debug: true
+          debug: false
           script: |
             set -ex
             cd /opt/yannis-eose
@@ -121,14 +121,21 @@ jobs:
               docker compose -f docker-compose.prod.yml pull || docker-compose -f docker-compose.prod.yml pull
               echo "→ Starting containers..."
               docker compose -f docker-compose.prod.yml up -d || docker-compose -f docker-compose.prod.yml up -d
-              echo "→ Waiting for services (health checks with retries)..."
-              for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              echo "→ Waiting 20s for containers to start..."
+              sleep 20
+              echo "→ Health checks (retry every 5s, up to 90s)..."
+              for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
                 if curl -sf http://localhost:4444/health >/dev/null && curl -sf http://localhost:3000 >/dev/null; then
                   echo "→ Health checks passed."
                   break
                 fi
-                if [ "$i" -eq 12 ]; then
-                  echo "→ Health check timeout after 60s"
+                if [ "$i" -eq 18 ]; then
+                  echo "→ Health check timeout. Container status:"
+                  docker compose -f docker-compose.prod.yml ps -a
+                  echo "→ API logs (last 40 lines):"
+                  docker compose -f docker-compose.prod.yml logs --tail=40 api
+                  echo "→ Web logs (last 40 lines):"
+                  docker compose -f docker-compose.prod.yml logs --tail=40 web
                   curl -sf http://localhost:4444/health || echo "API not ready"
                   curl -sf http://localhost:3000 || echo "Web not ready"
                   exit 1

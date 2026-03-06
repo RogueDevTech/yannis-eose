@@ -192,9 +192,9 @@ export function RemitPage({
         {deliveryRemittances.length > 0 && (
           <div className="mt-6 pt-4 border-t border-surface-200 dark:border-surface-700">
             <h3 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Your delivery remittances</h3>
-            <ul className="space-y-1 text-sm">
+            <ul className="space-y-2 text-sm">
               {deliveryRemittances.map((r) => (
-                <li key={r.id} className="flex items-center gap-2">
+                <li key={r.id} className="flex flex-wrap items-center gap-2">
                   <span
                     className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
                       r.status === 'RECEIVED'
@@ -209,6 +209,21 @@ export function RemitPage({
                   <span className="text-surface-600 dark:text-surface-400">
                     {r.orderCount} order(s) · {new Date(r.sentAt).toLocaleDateString()}
                   </span>
+                  {(r.receiptUrls ?? []).length > 0 && (
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      {(r.receiptUrls ?? []).map((url, i) => (
+                        <a
+                          key={url}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-brand-600 dark:text-brand-400 hover:underline text-xs"
+                        >
+                          View receipt{(r.receiptUrls?.length ?? 0) > 1 ? ` ${i + 1}` : ''}
+                        </a>
+                      ))}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

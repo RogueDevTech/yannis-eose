@@ -20,9 +20,13 @@ export interface LogisticsOrderDetailPageProps {
   history: Promise<HistoryEntry[]>;
   locations: Location[];
   riders: RiderOption[];
+  /** Back link (e.g. "/tpl/orders" for TPL, "/admin/logistics/orders" for admin) */
+  backLink?: string;
+  /** When provided (e.g. TPL), only these locations in allocate dropdown */
+  allocatableLocations?: Location[];
 }
 
-const BACK_LINK = '/admin/logistics/orders';
+const DEFAULT_BACK_LINK = '/admin/logistics/orders';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('en-NG', {
@@ -39,7 +43,14 @@ function formatDeliveryDate(date: string): string {
   return d.toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function LogisticsOrderDetailPage({ order, history, locations, riders }: LogisticsOrderDetailPageProps) {
+export function LogisticsOrderDetailPage({
+  order,
+  history,
+  locations,
+  riders,
+  backLink = DEFAULT_BACK_LINK,
+  allocatableLocations: allocatableLocationsProp,
+}: LogisticsOrderDetailPageProps) {
   const fetcher = useFetcher();
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
 
@@ -69,7 +80,7 @@ export function LogisticsOrderDetailPage({ order, history, locations, riders }: 
     order.logisticsLocationId && order.status === 'ALLOCATED'
       ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
       : riders;
-  const allocatableLocations = locations.filter((l) => l.status === 'ACTIVE');
+  const allocatableLocations = allocatableLocationsProp ?? locations.filter((l) => l.status === 'ACTIVE');
 
   const isSubmitting = fetcher.state === 'submitting';
 
@@ -79,7 +90,7 @@ export function LogisticsOrderDetailPage({ order, history, locations, riders }: 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <Link
-            to={BACK_LINK}
+            to={backLink}
             className="p-1.5 rounded-lg text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-surface-200"
             aria-label="Back to Logistics Orders"
           >

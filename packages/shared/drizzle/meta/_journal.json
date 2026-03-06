@@ -155,6 +155,13 @@
       "when": 1772421000000,
       "tag": "0034_add_delivery_remittances",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1772422000000,
+      "tag": "0035_sync_ad_spend_logs_history_status",
+      "breakpoints": true
     }
   ]
 }

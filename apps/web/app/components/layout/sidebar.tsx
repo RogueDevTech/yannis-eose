@@ -81,8 +81,8 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
           />
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-3 px-3">
+        {/* Navigation — overflow-x-visible when collapsed so icon tooltips can show to the right */}
+        <nav className={`flex-1 overflow-y-auto py-3 px-3 ${isExpanded ? 'overflow-x-visible' : ''}`}>
           {groups.map((group, gi) => {
             // Skip groups with no items — no point showing an empty accordion
             if (group.items.length === 0) return null;
@@ -176,10 +176,11 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
           })}
         </nav>
 
-        {/* Collapse toggle — desktop only */}
-        <div className="hidden lg:block border-t border-surface-200 dark:border-surface-700/50 p-3">
+        {/* Collapse toggle — desktop only; show tooltip when collapsed */}
+        <div className={`hidden lg:block border-t border-surface-200 dark:border-surface-700/50 p-3 ${collapsed ? 'relative group' : ''}`}>
           <button
             onClick={onToggle}
+            title={collapsed ? 'Expand sidebar' : undefined}
             className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-surface-600 dark:text-surface-400 hover:bg-surface-100 hover:text-surface-900 dark:hover:bg-surface-800 dark:hover:text-white transition-colors duration-150"
           >
             <svg
@@ -197,6 +198,14 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
             </svg>
             {!collapsed && <span>Collapse</span>}
           </button>
+          {collapsed && (
+            <div
+              className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-surface-800 dark:bg-surface-700 text-white shadow-lg border border-surface-700 dark:border-surface-600 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 delay-200 pointer-events-none z-[100]"
+              role="tooltip"
+            >
+              Expand sidebar
+            </div>
+          )}
         </div>
       </aside>
     </>
@@ -225,7 +234,8 @@ function SidebarNavLink({
   };
 
   return (
-    <NavLink
+    <div className={isExpanded ? 'relative group' : undefined}>
+      <NavLink
       to={item.href}
       end={item.href === '/admin'}
       prefetch="intent"
@@ -238,8 +248,7 @@ function SidebarNavLink({
             : 'text-surface-600 dark:text-surface-300 hover:bg-surface-100 hover:text-surface-900 dark:hover:bg-surface-800 dark:hover:text-white'
         } ${isExpanded ? 'justify-center relative' : ''}`;
       }}
-      title={isExpanded ? item.label : undefined}
-    >
+      >
       <span className="w-5 h-5 flex-shrink-0">{item.icon}</span>
       {!isExpanded && <span className="truncate">{item.label}</span>}
       {!isExpanded && badge != null && badge > 0 && (
@@ -255,7 +264,16 @@ function SidebarNavLink({
           {badge > 99 ? '99+' : badge}
         </span>
       )}
-    </NavLink>
+      </NavLink>
+      {isExpanded && (
+        <div
+          className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-surface-800 dark:bg-surface-700 text-white shadow-lg border border-surface-700 dark:border-surface-600 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 delay-200 pointer-events-none z-[100]"
+          role="tooltip"
+        >
+          {item.label}
+        </div>
+      )}
+    </div>
   );
 }
 
