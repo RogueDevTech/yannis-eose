@@ -150,6 +150,9 @@ jobs:
               done
               curl -sf http://localhost:4444/health || (echo "API health check failed" && exit 1)
               curl -sf http://localhost:3000 || (echo "Web health check failed" && exit 1)
+              echo "→ Checking nginx is up..."
+              docker compose -f docker-compose.prod.yml ps nginx
+              curl -sf -o /dev/null http://localhost:80 || (echo "Nginx not responding on :80" && docker compose -f docker-compose.prod.yml logs --tail=20 nginx && exit 1)
               docker image prune -f
               echo "→ Deploy done."
             } 2>&1 | tee /tmp/deploy.log
