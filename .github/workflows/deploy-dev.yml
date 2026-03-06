@@ -10,7 +10,8 @@ concurrency:
 
 env:
   NODE_VERSION: "20"
-  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+  # ECR and EC2 deploy use this region. Set secret AWS_ACCOUNT_ID (e.g. 194722404149) for EC2 pull.
+  AWS_REGION: ${{ secrets.AWS_REGION || 'eu-north-1' }}
 
 jobs:
   build:
@@ -115,7 +116,7 @@ jobs:
               echo "→ Logging into ECR..."
               aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
               export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-              export IMAGE_TAG=dev-${{ github.sha }}
+              export IMAGE_TAG=dev-latest
               echo "→ Pulling images..."
               docker compose -f docker-compose.prod.yml pull || docker-compose -f docker-compose.prod.yml pull
               echo "→ Starting containers..."
