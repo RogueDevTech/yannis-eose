@@ -3,7 +3,7 @@ import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { defer, json } from '@remix-run/node';
-import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { LogisticsOrderDetailPage } from '~/features/logistics/LogisticsOrderDetailPage';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
@@ -14,7 +14,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'logistics.read');
+  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
   const cookie = getSessionCookie(request);
   const orderId = params['id'];
 
@@ -106,7 +106,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'allocate') {
-    await requirePermission(request, 'logistics.read');
+    await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
     const logisticsLocationId = formData.get('logisticsLocationId')?.toString();
     if (!logisticsLocationId) {
       return json({ error: 'Location is required' }, { status: 400 });
@@ -128,7 +128,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'dispatch') {
-    await requirePermission(request, 'logistics.read');
+    await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
     const riderId = formData.get('riderId')?.toString();
     if (!riderId) {
       return json({ error: 'Rider is required' }, { status: 400 });
