@@ -50,4 +50,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:3000 || exit 1
 
-CMD ["npx", "remix-serve", "./build/server/index.js"]
+# Use web app's node_modules so remix-serve is found (root node_modules doesn't have @remix-run/serve)
+CMD ["node", "apps/web/node_modules/.bin/remix-serve", "./build/server/index.js"]

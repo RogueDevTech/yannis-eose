@@ -73,10 +73,12 @@ export function TplLayout({
   const isDark = resolvedDark;
 
   return (
-    <div className="mx-auto min-h-screen w-full max-w-[1440px] bg-surface-50 dark:bg-surface-950">
-      {/* Top bar: logo + nav + actions */}
-      <header className="sticky top-0 z-40 bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800">
-        <div className="flex items-center justify-between gap-4 px-4 py-2">
+    <div className="min-h-screen w-full bg-surface-50 dark:bg-surface-950">
+      {/* Constrained content: max 1200px, centered */}
+      <div className="mx-auto w-full max-w-[1200px] min-h-screen flex flex-col">
+        {/* Top bar: logo + nav + actions */}
+        <header className="sticky top-0 z-40 shrink-0 bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800">
+          <div className="flex items-center justify-between gap-4 px-4 py-2">
           <div className="flex items-center gap-6 min-w-0">
             <NavLink to="/tpl" className="flex-shrink-0 flex items-center gap-2">
               <img
@@ -170,9 +172,10 @@ export function TplLayout({
         </div>
       </header>
 
-      <main className="p-4 lg:p-6">
-        {children}
-      </main>
+        <main className="flex-1 p-4 lg:p-6">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

@@ -84,7 +84,7 @@ export interface CEODashboardPageProps {
 }
 
 export function CEODashboardPage({ data, filters = { startDate: '', endDate: '', periodAllTime: false }, showBackToDashboard = true }: CEODashboardPageProps) {
-  const [showChartView, setShowChartView] = useState(true);
+  const [showChartView, setShowChartView] = useState(false);
   const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const topic = filters?.topic ?? 'orders';
@@ -169,6 +169,83 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         </div>
       </div>
 
+      {/* ── Revenue & orders over time chart (always visible) ───────────────── */}
+      <div>
+        <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
+          Revenue & orders over time
+        </h2>
+        <div className="card">
+          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+            <strong>Revenue</strong> and <strong>Orders delivered</strong> are by delivery date. <strong>Orders created</strong> shows daily order volume (any status) so the chart has data even before deliveries.
+          </p>
+          {data.timeSeries && data.timeSeries.length > 0 ? (
+            <div className="h-72 min-h-[288px] w-full min-w-0">
+              <ClientOnly fallback={<div className="h-72 min-h-[288px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <div className="h-full min-h-[288px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={data.timeSeries} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-surface-200 dark:stroke-surface-700" />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(v) => (typeof v === 'string' ? v.slice(0, 10) : v)}
+                    />
+                    <YAxis yAxisId="revenue" orientation="left" tick={{ fontSize: 11 }} tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
+                    <YAxis yAxisId="orders" orientation="right" tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: '8px' }}
+                      labelFormatter={(label) => (typeof label === 'string' ? label : String(label))}
+                      formatter={((value: number | undefined, name: string) => [
+                        name === 'Revenue' ? fmt(value ?? 0) : (value ?? 0),
+                        name,
+                      ]) as never}
+                      labelStyle={{ fontWeight: 600 }}
+                    />
+                    <Legend />
+                    <Area
+                      yAxisId="revenue"
+                      type="monotone"
+                      dataKey="revenue"
+                      name="Revenue"
+                      fill="#4f46e5"
+                      stroke="#4f46e5"
+                      fillOpacity={0.4}
+                    />
+                    <Line
+                      yAxisId="orders"
+                      type="monotone"
+                      dataKey="orderCount"
+                      name="Orders delivered"
+                      stroke="#059669"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                    <Line
+                      yAxisId="orders"
+                      type="monotone"
+                      dataKey="createdCount"
+                      name="Orders created"
+                      stroke="#0284c7"
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                      dot={{ r: 3 }}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              </ClientOnly>
+            </div>
+          ) : (
+            <div className="h-72 min-h-[288px] flex flex-col items-center justify-center gap-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm text-center px-4">
+              <p className="font-medium">No orders in this period.</p>
+              <p className="text-xs max-w-md">
+                Revenue and &quot;Orders delivered&quot; appear when orders are marked Delivered. &quot;Orders created&quot; shows daily volume (any status). Try &quot;All time&quot; or a wider date range.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* ── Data view: KPIs, lists, grids ─────────────────────── */}
       {!showChartView && (
         <>
@@ -207,8 +284,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             Cost Breakdown
           </h2>
           {showChartView && (
-          <div className="mb-4 h-48">
-            <ClientOnly fallback={<div className="h-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+          <div className="mb-4 h-48 min-h-[192px] w-full">
+            <ClientOnly fallback={<div className="h-full min-h-[192px] animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <div className="h-full min-h-[192px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -255,6 +333,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
+            </div>
             </ClientOnly>
           </div>
           )}
@@ -311,8 +390,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
             Volume, CS engaged, Confirmed, Logistics distributed, and Delivered for the selected period.
           </p>
-          <div className="h-64">
-            <ClientOnly fallback={<div className="h-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+          <div className="h-64 min-h-[256px] w-full">
+            <ClientOnly fallback={<div className="h-full min-h-[256px] animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <div className="h-full min-h-[256px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 layout="vertical"
@@ -340,6 +420,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            </div>
             </ClientOnly>
           </div>
         </div>
@@ -374,8 +455,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         <div className="card">
           <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Status Distribution</h3>
           {showChartView && (
-          <div className="mb-4 h-52">
-            <ClientOnly fallback={<div className="h-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+          <div className="mb-4 h-52 min-h-[208px] w-full">
+            <ClientOnly fallback={<div className="h-full min-h-[208px] animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <div className="h-full min-h-[208px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -415,6 +497,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
+            </div>
             </ClientOnly>
           </div>
           )}
@@ -574,84 +657,13 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
         {topic === 'orders' && (
         <div className="space-y-4">
-        <div>
-          <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
-            Revenue & orders over time
-          </h2>
-          <div className="card">
-            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
-              <strong>Revenue</strong> and <strong>Orders delivered</strong> are by delivery date. <strong>Orders created</strong> shows daily order volume (any status) so the chart has data even before deliveries.
-            </p>
-            {data.timeSeries && data.timeSeries.length > 0 ? (
-              <div className="h-72 min-h-[288px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={data.timeSeries} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-surface-200 dark:stroke-surface-700" />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 11 }}
-                      tickFormatter={(v) => (typeof v === 'string' ? v.slice(0, 10) : v)}
-                    />
-                    <YAxis yAxisId="revenue" orientation="left" tick={{ fontSize: 11 }} tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
-                    <YAxis yAxisId="orders" orientation="right" tick={{ fontSize: 11 }} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '8px' }}
-                      labelFormatter={(label) => (typeof label === 'string' ? label : String(label))}
-                      // Recharts Formatter allows value to be undefined at runtime
-                      formatter={((value: number | undefined, name: string) => [
-                        name === 'Revenue' ? fmt(value ?? 0) : (value ?? 0),
-                        name,
-                      ]) as never}
-                      labelStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend />
-                    <Area
-                      yAxisId="revenue"
-                      type="monotone"
-                      dataKey="revenue"
-                      name="Revenue"
-                      fill="#4f46e5"
-                      stroke="#4f46e5"
-                      fillOpacity={0.4}
-                    />
-                    <Line
-                      yAxisId="orders"
-                      type="monotone"
-                      dataKey="orderCount"
-                      name="Orders delivered"
-                      stroke="#059669"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                    />
-                    <Line
-                      yAxisId="orders"
-                      type="monotone"
-                      dataKey="createdCount"
-                      name="Orders created"
-                      stroke="#0284c7"
-                      strokeWidth={2}
-                      strokeDasharray="4 4"
-                      dot={{ r: 3 }}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="h-72 min-h-[288px] flex flex-col items-center justify-center gap-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm text-center px-4">
-                <p className="font-medium">No orders in this period.</p>
-                <p className="text-xs max-w-md">
-                  Revenue and &quot;Orders delivered&quot; appear when orders are marked Delivered. &quot;Orders created&quot; shows daily volume (any status). Try &quot;All time&quot; or a wider date range.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Second row: Cost + Status 50/50 */}
+        {/* Cost Breakdown + Status Distribution (chart always shown above) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="card">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Breakdown</h2>
-            <div className="h-48 min-h-[192px] w-full">
+            <div className="h-48 min-h-[192px] w-full min-w-0">
+              <ClientOnly fallback={<div className="h-48 min-h-[192px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <div className="h-full min-h-[192px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -692,11 +704,15 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   <Tooltip formatter={(v: number | undefined) => [totalCosts > 0 ? fmt(v ?? 0) : '—', '']} contentStyle={{ borderRadius: '8px' }} />
                 </PieChart>
               </ResponsiveContainer>
+              </div>
+              </ClientOnly>
             </div>
           </div>
           <div className="card">
             <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Status Distribution</h3>
-            <div className="h-52 min-h-[208px] w-full">
+            <div className="h-52 min-h-[208px] w-full min-w-0">
+              <ClientOnly fallback={<div className="h-52 min-h-[208px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <div className="h-full min-h-[208px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -733,6 +749,8 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
+              </div>
+              </ClientOnly>
             </div>
           </div>
         </div>
@@ -743,7 +761,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
             Volume, CS engaged, Confirmed, Logistics distributed, and Delivered for the selected period.
           </p>
-          <div className="h-64 min-h-[256px] w-full">
+          <div className="h-64 min-h-[256px] w-full min-w-0">
+            <ClientOnly fallback={<div className="h-64 min-h-[256px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <div className="h-full min-h-[256px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 layout="vertical"
@@ -767,6 +787,8 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            </div>
+            </ClientOnly>
           </div>
         </div>
         </div>
@@ -779,7 +801,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             Ad spend, delivered orders, and True ROAS by media buyer for the selected period.
           </p>
           {data.chartTopicData?.mediaBuyerLeaderboard && data.chartTopicData.mediaBuyerLeaderboard.length > 0 ? (
-            <div className="h-96 min-h-[320px] w-full">
+            <div className="h-96 min-h-[320px] w-full min-w-0">
+              <ClientOnly fallback={<div className="h-96 min-h-[320px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <div className="h-full min-h-[320px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   layout="vertical"
@@ -805,6 +829,8 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   <Bar dataKey="spend" name="Ad spend" fill="#6366f1" radius={[0, 4, 4, 0]} minPointSize={4} />
                 </BarChart>
               </ResponsiveContainer>
+              </div>
+              </ClientOnly>
             </div>
           ) : (
             <div className="h-64 flex items-center justify-center rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm">
@@ -821,7 +847,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             Pending orders per agent (Unprocessed, CS Assigned, CS Engaged).
           </p>
           {data.chartTopicData?.csWorkloads && data.chartTopicData.csWorkloads.length > 0 ? (
-            <div className="h-80 min-h-[280px] w-full">
+            <div className="h-80 min-h-[280px] w-full min-w-0">
+              <ClientOnly fallback={<div className="h-80 min-h-[280px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <div className="h-full min-h-[280px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   layout="vertical"
@@ -844,6 +872,8 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   <Bar dataKey="capacity" name="Capacity" fill="#94a3b8" radius={[0, 4, 4, 0]} minPointSize={4} />
                 </BarChart>
               </ResponsiveContainer>
+              </div>
+              </ClientOnly>
             </div>
           ) : (
             <div className="h-64 flex items-center justify-center rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm">
