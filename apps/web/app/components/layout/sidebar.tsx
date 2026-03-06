@@ -224,12 +224,30 @@ function SidebarNavLink({
     return path === item.href || path.startsWith(item.href + '/');
   };
 
+  const handleClick = () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aaca2c' },
+      body: JSON.stringify({
+        sessionId: 'aaca2c',
+        location: 'sidebar.tsx:NavLink',
+        message: 'Sidebar nav link clicked',
+        data: { label: item.label, href: item.href },
+        timestamp: Date.now(),
+        hypothesisId: 'H1-H2',
+      }),
+    }).catch(() => {});
+    // #endregion
+    onMobileClose();
+  };
+
   return (
     <NavLink
       to={item.href}
       end={item.href === '/admin'}
       prefetch="intent"
-      onClick={onMobileClose}
+      onClick={handleClick}
       className={({ isActive }) => {
         const active = activePathname != null ? isActiveFromPath(activePathname) : isActive;
         return `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${

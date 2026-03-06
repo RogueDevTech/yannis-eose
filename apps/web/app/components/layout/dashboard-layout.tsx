@@ -272,6 +272,24 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
 
   const navGroups = getNavGroupsForUser(user);
 
+  // #region agent log
+  if (typeof window !== 'undefined' && navGroups.length > 0 && navGroups[0].items.length > 0) {
+    const first = navGroups[0].items[0];
+    fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aaca2c' },
+      body: JSON.stringify({
+        sessionId: 'aaca2c',
+        location: 'dashboard-layout.tsx:navGroups',
+        message: 'First nav item (Dashboard expected)',
+        data: { role: user?.role, firstLabel: first.label, firstHref: first.href, totalGroups: navGroups.length },
+        timestamp: Date.now(),
+        hypothesisId: 'H2-H5',
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
+
   // Show a global content loader only during real route transitions
   const isAdminShellPath = location.pathname.startsWith('/admin') || location.pathname.startsWith('/hr');
   const isNavigating = navigation.state !== 'idle' && navigation.location != null;

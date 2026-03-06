@@ -61,6 +61,21 @@ function defaultThisMonth(): { startDate: string; endDate: string } {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // #region agent log
+  fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aaca2c' },
+    body: JSON.stringify({
+      sessionId: 'aaca2c',
+      location: 'admin.marketing.overview/route.tsx:loader',
+      message: 'Marketing overview loader ran',
+      data: { path: new URL(request.url).pathname },
+      timestamp: Date.now(),
+      hypothesisId: 'H3',
+    }),
+  }).catch(() => {});
+  // #endregion
+
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'],
     permission: 'marketing.teamOverview',

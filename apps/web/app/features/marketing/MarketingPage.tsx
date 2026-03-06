@@ -317,52 +317,54 @@ export function MarketingPage({
               </DeferredSection>
             )}
 
-            {/* Recipient balances — Admin only */}
+            {/* Recipient balances — Admin only (full width) */}
             {viewMode !== 'media_buyer' && balancesList && (
-              <DeferredSection resolve={balancesList} skeleton="card">
-                {(rows: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>) => (
-                  <div className="card p-0 overflow-hidden">
-                    <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                      <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Recipient balances</h3>
-                      <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">Funding received (confirmed) minus approved ad spend</p>
-                    </div>
-                    {rows.length === 0 ? (
-                      <div className="px-4 py-6 text-center text-surface-500 text-sm">No recipients yet</div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full">
-                          <thead>
-                            <tr>
-                              <th className="table-header">User</th>
-                              <th className="table-header">Role</th>
-                              <th className="table-header text-right">Received</th>
-                              <th className="table-header text-right">Spent</th>
-                              <th className="table-header text-right">Balance</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rows.map((r) => (
-                              <tr key={r.userId} className="table-row">
-                                <td className="table-cell">
-                                  <Link to={`/hr/users/${r.userId}`} className="text-brand-500 hover:text-brand-600 font-medium text-sm">
-                                    {r.name}
-                                  </Link>
-                                </td>
-                                <td className="table-cell text-sm text-surface-700 dark:text-surface-300">
-                                  {r.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : r.role === 'MEDIA_BUYER' ? 'Media Buyer' : r.role}
-                                </td>
-                                <td className="table-cell text-right text-sm">{'\u20A6'}{Number(r.totalReceived).toLocaleString()}</td>
-                                <td className="table-cell text-right text-sm">{'\u20A6'}{Number(r.totalSpend).toLocaleString()}</td>
-                                <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400">{'\u20A6'}{Number(r.balance).toLocaleString()}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+              <div className="w-full lg:col-span-2">
+                <DeferredSection resolve={balancesList} skeleton="card">
+                  {(rows: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>) => (
+                    <div className="card p-0 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
+                        <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Recipient balances</h3>
+                        <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">Funding received (confirmed) minus approved ad spend</p>
                       </div>
-                    )}
-                  </div>
-                )}
-              </DeferredSection>
+                      {rows.length === 0 ? (
+                        <div className="px-4 py-6 text-center text-surface-500 text-sm">No recipients yet</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead>
+                              <tr>
+                                <th className="table-header">User</th>
+                                <th className="table-header">Role</th>
+                                <th className="table-header text-right">Received</th>
+                                <th className="table-header text-right">Spent</th>
+                                <th className="table-header text-right">Balance</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((r) => (
+                                <tr key={r.userId} className="table-row">
+                                  <td className="table-cell">
+                                    <Link to={`/hr/users/${r.userId}`} className="text-brand-500 hover:text-brand-600 font-medium text-sm">
+                                      {r.name}
+                                    </Link>
+                                  </td>
+                                  <td className="table-cell text-sm text-surface-700 dark:text-surface-300">
+                                    {r.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : r.role === 'MEDIA_BUYER' ? 'Media Buyer' : r.role}
+                                  </td>
+                                  <td className="table-cell text-right text-sm">{'\u20A6'}{Number(r.totalReceived).toLocaleString()}</td>
+                                  <td className="table-cell text-right text-sm">{'\u20A6'}{Number(r.totalSpend).toLocaleString()}</td>
+                                  <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400">{'\u20A6'}{Number(r.balance).toLocaleString()}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </DeferredSection>
+              </div>
             )}
           </div>
 
