@@ -2,8 +2,10 @@ import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { eq, and, lt, desc, count, gte, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
-import { DRIZZLE } from '../database/database.module';
+import { SYSTEM_ACTOR_ID } from '@yannis/shared';
+import { DRIZZLE, PG_CLIENT } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 
 function maskPhone(phoneHash: string): string {
@@ -15,21 +17,29 @@ function maskPhone(phoneHash: string): string {
 export class CartService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly events: EventsService,
   ) {}
 
   /**
    * Save or upsert a cart. Called by Edge Worker when user fills name + phone.
    * Same campaign + phone + product = upsert (refresh updated_at).
+   * When actorId is provided (e.g. edge-form), audit trail records it; otherwise no actor.
    */
-  async save(input: {
-    campaignId: string;
-    mediaBuyerId?: string;
-    customerName: string;
-    customerPhoneHash: string;
-    productId: string;
-    offerLabel?: string;
-  }) {
+  async save(
+    input: {
+      campaignId: string;
+      mediaBuyerId?: string;
+      customerName: string;
+      customerPhoneHash: string;
+      productId: string;
+      offerLabel?: string;
+    },
+    actorId?: string | null,
+  ) {
+    if (actorId) {
+      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    }
     const existing = await this.db
       .select()
       .from(schema.cartAbandonments)
@@ -81,8 +91,12 @@ export class CartService {
 
   /**
    * Mark cart as CONVERTED when user submits order.
+   * When actorId is provided (e.g. from order create flow), audit trail records it.
    */
-  async convert(cartId: string, orderId: string): Promise<void> {
+  async convert(cartId: string, orderId: string, actorId?: string | null): Promise<void> {
+    if (actorId) {
+      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    }
     await this.db
       .update(schema.cartAbandonments)
       .set({
@@ -97,13 +111,18 @@ export class CartService {
   /**
    * Mark cart as CONVERTED by phone hash + product (when cartId not available).
    * Matches both PENDING and ABANDONED so we "bring back" carts that were marked abandoned if the user completes later.
+   * When actorId is provided, audit trail records it.
    */
   async convertByPhoneAndProduct(
     campaignId: string,
     customerPhoneHash: string,
     productId: string,
     orderId: string,
+    actorId?: string | null,
   ): Promise<void> {
+    if (actorId) {
+      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    }
     await this.db
       .update(schema.cartAbandonments)
       .set({
@@ -130,7 +149,7 @@ export class CartService {
   @Cron('0 */10 * * * *') // Every 10 minutes at :00 seconds
   async handleAbandonedCarts(): Promise<void> {
     const thresholdMinutes = 5;
-    const count = await this.markAbandoned(thresholdMinutes);
+    const count = await this.markAbandoned(thresholdMinutes, SYSTEM_ACTOR_ID);
     if (count > 0) {
       console.log(`[Cart] Marked ${count} cart(s) as abandoned`);
     }
@@ -138,8 +157,12 @@ export class CartService {
 
   /**
    * Mark PENDING carts as ABANDONED if updated_at is older than threshold.
+   * When actorId is provided (e.g. from tRPC or SYSTEM_ACTOR_ID for cron), audit trail records it.
    */
-  async markAbandoned(thresholdMinutes: number): Promise<number> {
+  async markAbandoned(thresholdMinutes: number, actorId?: string | null): Promise<number> {
+    if (actorId) {
+      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    }
     const threshold = new Date(Date.now() - thresholdMinutes * 60 * 1000);
     const result = await this.db
       .update(schema.cartAbandonments)

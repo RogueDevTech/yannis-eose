@@ -162,6 +162,27 @@
       "when": 1772422000000,
       "tag": "0035_sync_ad_spend_logs_history_status",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1772423000000,
+      "tag": "0036_rename_products_to_pharmaceutical",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1772424000000,
+      "tag": "0037_add_orders_order_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1772425000000,
+      "tag": "0038_add_ceo_overview_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -324,8 +324,12 @@ export class VoipService {
   /**
    * Release expired order locks.
    * Can be called periodically via a cron or on-demand.
+   * When actorId is provided (e.g. from tRPC), audit trail records that user.
    */
-  async releaseExpiredLocks(): Promise<number> {
+  async releaseExpiredLocks(actorId?: string | null): Promise<number> {
+    if (actorId) {
+      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    }
     const result = await this.db
       .update(schema.orders)
       .set({

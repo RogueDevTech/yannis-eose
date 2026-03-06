@@ -36,6 +36,7 @@ export function TplLayout({
   const location = useLocation();
   const navigation = useNavigation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [resolvedDark, setResolvedDark] = useState(darkMode);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -88,48 +89,47 @@ export function TplLayout({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [userMenuOpen]);
 
+  const closeMobileNav = () => setMobileNavOpen(false);
+
   const isDark = resolvedDark;
 
   return (
     <div className="min-h-screen w-full bg-surface-50 dark:bg-surface-950">
       {/* Constrained content: max 1200px, centered */}
       <div className="mx-auto w-full max-w-tpl min-h-screen flex flex-col">
-        {/* Top bar: logo + nav + actions */}
-        <header className="sticky top-0 z-40 shrink-0 bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800">
+        {/* Header + nav: sticky together */}
+        <div className="sticky top-0 z-40 shrink-0">
+        <header className="bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800">
           <div className="flex items-center justify-between gap-4 px-4 py-2">
-          <div className="flex items-center gap-6 min-w-0">
-            <NavLink to="/tpl" className="flex-shrink-0 flex items-center gap-2">
-              <img
-                src={isDark ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
-                alt="Yannis"
-                className="h-8 w-auto object-contain"
-              />
-              <span className="hidden sm:inline text-sm font-medium text-surface-700 dark:text-surface-300">3PL</span>
-            </NavLink>
-            <nav className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
-              {TPL_NAV.map((item) => {
-                const active = isActiveFromPath(effectivePath, item.href);
-                return (
-                  <NavLink
-                    key={item.href}
-                    to={item.href}
-                    end={item.href === '/tpl'}
-                    prefetch="intent"
-                    className={() =>
-                      `px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
-                        active
-                          ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
-                          : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-surface-200'
-                      }`
-                    }
-                  >
-                    {item.label}
-                  </NavLink>
-                );
-              })}
-            </nav>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <NavLink to="/tpl" className="flex-shrink-0 flex items-center gap-2">
+                <img
+                  src={isDark ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
+                  alt="Yannis"
+                  className="h-8 w-auto object-contain"
+                />
+                <span className="hidden sm:inline text-sm font-medium text-surface-700 dark:text-surface-300">3PL</span>
+              </NavLink>
+              {/* Mobile: menu button to toggle nav */}
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen((o) => !o)}
+                className="md:hidden flex items-center justify-center p-2 rounded-lg text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800"
+                aria-expanded={mobileNavOpen}
+                aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
+              >
+                {mobileNavOpen ? (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
             <NavLink
               to="/tpl/notifications"
               prefetch="intent"
@@ -200,8 +200,39 @@ export function TplLayout({
               )}
             </div>
           </div>
+          </div>
+        </header>
+
+        {/* Nav row: below header, always visible on md+, toggled by menu button on mobile */}
+        <nav
+          className={`flex items-center gap-1 overflow-x-auto scrollbar-hide bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800 px-4 py-2 min-h-[2.75rem] ${
+            mobileNavOpen ? 'flex' : 'hidden md:flex'
+          }`}
+          aria-label="Main navigation"
+        >
+          {TPL_NAV.map((item) => {
+            const active = isActiveFromPath(effectivePath, item.href);
+            return (
+              <NavLink
+                key={item.href}
+                to={item.href}
+                end={item.href === '/tpl'}
+                prefetch="intent"
+                onClick={closeMobileNav}
+                className={() =>
+                  `px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors flex-shrink-0 ${
+                    active
+                      ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
+                      : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-surface-200'
+                  }`
+                }
+              >
+                {item.label}
+              </NavLink>
+            );
+          })}
+        </nav>
         </div>
-      </header>
 
         <main className="flex-1 p-4 lg:p-6">
           <div

@@ -19,21 +19,21 @@ function getCartService(): CartService {
 export const cartRouter = router({
   /**
    * Save cart — called by Edge Worker when user fills name + phone.
-   * Public procedure (no auth).
+   * Public procedure (no auth). When caller is authenticated, audit trail records that user.
    */
   save: publicProcedure
     .input(saveCartSchema)
-    .mutation(async ({ input }) => {
-      return getCartService().save(input);
+    .mutation(async ({ input, ctx }) => {
+      return getCartService().save(input, ctx.user?.id ?? null);
     }),
 
   /**
-   * Mark abandoned carts. Called by cron or admin.
+   * Mark abandoned carts. Called by cron or admin. Audit trail uses current user when present.
    */
   markAbandoned: permissionProcedure('settings.write')
     .input(z.object({ thresholdMinutes: z.number().int().min(1).default(5) }))
-    .mutation(async ({ input }) => {
-      const count = await getCartService().markAbandoned(input.thresholdMinutes);
+    .mutation(async ({ input, ctx }) => {
+      const count = await getCartService().markAbandoned(input.thresholdMinutes, ctx.user?.id ?? null);
       return { marked: count };
     }),
 

@@ -695,25 +695,24 @@ export class MarketingService {
     if (periodEnd) deliveredConditions.push(lte(schema.orders.deliveredAt, periodEnd));
     const deliveredWhere = and(...deliveredConditions);
 
-    const totalSpendRows = await this.db
-      .select({ total: sum(schema.adSpendLogs.spendAmount) })
-      .from(schema.adSpendLogs)
-      .where(spendWhere);
-
-    const totalOrdersRows = await this.db
-      .select({ count: count() })
-      .from(schema.orders)
-      .where(orderWhere);
-
-    const deliveredOrdersRows = await this.db
-      .select({ count: count() })
-      .from(schema.orders)
-      .where(deliveredWhere);
-
-    const deliveredRevenueRows = await this.db
-      .select({ total: sum(schema.orders.totalAmount) })
-      .from(schema.orders)
-      .where(deliveredWhere);
+    const [totalSpendRows, totalOrdersRows, deliveredOrdersRows, deliveredRevenueRows] = await Promise.all([
+      this.db
+        .select({ total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .where(spendWhere),
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(orderWhere),
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(deliveredWhere),
+      this.db
+        .select({ total: sum(schema.orders.totalAmount) })
+        .from(schema.orders)
+        .where(deliveredWhere),
+    ]);
 
     const totalSpend = Number(totalSpendRows[0]?.total ?? 0);
     const totalOrders = totalOrdersRows[0]?.count ?? 0;
@@ -736,39 +735,25 @@ export class MarketingService {
   // ============================================
 
   async getMediaBuyerLeaderboard(period: 'this_month' | 'all_time' = 'this_month', startDate?: string, endDate?: string) {
-    const useCustomRange = startDate && endDate;
-    const periodStart = useCustomRange
-      ? new Date(startDate)
-      : period === 'this_month'
-        ? new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-        : null;
-    let periodEnd: Date | null = useCustomRange ? new Date(endDate) : null;
-    if (periodEnd) periodEnd.setHours(23, 59, 59, 999);
-
-    const buyersQuery = this.db
-      .selectDistinct({ mediaBuyerId: schema.adSpendLogs.mediaBuyerId })
-      .from(schema.adSpendLogs);
-    const buyerWhereConditions: Parameters<typeof and>[0][] = [eq(schema.adSpendLogs.status, 'APPROVED')];
-    if (periodStart && periodEnd) {
-      buyerWhereConditions.push(gte(schema.adSpendLogs.spendDate, periodStart), lte(schema.adSpendLogs.spendDate, periodEnd));
-    } else if (periodStart) {
-      buyerWhereConditions.push(gte(schema.adSpendLogs.spendDate, periodStart));
-    }
-    const buyerWhere = and(...buyerWhereConditions);
-    const buyers = await buyersQuery.where(buyerWhere);
+    // Include ALL active media buyers so the leaderboard is always populated,
+    // not just those who have approved ad spend in the period.
+    const allBuyers = await this.db
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.role, 'MEDIA_BUYER'),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      );
 
     const leaderboard = await Promise.all(
-      buyers.map(async (b) => {
-        const metrics = await this.getPerformanceMetrics(b.mediaBuyerId, period, startDate, endDate);
-        const userRows = await this.db
-          .select({ name: schema.users.name, email: schema.users.email })
-          .from(schema.users)
-          .where(eq(schema.users.id, b.mediaBuyerId))
-          .limit(1);
+      allBuyers.map(async (buyer) => {
+        const metrics = await this.getPerformanceMetrics(buyer.id, period, startDate, endDate);
         return {
-          mediaBuyerId: b.mediaBuyerId,
-          name: userRows[0]?.name ?? 'Unknown',
-          email: userRows[0]?.email ?? '',
+          mediaBuyerId: buyer.id,
+          name: buyer.name,
+          email: buyer.email,
           ...metrics,
         };
       }),
