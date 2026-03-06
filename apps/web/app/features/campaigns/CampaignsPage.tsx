@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFetcher, useSearchParams, useRevalidator, Link } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
+import { PageNotification } from '~/components/ui/page-notification';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Checkbox } from '~/components/ui/checkbox';
 import type { Campaign, CampaignFormConfig, FormsPageProps } from './types';
 
@@ -146,8 +148,13 @@ export function FormsPage({
 
   const actionError = (fetcher.data as { error?: string })?.error;
   const actionSuccess = (fetcher.data as { success?: boolean })?.success;
+  const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'Saved successfully' });
   useFetcherToast(statusFetcher.data, { successMessage: 'Status updated' });
+
+  useEffect(() => {
+    if (actionError) setDismissedError(false);
+  }, [actionError]);
 
   // Close confirm modal (deactivate/archive) when statusFetcher returns success
   useEffect(() => {
@@ -238,10 +245,13 @@ export function FormsPage({
         </div>
       </div>
 
-      {actionError && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionError}</p>
-        </div>
+      {actionError && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionError}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
       {/* Empty state hint: why you might not see forms */}
@@ -286,7 +296,7 @@ export function FormsPage({
       </div>
 
       {/* Add Form */}
-      {showAddForm && (
+      <ResponsiveFormPanel open={showAddForm} onClose={() => setShowAddForm(false)}>
         <fetcher.Form method="post" className="card space-y-3">
           <h3 className="text-lg font-semibold text-surface-900 dark:text-white">New Form</h3>
           <input type="hidden" name="intent" value="createForm" />
@@ -355,7 +365,7 @@ export function FormsPage({
             </Button>
           </div>
         </fetcher.Form>
-      )}
+      </ResponsiveFormPanel>
 
       {/* ── Forms Cards ───────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

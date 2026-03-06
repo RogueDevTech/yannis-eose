@@ -170,10 +170,10 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
       <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
-      <div className="fixed inset-x-0 top-[15vh] z-50 mx-auto max-w-lg px-4">
-        <div className="rounded-xl bg-white dark:bg-surface-800 shadow-2xl border border-surface-200 dark:border-surface-700 overflow-hidden animate-fade-in">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+        <div className="rounded-xl bg-white dark:bg-surface-800 shadow-2xl border border-surface-200 dark:border-surface-700 overflow-hidden flex flex-col w-full max-w-lg max-h-[85dvh] animate-fade-in" onClick={(e) => e.stopPropagation()}>
           {/* Search input */}
-          <div className="flex items-center gap-3 px-4 border-b border-surface-100 dark:border-surface-700">
+          <div className="flex items-center gap-3 px-4 border-b border-surface-100 dark:border-surface-700 shrink-0">
             <svg className="w-5 h-5 text-surface-700 flex-shrink-0 dark:text-surface-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
             </svg>
@@ -194,9 +194,10 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
             </kbd>
           </div>
 
-          {/* Results */}
+          {/* Results + empty + hint */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
           {results.length > 0 && (
-            <div className="max-h-[40vh] overflow-y-auto py-2">
+            <div className="py-2">
               {results.map((result, index) => {
                 const meta = TYPE_LABELS[result.type];
                 return (
@@ -248,9 +249,10 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
               </p>
             </div>
           )}
+          </div>
 
           {/* Footer */}
-          <div className="px-4 py-2 border-t border-surface-100 dark:border-surface-700 flex items-center gap-4 text-[11px] text-surface-700 dark:text-surface-300">
+          <div className="px-4 py-2 border-t border-surface-100 dark:border-surface-700 shrink-0 flex items-center gap-4 text-[11px] text-surface-700 dark:text-surface-300 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <span className="flex items-center gap-1">
               <kbd className="px-1 py-0.5 bg-surface-100 dark:bg-surface-700 rounded font-mono text-[10px]">↑↓</kbd>
               Navigate

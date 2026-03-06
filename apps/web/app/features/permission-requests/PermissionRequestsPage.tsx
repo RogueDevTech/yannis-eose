@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { PageNotification } from '~/components/ui/page-notification';
 import type { PermissionRequest } from './types';
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
@@ -15,8 +16,14 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
   const fetcher = useFetcher();
   const [modal, setModal] = useState<{ requestId: string; action: 'APPROVED' | 'REJECTED' } | null>(null);
   const [reason, setReason] = useState('');
+  const fetcherError = (fetcher.data as { error?: string })?.error;
+  const [dismissedError, setDismissedError] = useState(false);
 
   useFetcherToast(fetcher.data, { successMessage: 'Request processed' });
+
+  useEffect(() => {
+    if (fetcherError) setDismissedError(false);
+  }, [fetcherError]);
 
   return (
     <div className="space-y-4">
@@ -27,10 +34,13 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
         </p>
       </div>
 
-      {(fetcher.data as { error?: string })?.error && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{(fetcher.data as { error?: string }).error}</p>
-        </div>
+      {fetcherError && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={fetcherError}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
       <div className="card p-0 overflow-hidden">
@@ -171,25 +181,27 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
       {modal && (
         <>
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setModal(null)} />
-          <div className="fixed inset-x-0 top-[20vh] z-50 mx-auto max-w-md px-4">
-            <div className="rounded-xl bg-white dark:bg-surface-800 shadow-2xl border border-surface-200 dark:border-surface-700 p-6 space-y-4">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="rounded-xl bg-white dark:bg-surface-800 shadow-2xl border border-surface-200 dark:border-surface-700 p-6 flex flex-col max-h-[80dvh] overflow-hidden w-full max-w-md">
+              <h3 className="text-lg font-semibold text-surface-900 dark:text-white shrink-0">
                 {modal.action === 'APPROVED' ? 'Approve Request' : 'Reject Request'}
               </h3>
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Reason <span className="text-surface-700">(min 10 characters)</span>
-                </label>
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  className="input min-h-[80px]"
-                  placeholder={
-                    modal.action === 'APPROVED' ? 'Reason for approval...' : 'Reason for rejection...'
-                  }
-                />
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                    Reason <span className="text-surface-700">(min 10 characters)</span>
+                  </label>
+                  <textarea
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    className="input min-h-[80px]"
+                    placeholder={
+                      modal.action === 'APPROVED' ? 'Reason for approval...' : 'Reason for rejection...'
+                    }
+                  />
+                </div>
               </div>
-              <div className="flex gap-2 justify-end">
+              <div className="flex gap-2 justify-end shrink-0 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <Button type="button" variant="secondary" size="sm" onClick={() => setModal(null)}>
                   Cancel
                 </Button>

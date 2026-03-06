@@ -182,14 +182,14 @@ export function LogisticsOrdersPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-surface-900 dark:text-white">{pageTitle}</h1>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-              Allocate confirmed orders to 3PL locations and dispatch to riders
-            </p>
-          </div>
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">{pageTitle}</h1>
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+            Allocate confirmed orders to 3PL locations and dispatch to riders
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center min-h-[2rem] rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 pl-2.5 pr-2 py-1">
             <DateFilterBar
               startDate={filters.startDate}

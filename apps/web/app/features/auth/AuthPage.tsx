@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { PageNotification } from '~/components/ui/page-notification';
 import type { AuthActionData, AuthPageProps } from './types';
 
 /**
@@ -65,19 +66,26 @@ function LoginForm({
   isSubmitting: boolean;
   actionData?: AuthActionData;
 }) {
-  const [hideError, setHideError] = useState(false);
+  const [dismissedError, setDismissedError] = useState(false);
+  const [dismissedSuccess, setDismissedSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const nav = useNavigation();
   const prevNavState = useRef(nav.state);
 
   useEffect(() => {
     if (prevNavState.current === 'submitting' && nav.state === 'idle') {
-      setHideError(false);
+      setDismissedError(false);
+      setDismissedSuccess(false);
     }
     prevNavState.current = nav.state;
   }, [nav.state]);
 
-  const onInputChange = () => setHideError(true);
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+    if (actionData?.success) setDismissedSuccess(false);
+  }, [actionData?.error, actionData?.success]);
+
+  const onInputChange = () => {};
 
   return (
     <>
@@ -90,16 +98,22 @@ function LoginForm({
         </p>
       </div>
 
-      {actionData?.error && !hideError && (
-        <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 border border-danger-700/50 lg:border-danger-200 px-4 py-3">
-          <p className="text-sm text-danger-400 lg:text-danger-700">{actionData.error}</p>
-        </div>
+      {actionData?.error && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionData.error}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
-      {actionData?.success && (
-        <div className="rounded-lg bg-success-700/20 lg:bg-success-50 border border-success-700/50 lg:border-success-200 px-4 py-3">
-          <p className="text-sm text-success-400 lg:text-success-700">{actionData.success}</p>
-        </div>
+      {actionData?.success && !dismissedSuccess && (
+        <PageNotification
+          variant="success"
+          message={actionData.success}
+          durationMs={5000}
+          onDismiss={() => setDismissedSuccess(true)}
+        />
       )}
 
       <Form method="post" className="space-y-4">
@@ -210,18 +224,22 @@ function SetupForm({
   actionData?: AuthActionData;
 }) {
   const [showPassword, setShowPassword] = useState(false);
-  const [hideError, setHideError] = useState(false);
+  const [dismissedError, setDismissedError] = useState(false);
   const nav = useNavigation();
   const prevNavState = useRef(nav.state);
 
   useEffect(() => {
     if (prevNavState.current === 'submitting' && nav.state === 'idle') {
-      setHideError(false);
+      setDismissedError(false);
     }
     prevNavState.current = nav.state;
   }, [nav.state]);
 
-  const onInputChange = () => setHideError(true);
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+  }, [actionData?.error]);
+
+  const onInputChange = () => {};
 
   return (
     <>
@@ -237,10 +255,13 @@ function SetupForm({
         </p>
       </div>
 
-      {actionData?.error && !hideError && (
-        <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 border border-danger-700/50 lg:border-danger-200 px-4 py-3">
-          <p className="text-sm text-danger-400 lg:text-danger-700">{actionData.error}</p>
-        </div>
+      {actionData?.error && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionData.error}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
       <Form method="post" className="space-y-4">

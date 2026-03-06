@@ -18,7 +18,7 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-700 shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+        className="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-700 shadow-xl w-full max-w-2xl max-h-[90dvh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -120,7 +120,7 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-surface-200 dark:border-surface-700 shrink-0">
+        <div className="p-4 border-t border-surface-200 dark:border-surface-700 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button
             type="button"
             onClick={onClose}

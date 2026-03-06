@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Link, useFetcher, useRevalidator, useNavigation } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { PageNotification } from '~/components/ui/page-notification';
+import { HighCpaWarningBanner } from '~/features/marketing/HighCpaWarningBanner';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { FileUpload } from '~/components/ui/file-upload';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Tabs } from '~/components/ui/tabs';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Spinner } from '~/components/ui/spinner';
@@ -61,6 +64,7 @@ export function MarketingPage({
   fundingRequests = [],
   myBalance,
   balancesList,
+  currentUserId = '',
 }: MarketingStreamData) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const fetcher = useFetcher();
@@ -78,7 +82,12 @@ export function MarketingPage({
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
+  const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'Action completed' });
+
+  useEffect(() => {
+    if (actionError) setDismissedError(false);
+  }, [actionError]);
 
   if (actionSuccess && showFundingForm) setShowFundingForm(false);
   if (actionSuccess && showRequestFundingForm) setShowRequestFundingForm(false);
@@ -135,83 +144,62 @@ export function MarketingPage({
           )}
         </DeferredSection>
       )}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Marketing</h1>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-              Funding ledger, ad spend tracking, and performance metrics
-            </p>
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Marketing</h1>
+          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+            Funding ledger, ad spend tracking, and performance metrics
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center min-h-[2rem] rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 pl-2.5 pr-2 py-1">
+            <DateFilterBar
+              startDate={dateFilters.startDate}
+              endDate={dateFilters.endDate}
+              periodAllTime={dateFilters.periodAllTime}
+            />
           </div>
-          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-            <div className="flex items-center min-h-[2rem] rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 pl-2.5 pr-2 py-1">
-              <DateFilterBar
-                startDate={dateFilters.startDate}
-                endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime}
-              />
-            </div>
-            {isFilterLoading && (
-              <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
-                <Spinner size="sm" className="shrink-0" />
-              </span>
-            )}
-            <div className="flex items-center gap-2 border-surface-200 dark:border-surface-700 sm:border-l sm:pl-4">
-              {canSendFunding && (
-                <Button variant="primary" size="sm" onClick={() => { setShowFundingForm(!showFundingForm); setActiveTab('funding'); }}>
-                  {showFundingForm ? 'Close' : '+ Send Funding'}
-                </Button>
-              )}
-              {viewMode === 'media_buyer' && (
-                <Button variant="secondary" size="sm" onClick={() => { setShowRequestFundingForm(!showRequestFundingForm); setActiveTab('funding'); }}>
-                  {showRequestFundingForm ? 'Close' : '+ Request Funds'}
-                </Button>
-              )}
-              <Button variant="secondary" size="sm" onClick={() => { setShowAdSpendForm(!showAdSpendForm); setActiveTab('adspend'); }}>
-                {showAdSpendForm ? 'Close' : '+ Log Ad Spend'}
+          {isFilterLoading && (
+            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+              <Spinner size="sm" className="shrink-0" />
+            </span>
+          )}
+          <div className="flex items-center gap-2">
+            {canSendFunding && (
+              <Button variant="primary" size="sm" onClick={() => { setShowFundingForm(!showFundingForm); setActiveTab('funding'); }}>
+                {showFundingForm ? 'Close' : '+ Send Funding'}
               </Button>
-            </div>
+            )}
+            {viewMode === 'media_buyer' && (
+              <Button variant="secondary" size="sm" onClick={() => { setShowRequestFundingForm(!showRequestFundingForm); setActiveTab('funding'); }}>
+                {showRequestFundingForm ? 'Close' : '+ Request Funds'}
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => { setShowAdSpendForm(!showAdSpendForm); setActiveTab('adspend'); }}>
+              {showAdSpendForm ? 'Close' : '+ Log Ad Spend'}
+            </Button>
           </div>
         </div>
       </div>
 
-      {actionError && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionError}</p>
-        </div>
+      {actionError && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionError}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
       {/* High CPA Alert Banner — deferred because it depends on leaderboard */}
       <DeferredSection resolve={leaderboard} skeleton="inline">
         {(lb) => {
           const highCpaBuyers = lb.filter((b: LeaderboardEntry) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0);
-          if (highCpaBuyers.length === 0) return null;
           return (
-            <div className="rounded-lg bg-warning-50 dark:bg-warning-700/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3">
-              <div className="flex items-start gap-3">
-                <svg className="w-5 h-5 text-warning-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                </svg>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-warning-800 dark:text-warning-300">High CPA Warning</p>
-                  <p className="text-xs text-warning-600 dark:text-warning-400 mt-0.5">
-                    {highCpaBuyers.length} media buyer{highCpaBuyers.length !== 1 ? 's' : ''} exceed the threshold of ₦{HIGH_CPA_THRESHOLD.toLocaleString()}. Review ad performance.
-                  </p>
-                  <ul className="mt-2 space-y-1 text-xs text-warning-700 dark:text-warning-300">
-                    {[...highCpaBuyers]
-                      .sort((a: LeaderboardEntry, b: LeaderboardEntry) => b.cpa - a.cpa)
-                      .map((b: LeaderboardEntry) => (
-                        <li key={b.mediaBuyerId} className="flex items-center justify-between gap-3">
-                          <Link to={`/hr/users/${b.mediaBuyerId}`} prefetch="intent" className="font-medium truncate hover:text-warning-800 dark:hover:text-warning-200">
-                            {b.name}
-                          </Link>
-                          <span className="shrink-0 font-mono tabular-nums">₦{Math.round(b.cpa).toLocaleString()}</span>
-                        </li>
-                      ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
+            <HighCpaWarningBanner
+              buyers={highCpaBuyers.map((b: LeaderboardEntry) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
+              threshold={HIGH_CPA_THRESHOLD}
+            />
           );
         }}
       </DeferredSection>
@@ -686,7 +674,7 @@ export function MarketingPage({
                         {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                       </td>
                       <td className="table-cell">
-                        {f.status === 'SENT' && (
+                        {f.status === 'SENT' && f.receiverId === currentUserId && (
                           <div className="flex gap-1.5">
                             <fetcher.Form method="post" className="inline">
                               <input type="hidden" name="intent" value="verifyFunding" />
@@ -730,7 +718,7 @@ export function MarketingPage({
                       )}
                     </DeferredSection>
                   </p>
-                  {f.status === 'SENT' && (
+                  {f.status === 'SENT' && f.receiverId === currentUserId && (
                     <div className="flex gap-2 pt-1">
                       <fetcher.Form method="post" className="inline">
                         <input type="hidden" name="intent" value="verifyFunding" />
@@ -957,13 +945,13 @@ export function MarketingPage({
       {receiptPreviewUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setReceiptPreviewUrl(null)}>
           <div className="fixed inset-0 bg-black/70" />
-          <div className="relative max-w-2xl max-h-[90vh] w-full" onClick={(e) => e.stopPropagation()}>
+          <div className="relative max-w-2xl max-h-[90dvh] w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-end mb-2">
               <button type="button" onClick={() => setReceiptPreviewUrl(null)} className="text-surface-100 hover:text-white p-1 rounded">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <img src={receiptPreviewUrl} alt="Receipt" className="w-full h-auto max-h-[85vh] object-contain rounded-lg bg-white shadow-xl" />
+            <img src={receiptPreviewUrl} alt="Receipt" className="w-full h-auto max-h-[85dvh] object-contain rounded-lg bg-white shadow-xl" />
           </div>
         </div>
       )}
@@ -972,7 +960,7 @@ export function MarketingPage({
       {activeTab === 'adspend' && (
         <>
           {/* Create Ad Spend Form */}
-          {showAdSpendForm && (
+          <ResponsiveFormPanel open={showAdSpendForm} onClose={() => setShowAdSpendForm(false)}>
             <fetcher.Form method="post" className="card space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Log Ad Spend</h3>
@@ -1034,7 +1022,7 @@ export function MarketingPage({
                 </Button>
               </div>
             </fetcher.Form>
-          )}
+          </ResponsiveFormPanel>
 
           <div className="card p-0 overflow-hidden">
             <div className="hidden md:block overflow-x-auto">

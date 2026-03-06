@@ -125,16 +125,16 @@ export function ConfirmActionModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 min-h-0"
       aria-modal="true"
       role="alertdialog"
       aria-labelledby="confirm-action-modal-title"
       aria-describedby="confirm-action-modal-desc"
     >
       <div
-        className={`card w-full max-w-lg space-y-5 shadow-xl bg-white dark:bg-surface-900 ${styles.border}`}
+        className={`card w-full max-w-lg max-h-[90dvh] overflow-hidden flex flex-col shadow-xl bg-white dark:bg-surface-900 ${styles.border}`}
       >
-        <div className={`flex items-center gap-3 pb-2 border-b ${borderBottomClass}`}>
+        <div className={`flex items-center gap-3 pb-2 border-b shrink-0 ${borderBottomClass}`}>
           <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${styles.iconBg}`}>
             <Icon className={`w-5 h-5 ${styles.iconColor}`} />
           </div>
@@ -142,18 +142,20 @@ export function ConfirmActionModal({
             {title}
           </h3>
         </div>
-        <p id="confirm-action-modal-desc" className="text-sm text-surface-700 dark:text-surface-200">
-          {description}
-        </p>
-        {details && (
-          <div className={`rounded-lg border p-4 space-y-2 ${styles.detailsBox}`}>{details}</div>
-        )}
-        {error && (
-          <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-3 py-2">
-            <p className="text-sm text-danger-700 dark:text-danger-500">{error}</p>
-          </div>
-        )}
-        <div className="flex items-center justify-end gap-3 pt-2">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-5 p-1">
+          <p id="confirm-action-modal-desc" className="text-sm text-surface-700 dark:text-surface-200">
+            {description}
+          </p>
+          {details && (
+            <div className={`rounded-lg border p-4 space-y-2 ${styles.detailsBox}`}>{details}</div>
+          )}
+          {error && (
+            <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-3 py-2">
+              <p className="text-sm text-danger-700 dark:text-danger-500">{error}</p>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-3 pt-2 shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <Button
             type="button"
             variant="secondary"

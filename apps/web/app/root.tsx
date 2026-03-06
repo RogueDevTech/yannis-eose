@@ -11,6 +11,7 @@ import {
   useLoaderData,
   useRouteError,
 } from '@remix-run/react';
+import { ScrollToTopButton } from '~/components/ui/scroll-to-top-button';
 import stylesheet from '~/tailwind.css?url';
 
 declare global {
@@ -72,6 +73,7 @@ export default function App() {
       </head>
       <body className="h-full">
         <Outlet />
+        <ScrollToTopButton />
         <ScrollRestoration />
         <script dangerouslySetInnerHTML={{ __html: `window.__ENV = ${envScript};` }} />
         <Scripts />

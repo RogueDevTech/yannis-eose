@@ -2,8 +2,9 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
-import { DismissibleMessageCard } from '~/components/ui/dismissible-message-card';
 import { LiveIndicator } from '~/components/ui/live-indicator';
+import { PageNotification } from '~/components/ui/page-notification';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
@@ -124,6 +125,7 @@ export function CSDashboardPage({
   }, [viewAllAgentsOpen]);
 
   const actionError = (fetcher.data as { error?: string })?.error;
+  const [dismissedError, setDismissedError] = useState(false);
   const distributeResult = fetcher.data as { success?: boolean; distributed?: number } | undefined;
   const successMessage =
     distributeResult && 'distributed' in distributeResult
@@ -132,6 +134,10 @@ export function CSDashboardPage({
         : `${distributeResult.distributed} order(s) distributed to agents`
       : 'CS action completed';
   useFetcherToast(fetcher.data, { successMessage });
+
+  useEffect(() => {
+    if (actionError) setDismissedError(false);
+  }, [actionError]);
 
   // Close reassign / cancel modals only after a successful response
   useEffect(() => {
@@ -220,6 +226,7 @@ export function CSDashboardPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <PageRefreshButton />
           {canCreateOffline && (
             <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
               Create offline order
@@ -240,10 +247,13 @@ export function CSDashboardPage({
         />
       )}
 
-      {actionError && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionError}</p>
-        </div>
+      {actionError && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionError}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
 
       {/* Overview + Order Pipeline (compact, single horizontal row) */}
@@ -1544,7 +1554,7 @@ export function CSDashboardPage({
           aria-labelledby="view-all-agents-title"
         >
           <div
-            className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-4xl w-full max-h-[90dvh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
@@ -1567,7 +1577,7 @@ export function CSDashboardPage({
                 {workloads.length} agent{workloads.length !== 1 ? 's' : ''}
               </p>
             </div>
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 min-h-0 overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
               {(() => {
                 const pageSize = 20;
                 const totalPages = Math.max(1, Math.ceil(workloads.length / pageSize));

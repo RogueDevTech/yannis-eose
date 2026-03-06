@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { HighCpaWarningBanner } from '~/features/marketing/HighCpaWarningBanner';
+import { MediaBuyerBalanceCard } from '~/features/marketing/MediaBuyerBalanceCard';
 import { LiveIndicator } from '~/components/ui/live-indicator';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
@@ -90,53 +93,6 @@ function renderMediaBuyerLeaderboardCard(
   );
 }
 
-function renderMediaBuyerBalanceCard(row: FundingBalanceRow, className = '') {
-  return (
-    <div key={row.userId} className={`card ${className}`}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center">
-          <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
-            {row.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
-          </span>
-        </div>
-        <div className="min-w-0 flex-1">
-          <Link
-            to={`/hr/users/${row.userId}`}
-            prefetch="intent"
-            className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate block hover:text-brand-600 dark:hover:text-brand-400"
-          >
-            {row.name}
-          </Link>
-          <p className="text-xs text-surface-800 dark:text-surface-200">Media Buyer</p>
-        </div>
-      </div>
-      <div className="space-y-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-surface-700 dark:text-surface-300">Balance</span>
-          <span className="font-medium text-brand-600 dark:text-brand-400">
-            ₦{Number(row.balance).toLocaleString()}
-          </span>
-        </div>
-        <div className="flex justify-between text-surface-500 dark:text-surface-400">
-          <span>Received</span>
-          <span>₦{Number(row.totalReceived).toLocaleString()}</span>
-        </div>
-        <div className="flex justify-between text-surface-500 dark:text-surface-400">
-          <span>Spent</span>
-          <span>₦{Number(row.totalSpend).toLocaleString()}</span>
-        </div>
-      </div>
-      <Link
-        to={`/hr/users/${row.userId}`}
-        prefetch="intent"
-        className="mt-3 block text-center text-xs font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
-      >
-        View profile
-      </Link>
-    </div>
-  );
-}
-
 const HIGH_CPA_THRESHOLD = 5000;
 
 export interface MarketingOverviewPageProps {
@@ -214,6 +170,7 @@ export function MarketingOverviewPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <PageRefreshButton />
           {liveEvents != null && liveEvents.length > 0 && (
             <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
           )}
@@ -226,38 +183,10 @@ export function MarketingOverviewPage({
       </div>
 
       {/* High CPA Alert Banner */}
-      {highCpaBuyers.length > 0 && (
-        <div className="rounded-lg bg-warning-50 dark:bg-warning-700/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3">
-          <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-warning-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-            </svg>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-warning-800 dark:text-warning-300">High CPA Warning</p>
-              <p className="text-xs text-warning-600 dark:text-warning-400 mt-0.5">
-                {highCpaBuyers.length} media buyer{highCpaBuyers.length !== 1 ? 's' : ''} exceed the threshold of ₦{HIGH_CPA_THRESHOLD.toLocaleString()}. Review ad performance.
-              </p>
-              <ul className="mt-2 space-y-1 text-xs text-warning-700 dark:text-warning-300">
-                {highCpaBuyers
-                  .slice()
-                  .sort((a, b) => b.cpa - a.cpa)
-                  .map((b) => (
-                    <li key={b.mediaBuyerId} className="flex items-center justify-between gap-3">
-                      <Link
-                        to={`/hr/users/${b.mediaBuyerId}`}
-                        prefetch="intent"
-                        className="font-medium truncate hover:text-warning-800 dark:hover:text-warning-200"
-                      >
-                        {b.name}
-                      </Link>
-                      <span className="shrink-0 font-mono tabular-nums">₦{Math.round(b.cpa).toLocaleString()}</span>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
+      <HighCpaWarningBanner
+        buyers={highCpaBuyers.map((b) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
+        threshold={HIGH_CPA_THRESHOLD}
+      />
 
       {/* Stats strip — CS-style horizontal scroll */}
       <div className="card">
@@ -590,7 +519,9 @@ export function MarketingOverviewPage({
               className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden pb-1"
             >
               {cardsSource != null && cardsSource.map((buyer) => renderMediaBuyerLeaderboardCard(buyer, balancesList, 'shrink-0 w-64'))}
-              {balanceOnlySource != null && balanceOnlySource.map((row) => renderMediaBuyerBalanceCard(row, 'shrink-0 w-64'))}
+              {balanceOnlySource != null && balanceOnlySource.map((row) => (
+                <MediaBuyerBalanceCard key={row.userId} row={row} className="shrink-0 w-64" />
+              ))}
             </div>
           );
         })()}
@@ -623,7 +554,7 @@ export function MarketingOverviewPage({
             aria-labelledby="view-all-media-buyers-title"
           >
             <div
-              className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+              className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-4xl w-full max-h-[90dvh] overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
@@ -646,12 +577,14 @@ export function MarketingOverviewPage({
                   {allItems.length} media buyer{allItems.length !== 1 ? 's' : ''}
                 </p>
               </div>
-              <div className="flex-1 overflow-auto p-4">
+              <div className="flex-1 min-h-0 overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
                   {pageItems.map((item) =>
-                    item.type === 'leaderboard'
-                      ? renderMediaBuyerLeaderboardCard(item.data, balancesList)
-                      : renderMediaBuyerBalanceCard(item.data)
+                    item.type === 'leaderboard' ? (
+                      <div key={item.data.mediaBuyerId}>{renderMediaBuyerLeaderboardCard(item.data, balancesList)}</div>
+                    ) : (
+                      <MediaBuyerBalanceCard key={item.data.userId} row={item.data} />
+                    )
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-surface-100 dark:border-surface-800">

@@ -1,6 +1,7 @@
 import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 
@@ -27,7 +28,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
             {getGreeting()}, {firstName}
@@ -36,7 +37,10 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
             {getRoleDescription(role)}
           </p>
         </div>
-        <DateFilterBar startDate={dateFilters.startDate} endDate={dateFilters.endDate} periodAllTime={dateFilters.periodAllTime ?? false} />
+        <div className="flex flex-wrap items-center gap-2">
+          <PageRefreshButton />
+          <DateFilterBar startDate={dateFilters.startDate} endDate={dateFilters.endDate} periodAllTime={dateFilters.periodAllTime ?? false} />
+        </div>
       </div>
 
       {/* Missing role: minimal welcome (safer than defaulting to SuperAdmin) */}

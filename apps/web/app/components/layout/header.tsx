@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Form, useNavigate } from '@remix-run/react';
+import { Form, Link, useNavigate } from '@remix-run/react';
 import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -157,9 +157,9 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
           : 'lg:left-[var(--sidebar-width)]'
       }`}
     >
-      {/* Left: mobile menu + search */}
+      {/* Left: mobile menu + logo (mobile) + search */}
       <div className="flex items-center gap-3 flex-1 max-w-lg">
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — before logo */}
         <button
           onClick={onMobileMenuToggle}
           className="lg:hidden p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
@@ -168,6 +168,18 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
           </svg>
         </button>
+        {/* Logo — mobile only, after menu bar */}
+        <Link
+          to="/admin"
+          className="lg:hidden flex items-center shrink-0"
+          aria-label="Yannis home"
+        >
+          <img
+            src={darkMode ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
+            alt="Yannis"
+            className="h-[1.575rem] w-auto max-w-[108px] object-contain"
+          />
+        </Link>
 
         {/* Search trigger */}
         <button
@@ -383,7 +395,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                           role="dialog"
                           aria-modal="true"
                           aria-labelledby="notification-detail-title"
-                          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[111] w-full max-w-md max-h-[90vh] flex flex-col bg-white dark:bg-surface-800 rounded-xl shadow-xl border border-surface-200 dark:border-surface-700 mx-4 animate-fade-in"
+                          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[111] w-full max-w-md max-h-[90dvh] flex flex-col bg-white dark:bg-surface-800 rounded-xl shadow-xl border border-surface-200 dark:border-surface-700 mx-4 animate-fade-in"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-start justify-between gap-3 p-5 pb-0 flex-shrink-0">
@@ -413,7 +425,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                               {formatNotificationDate(selectedNotification.createdAt)}
                             </p>
                           </div>
-                          <div className="flex flex-wrap gap-2 p-5 pt-3 border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
+                          <div className="flex flex-wrap gap-2 p-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
                             {(() => {
                               const action = getNotificationAction(selectedNotification);
                               return action ? (

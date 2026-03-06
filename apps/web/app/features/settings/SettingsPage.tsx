@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { PageNotification } from '~/components/ui/page-notification';
 import { Tabs } from '~/components/ui/tabs';
 import { ROLE_LABELS } from './types';
 
@@ -60,6 +61,13 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   }, [notificationEmailConfig]);
 
   const actionData = fetcher.data as { error?: string; success?: boolean; message?: string } | undefined;
+  const [dismissedError, setDismissedError] = useState(false);
+  const [dismissedSuccess, setDismissedSuccess] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+    if (actionData?.success) setDismissedSuccess(false);
+  }, [actionData?.error, actionData?.success]);
 
   // Derive feature flag states from system settings
   const strictSetting = systemSettings.find((s) => s.key === 'STRICT_DATA_MODE');
@@ -107,15 +115,21 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
         }))}
       />
 
-      {actionData?.error && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionData.error}</p>
-        </div>
+      {actionData?.error && !dismissedError && (
+        <PageNotification
+          variant="error"
+          message={actionData.error}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
+        />
       )}
-      {actionData?.success && (
-        <div className="rounded-lg bg-success-50 dark:bg-success-700/20 border border-success-200 dark:border-success-700/50 px-4 py-3">
-          <p className="text-sm text-success-700 dark:text-success-500">{actionData.message}</p>
-        </div>
+      {actionData?.success && !dismissedSuccess && (
+        <PageNotification
+          variant="success"
+          message={actionData.message ?? 'Settings saved.'}
+          durationMs={5000}
+          onDismiss={() => setDismissedSuccess(true)}
+        />
       )}
 
       {/* Profile Tab */}

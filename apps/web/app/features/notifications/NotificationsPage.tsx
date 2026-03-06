@@ -162,7 +162,7 @@ export function NotificationsPage({
             role="dialog"
             aria-modal="true"
             aria-labelledby="notification-detail-title"
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[201] w-full max-w-md max-h-[90vh] flex flex-col bg-white dark:bg-surface-800 rounded-xl shadow-xl border border-surface-200 dark:border-surface-700 animate-fade-in mx-4"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[201] w-full max-w-md max-h-[90dvh] flex flex-col bg-white dark:bg-surface-800 rounded-xl shadow-xl border border-surface-200 dark:border-surface-700 animate-fade-in mx-4"
           >
             <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3 flex-shrink-0">
               <h2 id="notification-detail-title" className="text-lg font-semibold text-surface-900 dark:text-white flex-1 min-w-0">
@@ -191,7 +191,7 @@ export function NotificationsPage({
                 {formatNotificationDate(detailNotification.createdAt)}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 px-5 pt-3 pb-5 border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2 px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
               {action && (
                 <Link
                   to={action.link}

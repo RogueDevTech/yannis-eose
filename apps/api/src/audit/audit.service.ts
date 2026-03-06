@@ -59,10 +59,36 @@ export interface FieldDiff {
 
 @Injectable()
 export class AuditService {
+  private existingHistoryTables: Set<string> | null = null;
+
   constructor(
     @Inject(PG_CLIENT) private readonly sql: ReturnType<typeof postgres>,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
+
+  /**
+   * Discover which _history tables actually exist in the database.
+   * Cached after first call for the lifetime of the service instance.
+   */
+  private async getExistingHistoryTables(): Promise<Set<string>> {
+    if (this.existingHistoryTables) return this.existingHistoryTables;
+
+    const rows = await this.sql`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name LIKE '%_history'
+    `;
+    const existing = new Set<string>();
+    for (const row of rows) {
+      const histName = (row as Record<string, unknown>).table_name as string;
+      // Strip _history suffix to get the base table name
+      const baseName = histName.replace(/_history$/, '');
+      if ((AUDITABLE_TABLES as readonly string[]).includes(baseName)) {
+        existing.add(baseName);
+      }
+    }
+    this.existingHistoryTables = existing;
+    return existing;
+  }
 
   /**
    * Resolve a list of user IDs to a map of id → { name, role }.
@@ -100,6 +126,11 @@ export class AuditService {
       });
     }
 
+    const existingTables = await this.getExistingHistoryTables();
+    if (!existingTables.has(tableName)) {
+      return { rows: [], total: 0 };
+    }
+
     const historyTable = `${tableName}_history`;
     const offset = (page - 1) * limit;
 
@@ -134,12 +165,18 @@ export class AuditService {
       const { tableName, actorId, startDate, endDate, page = 1, limit = 20 } = filters;
       const offset = (page - 1) * limit;
 
-      // Determine which tables to query
+      // Determine which tables to query — only those with existing _history tables
+      const existingTables = await this.getExistingHistoryTables();
+
       const tables: AuditableTable[] = tableName
         ? isAuditableTable(tableName)
-          ? [tableName]
+          ? existingTables.has(tableName) ? [tableName] : []
           : (() => { throw new TRPCError({ code: 'BAD_REQUEST', message: `Table '${tableName}' is not auditable` }); })()
-        : [...AUDITABLE_TABLES];
+        : AUDITABLE_TABLES.filter((t) => existingTables.has(t));
+
+      if (tables.length === 0) {
+        return { rows: [], total: 0 };
+      }
 
       // Build UNION ALL query across selected history tables
       const unionParts: string[] = [];
@@ -238,6 +275,11 @@ export class AuditService {
       });
     }
 
+    const existingTables = await this.getExistingHistoryTables();
+    if (!existingTables.has(tableName)) {
+      return null;
+    }
+
     const historyTable = `${tableName}_history`;
 
     // Find the version that was active at the given timestamp
@@ -290,6 +332,14 @@ export class AuditService {
       });
     }
 
+    const existingTables = await this.getExistingHistoryTables();
+    if (!existingTables.has(tableName)) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: `History table for '${tableName}' does not exist`,
+      });
+    }
+
     const historyTable = `${tableName}_history`;
 
     // Fetch both versions
@@ -335,8 +385,9 @@ export class AuditService {
   /**
    * Get the list of auditable table names (for the UI dropdown).
    */
-  getAuditableTables(): string[] {
-    return [...AUDITABLE_TABLES];
+  async getAuditableTables(): Promise<string[]> {
+    const existing = await this.getExistingHistoryTables();
+    return AUDITABLE_TABLES.filter((t) => existing.has(t));
   }
 
   // ── Private helpers ──────────────────────────────────────────

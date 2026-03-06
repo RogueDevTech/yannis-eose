@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from '@remix-run/react';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import type { Product } from './types';
 import { PRODUCT_STATUS_COLORS } from './types';
 import { ProductViewModal } from './ProductViewModal';
@@ -91,19 +92,22 @@ export function ProductsListPage({ products, total, canEditProduct = false }: Pr
   return (
     <div className="space-y-4">
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Products</h1>
           <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
             Manage your product catalog and bundle offers
           </p>
         </div>
-        <Link to="/admin/products/new" className="btn-primary">
-          <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Add Product
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <PageRefreshButton />
+          <Link to="/admin/products/new" className="btn-primary">
+            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add Product
+          </Link>
+        </div>
       </div>
 
       {/* Stats */}

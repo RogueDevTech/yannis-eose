@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast } from '~/components/ui/toast';
-import { DismissibleAlert } from '~/components/ui/dismissible-alert';
 import { Button } from '~/components/ui/button';
+import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -529,7 +529,7 @@ function InCallOverlay({
   const isActive = callStatus === 'INITIATED' || callStatus === 'RINGING' || callStatus === 'IN_PROGRESS';
 
   return (
-    <div className="rounded-xl bg-surface-900 dark:bg-surface-950 p-4 sm:p-5 text-white animate-fade-in w-full max-w-sm mx-auto max-h-[90vh] overflow-y-auto">
+    <div className="rounded-xl bg-surface-900 dark:bg-surface-950 p-4 sm:p-5 text-white animate-fade-in w-full max-w-sm mx-auto max-h-[90dvh] overflow-y-auto">
       {/* Status + pulsing dot */}
       <div className="flex items-center justify-center gap-2 mb-3">
         {isActive && (
@@ -759,7 +759,7 @@ export function OrderDetailPage({
   const [assignToId, setAssignToId] = useState('');
   const [callCustomerModalOpen, setCallCustomerModalOpen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [dismissedMessage, setDismissedMessage] = useState<string | null>(null);
+  const [dismissedError, setDismissedError] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState('');
   const [scheduleDelayMinutes, setScheduleDelayMinutes] = useState(120);
@@ -772,14 +772,33 @@ export function OrderDetailPage({
   const callInitiated = (fetcher.data as { callInitiated?: boolean })?.callInitiated;
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
   useFetcherToast(scheduleFetcher.data, { successMessage: 'Callback scheduled' });
+
+  useEffect(() => {
+    if (actionError) setDismissedError(false);
+  }, [actionError]);
   useFetcherToast(adjustItemsFetcher.data, { successMessage: 'Order items updated' });
 
   // When user submits again, clear dismissed so the next response error will show
   useEffect(() => {
-    if (fetcher.state === 'submitting') setDismissedMessage(null);
+    if (fetcher.state === 'submitting') setDismissedError(false);
   }, [fetcher.state]);
 
-  const showActionError = actionError && actionError !== dismissedMessage;
+  // When call customer modal opens and order is not yet engaged, transition to CS_ENGAGED so user only clicks once
+  useEffect(() => {
+    if (
+      callCustomerModalOpen &&
+      (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') &&
+      canTransitionTo('CS_ENGAGED') &&
+      fetcher.state === 'idle'
+    ) {
+      fetcher.submit(
+        { intent: 'transition', newStatus: 'CS_ENGAGED' },
+        { method: 'post' },
+      );
+    }
+  }, [callCustomerModalOpen, order.status, fetcher.state]);
+
+  const showActionError = actionError && !dismissedError;
 
   const isAssignedToMe = order.assignedCsId === userId;
   const isCSOrHoS = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'].includes(userRole);
@@ -946,11 +965,11 @@ export function OrderDetailPage({
       </div>
 
       {showActionError && actionError && (
-        <DismissibleAlert
+        <PageNotification
+          variant="error"
           message={actionError}
-          variant="danger"
-          durationMs={6000}
-          onDismiss={() => setDismissedMessage(actionError ?? null)}
+          durationMs={5000}
+          onDismiss={() => setDismissedError(true)}
         />
       )}
 
@@ -1114,6 +1133,7 @@ export function OrderDetailPage({
                   </div>
                 )}
                 <div className={`space-y-2 ${!canPerformCSActionsOnOrder ? 'pointer-events-none opacity-60' : ''}`}>
+                  {/* Adjust order items — always first */}
                   <Button
                     type="button"
                     variant="secondary"
@@ -1133,120 +1153,99 @@ export function OrderDetailPage({
                   >
                     Adjust order items
                   </Button>
-                  {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && (
-                    <>
-                      {!voipEnabled && canTransitionTo('CS_ENGAGED') && (
-                        <fetcher.Form method="post">
-                          <input type="hidden" name="intent" value="transition" />
-                          <input type="hidden" name="newStatus" value="CS_ENGAGED" />
-                          <Button
-                            type="submit"
-                            variant="primary"
-                            className="w-full"
-                            disabled={fetcher.state === 'submitting' || !canPerformCSActionsOnOrder}
-                            loading={fetcher.state === 'submitting'}
-                            loadingText="Starting..."
-                          >
-                            Call customer
-                          </Button>
-                        </fetcher.Form>
-                      )}
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
-                        onClick={() => {
-                          setCancelModalOpen(true);
-                          setCancelReason('Customer not picking');
-                        }}
-                        disabled={fetcher.state === 'submitting' || !canTransitionTo('CANCELLED')}
-                      >
-                        Delete order
-                      </Button>
-                    </>
+
+                  {/* Confirm order — CS_ENGAGED only */}
+                  {order.status === 'CS_ENGAGED' && canConfirm && canTransitionTo('CONFIRMED') && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => setConfirmModalOpen(true)}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Confirm order
+                    </Button>
                   )}
-                  {order.status === 'CS_ENGAGED' && (
-                    <>
-                      {canConfirm && canTransitionTo('CONFIRMED') && (
-                        <Button
-                          type="button"
-                          variant="primary"
-                          className="w-full"
-                          onClick={() => setConfirmModalOpen(true)}
-                          disabled={fetcher.state === 'submitting'}
-                        >
-                          Confirm order
-                        </Button>
-                      )}
-                      {!voipEnabled && (
-                        <div className="space-y-2">
-                          {!canConfirm && (
-                            <p className="text-xs text-warning-600 dark:text-warning-400 text-center">
-                              Call the customer manually, then confirm the order.
-                            </p>
-                          )}
-                          <Button
-                            type="button"
-                            variant={canConfirm ? 'secondary' : 'primary'}
-                            className="w-full"
-                            onClick={() => setCallCustomerModalOpen(true)}
-                          >
-                            Call customer
-                          </Button>
-                        </div>
+
+                  {/* Call customer + helper — one button opens modal; transition to CS_ENGAGED runs when modal opens if needed (VOIP off) */}
+                  {!voipEnabled &&
+                  (((order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && canTransitionTo('CS_ENGAGED')) ||
+                    order.status === 'CS_ENGAGED') ? (
+                    <div className="space-y-2">
+                      {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || !canConfirm) && (
+                        <p className="text-xs text-warning-600 dark:text-warning-400 text-center">
+                          Call the customer manually, then confirm the order.
+                        </p>
                       )}
                       <Button
                         type="button"
-                        variant="secondary"
-                        className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
-                        onClick={() => {
-                          setCancelModalOpen(true);
-                          setCancelReason('Customer not picking');
-                        }}
-                        disabled={fetcher.state === 'submitting' || !canTransitionTo('CANCELLED')}
+                        variant={order.status === 'CS_ENGAGED' && canConfirm ? 'secondary' : 'primary'}
+                        className="w-full"
+                        onClick={() => setCallCustomerModalOpen(true)}
+                        disabled={!canPerformCSActionsOnOrder || (order.status === 'CS_ENGAGED' && fetcher.state === 'submitting')}
+                        loading={(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && fetcher.state === 'submitting'}
+                        loadingText="Starting..."
                       >
-                        Delete order
+                        Call customer
                       </Button>
-                      {canRequestTransfer && csAgentsForAssign && csAgentsForAssign.length > 0 && (
+                    </div>
+                  ) : null}
+
+                  {/* Delete order — single button for all statuses */}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
+                    onClick={() => {
+                      setCancelModalOpen(true);
+                      setCancelReason('Customer not picking');
+                    }}
+                    disabled={fetcher.state === 'submitting' || !canTransitionTo('CANCELLED')}
+                  >
+                    Delete order
+                  </Button>
+
+                  {/* Request transfer — CS_ENGAGED only */}
+                  {order.status === 'CS_ENGAGED' && canRequestTransfer && csAgentsForAssign && csAgentsForAssign.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => setTransferModalOpen(true)}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Request transfer
+                    </Button>
+                  )}
+
+                  {/* Assign to agent — CS_ENGAGED only */}
+                  {order.status === 'CS_ENGAGED' && canAssignToCS && csAgentsForAssign && csAgentsForAssign.length > 0 && (
+                    <div className="flex gap-2">
+                      <select
+                        value={assignToId}
+                        onChange={(e) => setAssignToId(e.target.value)}
+                        className="input flex-1 min-w-0"
+                        aria-label="Assign to agent"
+                      >
+                        <option value="">Select agent...</option>
+                        {csAgentsForAssign.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </select>
+                      <fetcher.Form method="post" className="flex-shrink-0">
+                        <input type="hidden" name="intent" value="assignToCS" />
+                        <input type="hidden" name="toCsAgentId" value={assignToId} />
                         <Button
-                          type="button"
-                          variant="secondary"
-                          className="w-full"
-                          onClick={() => setTransferModalOpen(true)}
-                          disabled={fetcher.state === 'submitting'}
+                          type="submit"
+                          variant="primary"
+                          disabled={!assignToId || fetcher.state === 'submitting'}
+                          loading={fetcher.state === 'submitting'}
+                          loadingText="Assigning..."
                         >
-                          Request transfer
+                          Assign
                         </Button>
-                      )}
-                      {canAssignToCS && csAgentsForAssign && csAgentsForAssign.length > 0 && (
-                        <div className="flex gap-2">
-                          <select
-                            value={assignToId}
-                            onChange={(e) => setAssignToId(e.target.value)}
-                            className="input flex-1 min-w-0"
-                            aria-label="Assign to agent"
-                          >
-                            <option value="">Select agent...</option>
-                            {csAgentsForAssign.map((a) => (
-                              <option key={a.id} value={a.id}>{a.name}</option>
-                            ))}
-                          </select>
-                          <fetcher.Form method="post" className="flex-shrink-0">
-                            <input type="hidden" name="intent" value="assignToCS" />
-                            <input type="hidden" name="toCsAgentId" value={assignToId} />
-                            <Button
-                              type="submit"
-                              variant="primary"
-                              disabled={!assignToId || fetcher.state === 'submitting'}
-                              loading={fetcher.state === 'submitting'}
-                              loadingText="Assigning..."
-                            >
-                              Assign
-                            </Button>
-                          </fetcher.Form>
-                        </div>
-                      )}
-                    </>
+                      </fetcher.Form>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1321,7 +1320,7 @@ export function OrderDetailPage({
       {/* Confirm order modal — Confirm now or Schedule callback */}
       {confirmModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Confirm order</h3>
             <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
               Confirm the order now or schedule a callback for later.
@@ -1697,7 +1696,7 @@ export function OrderDetailPage({
           aria-modal="true"
           aria-labelledby="adjust-items-title"
         >
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-lg w-full max-h-[90dvh] overflow-hidden flex flex-col">
             <h2 id="adjust-items-title" className="text-lg font-semibold text-surface-900 dark:text-white p-6 pb-2">
               Adjust order items
             </h2>
@@ -1707,7 +1706,7 @@ export function OrderDetailPage({
             {adjustItemsData?.error && (
               <p className="text-sm text-danger-600 dark:text-danger-400 mx-6 mb-2">{adjustItemsData.error}</p>
             )}
-            <div className="flex-1 overflow-y-auto px-6 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 space-y-4">
               {editedItems.map((item, index) => (
                 <div
                   key={`${item.productId}-${index}`}
@@ -1758,7 +1757,7 @@ export function OrderDetailPage({
                 </div>
               ))}
             </div>
-            <div className="p-6 pt-4 border-t border-surface-200 dark:border-surface-700">
+            <div className="p-6 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] border-t border-surface-200 dark:border-surface-700">
               <p className="text-sm font-semibold text-surface-900 dark:text-white mb-4">
                 Total: &#8358;
                 {editedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}

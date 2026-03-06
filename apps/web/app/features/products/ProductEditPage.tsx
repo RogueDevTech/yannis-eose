@@ -4,6 +4,7 @@ import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { PageNotification } from '~/components/ui/page-notification';
 import { PRODUCT_STATUS_COLORS } from './types';
 import type { Product } from './types';
 
@@ -42,6 +43,7 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
   const errorRef = useRef<HTMLDivElement>(null);
   const formWrapperRef = useRef<HTMLDivElement>(null);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [dismissedError, setDismissedError] = useState(false);
 
   const [offers, setOffers] = useState<OfferRow[]>(() => parseOffers(product.offers));
 
@@ -53,6 +55,10 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
     }
     prevNavState.current = navigation.state;
   }, [navigation.state, showArchiveConfirm]);
+
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+  }, [actionData?.error]);
 
   useEffect(() => {
     if (actionData?.error && errorRef.current) {
@@ -109,9 +115,14 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
         </span>
       </div>
 
-      {actionData?.error && (
-        <div ref={errorRef} className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-4 py-3">
-          <p className="text-sm text-danger-700 dark:text-danger-500">{actionData.error}</p>
+      {actionData?.error && !dismissedError && (
+        <div ref={errorRef}>
+          <PageNotification
+            variant="error"
+            message={actionData.error}
+            durationMs={5000}
+            onDismiss={() => setDismissedError(true)}
+          />
         </div>
       )}
 

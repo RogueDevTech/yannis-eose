@@ -3,6 +3,7 @@ import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, Link, useActionData, useLoaderData, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { PageNotification } from '~/components/ui/page-notification';
 import { apiRequest, getCurrentUser, safeStatus } from '~/lib/api.server';
 
 export const meta: MetaFunction = () => {
@@ -66,17 +67,21 @@ export default function ResetPasswordRoute() {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
   const [showPassword, setShowPassword] = useState(false);
-  const [hideError, setHideError] = useState(false);
+  const [dismissedError, setDismissedError] = useState(false);
   const prevNavState = useRef(navigation.state);
 
   useEffect(() => {
     if (prevNavState.current === 'submitting' && navigation.state === 'idle') {
-      setHideError(false);
+      setDismissedError(false);
     }
     prevNavState.current = navigation.state;
   }, [navigation.state]);
 
-  const onInputChange = () => setHideError(true);
+  useEffect(() => {
+    if (actionData?.error) setDismissedError(false);
+  }, [actionData?.error]);
+
+  const onInputChange = () => {};
 
   const hasToken = Boolean(token);
 
@@ -167,10 +172,13 @@ export default function ResetPasswordRoute() {
                 </p>
               </div>
 
-              {actionData?.error && !hideError && (
-                <div className="rounded-lg bg-danger-700/20 lg:bg-danger-50 border border-danger-700/50 lg:border-danger-200 px-4 py-3">
-                  <p className="text-sm text-danger-400 lg:text-danger-700">{actionData.error}</p>
-                </div>
+              {actionData?.error && !dismissedError && (
+                <PageNotification
+                  variant="error"
+                  message={actionData.error}
+                  durationMs={5000}
+                  onDismiss={() => setDismissedError(true)}
+                />
               )}
 
               <Form method="post" className="space-y-4">

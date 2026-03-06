@@ -3,6 +3,7 @@ import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/rea
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Spinner } from '~/components/ui/spinner';
+import { STATUS_HEX, STATUS_LABELS, STATUS_TEXT_CLASS } from '~/features/shared/order-status';
 import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
 
 function buildChartDataUrl(filters: CEODashboardFilters): string {
@@ -21,58 +22,6 @@ function ClientOnly({ children, fallback }: { children: React.ReactNode; fallbac
   useEffect(() => setMounted(true), []);
   return mounted ? <>{children}</> : <>{fallback}</>;
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  UNPROCESSED: 'Unprocessed',
-  CS_ASSIGNED: 'CS Assigned',
-  CS_ENGAGED: 'CS Engaged',
-  CONFIRMED: 'Confirmed',
-  ALLOCATED: 'Allocated',
-  DISPATCHED: 'Dispatched',
-  IN_TRANSIT: 'In Transit',
-  DELIVERED: 'Delivered',
-  COMPLETED: 'Completed',
-  CANCELLED: 'Cancelled',
-  RETURNED: 'Returned',
-  PARTIALLY_DELIVERED: 'Partial',
-  RESTOCKED: 'Restocked',
-  WRITTEN_OFF: 'Written Off',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  UNPROCESSED: 'text-warning-600 dark:text-warning-400',
-  CS_ASSIGNED: 'text-info-600 dark:text-info-400',
-  CS_ENGAGED: 'text-info-600 dark:text-info-400',
-  CONFIRMED: 'text-brand-600 dark:text-brand-400',
-  ALLOCATED: 'text-info-600 dark:text-info-400',
-  DISPATCHED: 'text-info-600 dark:text-info-400',
-  IN_TRANSIT: 'text-brand-600 dark:text-brand-400',
-  DELIVERED: 'text-success-600 dark:text-success-400',
-  COMPLETED: 'text-success-600 dark:text-success-400',
-  CANCELLED: 'text-danger-600 dark:text-danger-400',
-  RETURNED: 'text-danger-600 dark:text-danger-400',
-  PARTIALLY_DELIVERED: 'text-warning-600 dark:text-warning-400',
-  RESTOCKED: 'text-success-600 dark:text-success-400',
-  WRITTEN_OFF: 'text-danger-600 dark:text-danger-400',
-};
-
-/** Hex colors for Recharts (status) */
-const STATUS_COLORS_HEX: Record<string, string> = {
-  UNPROCESSED: '#d97706',
-  CS_ASSIGNED: '#0284c7',
-  CS_ENGAGED: '#0284c7',
-  CONFIRMED: '#4f46e5',
-  ALLOCATED: '#0ea5e9',
-  DISPATCHED: '#38bdf8',
-  IN_TRANSIT: '#6366f1',
-  DELIVERED: '#059669',
-  COMPLETED: '#10b981',
-  CANCELLED: '#dc2626',
-  RETURNED: '#ef4444',
-  PARTIALLY_DELIVERED: '#f59e0b',
-  RESTOCKED: '#34d399',
-  WRITTEN_OFF: '#b91c1c',
-};
 
 /** Hex colors for cost breakdown donut */
 const COST_COLORS_HEX = ['#dc2626', '#ea580c', '#d97706', '#ca8a04', '#65a30d', '#b91c1c'] as const;
@@ -170,15 +119,15 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex items-center justify-between gap-4">
+      {/* Page header: title and subtitle first, then filters/actions below */}
+      <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Executive Overview</h1>
           <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
             Real-time business intelligence across all departments.
           </p>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => setShowChartView((v) => !v)}
@@ -504,7 +453,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                           .map(([status, value]) => ({
                             name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
                             value,
-                            fill: STATUS_COLORS_HEX[status] ?? '#64748b',
+                            fill: STATUS_HEX[status] ?? '#64748b',
                           }))
                       : [{ name: 'No orders', value: 1 }]
                   }
@@ -521,7 +470,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                         .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
                         .sort(([, a], [, b]) => b - a)
                         .map(([status]) => (
-                          <Cell key={status} fill={STATUS_COLORS_HEX[status] ?? '#64748b'} />
+                          <Cell key={status} fill={STATUS_HEX[status] ?? '#64748b'} />
                         ))
                     : [<Cell key="empty" fill="#94a3b8" />]}
                 </Pie>
@@ -542,7 +491,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
               .sort(([, a], [, b]) => b - a)
               .map(([status, count]) => (
                 <div key={status} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
-                  <p className={`text-2xl font-bold ${STATUS_COLORS[status] ?? 'text-surface-900 dark:text-white'}`}>
+                  <p className={`text-2xl font-bold ${STATUS_TEXT_CLASS[status] ?? 'text-surface-900 dark:text-white'}`}>
                     {count}
                   </p>
                   <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
@@ -759,7 +708,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                             .map(([status, value]) => ({
                               name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
                               value,
-                              fill: STATUS_COLORS_HEX[status] ?? '#64748b',
+                              fill: STATUS_HEX[status] ?? '#64748b',
                             }))
                         : [{ name: 'No orders', value: 1 }]
                     }
@@ -776,7 +725,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                           .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
                           .sort(([, a], [, b]) => b - a)
                           .map(([status]) => (
-                            <Cell key={status} fill={STATUS_COLORS_HEX[status] ?? '#64748b'} />
+                            <Cell key={status} fill={STATUS_HEX[status] ?? '#64748b'} />
                           ))
                       : [<Cell key="empty" fill="#94a3b8" />]}
                   </Pie>
