@@ -46,6 +46,8 @@ COPY --from=build /app/apps/web/build ./apps/web/build
 COPY --from=build /app/apps/web/package.json ./apps/web/package.json
 
 ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOST=0.0.0.0
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \

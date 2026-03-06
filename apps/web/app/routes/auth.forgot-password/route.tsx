@@ -55,7 +55,7 @@ export default function ForgotPasswordRoute() {
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
             <img
-              src="/assets/yannis-logo-white-bg.png"
+              src="/assets/yannis-logo1.png"
               alt="Yannis"
               className="h-14 w-auto max-w-full object-contain"
             />
@@ -71,7 +71,7 @@ export default function ForgotPasswordRoute() {
           <div className="lg:hidden text-center">
             <div className="flex items-center justify-center mb-2">
               <img
-                src="/assets/yannis-logo-white-bg.png"
+                src="/assets/yannis-logo1.png"
                 alt="Yannis"
                 className="h-10 w-auto max-w-full object-contain"
               />
