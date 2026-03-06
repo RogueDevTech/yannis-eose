@@ -25,6 +25,8 @@ services:
     environment:
       - NODE_ENV=production
       - API_URL=http://api:4444
+      - PORT=3000
+      - HOST=0.0.0.0
     ports:
       - "3000:3000"
     depends_on:
@@ -49,5 +51,5 @@ services:
       api:
         condition: service_healthy
       web:
-        condition: service_healthy
+        condition: service_started
     restart: always
