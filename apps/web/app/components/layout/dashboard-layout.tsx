@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigation } from '@remix-run/react';
 import { Sidebar, SidebarIcons, type SidebarGroup } from './sidebar';
 import { Header } from './header';
-import { BottomNav, type BottomNavItem, type BottomNavGroup } from './bottom-nav';
+import { BottomNav, BottomNavMoreModal, type BottomNavItem, type BottomNavGroup } from './bottom-nav';
 import { useSocket, useRealtimeNotifications } from '~/hooks/useSocket';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { ToastProvider } from '~/components/ui/toast';
@@ -243,16 +243,16 @@ function getBottomNavItemsForUser(user: { role: string; permissions?: string[] }
   return flat.slice(0, 5);
 }
 
-const MORE_OPEN_STORAGE_KEY = 'yannis_more_open_ts';
-const MORE_OPEN_RESTORE_MS = 2500;
+const MORE_OPEN_KEY = 'yannis_more_open_ts';
+const MORE_OPEN_TTL_MS = 600;
 
 function readMoreOpenFromStorage(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    const raw = sessionStorage.getItem(MORE_OPEN_STORAGE_KEY);
+    const raw = sessionStorage.getItem(MORE_OPEN_KEY);
     if (!raw) return false;
     const ts = parseInt(raw, 10);
-    return Number.isFinite(ts) && Date.now() - ts < MORE_OPEN_RESTORE_MS;
+    return Number.isFinite(ts) && Date.now() - ts < MORE_OPEN_TTL_MS;
   } catch {
     return false;
   }
@@ -434,21 +434,26 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
           </div>
         </div>
       </main>
-      <BottomNav
-        barItems={barItems}
-        allItems={allNavItemsForModal}
-        allGroups={allNavGroupsForModal}
-        currentPathname={location.pathname}
-        pwaInstall={canInstall ? { canInstall, install } : undefined}
-        moreOpen={moreNavOpen}
-        onMoreOpenChange={(open) => {
-          setMoreNavOpen(open);
-          try {
-            if (open) sessionStorage.setItem(MORE_OPEN_STORAGE_KEY, Date.now().toString());
-            else sessionStorage.removeItem(MORE_OPEN_STORAGE_KEY);
-          } catch {}
-        }}
-      />
+      <BottomNav barItems={barItems} allItems={allNavItemsForModal} allGroups={allNavGroupsForModal} currentPathname={location.pathname} pwaInstall={canInstall ? { canInstall, install } : undefined} moreOpen={moreNavOpen} onMoreOpenChange={(open) => {
+        try {
+          if (open) sessionStorage.setItem(MORE_OPEN_KEY, Date.now().toString());
+          else sessionStorage.removeItem(MORE_OPEN_KEY);
+        } catch {}
+        setMoreNavOpen(open);
+      }} />
+      {moreNavOpen && (
+        <BottomNavMoreModal
+          open={moreNavOpen}
+          onClose={() => {
+            try { sessionStorage.removeItem(MORE_OPEN_KEY); } catch {}
+            setMoreNavOpen(false);
+          }}
+          allItems={allNavItemsForModal}
+          allGroups={allNavGroupsForModal}
+          currentPathname={location.pathname}
+          pwaInstall={canInstall ? { canInstall, install } : undefined}
+        />
+      )}
       </div>
   );
 }

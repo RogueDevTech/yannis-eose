@@ -123,12 +123,18 @@ export function LogisticsOrdersPage({
     }
   }, [fetcher.state, fetcherResult, deliverConfirm]);
 
-  // Close edit delivery date modal on success
+  // Close Resolve order modal after request completes (success or error) so user is not stuck
   useEffect(() => {
-    if (fetcher.state === 'idle' && fetcherResult?.success && fetcherResult?.intent === 'updateDeliveryDate' && editDeliveryDateOrder) {
+    if (
+      fetcher.state === 'idle' &&
+      fetcher.data &&
+      typeof fetcher.data === 'object' &&
+      (fetcher.data as { intent?: string }).intent === 'updateDeliveryDate' &&
+      editDeliveryDateOrder
+    ) {
       setEditDeliveryDateOrder(null);
     }
-  }, [fetcher.state, fetcherResult, editDeliveryDateOrder]);
+  }, [fetcher.state, fetcher.data, editDeliveryDateOrder]);
 
   useEffect(() => {
     setSelectedStatus(statusFilter || 'CONFIRMED');
@@ -537,7 +543,7 @@ export function LogisticsOrdersPage({
                             View
                           </Button>
                         </Link>
-                        {canEditDeliveryDate && (
+                        {canEditDeliveryDate && order.status === 'CONFIRMED' && (
                           <Button
                             variant="secondary"
                             size="sm"
@@ -671,7 +677,7 @@ export function LogisticsOrdersPage({
                       View
                     </Button>
                   </Link>
-                        {canEditDeliveryDate && (
+                        {canEditDeliveryDate && order.status === 'CONFIRMED' && (
                           <Button
                             variant="secondary"
                             size="sm"

@@ -371,7 +371,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }>('/trpc/orders.update', { method: 'POST', cookie, body });
     if (!updateRes.ok) {
       const err = (updateRes.data as { error?: { message?: string } })?.error?.message ?? 'Update failed';
-      return json({ success: false, error: err }, { status: safeStatus(updateRes.status) });
+      return json({ success: false, error: err, intent: 'updateDeliveryDate' }, { status: safeStatus(updateRes.status) });
     }
     let current = updateRes.data?.result?.data;
     let status = current?.status;
@@ -389,15 +389,22 @@ export async function action({ request }: ActionFunctionArgs) {
       const data = (res.data as { result?: { data?: OrderSnapshot } })?.result?.data;
       return data ?? null;
     };
-    const transitionError = (res: { data: unknown }, fallback: string) =>
-      (res.data as { error?: { message?: string } })?.error?.message ?? fallback;
+    const transitionError = (res: { data: unknown }, fallback: string): string => {
+      const d = res.data as Record<string, unknown> | null | undefined;
+      if (!d || typeof d !== 'object') return fallback;
+      const err = d['error'] as Record<string, unknown> | undefined;
+      if (err && typeof err === 'object' && typeof err['message'] === 'string') return err['message'];
+      const msg = d['message'];
+      if (typeof msg === 'string') return msg;
+      return fallback;
+    };
 
     while (status && status !== 'DELIVERED') {
       if (status === 'CONFIRMED') {
         const locationId = user.logisticsLocationId ?? current?.logisticsLocationId;
         if (!locationId) {
           return json(
-            { success: false, error: 'Resolve from CONFIRMED requires a TPL location. Allocate the order from the order detail page first.' },
+            { success: false, error: 'Resolve from CONFIRMED requires a TPL location. Allocate the order from the order detail page first.', intent: 'updateDeliveryDate' },
             { status: 400 },
           );
         }
@@ -407,7 +414,8 @@ export async function action({ request }: ActionFunctionArgs) {
           body: { orderId, newStatus: 'ALLOCATED', metadata: { logisticsLocationId: locationId } },
         });
         if (!tr.ok) {
-          return json({ success: false, error: transitionError(tr, 'Allocation failed') }, { status: safeStatus(tr.status) });
+          const errMsg = transitionError(tr, 'Allocation failed');
+          return json({ success: false, error: errMsg, intent: 'updateDeliveryDate' }, { status: safeStatus(tr.status) });
         }
         current = await transitionResponse(tr);
         status = current?.status;
@@ -421,13 +429,13 @@ export async function action({ request }: ActionFunctionArgs) {
             { method: 'GET', cookie },
           );
           if (!ridersRes.ok) {
-            return json({ success: false, error: 'Could not load riders' }, { status: 502 });
+            return json({ success: false, error: 'Could not load riders', intent: 'updateDeliveryDate' }, { status: 502 });
           }
           const riders = (ridersRes.data as { result?: { data?: Array<{ id: string; logisticsLocationId: string | null }> } })?.result?.data ?? [];
           const locationId = current?.logisticsLocationId;
           const rider = locationId ? riders.find((r) => r.logisticsLocationId === locationId) : riders[0];
           if (!rider) {
-            return json({ success: false, error: 'No riders at this location. Add a rider before resolving.' }, { status: 400 });
+            return json({ success: false, error: 'No riders at this location. Add a rider before resolving.', intent: 'updateDeliveryDate' }, { status: 400 });
           }
           riderId = rider.id;
         }
@@ -437,7 +445,7 @@ export async function action({ request }: ActionFunctionArgs) {
           body: { orderId, newStatus: 'DISPATCHED', metadata: { riderId } },
         });
         if (!tr.ok) {
-          return json({ success: false, error: transitionError(tr, 'Dispatch failed') }, { status: safeStatus(tr.status) });
+          return json({ success: false, error: transitionError(tr, 'Dispatch failed'), intent: 'updateDeliveryDate' }, { status: safeStatus(tr.status) });
         }
         current = await transitionResponse(tr);
         status = current?.status;
@@ -450,7 +458,7 @@ export async function action({ request }: ActionFunctionArgs) {
           body: { orderId, newStatus: 'IN_TRANSIT' },
         });
         if (!tr.ok) {
-          return json({ success: false, error: transitionError(tr, 'Mark in transit failed') }, { status: safeStatus(tr.status) });
+          return json({ success: false, error: transitionError(tr, 'Mark in transit failed'), intent: 'updateDeliveryDate' }, { status: safeStatus(tr.status) });
         }
         current = await transitionResponse(tr);
         status = current?.status;
@@ -463,11 +471,11 @@ export async function action({ request }: ActionFunctionArgs) {
           body: { orderId, newStatus: 'DELIVERED', metadata: deliveryMetadata },
         });
         if (!tr.ok) {
-          return json({ success: false, error: transitionError(tr, 'Mark delivered failed') }, { status: safeStatus(tr.status) });
+          return json({ success: false, error: transitionError(tr, 'Mark delivered failed'), intent: 'updateDeliveryDate' }, { status: safeStatus(tr.status) });
         }
         return json({ success: true, intent: 'updateDeliveryDate' });
       }
-      return json({ success: false, error: `Cannot resolve order from status: ${status}` }, { status: 400 });
+      return json({ success: false, error: `Cannot resolve order from status: ${status}`, intent: 'updateDeliveryDate' }, { status: 400 });
     }
     return json({ success: true, intent: 'updateDeliveryDate' });
   }
