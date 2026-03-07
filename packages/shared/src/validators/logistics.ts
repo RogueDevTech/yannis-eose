@@ -102,6 +102,7 @@ const deliveryConfirmationMetadataSchema = z.object({
   gpsLng: z.number().min(-180).max(180).optional(),
   deliveryFeeAddOn: z.number().min(0).optional(),
   deliveryProofUrl: z.string().url().optional(),
+  deliveryDiscountAmount: z.number().min(0).optional(),
   preferredDeliveryDate: z.string().optional(),
 });
 

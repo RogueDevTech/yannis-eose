@@ -37,6 +37,8 @@ interface DashboardLayoutProps {
 
 interface NavItemDef {
   label: string;
+  /** Shown only on mobile (bottom nav + More modal). Falls back to label if not set. */
+  labelShort?: string;
   href: string;
   icon: React.ReactNode;
   permission?: string; // undefined = all authenticated users
@@ -59,7 +61,7 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'MARKETING',
     items: [
-      { label: 'Live Activities', href: '/admin/marketing/overview', icon: SidebarIcons.marketing, permission: 'marketing.teamOverview', roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'] },
+      { label: 'Live Activities', labelShort: 'Marketing', href: '/admin/marketing/overview', icon: SidebarIcons.marketing, permission: 'marketing.teamOverview', roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'] },
       { label: 'Team', href: '/admin/marketing/team', icon: SidebarIcons.marketing, permission: 'marketing.teamOverview', roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'] },
       { label: 'Marketing Orders', href: '/admin/marketing/orders', icon: SidebarIcons.orders, permission: 'marketing.orders' },
       { label: 'Funding & Ad Spend', href: '/admin/marketing/funding', icon: SidebarIcons.marketing, permission: 'marketing.read' },
@@ -70,7 +72,7 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'SALES & CS',
     items: [
-      { label: 'Live Activities', href: '/admin/cs/queue', icon: SidebarIcons.cs, permission: 'cs.teamOverview' },
+      { label: 'Live Activities', labelShort: 'Sales', href: '/admin/cs/queue', icon: SidebarIcons.cs, permission: 'cs.teamOverview' },
       { label: 'Team', href: '/admin/cs/team', icon: SidebarIcons.cs, permission: 'cs.teamOverview', roles: ['SUPER_ADMIN', 'HEAD_OF_CS'] },
       { label: 'CS Orders', href: '/admin/cs/orders', icon: SidebarIcons.orders, permission: 'orders.read' },
       { label: 'CS Leaderboard', href: '/admin/cs/leaderboard', icon: SidebarIcons.leaderboards, permission: 'cs.leaderboard' },
@@ -80,7 +82,7 @@ const navStructure: NavGroupDef[] = [
     group: 'LOGISTICS',
     items: [
       { label: 'Partners', href: '/admin/logistics/partners', icon: SidebarIcons.logistics, permission: 'logistics.read' },
-      { label: 'Logistics Orders', href: '/admin/logistics/orders', icon: SidebarIcons.orders, permission: 'logistics.read' },
+      { label: 'Logistics Orders', labelShort: 'Logistics', href: '/admin/logistics/orders', icon: SidebarIcons.orders, permission: 'logistics.read' },
       { label: 'Delivery confirmations', href: '/admin/logistics/delivery-confirmations', icon: SidebarIcons.orders, permission: 'logistics.read' },
       { label: 'Remittances', href: '/admin/logistics/remittances', icon: SidebarIcons.logistics, permission: 'logistics.write' },
     ],
@@ -142,11 +144,20 @@ function getDisplayLabel(
   return item.label;
 }
 
-function getNavGroupsForUser(user: { role: string; permissions?: string[] } | null): SidebarGroup[] {
+/** Label for mobile (bottom nav + More modal): uses labelShort when set. */
+function getDisplayLabelMobile(item: NavItemDef, user: { role: string } | null): string {
+  return item.labelShort ?? getDisplayLabel(item, user);
+}
+
+function getNavGroupsForUser(
+  user: { role: string; permissions?: string[] } | null,
+  options?: { forMobile?: boolean }
+): SidebarGroup[] {
   const result: SidebarGroup[] = [];
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const perms = user?.permissions ?? [];
   const role = user?.role ?? '';
+  const forMobile = options?.forMobile === true;
 
   const isLogisticsOnly = ['HEAD_OF_LOGISTICS', 'TPL_MANAGER'].includes(role);
   const logisticsHiddenGroups = ['Catalog', 'HR', 'Analytics', 'Finance'];
@@ -159,13 +170,15 @@ function getNavGroupsForUser(user: { role: string; permissions?: string[] } | nu
 
     const visibleItems = groupDef.items
       .filter((item) => {
+        // Disbursements: Finance → HoM only; HoM must not see this (they use Marketing → Funding).
+        if (item.href === '/admin/finance/disbursements' && role === 'HEAD_OF_MARKETING') return false;
         if (!item.permission) return true;
         if (isSuperAdmin) return true;
         if (item.roles?.includes(user?.role ?? '')) return true;
         return perms.includes(item.permission);
       })
       .map((item) => ({
-        label: getDisplayLabel(item, user),
+        label: forMobile ? getDisplayLabelMobile(item, user) : getDisplayLabel(item, user),
         href: item.href,
         icon: item.icon,
       }));
@@ -214,7 +227,7 @@ function getBottomNavItemsForUser(user: { role: string; permissions?: string[] }
         perms.includes(item.permission);
       if (allowed) {
         result.push({
-          label: getDisplayLabel(item, user),
+          label: getDisplayLabelMobile(item, user),
           href: item.href,
           icon: item.icon,
         });
@@ -222,8 +235,8 @@ function getBottomNavItemsForUser(user: { role: string; permissions?: string[] }
     }
     if (result.length > 0) return result;
   }
-  // Fallback: first 5 items from visible sidebar groups
-  const groups = getNavGroupsForUser(user);
+  // Fallback: first 5 items from visible sidebar groups (mobile labels)
+  const groups = getNavGroupsForUser(user, { forMobile: true });
   const flat: BottomNavItem[] = groups.flatMap((g) => g.items);
   return flat.slice(0, 5);
 }
@@ -323,7 +336,7 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
 
   const navGroups = getNavGroupsForUser(user);
   const bottomNavItems = getBottomNavItemsForUser(user);
-  const allNavItemsForModal: BottomNavItem[] = navGroups.flatMap((g) => g.items);
+  const allNavItemsForModal: BottomNavItem[] = getNavGroupsForUser(user, { forMobile: true }).flatMap((g) => g.items);
   const barItems = bottomNavItems.slice(0, 4);
 
   // Show a global content loader only during real route transitions

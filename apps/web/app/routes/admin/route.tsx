@@ -30,7 +30,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (!user) {
     const url = new URL(request.url);
-    const redirectTo = url.pathname === '/admin' ? '' : `?redirectTo=${url.pathname}`;
+    const destination = url.pathname + (url.search || '');
+    const redirectTo = destination ? `?redirectTo=${encodeURIComponent(destination)}` : '';
     return redirect(`/auth${redirectTo}`);
   }
 

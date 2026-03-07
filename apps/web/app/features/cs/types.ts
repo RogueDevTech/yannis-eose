@@ -47,6 +47,16 @@ export interface CSLeaderboardEntry {
   avgCallDurationSeconds: number;
 }
 
+/** Team member with optional workload, leaderboard, and idle state for CS Team overview page. */
+export interface CSTeamMemberOverview {
+  id: string;
+  name: string;
+  role: string;
+  workload?: AgentWorkload;
+  leaderboardEntry?: CSLeaderboardEntry;
+  isIdle: boolean;
+}
+
 export interface CSDashboardLoaderData {
   workloads: AgentWorkload[];
   unassignedOrders: CSOrder[];
@@ -97,10 +107,15 @@ export interface CSDashboardStreamData {
   leaderboardPeriod: 'this_month' | 'all_time';
   cartStats?: Promise<{ pending: number; abandonedLast24h: number }>;
   pendingCarts?: Promise<PendingCart[]>;
+  abandonedCarts?: Promise<PendingCart[]>;
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
   /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */
   canCreateOffline?: boolean;
   /** Products list for offline order form (when canCreateOffline). */
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+  /** Deep-link: open this tab (e.g. 'hotswap') on load. */
+  initialTab?: string;
+  /** Deep-link: pre-select this agent ID as "From" in Hot Swap (requires initialTab === 'hotswap'). */
+  initialHotSwapFrom?: string;
 }

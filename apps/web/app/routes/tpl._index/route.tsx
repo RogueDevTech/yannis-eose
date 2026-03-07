@@ -1,15 +1,9 @@
-import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { useLoaderData, useRouteLoaderData, Await } from '@remix-run/react';
+import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, defaultThisMonthRange } from '~/lib/api.server';
-import { RouteLoader } from '~/components/ui/route-loader';
-import { DeferredError } from '~/components/ui/deferred-section';
-import { DashboardPage } from '~/features/dashboard/DashboardPage';
-import type { DashboardData, DashboardLoaderData, DashboardPageData, OrdersAndCounts } from '~/features/dashboard/types';
-
-const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
-const defaultProfit: DashboardData['profit'] = { revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0, trueProfit: 0, orderCount: 0, margin: 0 };
+import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { TplDashboardPage } from '~/features/tpl-dashboard/TplDashboardPage';
+import type { TplDashboardData } from '~/features/tpl-dashboard/types';
 
 export const meta: MetaFunction = () => [
   { title: '3PL Dashboard — Yannis EOSE' },
@@ -32,77 +26,91 @@ export async function loader({ request }: LoaderFunctionArgs) {
     startDate = undefined;
     endDate = undefined;
   }
-  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime, topic: 'orders' as const };
 
-  const ordersCountsInput = JSON.stringify({ startDate, endDate });
-  const listInput = JSON.stringify({
+  const locationId = user?.role === 'TPL_MANAGER' && user?.logisticsLocationId
+    ? user.logisticsLocationId
+    : undefined;
+
+  // Build inputs
+  const countsInput: Record<string, unknown> = {};
+  if (startDate) countsInput.startDate = startDate;
+  if (endDate) countsInput.endDate = endDate;
+  if (locationId) countsInput.logisticsLocationId = locationId;
+
+  const listInput: Record<string, unknown> = {
     page: 1,
-    limit: 10,
-    ...(user?.logisticsLocationId && user.role === 'TPL_MANAGER' ? { logisticsLocationId: user.logisticsLocationId } : {}),
-  });
+    limit: 8,
+    sortBy: 'preferredDeliveryDate',
+    sortOrder: 'asc',
+    ...(startDate && { startDate }),
+    ...(endDate && { endDate }),
+  };
+  if (locationId) listInput.logisticsLocationId = locationId;
 
-  const ordersP = apiRequest<unknown>(`/trpc/orders.list?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
-  const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, { method: 'GET', cookie });
-  const countsInputExtra = user?.role === 'TPL_MANAGER' && user?.logisticsLocationId
-    ? { logisticsLocationId: user.logisticsLocationId }
+  // Start all fetches concurrently
+  const ordersPromise = apiRequest<unknown>(
+    `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(listInput))}`,
+    { method: 'GET', cookie },
+  );
+  const countsPromise = apiRequest<unknown>(
+    `/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify(countsInput))}`,
+    { method: 'GET', cookie },
+  );
+  const transfersPromise = apiRequest<unknown>(
+    '/trpc/inventory.transfers',
+    { method: 'GET', cookie },
+  );
+  const returnedPromise = apiRequest<unknown>(
+    '/trpc/inventory.returnedOrders',
+    { method: 'GET', cookie },
+  );
+
+  const [ordersRes, countsRes, transfersRes, returnedRes] = await Promise.all([
+    ordersPromise,
+    countsPromise,
+    transfersPromise,
+    returnedPromise,
+  ]);
+
+  const ordersData = ordersRes.ok
+    ? (ordersRes.data as { result?: { data?: { orders: Array<Record<string, unknown>>; pagination: { total: number } } } })?.result?.data
+    : null;
+  const countsData = countsRes.ok
+    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
     : {};
-  const countsP2 = Object.keys(countsInputExtra).length
-    ? apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify({ ...countsInputExtra, startDate, endDate }))}`, { method: 'GET', cookie })
-    : countsP;
 
-  const ordersAndCountsPromise = Promise.all([ordersP, countsP2]).then(([ordersRes, countsRes]): OrdersAndCounts => {
-    const ordersData = ordersRes.ok
-      ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
-      : null;
-    const countsData = countsRes.ok
-      ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-      : {};
-    return {
-      orderCounts: countsData,
-      totalOrders: ordersData?.pagination?.total ?? 0,
-      recentOrders: ordersData?.orders ?? [],
-    };
-  }).catch(() => ({ orderCounts: {} as Record<string, number>, totalOrders: 0, recentOrders: [] }));
+  const transfers = transfersRes.ok
+    ? (transfersRes.data as { result?: { data?: Array<{ transferStatus: string }> } })?.result?.data ?? []
+    : [];
 
-  return defer({
-    filters,
-    data: {
-      ordersAndCounts: ordersAndCountsPromise,
-      metrics: Promise.resolve(defaultMetrics),
-      profit: Promise.resolve(defaultProfit),
-      totalUsers: Promise.resolve(0),
-      totalProducts: Promise.resolve(0),
-      payoutSummary: Promise.resolve({}),
-    } satisfies DashboardLoaderData,
-  });
+  const returnedOrders = returnedRes.ok
+    ? (returnedRes.data as { result?: { data?: Array<Record<string, unknown>> } })?.result?.data ?? []
+    : [];
+
+  const inTransitTransfers = transfers.filter((t) => t.transferStatus === 'IN_TRANSIT').length;
+
+  return {
+    recentOrders: (ordersData?.orders ?? []).map((o) => ({
+      id: o.id as string,
+      customerName: o.customerName as string,
+      status: o.status as string,
+      totalAmount: o.totalAmount as string | null,
+      createdAt: o.createdAt as string,
+      preferredDeliveryDate: (o.preferredDeliveryDate as string) ?? null,
+    })),
+    orderCounts: countsData,
+    totalOrders: ordersData?.pagination?.total ?? 0,
+    inTransitTransfers,
+    returnsQueue: returnedOrders.length,
+    filters: { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime },
+  } satisfies TplDashboardData;
 }
 
 export default function TplDashboard() {
-  const loaderData = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>() as TplDashboardData;
   const parentData = useRouteLoaderData('routes/tpl') as { user: { name: string; role: string; email: string } } | undefined;
-  const role = parentData?.user?.role ?? 'TPL_MANAGER';
   const userName = parentData?.user?.name ?? 'User';
-  const { ordersAndCounts: ordersPromise } = loaderData.data;
+  usePageRefreshOnEvent(['order:status_changed', 'transfer:created', 'stock:updated']);
 
-  return (
-    <Suspense fallback={<RouteLoader />}>
-      <Await resolve={ordersPromise} errorElement={<DeferredError />}>
-        {(ordersAndCounts) => (
-          <DashboardPage
-            data={{
-              ...ordersAndCounts,
-              metrics: defaultMetrics,
-              profit: defaultProfit,
-              totalUsers: 0,
-              totalProducts: 0,
-              payoutSummary: {},
-            } as unknown as DashboardPageData}
-            role={role}
-            userName={userName}
-            filters={loaderData.filters}
-          />
-        )}
-      </Await>
-    </Suspense>
-  );
+  return <TplDashboardPage data={data} userName={userName} />;
 }

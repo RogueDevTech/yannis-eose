@@ -263,6 +263,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const deliveredQtyStr = formData.get('deliveredQuantity')?.toString();
     const returnedQtyStr = formData.get('returnedQuantity')?.toString();
     const deliveryFeeAddOnStr = formData.get('deliveryFeeAddOn')?.toString();
+    const deliveryDiscountAmountStr = formData.get('deliveryDiscountAmount')?.toString();
 
     const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString() || undefined;
 
@@ -283,6 +284,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (deliveryFeeAddOnStr) {
       const addOn = parseFloat(deliveryFeeAddOnStr);
       if (!Number.isNaN(addOn) && addOn >= 0) metadata['deliveryFeeAddOn'] = addOn;
+    }
+    if (deliveryDiscountAmountStr !== undefined && deliveryDiscountAmountStr !== '') {
+      const discount = parseFloat(deliveryDiscountAmountStr);
+      if (!Number.isNaN(discount) && discount >= 0) metadata['deliveryDiscountAmount'] = discount;
     }
 
     const res = await apiRequest<unknown>('/trpc/orders.transition', {

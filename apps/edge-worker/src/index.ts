@@ -995,7 +995,8 @@ function escapeHtml(str: string): string {
 function formatPrice(price: string): string {
   const num = parseFloat(price);
   if (isNaN(num)) return price;
-  return '\u20A6' + num.toLocaleString('en-NG');
+  const formatted = Math.abs(num).toLocaleString('en-NG');
+  return num < 0 ? `-\u20A6${formatted}` : `\u20A6${formatted}`;
 }
 
 // ── Fallback Form (no campaign data) ──────────────────────────

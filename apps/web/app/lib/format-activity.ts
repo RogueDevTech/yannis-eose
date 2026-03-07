@@ -3,10 +3,12 @@
  * Used on user detail pages where the actor is the profile user (actor omitted).
  */
 
+import { formatNaira } from '~/lib/format-amount';
+
 function formatCurrency(val: unknown): string {
   const num = Number(val);
   if (isNaN(num)) return String(val);
-  return `₦${num.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatNaira(num, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatTableName(name: string): string {

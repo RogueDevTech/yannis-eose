@@ -4,6 +4,17 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { AuthPage } from '~/features/auth/AuthPage';
 
+const ALLOWED_REDIRECT_PREFIXES = ['/admin', '/tpl', '/rider'] as const;
+
+function isAllowedRedirectPath(path: string): boolean {
+  try {
+    const decoded = decodeURIComponent(path);
+    return ALLOWED_REDIRECT_PREFIXES.some((prefix) => decoded.startsWith(prefix));
+  } catch {
+    return false;
+  }
+}
+
 export const meta: MetaFunction = () => {
   return [
     { title: 'Yannis EOSE — Login' },
@@ -12,12 +23,17 @@ export const meta: MetaFunction = () => {
 };
 
 /**
- * Loader — if already authenticated, redirect by role: TPL_MANAGER → /tpl, TPL_RIDER → /rider, others → /admin.
+ * Loader — if already authenticated, redirect by role or to redirectTo if valid.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const user = await getCurrentUser(request);
     if (user) {
+      const url = new URL(request.url);
+      const redirectTo = url.searchParams.get('redirectTo');
+      if (redirectTo && isAllowedRedirectPath(redirectTo)) {
+        return redirect(decodeURIComponent(redirectTo));
+      }
       if (user.role === 'TPL_MANAGER') return redirect('/tpl');
       if (user.role === 'TPL_RIDER') return redirect('/rider');
       return redirect('/admin');
@@ -46,13 +62,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString() ?? 'login';
 
   if (intent === 'setup') {
-    return handleSetup(formData);
+    return handleSetup(request, formData);
   }
 
-  return handleLogin(formData);
+  return handleLogin(request, formData);
 }
 
-async function handleLogin(formData: FormData) {
+async function handleLogin(request: Request, formData: FormData) {
   const email = formData.get('email')?.toString() ?? '';
   const password = formData.get('password')?.toString() ?? '';
 
@@ -90,12 +106,19 @@ async function handleLogin(formData: FormData) {
     headers.set('Set-Cookie', res.setCookie);
   }
 
-  const role = res.data?.user?.role;
-  const target = role === 'TPL_MANAGER' ? '/tpl' : role === 'TPL_RIDER' ? '/rider' : '/admin';
+  const url = new URL(request.url);
+  const redirectTo = url.searchParams.get('redirectTo');
+  let target: string;
+  if (redirectTo && isAllowedRedirectPath(redirectTo)) {
+    target = decodeURIComponent(redirectTo);
+  } else {
+    const role = res.data?.user?.role;
+    target = role === 'TPL_MANAGER' ? '/tpl' : role === 'TPL_RIDER' ? '/rider' : '/admin';
+  }
   return redirect(target, { headers });
 }
 
-async function handleSetup(formData: FormData) {
+async function handleSetup(request: Request, formData: FormData) {
   const name = formData.get('name')?.toString() ?? '';
   const email = formData.get('email')?.toString() ?? '';
   const password = formData.get('password')?.toString() ?? '';
@@ -132,7 +155,10 @@ async function handleSetup(formData: FormData) {
   if (loginRes.ok && loginRes.setCookie) {
     const headers = new Headers();
     headers.set('Set-Cookie', loginRes.setCookie);
-    return redirect('/admin', { headers });
+    const url = new URL(request.url);
+    const redirectTo = url.searchParams.get('redirectTo');
+    const target = redirectTo && isAllowedRedirectPath(redirectTo) ? decodeURIComponent(redirectTo) : '/admin';
+    return redirect(target, { headers });
   }
 
   // If auto-login fails, just redirect to login page

@@ -47,6 +47,15 @@ export const cartRouter = router({
     }),
 
   /**
+   * List ABANDONED carts in the last 24h for CS dashboard (Cart Abandonment tab).
+   */
+  listAbandoned: permissionProcedure('cart.read')
+    .input(z.object({ limit: z.number().int().min(1).max(100).default(50) }).optional())
+    .query(async ({ input }) => {
+      return getCartService().listAbandoned(input?.limit ?? 50);
+    }),
+
+  /**
    * Get cart abandonment stats for CS dashboard.
    */
   getStats: permissionProcedure('cart.read').query(async () => {

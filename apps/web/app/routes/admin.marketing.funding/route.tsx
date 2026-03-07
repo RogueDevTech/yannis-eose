@@ -154,8 +154,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const usersP = isFundingAdmin
     ? apiRequest<unknown>('/trpc/users.list', { method: 'GET', cookie })
     : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
+  const leaderboardInput: { period: 'this_month' | 'all_time'; startDate?: string; endDate?: string } = {
+    period: startDate && endDate ? 'this_month' : (periodAllTime ? 'all_time' : 'this_month'),
+    ...(startDate && { startDate }),
+    ...(endDate && { endDate }),
+  };
   const leaderboardP = apiRequest<unknown>(
-    `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify({ period: leaderboardPeriod }))}`,
+    `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
     { method: 'GET', cookie },
   ).catch(() => ({ ok: false, data: { result: { data: [] } } }));
 

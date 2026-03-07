@@ -1,14 +1,34 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useIsMobile } from '~/hooks/useIsMobile';
 
 const SCROLL_THRESHOLD = 300;
 
+/** Ease-out step: move ~12% of remaining distance per frame, min 2px so we always reach 0 */
+function nextScrollY(current: number): number {
+  const step = Math.max(current * 0.12, 2);
+  return Math.max(0, current - step);
+}
+
 export function ScrollToTopButton() {
   const isMobile = useIsMobile();
   const [visible, setVisible] = useState(false);
+  const rafIdRef = useRef<number | null>(null);
+  const isScrollingToTopRef = useRef(false);
+  const lastScrollYRef = useRef(0);
 
   const checkScroll = useCallback(() => {
-    const y = typeof window !== 'undefined' ? window.scrollY ?? document.documentElement.scrollTop : 0;
+    if (typeof window === 'undefined') return;
+    const y = window.scrollY ?? document.documentElement.scrollTop ?? 0;
+
+    // Cancel programmatic scroll-to-top if user scrolled down (scrollY increased)
+    if (isScrollingToTopRef.current && y > lastScrollYRef.current) {
+      if (rafIdRef.current != null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      isScrollingToTopRef.current = false;
+    }
+    lastScrollYRef.current = y;
     setVisible(y > SCROLL_THRESHOLD);
   }, []);
 
@@ -16,12 +36,38 @@ export function ScrollToTopButton() {
     if (!isMobile) return;
     checkScroll();
     window.addEventListener('scroll', checkScroll, { passive: true });
-    return () => window.removeEventListener('scroll', checkScroll);
+    return () => {
+      window.removeEventListener('scroll', checkScroll);
+      if (rafIdRef.current != null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      isScrollingToTopRef.current = false;
+    };
   }, [isMobile, checkScroll]);
 
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  const scrollToTop = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (rafIdRef.current != null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    isScrollingToTopRef.current = true;
+    lastScrollYRef.current = window.scrollY ?? document.documentElement.scrollTop ?? 0;
+
+    const tick = () => {
+      const current = window.scrollY ?? document.documentElement.scrollTop ?? 0;
+      if (current <= 0) {
+        isScrollingToTopRef.current = false;
+        rafIdRef.current = null;
+        return;
+      }
+      const next = nextScrollY(current);
+      window.scrollTo(0, next);
+      rafIdRef.current = requestAnimationFrame(tick);
+    };
+    rafIdRef.current = requestAnimationFrame(tick);
+  }, []);
 
   if (!isMobile) return null;
 

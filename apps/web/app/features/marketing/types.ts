@@ -22,6 +22,10 @@ export interface FundingBalanceRow {
   totalReceived: string;
   totalSpend: string;
   balance: string;
+  /** This month's confirmation rate (0–100), when loaded from team page with leaderboard */
+  confirmationRate?: number;
+  /** This month's delivery rate (0–100), when loaded from team page with leaderboard */
+  deliveryRate?: number;
 }
 
 export interface FundingRequestRecord {
@@ -54,6 +58,8 @@ export interface Metrics {
   totalOrders: number;
   deliveredOrders: number;
   deliveredRevenue: number;
+  confirmedOrders: number;
+  confirmationRate: number;
   cpa: number;
   trueRoas: number;
   deliveryRate: number;
@@ -67,6 +73,8 @@ export interface LeaderboardEntry {
   totalOrders: number;
   deliveredOrders: number;
   deliveredRevenue: number;
+  confirmedOrders: number;
+  confirmationRate: number;
   cpa: number;
   trueRoas: number;
   deliveryRate: number;

@@ -76,6 +76,8 @@ export interface CEODashboardData {
       totalOrders: number;
       deliveredOrders: number;
       deliveredRevenue: number;
+      confirmedOrders: number;
+      confirmationRate: number;
       cpa: number;
       trueRoas: number;
       deliveryRate: number;

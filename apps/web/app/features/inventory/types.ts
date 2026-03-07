@@ -60,4 +60,82 @@ export interface InventoryStreamData {
   locations: LocationOption[];
   /** When false, Stock Intake button and form are hidden (view-only). */
   canIntake?: boolean;
+  /** TPL combined view: transfers, returns, reconciliations */
+  transfers?: Transfer[];
+  returnedOrders?: ReturnedOrder[];
+  reconciliations?: Promise<Reconciliation[]> | Reconciliation[];
+  /** Locations with dispatchLocked info (for returns) */
+  locationsWithLock?: LocationWithLock[];
 }
+
+/* ── Transfer & Returns types (for combined TPL inventory view) ── */
+
+export interface Transfer {
+  id: string;
+  productId: string;
+  quantitySent: number;
+  quantityReceived: number | null;
+  fromLocationId: string;
+  toLocationId: string;
+  transferStatus: string;
+  shrinkageReason: string | null;
+  transferCost: string | null;
+  createdAt: string;
+  verifiedAt: string | null;
+}
+
+export interface ReturnedOrder {
+  id: string;
+  customerName: string;
+  status: string;
+  items: unknown;
+  logisticsLocationId: string | null;
+  deliveryNotes: string | null;
+  updatedAt: string;
+}
+
+export interface Reconciliation {
+  id: string;
+  locationId: string;
+  productId: string;
+  digitalCount: number;
+  physicalCount: number;
+  discrepancy: number;
+  reasonCode: string;
+  notes: string | null;
+  reconciliationStatus: string;
+  submittedBy: string;
+  approvedBy: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface LocationWithLock {
+  id: string;
+  name: string;
+  address: string;
+  dispatchLocked: boolean;
+  status: string;
+}
+
+export const TRANSFER_STATUS_BADGE: Record<string, string> = {
+  PENDING: 'badge',
+  IN_TRANSIT: 'badge-warning',
+  RECEIVED: 'badge-success',
+  DISPUTED: 'badge-danger',
+};
+
+export const RECON_STATUS_BADGE: Record<string, string> = {
+  PENDING: 'badge-warning',
+  APPROVED: 'badge-success',
+  REJECTED: 'badge-danger',
+};
+
+export const REASON_LABELS: Record<string, string> = {
+  DAMAGED: 'Damaged',
+  LOST: 'Lost',
+  EXPIRED: 'Expired',
+  THEFT: 'Suspected Theft',
+  COUNTING_ERROR: 'Counting Error',
+  OTHER: 'Other',
+};

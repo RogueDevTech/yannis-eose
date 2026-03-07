@@ -143,6 +143,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const returnedQtyStr = formData.get('returnedQuantity')?.toString();
     const deliveryFeeAddOnStr = formData.get('deliveryFeeAddOn')?.toString();
     const deliveryProofUrl = formData.get('deliveryProofUrl')?.toString()?.trim() || undefined;
+    const deliveryDiscountAmountStr = formData.get('deliveryDiscountAmount')?.toString();
 
     const metadata: Record<string, unknown> = {};
     if (reason) metadata['reason'] = reason;
@@ -159,6 +160,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       if (!Number.isNaN(addOn) && addOn >= 0) metadata['deliveryFeeAddOn'] = addOn;
     }
     if (deliveryProofUrl) metadata['deliveryProofUrl'] = deliveryProofUrl;
+    if (deliveryDiscountAmountStr !== undefined && deliveryDiscountAmountStr !== '') {
+      const discount = parseFloat(deliveryDiscountAmountStr);
+      if (!Number.isNaN(discount) && discount >= 0) metadata['deliveryDiscountAmount'] = discount;
+    }
 
     const isDeliveryConfirmation = newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED';
     const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN';

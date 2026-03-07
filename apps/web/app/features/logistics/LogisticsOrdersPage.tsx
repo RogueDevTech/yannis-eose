@@ -2,10 +2,14 @@ import { useState, useEffect } from 'react';
 import { Link, useFetcher, useSearchParams, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { Spinner } from '~/components/ui/spinner';
+import { FileUpload } from '~/components/ui/file-upload';
+import { S3_FOLDERS } from '~/lib/s3-upload';
 import { formatStatus } from '~/features/shared/order-status';
 import type { Order } from '~/features/orders/types';
 import type { Location } from './types';
@@ -46,6 +50,12 @@ interface LogisticsOrdersPageProps {
   pageTitle?: string;
   /** Base path for order detail links (e.g. "/tpl/orders" for TPL, "/admin/logistics/orders" for admin) */
   orderDetailBasePath?: string;
+  /** When true, allocation is only on the order detail page (e.g. 3PL); hide allocate from list and bulk */
+  allocationOnDetailOnly?: boolean;
+  /** When true, show Edit button to change preferred delivery date (e.g. TPL orders page) */
+  canEditDeliveryDate?: boolean;
+  /** Label for DISPATCHED → IN_TRANSIT button (e.g. "Mark In Transit" for TPL, default "Start Delivery") */
+  markInTransitLabel?: string;
 }
 
 export function LogisticsOrdersPage({
@@ -64,6 +74,9 @@ export function LogisticsOrdersPage({
   isTplManagerScoped = false,
   pageTitle = 'Logistics Orders',
   orderDetailBasePath = '/admin/logistics/orders',
+  allocationOnDetailOnly = false,
+  canEditDeliveryDate = false,
+  markInTransitLabel = 'Start Delivery',
 }: LogisticsOrdersPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -76,8 +89,45 @@ export function LogisticsOrdersPage({
   const [dispatchRiderId, setDispatchRiderId] = useState('');
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; errors: string[] } | null>(null);
 
+  const [deliverConfirm, setDeliverConfirm] = useState<{ orderId: string; customerName: string } | null>(null);
+  const [deliverConfirmDiscount, setDeliverConfirmDiscount] = useState('');
+  const [deliverConfirmDeliveryCost, setDeliverConfirmDeliveryCost] = useState('');
+  const [editDeliveryDateOrder, setEditDeliveryDateOrder] = useState<{
+    orderId: string;
+    customerName: string;
+    preferredDeliveryDate: string | null;
+  } | null>(null);
+
   const fetcher = useFetcher();
-  useFetcherToast(fetcher.data, { successMessage: 'Logistics action completed' });
+  const fetcherResult = fetcher.data as {
+    success?: boolean;
+    deliveryConfirmation?: boolean;
+    intent?: string;
+  } | undefined;
+  useFetcherToast(fetcher.data, {
+    successMessage:
+      fetcherResult?.intent === 'updateDeliveryDate'
+        ? 'Delivery date updated'
+        : fetcherResult?.deliveryConfirmation
+          ? 'Delivery confirmation submitted for approval'
+          : 'Logistics action completed',
+  });
+
+  // Close deliver confirm modal on success
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcherResult?.success && deliverConfirm) {
+      setDeliverConfirm(null);
+      setDeliverConfirmDiscount('');
+      setDeliverConfirmDeliveryCost('');
+    }
+  }, [fetcher.state, fetcherResult, deliverConfirm]);
+
+  // Close edit delivery date modal on success
+  useEffect(() => {
+    if (fetcher.state === 'idle' && fetcherResult?.success && fetcherResult?.intent === 'updateDeliveryDate' && editDeliveryDateOrder) {
+      setEditDeliveryDateOrder(null);
+    }
+  }, [fetcher.state, fetcherResult, editDeliveryDateOrder]);
 
   useEffect(() => {
     setSelectedStatus(statusFilter || 'CONFIRMED');
@@ -148,11 +198,13 @@ export function LogisticsOrdersPage({
   const selectedOrders = orders.filter((o) => selectedIds.has(o.id));
   const selectedConfirmed = selectedOrders.filter((o) => o.status === 'CONFIRMED');
   const selectedAllocated = selectedOrders.filter((o) => o.status === 'ALLOCATED');
+  const selectedInTransit = selectedOrders.filter((o) => o.status === 'IN_TRANSIT');
   const canBulkAllocate = selectedConfirmed.length > 0 && selectedConfirmed.length === selectedIds.size;
   const canBulkDispatch =
     selectedAllocated.length > 0 &&
     selectedAllocated.length === selectedIds.size &&
     new Set(selectedAllocated.map((o) => o.logisticsLocationId)).size === 1;
+  const canBulkMarkDelivered = selectedInTransit.length > 0 && selectedInTransit.length === selectedIds.size;
   const bulkDispatchLocationId = canBulkDispatch ? selectedAllocated[0]?.logisticsLocationId ?? null : null;
   const ridersForBulkDispatch = bulkDispatchLocationId
     ? riders.filter((r) => r.logisticsLocationId === bulkDispatchLocationId)
@@ -190,6 +242,7 @@ export function LogisticsOrdersPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <PageRefreshButton />
           <div className="flex items-center min-h-[2rem] rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 pl-2.5 pr-2 py-1">
             <DateFilterBar
               startDate={filters.startDate}
@@ -199,12 +252,6 @@ export function LogisticsOrdersPage({
           </div>
         </div>
       </div>
-
-      {isTplManagerScoped && (
-        <div className="rounded-lg border border-brand-200 dark:border-brand-700/50 bg-brand-50 dark:bg-brand-900/20 px-3 py-2 text-sm text-brand-800 dark:text-brand-200">
-          Showing orders for your location only.
-        </div>
-      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="card">
@@ -252,7 +299,7 @@ export function LogisticsOrdersPage({
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {canBulkAllocate && (
+              {canBulkAllocate && !allocationOnDetailOnly && (
                 <>
                   <select
                     value={allocateLocationId}
@@ -328,9 +375,32 @@ export function LogisticsOrdersPage({
                   </Button>
                 </>
               )}
-              {selectedIds.size > 0 && !canBulkAllocate && !canBulkDispatch && (
+              {canBulkMarkDelivered && (
+                <Button
+                  variant="success"
+                  size="sm"
+                  disabled={isSubmitting}
+                  loading={isSubmitting}
+                  loadingText="Marking delivered..."
+                  onClick={() => {
+                    fetcher.submit(
+                      {
+                        intent: 'bulkMarkDelivered',
+                        orderIds: JSON.stringify([...selectedIds]),
+                      },
+                      { method: 'post' },
+                    );
+                    setBulkResult(null);
+                  }}
+                >
+                  Mark delivered
+                </Button>
+              )}
+              {selectedIds.size > 0 && !canBulkAllocate && !canBulkDispatch && !canBulkMarkDelivered && (
                 <span className="text-xs text-surface-600 dark:text-surface-400">
-                  Select only CONFIRMED orders to bulk allocate, or only ALLOCATED orders (same location) to bulk dispatch.
+                  {allocationOnDetailOnly
+                    ? 'Open an order to allocate. Select only ALLOCATED orders (same location) to bulk dispatch, or only IN_TRANSIT to mark delivered.'
+                    : 'Select only CONFIRMED orders to bulk allocate, only ALLOCATED orders (same location) to bulk dispatch, or only IN_TRANSIT orders to mark delivered.'}
                 </span>
               )}
             </div>
@@ -459,7 +529,31 @@ export function LogisticsOrdersPage({
                             View
                           </Button>
                         </Link>
-                        {order.status === 'CONFIRMED' && (
+                        {canEditDeliveryDate && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              setEditDeliveryDateOrder({
+                                orderId: order.id,
+                                customerName: order.customerName,
+                                preferredDeliveryDate: order.preferredDeliveryDate ?? null,
+                              })
+                            }
+                          >
+                            Resolve order
+                          </Button>
+                        )}
+                        {order.status === 'IN_TRANSIT' && (
+                          <Button
+                            variant="success"
+                            size="sm"
+                            onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}
+                          >
+                            Mark Delivered
+                          </Button>
+                        )}
+                        {order.status === 'CONFIRMED' && !allocationOnDetailOnly && (
                           <fetcher.Form method="post" className="inline-flex items-center gap-1">
                             <input type="hidden" name="intent" value="allocate" />
                             <input type="hidden" name="orderId" value={order.id} />
@@ -512,6 +606,16 @@ export function LogisticsOrdersPage({
                             </Button>
                           </fetcher.Form>
                         )}
+                        {order.status === 'DISPATCHED' && (
+                          <fetcher.Form method="post" className="inline">
+                            <input type="hidden" name="intent" value="transition" />
+                            <input type="hidden" name="orderId" value={order.id} />
+                            <input type="hidden" name="newStatus" value="IN_TRANSIT" />
+                            <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting}>
+                              {markInTransitLabel}
+                            </Button>
+                          </fetcher.Form>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -559,7 +663,31 @@ export function LogisticsOrdersPage({
                       View
                     </Button>
                   </Link>
-                  {order.status === 'CONFIRMED' && (
+                  {canEditDeliveryDate && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        setEditDeliveryDateOrder({
+                          orderId: order.id,
+                          customerName: order.customerName,
+                          preferredDeliveryDate: order.preferredDeliveryDate ?? null,
+                        })
+                      }
+                    >
+                      Resolve order
+                    </Button>
+                  )}
+                  {order.status === 'IN_TRANSIT' && (
+                    <Button
+                      variant="success"
+                      size="sm"
+                      onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}
+                    >
+                      Mark Delivered
+                    </Button>
+                  )}
+                  {order.status === 'CONFIRMED' && !allocationOnDetailOnly && (
                     <fetcher.Form method="post" className="flex gap-1 flex-wrap">
                       <input type="hidden" name="intent" value="allocate" />
                       <input type="hidden" name="orderId" value={order.id} />
@@ -593,6 +721,16 @@ export function LogisticsOrdersPage({
                       </Button>
                     </fetcher.Form>
                   )}
+                  {order.status === 'DISPATCHED' && (
+                    <fetcher.Form method="post">
+                      <input type="hidden" name="intent" value="transition" />
+                      <input type="hidden" name="orderId" value={order.id} />
+                      <input type="hidden" name="newStatus" value="IN_TRANSIT" />
+                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
+                        {markInTransitLabel}
+                      </Button>
+                    </fetcher.Form>
+                  )}
                 </div>
               </div>
             );
@@ -620,6 +758,218 @@ export function LogisticsOrdersPage({
         </div>
       )}
 
+      {/* Mark Delivered confirmation modal */}
+      {deliverConfirm && (
+        <ConfirmActionModal
+          open={!!deliverConfirm}
+          onClose={() => {
+            setDeliverConfirm(null);
+            setDeliverConfirmDiscount('');
+            setDeliverConfirmDeliveryCost('');
+          }}
+          title="Mark order as delivered?"
+          description={
+            <>
+              Confirm delivery for order <strong>{deliverConfirm.orderId.slice(0, 8)}...</strong> ({deliverConfirm.customerName}).
+            </>
+          }
+          details={
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-surface-600 dark:text-surface-400">
+                Cost of delivery (₦) — optional
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={deliverConfirmDeliveryCost}
+                onChange={(e) => setDeliverConfirmDeliveryCost(e.target.value)}
+                className="input w-28 py-1.5"
+                placeholder="0"
+                disabled={fetcher.state === 'submitting'}
+              />
+              <label className="block text-xs font-medium text-surface-600 dark:text-surface-400">
+                Discount at delivery (₦) — optional
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={deliverConfirmDiscount}
+                onChange={(e) => setDeliverConfirmDiscount(e.target.value)}
+                className="input w-28 py-1.5"
+                placeholder="0"
+                disabled={fetcher.state === 'submitting'}
+              />
+            </div>
+          }
+          confirmLabel="Mark Delivered"
+          variant="warning"
+          loading={fetcher.state === 'submitting'}
+          onConfirm={() => {
+            const payload: Record<string, string> = {
+              intent: 'transition',
+              orderId: deliverConfirm.orderId,
+              newStatus: 'DELIVERED',
+            };
+            const costNum = deliverConfirmDeliveryCost.trim() !== '' ? parseFloat(deliverConfirmDeliveryCost) : NaN;
+            if (!Number.isNaN(costNum) && costNum >= 0) {
+              payload.deliveryFeeAddOn = String(costNum);
+            }
+            const discountNum = deliverConfirmDiscount.trim() !== '' ? parseFloat(deliverConfirmDiscount) : NaN;
+            if (!Number.isNaN(discountNum) && discountNum >= 0) {
+              payload.deliveryDiscountAmount = String(discountNum);
+            }
+            fetcher.submit(payload, { method: 'post' });
+          }}
+        />
+      )}
+
+      {/* Edit delivery date modal */}
+      {editDeliveryDateOrder && (
+        <EditDeliveryDateModal
+          orderId={editDeliveryDateOrder.orderId}
+          customerName={editDeliveryDateOrder.customerName}
+          initialDate={editDeliveryDateOrder.preferredDeliveryDate}
+          onClose={() => setEditDeliveryDateOrder(null)}
+          loading={fetcher.state === 'submitting'}
+          onSave={(preferredDeliveryDate, deliveryFeeAddOn, deliveryDiscountAmount, resolveReceiptUrl) => {
+            const payload: Record<string, string> = {
+              intent: 'updateDeliveryDate',
+              orderId: editDeliveryDateOrder.orderId,
+              preferredDeliveryDate,
+              resolveReceiptUrl: resolveReceiptUrl ?? '',
+            };
+            if (deliveryFeeAddOn !== undefined && !Number.isNaN(deliveryFeeAddOn) && deliveryFeeAddOn >= 0) {
+              payload.deliveryFeeAddOn = String(deliveryFeeAddOn);
+            }
+            if (deliveryDiscountAmount !== undefined && !Number.isNaN(deliveryDiscountAmount) && deliveryDiscountAmount >= 0) {
+              payload.deliveryDiscountAmount = String(deliveryDiscountAmount);
+            }
+            fetcher.submit(payload, { method: 'post' });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Edit Delivery Date Modal ───────────────────────────────────
+
+function getTodayYYYYMMDD(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function EditDeliveryDateModal({
+  orderId,
+  customerName,
+  initialDate,
+  onClose,
+  loading,
+  onSave,
+}: {
+  orderId: string;
+  customerName: string;
+  initialDate: string | null;
+  onClose: () => void;
+  loading: boolean;
+  onSave: (preferredDeliveryDate: string, deliveryFeeAddOn?: number, deliveryDiscountAmount?: number, resolveReceiptUrl?: string) => void;
+}) {
+  const [dateValue, setDateValue] = useState(initialDate ?? getTodayYYYYMMDD());
+  const [deliveryCost, setDeliveryCost] = useState('');
+  const [discount, setDiscount] = useState('');
+  const [receiptUrl, setReceiptUrl] = useState('');
+
+  const canSave = dateValue.trim() !== '' && receiptUrl.trim() !== '';
+
+  const handleSave = () => {
+    const trimmed = dateValue.trim();
+    if (!trimmed || !receiptUrl.trim()) return;
+    const costNum = deliveryCost.trim() !== '' ? parseFloat(deliveryCost) : undefined;
+    const discountNum = discount.trim() !== '' ? parseFloat(discount) : undefined;
+    onSave(
+      trimmed,
+      costNum !== undefined && !Number.isNaN(costNum) ? costNum : undefined,
+      discountNum !== undefined && !Number.isNaN(discountNum) ? discountNum : undefined,
+      receiptUrl.trim(),
+    );
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 min-h-0"
+      aria-modal="true"
+      role="dialog"
+      aria-labelledby="edit-delivery-date-title"
+    >
+      <div className="card w-full max-w-md shadow-xl bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700">
+        <div className="flex items-center justify-between pb-2 border-b border-surface-200 dark:border-surface-700">
+          <h3 id="edit-delivery-date-title" className="text-lg font-semibold text-surface-900 dark:text-white">
+            Resolve order
+          </h3>
+        </div>
+        <div className="space-y-4 pt-4">
+          <p className="text-sm text-surface-700 dark:text-surface-200">
+            Order <strong>{orderId.slice(0, 8)}...</strong> · {customerName}
+          </p>
+          <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">
+            Preferred delivery date
+          </label>
+          <input
+            type="date"
+            value={dateValue}
+            onChange={(e) => setDateValue(e.target.value)}
+            className="input w-full"
+            disabled={loading}
+          />
+          <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">
+            Cost of delivery (₦) — optional
+          </label>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={deliveryCost}
+            onChange={(e) => setDeliveryCost(e.target.value)}
+            className="input w-full"
+            placeholder="0"
+            disabled={loading}
+          />
+          <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">
+            Discount at delivery (₦) — optional
+          </label>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={discount}
+            onChange={(e) => setDiscount(e.target.value)}
+            className="input w-full"
+            placeholder="0"
+            disabled={loading}
+          />
+          <div>
+            <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">
+              Receipt <span className="text-danger-600 dark:text-danger-400">*</span>
+            </label>
+            <FileUpload
+              folder={S3_FOLDERS.RECEIPTS}
+              onUpload={setReceiptUrl}
+              accept="image/*,.pdf"
+              label="Upload receipt"
+              required
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 pt-4 mt-4 border-t border-surface-200 dark:border-surface-700">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button type="button" variant="primary" onClick={handleSave} loading={loading} disabled={!canSave}>
+            Save
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

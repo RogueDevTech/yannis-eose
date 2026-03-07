@@ -3,6 +3,7 @@ import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/rea
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Spinner } from '~/components/ui/spinner';
+import { formatNaira } from '~/lib/format-amount';
 import { STATUS_HEX, STATUS_LABELS, STATUS_TEXT_CLASS } from '~/features/shared/order-status';
 import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
 
@@ -30,7 +31,7 @@ const COST_COLORS_HEX = ['#dc2626', '#ea580c', '#d97706', '#ca8a04', '#65a30d', 
 const PIPELINE_CHART_COLORS = ['#6366f1', '#0284c7', '#4f46e5', '#0ea5e9', '#059669'] as const;
 
 function fmt(n: number): string {
-  return `\u20A6${Math.round(n).toLocaleString()}`;
+  return formatNaira(Math.round(n));
 }
 
 function pct(n: number): string {
@@ -342,13 +343,13 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             Profit Waterfall
           </h2>
           <div className="space-y-2">
-            <WaterfallRow label="Revenue" value={revenue} type="positive" />
-            <WaterfallRow label="Landed COGS" value={-costBreakdown.landedCost} type="negative" />
-            <WaterfallRow label="Delivery Fees" value={-costBreakdown.deliveryFee} type="negative" />
-            <WaterfallRow label="Ad Spend" value={-costBreakdown.adSpend} type="negative" />
-            <WaterfallRow label="Commission" value={-costBreakdown.commission} type="negative" />
-            <WaterfallRow label="Fulfillment" value={-costBreakdown.fulfillmentCost} type="negative" />
-            <WaterfallRow label="Op. Loss" value={-costBreakdown.operationalLoss} type="negative" />
+            <WaterfallRow label="Revenue" value={revenue} type="neutral" />
+            <WaterfallRow label="Landed COGS" value={-costBreakdown.landedCost} type="neutral" />
+            <WaterfallRow label="Delivery Fees" value={-costBreakdown.deliveryFee} type="neutral" />
+            <WaterfallRow label="Ad Spend" value={-costBreakdown.adSpend} type="neutral" />
+            <WaterfallRow label="Commission" value={-costBreakdown.commission} type="neutral" />
+            <WaterfallRow label="Fulfillment" value={-costBreakdown.fulfillmentCost} type="neutral" />
+            <WaterfallRow label="Op. Loss" value={-costBreakdown.operationalLoss} type="neutral" />
             <div className="pt-3 border-t-2 border-surface-300 dark:border-surface-600">
               <WaterfallRow
                 label="True Profit"
@@ -795,6 +796,8 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                     name: b.name,
                     spend: b.totalSpend,
                     orders: b.deliveredOrders,
+                    confirmed: b.confirmedOrders,
+                    confirmationRate: b.confirmationRate,
                     roas: b.trueRoas,
                   }))}
                   margin={{ top: 8, right: 24, left: 120, bottom: 8 }}
@@ -803,10 +806,20 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                   <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
                   <YAxis type="category" dataKey="name" width={112} tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={((value: number | undefined, name: string) => [
-                      name === 'roas' ? `${Number(value ?? 0).toFixed(2)}x` : name === 'spend' ? fmt(value ?? 0) : (value ?? 0),
-                      name === 'spend' ? 'Ad spend' : name === 'orders' ? 'Delivered' : 'True ROAS',
-                    ]) as never}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const p = payload[0].payload;
+                      return (
+                        <div className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 p-3 shadow-lg text-sm">
+                          <p className="font-semibold text-surface-900 dark:text-white mb-2">{p.name}</p>
+                          <p>Ad spend: {fmt(p.spend)}</p>
+                          <p>Delivered: {p.orders}</p>
+                          <p>Confirmed: {p.confirmed}</p>
+                          <p>Conf. rate: {Number(p.confirmationRate).toFixed(1)}%</p>
+                          <p>True ROAS: {Number(p.roas).toFixed(2)}x</p>
+                        </div>
+                      );
+                    }}
                     contentStyle={{ borderRadius: '8px' }}
                     cursor={{ fill: 'rgba(0,0,0,0.04)' }}
                   />
@@ -916,12 +929,12 @@ function CostRow({ label, value, total }: { label: string; value: number; total:
         <span className="text-sm text-surface-800 dark:text-surface-200">{label}</span>
         <div className="flex items-center gap-2">
           <span className="text-xs text-surface-700 dark:text-surface-300">{pctOfTotal.toFixed(0)}%</span>
-          <span className="text-sm font-medium text-danger-600 dark:text-danger-400">{fmt(value)}</span>
+          <span className="text-sm font-medium text-surface-900 dark:text-white">{fmt(value)}</span>
         </div>
       </div>
       <div className="w-full h-1.5 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
         <div
-          className="h-full bg-danger-400 dark:bg-danger-500 rounded-full transition-all duration-500"
+          className="h-full bg-surface-400 dark:bg-surface-500 rounded-full transition-all duration-500"
           style={{ width: `${Math.min(pctOfTotal, 100)}%` }}
         />
       </div>
@@ -937,13 +950,16 @@ function WaterfallRow({
 }: {
   label: string;
   value: number;
-  type: 'positive' | 'negative';
+  type: 'positive' | 'negative' | 'neutral';
   bold?: boolean;
 }) {
-  const color = type === 'positive'
-    ? 'text-success-600 dark:text-success-400'
-    : 'text-danger-600 dark:text-danger-400';
-  const prefix = value >= 0 ? '+' : '';
+  const color =
+    type === 'positive'
+      ? 'text-success-600 dark:text-success-400'
+      : type === 'negative'
+        ? 'text-danger-600 dark:text-danger-400'
+        : 'text-surface-900 dark:text-white';
+  const prefix = type !== 'neutral' && value >= 0 ? '+' : '';
 
   return (
     <div className="flex justify-between items-center">

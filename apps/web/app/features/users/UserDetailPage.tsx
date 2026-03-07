@@ -9,6 +9,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatActivityDescription } from '~/lib/format-activity';
+import { formatNaira } from '~/lib/format-amount';
 import type {
   UserDetailLoaderData,
   UserCreateProduct,
@@ -449,11 +450,13 @@ export function UserDetailPage({
                   <div className="card space-y-4">
                     <h2 className="text-base font-semibold text-surface-900 dark:text-white">Marketing Performance</h2>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                      <MetricCard label="Total Spend" value={`₦${Number(metrics.totalSpend).toLocaleString()}`} />
+                      <MetricCard label="Total Spend" value={formatNaira(Number(metrics.totalSpend))} />
                       <MetricCard label="Total Orders" value={String(metrics.totalOrders)} />
                       <MetricCard label="Delivered" value={String(metrics.deliveredOrders)} accent="success" />
-                      <MetricCard label="Revenue" value={`₦${Number(metrics.deliveredRevenue).toLocaleString()}`} accent="success" />
-                      <MetricCard label="CPA" value={`₦${Number(metrics.cpa).toLocaleString()}`} />
+                      <MetricCard label="Confirmed" value={String(metrics.confirmedOrders)} accent="success" />
+                      <MetricCard label="Revenue" value={formatNaira(Number(metrics.deliveredRevenue))} accent="success" />
+                      <MetricCard label="Conf. Rate" value={`${Number(metrics.confirmationRate).toFixed(1)}%`} />
+                      <MetricCard label="CPA" value={formatNaira(Number(metrics.cpa))} />
                       <MetricCard label="True ROAS" value={`${Number(metrics.trueRoas).toFixed(2)}x`} accent={metrics.trueRoas >= 2 ? 'success' : metrics.trueRoas >= 1 ? 'warning' : 'danger'} />
                     </div>
                   </div>
@@ -471,17 +474,17 @@ export function UserDetailPage({
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div>
                         <p className="text-xs text-surface-600 dark:text-surface-400">Total received</p>
-                        <p className="text-lg font-medium text-surface-900 dark:text-white">₦{Number(balance.totalReceived).toLocaleString()}</p>
+                        <p className="text-lg font-medium text-surface-900 dark:text-white">{formatNaira(Number(balance.totalReceived))}</p>
                       </div>
                       <div>
                         <p className="text-xs text-surface-600 dark:text-surface-400">Total spent</p>
                         <p className="text-lg font-medium text-surface-900 dark:text-white">
-                          {user.role === 'MEDIA_BUYER' ? `₦${Number(balance.totalSpend).toLocaleString()}` : '—'}
+                          {user.role === 'MEDIA_BUYER' ? formatNaira(Number(balance.totalSpend)) : '—'}
                         </p>
                       </div>
                       <div>
                         <p className="text-xs text-surface-600 dark:text-surface-400">Balance</p>
-                        <p className="text-xl font-bold text-brand-600 dark:text-brand-400">₦{Number(balance.balance).toLocaleString()}</p>
+                        <p className="text-xl font-bold text-brand-600 dark:text-brand-400">{formatNaira(Number(balance.balance))}</p>
                       </div>
                     </div>
                   </div>
@@ -544,7 +547,7 @@ export function UserDetailPage({
                             {' — '}
                             {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                           </span>
-                          <span className="font-medium text-surface-900 dark:text-surface-100">₦{Number(p.netAmount).toLocaleString()}</span>
+                          <span className="font-medium text-surface-900 dark:text-surface-100">{formatNaira(Number(p.netAmount))}</span>
                         </div>
                       ))}
                     </div>
@@ -626,7 +629,7 @@ export function UserDetailPage({
                             <OrderStatusBadge status={order.status} />
                           </td>
                           <td className="table-cell text-right text-sm font-medium text-surface-900 dark:text-surface-100">
-                            {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
+                            {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
                           </td>
                           <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
                             {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -674,11 +677,11 @@ export function UserDetailPage({
                               {' — '}
                               {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                             </td>
-                            <td className="table-cell text-right text-sm text-surface-900 dark:text-surface-100">₦{Number(p.grossAmount).toLocaleString()}</td>
+                            <td className="table-cell text-right text-sm text-surface-900 dark:text-surface-100">{formatNaira(Number(p.grossAmount))}</td>
                             <td className="table-cell text-right text-sm text-danger-600 dark:text-danger-400">
-                              {Number(p.deductions) > 0 ? `-₦${Number(p.deductions).toLocaleString()}` : '—'}
+                              {Number(p.deductions) > 0 ? formatNaira(-Number(p.deductions)) : '—'}
                             </td>
-                            <td className="table-cell text-right text-sm font-semibold text-surface-900 dark:text-surface-100">₦{Number(p.netAmount).toLocaleString()}</td>
+                            <td className="table-cell text-right text-sm font-semibold text-surface-900 dark:text-surface-100">{formatNaira(Number(p.netAmount))}</td>
                             <td className="table-cell">
                               <span className={p.status === 'PAID' ? 'badge-success' : p.status === 'PENDING' ? 'badge-warning' : 'badge'}>{p.status}</span>
                             </td>
@@ -722,7 +725,7 @@ export function UserDetailPage({
                               </span>
                             </td>
                             <td className={`table-cell text-right text-sm font-medium ${adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
-                              {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? '-' : '+'}₦{Number(adj.amount).toLocaleString()}
+                              {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? formatNaira(-Math.abs(Number(adj.amount))) : `+${formatNaira(Number(adj.amount))}`}
                             </td>
                             <td className="table-cell text-sm text-surface-700 dark:text-surface-200 max-w-[200px] truncate">{adj.reason || '—'}</td>
                             <td className="table-cell">
@@ -832,7 +835,7 @@ export function UserDetailPage({
                           <td className="table-cell">
                             <span className="badge">{a.type.replace(/_/g, ' ')}</span>
                           </td>
-                          <td className="table-cell text-right text-sm font-medium">₦{Number(a.amount).toLocaleString()}</td>
+                          <td className="table-cell text-right text-sm font-medium">{formatNaira(Number(a.amount))}</td>
                           <td className="table-cell text-sm text-surface-700 dark:text-surface-300 max-w-[200px] truncate">{a.description}</td>
                           <td className="table-cell">
                             <span className={a.status === 'APPROVED' ? 'badge-success' : a.status === 'REJECTED' ? 'badge-danger' : 'badge'}>{a.status}</span>

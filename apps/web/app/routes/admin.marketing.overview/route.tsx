@@ -20,7 +20,7 @@ function parseMetrics(res: { ok: boolean; data: unknown }): Metrics {
   const data = res.ok
     ? (res.data as { result?: { data?: Metrics } })?.result?.data
     : null;
-  return data ?? { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
+  return data ?? { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
 }
 
 function parseLeaderboard(res: { ok: boolean; data: unknown }): LeaderboardEntry[] {
@@ -85,6 +85,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
   };
 
+  const recentOrdersListInput: { limit: number; sortBy: string; sortOrder: string; startDate?: string; endDate?: string } = {
+    limit: 20,
+    sortBy: 'createdAt',
+    sortOrder: 'desc',
+    ...(startDate && { startDate }),
+    ...(endDate && { endDate }),
+  };
+
   const metricsP = apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(JSON.stringify(metricsInput))}`, { method: 'GET', cookie });
   const leaderboardP = apiRequest<unknown>(
     `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
@@ -92,7 +100,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
   const balancesP = apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie });
   const recentOrdersP = apiRequest<unknown>(
-    `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ limit: 20, sortBy: 'createdAt', sortOrder: 'desc' }))}`,
+    `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(recentOrdersListInput))}`,
     { method: 'GET', cookie },
   );
 

@@ -22,7 +22,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     apiRequest<unknown>('/trpc/products.list?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/logistics.listLocations?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' })), { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/logistics.listDeliveryRemittanceEligibleOrders', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' + encodeURIComponent(JSON.stringify({})), { method: 'GET', cookie }),
   ]);
 
   const remittancesData = remittancesRes.ok

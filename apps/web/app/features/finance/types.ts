@@ -73,9 +73,10 @@ export interface FinanceStreamData {
   totalInvoices: number;
   profit: ProfitReport;
   filters: FinancePageData['filters'];
-  invoiceSummary: Record<string, { count: number; total: string }>;
-  approvals: ApprovalRequest[];
-  totalApprovals: number;
-  pendingApprovals: number;
-  budgets: Budget[];
+  // Deferred (streamed)
+  invoiceSummary: Promise<Record<string, { count: number; total: string }>> | Record<string, { count: number; total: string }>;
+  approvals: Promise<ApprovalRequest[]> | ApprovalRequest[];
+  totalApprovals: Promise<number> | number;
+  pendingApprovals: Promise<number> | number;
+  budgets: Promise<Budget[]> | Budget[];
 }

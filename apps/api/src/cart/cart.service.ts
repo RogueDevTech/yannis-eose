@@ -230,6 +230,61 @@ export class CartService {
   }
 
   /**
+   * List ABANDONED carts in the last 24h for CS dashboard (Cart Abandonment tab).
+   * Same shape as listPending so the UI can render both.
+   */
+  async listAbandoned(limit = 50): Promise<
+    Array<{
+      id: string;
+      customerName: string;
+      customerPhoneDisplay: string;
+      productId: string;
+      productName: string | null;
+      campaignId: string;
+      campaignName: string | null;
+      offerLabel: string | null;
+      updatedAt: Date;
+    }>
+  > {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = await this.db
+      .select({
+        id: schema.cartAbandonments.id,
+        customerName: schema.cartAbandonments.customerName,
+        customerPhoneHash: schema.cartAbandonments.customerPhoneHash,
+        productId: schema.cartAbandonments.productId,
+        productName: schema.products.name,
+        campaignId: schema.cartAbandonments.campaignId,
+        campaignName: schema.campaigns.name,
+        offerLabel: schema.cartAbandonments.offerLabel,
+        updatedAt: schema.cartAbandonments.updatedAt,
+      })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(
+        and(
+          eq(schema.cartAbandonments.status, 'ABANDONED'),
+          gte(schema.cartAbandonments.updatedAt, twentyFourHoursAgo),
+        ),
+      )
+      .orderBy(desc(schema.cartAbandonments.updatedAt))
+      .limit(limit);
+
+    return rows.map((r) => ({
+      id: r.id,
+      customerName: r.customerName,
+      customerPhoneDisplay: maskPhone(r.customerPhoneHash),
+      productId: r.productId,
+      productName: r.productName ?? null,
+      campaignId: r.campaignId,
+      campaignName: r.campaignName ?? null,
+      offerLabel: r.offerLabel ?? null,
+      updatedAt: r.updatedAt ?? new Date(),
+    }));
+  }
+
+  /**
    * Get cart abandonment stats for CS dashboard.
    */
   async getStats(): Promise<{ pending: number; abandonedLast24h: number }> {

@@ -39,10 +39,11 @@ export const REDIS = Symbol('REDIS');
         }
         // Aiven and most cloud Postgres require SSL
         // Keep pool small — managed Postgres (Neon, Supabase, Aiven) often limits to 10–20 connections
+        // connect_timeout 30s: remote/cold-start DBs often need more than 10s (CONNECT_TIMEOUT otherwise)
         return postgres(connectionString, {
           max: 5,
           idle_timeout: 20,
-          connect_timeout: 10,
+          connect_timeout: 30,
           ssl: { rejectUnauthorized: false },
         });
       },

@@ -6,7 +6,6 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Spinner } from '~/components/ui/spinner';
-import { ActionDropdown, type ActionDropdownItem } from '~/components/ui/action-dropdown';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
@@ -160,7 +159,6 @@ export function OrdersListPage({
   const fetcher = useFetcher();
   const transferFetcher = useFetcher();
 
-  const [actionsDropdownOrderId, setActionsDropdownOrderId] = useState<string | null>(null);
   const [transferModalOrder, setTransferModalOrder] = useState<Order | null>(null);
   const [transferToAgentId, setTransferToAgentId] = useState<string>('');
   const [transferReason, setTransferReason] = useState<string>('');
@@ -182,58 +180,8 @@ export function OrdersListPage({
       setTransferModalOrder(null);
       setTransferToAgentId('');
       setTransferReason('');
-      setActionsDropdownOrderId(null);
     }
   }, [transferFetcher.state, transferFetcher.data]);
-
-  function getOrderActionsItems(order: Order): ActionDropdownItem[] {
-    const transferReq = pendingTransferRequests.find(
-      (req) =>
-        req.orderId === order.id &&
-        req.status === 'PENDING' &&
-        req.toCsId === currentUserId,
-    );
-
-    const items: ActionDropdownItem[] = [
-      { label: 'View', to: `/admin/orders/${order.id}` },
-    ];
-    if (transferReq) {
-      items.push(
-        {
-          label: 'Accept transfer',
-          variant: 'success',
-          onClick: () => {
-            transferFetcher.submit(
-              { intent: 'acceptTransfer', requestId: transferReq.id },
-              { method: 'post' },
-            );
-          },
-        },
-        {
-          label: 'Reject transfer',
-          variant: 'danger',
-          onClick: () => {
-            transferFetcher.submit(
-              { intent: 'rejectTransfer', requestId: transferReq.id },
-              { method: 'post' },
-            );
-          },
-        },
-      );
-    }
-    if (canTransferOrder(order)) {
-      items.push({
-        label: 'Transfer to agent...',
-        onClick: () => {
-          setTransferModalOrder(order);
-          setTransferToAgentId('');
-          setTransferReason('');
-          setActionsDropdownOrderId(null);
-        },
-      });
-    }
-    return items;
-  }
 
   // Server-side filtering via URL params; orders are already filtered by loader
   const filteredOrders = orders;
@@ -816,14 +764,65 @@ export function OrdersListPage({
                       minute: '2-digit',
                     })}
                   </td>
-                  <td className="table-cell text-center">
-                    <ActionDropdown
-                      id={order.id}
-                      trigger="actions"
-                      items={getOrderActionsItems(order)}
-                      openMenuId={actionsDropdownOrderId}
-                      setOpenMenuId={setActionsDropdownOrderId}
-                    />
+                  <td className="table-cell">
+                    <div className="flex flex-wrap items-center justify-center gap-1.5">
+                      <Link
+                        to={`/admin/orders/${order.id}`}
+                        className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                      >
+                        View
+                      </Link>
+                      {pendingTransferRequests
+                        .filter(
+                          (req) =>
+                            req.orderId === order.id &&
+                            req.status === 'PENDING' &&
+                            req.toCsId === currentUserId,
+                        )
+                        .map((req) => (
+                          <span key={req.id} className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="text-xs font-medium text-success-600 dark:text-success-400 hover:underline disabled:opacity-50"
+                              disabled={transferFetcher.state !== 'idle'}
+                              onClick={() =>
+                                transferFetcher.submit(
+                                  { intent: 'acceptTransfer', requestId: req.id },
+                                  { method: 'post' },
+                                )
+                              }
+                            >
+                              Accept
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs font-medium text-danger-600 dark:text-danger-400 hover:underline disabled:opacity-50"
+                              disabled={transferFetcher.state !== 'idle'}
+                              onClick={() =>
+                                transferFetcher.submit(
+                                  { intent: 'rejectTransfer', requestId: req.id },
+                                  { method: 'post' },
+                                )
+                              }
+                            >
+                              Reject
+                            </button>
+                          </span>
+                        ))}
+                      {canTransferOrder(order) && (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-surface-600 dark:text-surface-400 hover:underline"
+                          onClick={() => {
+                            setTransferModalOrder(order);
+                            setTransferToAgentId('');
+                            setTransferReason('');
+                          }}
+                        >
+                          Transfer
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

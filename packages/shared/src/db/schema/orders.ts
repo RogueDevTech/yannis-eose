@@ -36,6 +36,10 @@ export const orders = pgTable('orders', {
   deliveryGpsLng: numeric('delivery_gps_lng', { precision: 10, scale: 7 }),
   /** URL to screenshot from 3PL delivery app (required when marking DELIVERED in v1). */
   deliveryProofUrl: text('delivery_proof_url'),
+  /** Discount amount applied at delivery when 3PL marks DELIVERED/PARTIALLY_DELIVERED; order totalAmount is reduced by this. */
+  deliveryDiscountAmount: numeric('delivery_discount_amount', { precision: 12, scale: 2 }),
+  /** Required receipt URL when 3PL resolves order (Resolve order modal). */
+  resolveReceiptUrl: text('resolve_receipt_url'),
   parentOrderId: text('parent_order_id'),
   // Payment: method (PAY_ON_DELIVERY | PAY_ONLINE), status when online (PENDING | PAID | FAILED), Paystack reference
   paymentMethod: text('payment_method'),

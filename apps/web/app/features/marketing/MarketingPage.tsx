@@ -5,6 +5,7 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { HighCpaWarningBanner } from '~/features/marketing/HighCpaWarningBanner';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { AmountInput } from '~/components/ui/amount-input';
+import { formatNaira } from '~/lib/format-amount';
 import { Button } from '~/components/ui/button';
 import { FileUpload } from '~/components/ui/file-upload';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -137,7 +138,7 @@ export function MarketingPage({
                 </div>
                 <div>
                   <p className="text-xs text-surface-600 dark:text-surface-400">Balance</p>
-                  <p className="text-xl font-bold text-brand-600 dark:text-brand-400">{'\u20A6'}{Number(balance.balance).toLocaleString()}</p>
+                  <p className="text-xl font-bold text-brand-600 dark:text-brand-400">{formatNaira(Number(balance.balance))}</p>
                 </div>
               </div>
             </div>
@@ -236,6 +237,15 @@ export function MarketingPage({
               </p>
             </div>
             <div className="card">
+              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Confirmation Rate</p>
+              <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">
+                {m.confirmationRate.toFixed(1)}%
+              </p>
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+                Confirmed (CS scheduled) / Total Orders
+              </p>
+            </div>
+            <div className="card">
               <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Spend</p>
               <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
                 {'\u20A6'}{Math.round(m.totalSpend).toLocaleString()}
@@ -278,6 +288,14 @@ export function MarketingPage({
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-surface-800 dark:text-surface-200">Delivered Orders</span>
                       <span className="text-sm font-medium text-success-600 dark:text-success-400">{m.deliveredOrders}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Confirmed Orders</span>
+                      <span className="text-sm font-medium text-success-600 dark:text-success-400">{m.confirmedOrders}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-surface-800 dark:text-surface-200">Confirmation Rate</span>
+                      <span className="text-sm font-medium text-surface-900 dark:text-white">{m.confirmationRate.toFixed(1)}%</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-surface-800 dark:text-surface-200">Delivered Revenue</span>
@@ -354,7 +372,7 @@ export function MarketingPage({
                                   </td>
                                   <td className="table-cell text-right text-sm">{'\u20A6'}{Number(r.totalReceived).toLocaleString()}</td>
                                   <td className="table-cell text-right text-sm">{'\u20A6'}{Number(r.totalSpend).toLocaleString()}</td>
-                                  <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400">{'\u20A6'}{Number(r.balance).toLocaleString()}</td>
+                                  <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400">{formatNaira(Number(r.balance))}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -415,10 +433,12 @@ export function MarketingPage({
                           <th className="table-header text-right">Spend</th>
                           <th className="table-header text-right">Orders</th>
                           <th className="table-header text-right">Delivered</th>
+                          <th className="table-header text-right">Confirmed</th>
                           <th className="table-header text-right">Revenue</th>
                           <th className="table-header text-right">CPA</th>
                           <th className="table-header text-right">ROAS</th>
                           <th className="table-header text-right">Del. Rate</th>
+                          <th className="table-header text-right">Conf. Rate</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -436,6 +456,7 @@ export function MarketingPage({
                               <td className="table-cell text-right text-sm font-medium">{'\u20A6'}{Math.round(b.totalSpend).toLocaleString()}</td>
                               <td className="table-cell text-right text-sm">{b.totalOrders}</td>
                               <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">{b.deliveredOrders}</td>
+                              <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">{b.confirmedOrders}</td>
                               <td className="table-cell text-right text-sm font-medium">{'\u20A6'}{Math.round(b.deliveredRevenue).toLocaleString()}</td>
                               <td className="table-cell text-right">
                                 <span className={`text-sm font-medium ${isHighCpa ? 'text-danger-600 dark:text-danger-400' : 'text-surface-900 dark:text-white'}`}>
@@ -453,6 +474,7 @@ export function MarketingPage({
                                 </span>
                               </td>
                               <td className="table-cell text-right text-sm">{b.deliveryRate.toFixed(1)}%</td>
+                              <td className="table-cell text-right text-sm">{b.confirmationRate.toFixed(1)}%</td>
                             </tr>
                           );
                         })}
@@ -475,10 +497,18 @@ export function MarketingPage({
                               {b.trueRoas.toFixed(2)}x ROAS
                             </span>
                           </div>
-                          <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                             <div>
                               <span className="text-surface-700 dark:text-surface-300">Spend</span>
                               <p className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(b.totalSpend).toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <span className="text-surface-700 dark:text-surface-300">Delivered</span>
+                              <p className="font-medium text-success-600 dark:text-success-400">{b.deliveredOrders}</p>
+                            </div>
+                            <div>
+                              <span className="text-surface-700 dark:text-surface-300">Confirmed</span>
+                              <p className="font-medium text-success-600 dark:text-success-400">{b.confirmedOrders}</p>
                             </div>
                             <div>
                               <span className="text-surface-700 dark:text-surface-300">CPA</span>
@@ -489,6 +519,10 @@ export function MarketingPage({
                             <div>
                               <span className="text-surface-700 dark:text-surface-300">Del. Rate</span>
                               <p className="font-medium text-surface-900 dark:text-white">{b.deliveryRate.toFixed(1)}%</p>
+                            </div>
+                            <div>
+                              <span className="text-surface-700 dark:text-surface-300">Conf. Rate</span>
+                              <p className="font-medium text-surface-900 dark:text-white">{b.confirmationRate.toFixed(1)}%</p>
                             </div>
                           </div>
                         </div>

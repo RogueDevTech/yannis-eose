@@ -200,6 +200,16 @@ export const ordersRouter = router({
   }),
 
   /**
+   * Redistribute one agent's CS_ASSIGNED and CS_ENGAGED orders to other agents (from CS Team page).
+   * Restricted to Head of CS and SuperAdmin.
+   */
+  redistributeOrdersFromAgent: permissionProcedure('orders.reassign')
+    .input(z.object({ agentId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getOrdersService().redistributeOrdersFromAgent(input.agentId, ctx.user);
+    }),
+
+  /**
    * Distribute all UNPROCESSED (unassigned) orders to CS agents using the dispatch algorithm.
    * Manual fallback when auto-assignment on order creation did not run. Restricted to Head of CS and SuperAdmin.
    */

@@ -1,9 +1,15 @@
+import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { formatNaira } from '~/lib/format-amount';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
+
+const HIDDEN_AMOUNT = '******';
+
+type NairaFn = (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string;
 
 const KNOWN_ROLES = [
   'SUPER_ADMIN',
@@ -24,6 +30,11 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
   const firstName = userName?.split(' ')[0] ?? 'User';
   const isKnownRole = role && KNOWN_ROLES.includes(role as (typeof KNOWN_ROLES)[number]);
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
+  const [amountsHidden, setAmountsHidden] = useState(true);
+
+  /** Format naira or mask when hidden */
+  const naira = (amount: number, opts?: Parameters<typeof formatNaira>[1]) =>
+    amountsHidden ? HIDDEN_AMOUNT : formatNaira(amount, opts);
 
   return (
     <div className="space-y-6">
@@ -39,6 +50,24 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <PageRefreshButton />
+          <button
+            type="button"
+            onClick={() => setAmountsHidden((h) => !h)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 px-3 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
+            title={amountsHidden ? 'Show amounts' : 'Hide amounts'}
+          >
+            {amountsHidden ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12c1.292 4.338 5.31 7.5 10.066 7.5.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            )}
+            <span className="hidden sm:inline">{amountsHidden ? 'Show' : 'Hide'}</span>
+          </button>
           <DateFilterBar startDate={dateFilters.startDate} endDate={dateFilters.endDate} periodAllTime={dateFilters.periodAllTime ?? false} />
         </div>
       </div>
@@ -47,13 +76,13 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
       {!role && <GenericFallbackDashboard />}
 
       {/* Role-specific dashboard */}
-      {(role === 'SUPER_ADMIN') && <SuperAdminDashboard data={data} />}
+      {(role === 'SUPER_ADMIN') && <SuperAdminDashboard data={data} naira={naira} hidden={amountsHidden} />}
       {(role === 'HEAD_OF_CS' || role === 'CS_AGENT') && <CSDashboard data={data} role={role} />}
-      {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} />}
-      {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} />}
+      {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} naira={naira} hidden={amountsHidden} />}
+      {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} hidden={amountsHidden} />}
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
       {(role === 'WAREHOUSE_MANAGER') && <WarehouseDashboard data={data} />}
-      {(role === 'HR_MANAGER') && <HRDashboard data={data} />}
+      {(role === 'HR_MANAGER') && <HRDashboard data={data} naira={naira} hidden={amountsHidden} />}
 
       {/* Unknown role: generic fallback */}
       {role && !isKnownRole && <GenericFallbackDashboard />}
@@ -118,7 +147,7 @@ function GenericFallbackDashboard() {
 
 // ── SuperAdmin Dashboard ─────────────────────────────────
 
-function SuperAdminDashboard({ data }: { data: DashboardPageData }) {
+function SuperAdminDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: NairaFn; hidden: boolean }) {
   const counts = data.orderCounts as Record<string, number>;
   const unprocessed = counts['UNPROCESSED'] ?? 0;
   const confirmed = counts['CONFIRMED'] ?? 0;
@@ -128,10 +157,10 @@ function SuperAdminDashboard({ data }: { data: DashboardPageData }) {
       {/* Top KPIs — Revenue/Profit deferred, Orders/Unprocessed immediate */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <DeferredSection resolve={data.profit} skeleton="stat">
-          {(profit) => <StatCard label="Revenue" value={`₦${Math.round(profit.revenue).toLocaleString()}`} icon="revenue" />}
+          {(profit) => <StatCard label="Revenue" value={naira(Math.round(profit.revenue))} icon="revenue" />}
         </DeferredSection>
         <DeferredSection resolve={data.profit} skeleton="stat">
-          {(profit) => <StatCard label="True Profit" value={`₦${Math.round(profit.trueProfit).toLocaleString()}`} icon="profit" highlight={profit.trueProfit >= 0 ? 'success' : 'danger'} />}
+          {(profit) => <StatCard label="True Profit" value={naira(Math.round(profit.trueProfit))} icon="profit" highlight={profit.trueProfit >= 0 ? 'success' : 'danger'} />}
         </DeferredSection>
         <StatCard label="Orders" value={data.totalOrders.toString()} icon="orders" />
         <StatCard label="Unprocessed" value={unprocessed.toString()} icon="pending" highlight={unprocessed > 10 ? 'danger' : unprocessed > 0 ? 'warning' : undefined} />
@@ -206,7 +235,7 @@ function SuperAdminDashboard({ data }: { data: DashboardPageData }) {
       {/* Recent Orders + Quick Actions — immediate */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <RecentOrdersCard orders={data.recentOrders} />
+          <RecentOrdersCard orders={data.recentOrders} hidden={hidden} />
         </div>
         <QuickActionsCard role="SUPER_ADMIN" unprocessed={unprocessed} />
       </div>
@@ -281,16 +310,17 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
 
 // ── Marketing Dashboard ──────────────────────────────────
 
-function MarketingDashboard({ data, role }: { data: DashboardPageData; role: string }) {
+function MarketingDashboard({ data, role, naira, hidden }: { data: DashboardPageData; role: string; naira: NairaFn; hidden: boolean }) {
   return (
     <>
       <DeferredSection resolve={data.metrics} skeleton="stat">
         {(metrics) => (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard label="CPA" value={`₦${Math.round(metrics.cpa).toLocaleString()}`} icon="revenue" />
+            <StatCard label="CPA" value={naira(Math.round(metrics.cpa))} icon="revenue" />
             <StatCard label="True ROAS" value={`${metrics.trueRoas.toFixed(2)}x`} icon="roas" highlight={metrics.trueRoas >= 2 ? 'success' : metrics.trueRoas >= 1 ? 'warning' : 'danger'} />
             <StatCard label="Delivery Rate" value={`${metrics.deliveryRate.toFixed(1)}%`} icon="margin" highlight={metrics.deliveryRate >= 70 ? 'success' : 'warning'} />
-            <StatCard label="Total Spend" value={`₦${Math.round(metrics.totalSpend).toLocaleString()}`} icon="revenue" />
+            <StatCard label="Confirmation Rate" value={`${metrics.confirmationRate.toFixed(1)}%`} icon="margin" highlight={metrics.confirmationRate >= 70 ? 'success' : 'warning'} />
+            <StatCard label="Total Spend" value={naira(Math.round(metrics.totalSpend))} icon="revenue" />
           </div>
         )}
       </DeferredSection>
@@ -317,7 +347,9 @@ function MarketingDashboard({ data, role }: { data: DashboardPageData; role: str
               <div className="space-y-3">
                 <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Total Orders</span><span className="text-sm font-medium text-surface-900 dark:text-white">{metrics.totalOrders}</span></div>
                 <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivered Revenue</span><span className="text-sm font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(metrics.deliveredRevenue).toLocaleString()}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.confirmedOrders}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Conf. Rate</span><span className="text-sm font-medium text-surface-900 dark:text-white">{metrics.confirmationRate.toFixed(1)}%</span></div>
+                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivered Revenue</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(metrics.deliveredRevenue))}</span></div>
               </div>
             </div>
 
@@ -331,7 +363,8 @@ function MarketingDashboard({ data, role }: { data: DashboardPageData; role: str
 
 // ── Finance Dashboard ────────────────────────────────────
 
-function FinanceDashboard({ data }: { data: DashboardPageData }) {
+function FinanceDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: NairaFn; hidden: boolean }) {
+  void hidden;
   return (
     <>
       <DeferredSection resolve={data.profit} skeleton="stat">
@@ -340,26 +373,26 @@ function FinanceDashboard({ data }: { data: DashboardPageData }) {
           return (
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <StatCard label="Revenue" value={`₦${Math.round(profit.revenue).toLocaleString()}`} icon="revenue" />
-                <StatCard label="True Profit" value={`₦${Math.round(profit.trueProfit).toLocaleString()}`} icon="profit" highlight={profit.trueProfit >= 0 ? 'success' : 'danger'} />
+                <StatCard label="Revenue" value={naira(Math.round(profit.revenue))} icon="revenue" />
+                <StatCard label="True Profit" value={naira(Math.round(profit.trueProfit))} icon="profit" highlight={profit.trueProfit >= 0 ? 'success' : 'danger'} />
                 <StatCard label="Net Margin" value={`${profit.margin.toFixed(1)}%`} icon="margin" highlight={profit.margin >= 20 ? 'success' : profit.margin >= 10 ? 'warning' : 'danger'} />
-                <StatCard label="Total Costs" value={`₦${Math.round(totalCosts).toLocaleString()}`} icon="orders" highlight="danger" />
+                <StatCard label="Total Costs" value={naira(Math.round(totalCosts))} icon="orders" highlight="danger" />
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
                 <div className="card">
                   <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Breakdown</h2>
                   <div className="space-y-3">
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Landed COGS</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.landedCost).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivery Fees</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.deliveryFee).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Ad Spend</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.adSpend).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Commission</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.commission).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Fulfillment</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.fulfillmentCost).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Operational Loss</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{'\u20A6'}{Math.round(profit.operationalLoss).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Landed COGS</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.landedCost))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivery Fees</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.deliveryFee))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Ad Spend</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.adSpend))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Commission</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.commission))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Fulfillment</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.fulfillmentCost))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Operational Loss</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.operationalLoss))}</span></div>
                     <div className="pt-2 border-t border-surface-200 dark:border-surface-700 flex justify-between">
                       <span className="text-sm font-semibold text-surface-900 dark:text-white">True Profit</span>
                       <span className={`text-sm font-bold ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
-                        {'\u20A6'}{Math.round(profit.trueProfit).toLocaleString()}
+                        {naira(Math.round(profit.trueProfit))}
                       </span>
                     </div>
                   </div>
@@ -469,7 +502,8 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
 
 // ── HR Dashboard ─────────────────────────────────────────
 
-function HRDashboard({ data }: { data: DashboardPageData }) {
+function HRDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: NairaFn; hidden: boolean }) {
+  void hidden;
   return (
     <DeferredSection resolve={data.payoutSummary} skeleton="stat">
       {(summary) => {
@@ -480,9 +514,9 @@ function HRDashboard({ data }: { data: DashboardPageData }) {
         return (
           <>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard label="Draft Payouts" value={`₦${draftTotal.toLocaleString()}`} icon="pending" highlight={draftTotal > 0 ? 'warning' : undefined} />
-              <StatCard label="Approved" value={`₦${approvedTotal.toLocaleString()}`} icon="orders" />
-              <StatCard label="Paid" value={`₦${paidTotal.toLocaleString()}`} icon="profit" highlight="success" />
+              <StatCard label="Draft Payouts" value={naira(draftTotal)} icon="pending" highlight={draftTotal > 0 ? 'warning' : undefined} />
+              <StatCard label="Approved" value={naira(approvedTotal)} icon="orders" />
+              <StatCard label="Paid" value={naira(paidTotal)} icon="profit" highlight="success" />
               <DeferredSection resolve={data.totalUsers} skeleton="stat">
                 {(total) => <StatCard label="Staff" value={total.toString()} icon="users" />}
               </DeferredSection>
@@ -511,7 +545,7 @@ function HRDashboard({ data }: { data: DashboardPageData }) {
                     <div>
                       <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Pending Approval</h3>
                       <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
-                        {summary['DRAFT']?.count ?? 0} draft payouts totaling {'\u20A6'}{draftTotal.toLocaleString()} awaiting review.
+                        {summary['DRAFT']?.count ?? 0} draft payouts totaling {naira(draftTotal)} awaiting review.
                       </p>
                       <Link to="/hr/payroll" prefetch="intent" className="text-sm text-brand-500 hover:text-brand-600 font-medium mt-2 inline-block">
                         Review payouts →
@@ -530,7 +564,7 @@ function HRDashboard({ data }: { data: DashboardPageData }) {
 
 // ── Shared Components ────────────────────────────────────
 
-function RecentOrdersCard({ orders }: { orders: DashboardData['recentOrders'] }) {
+function RecentOrdersCard({ orders, hidden }: { orders: DashboardData['recentOrders']; hidden?: boolean }) {
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-4">
@@ -555,7 +589,7 @@ function RecentOrdersCard({ orders }: { orders: DashboardData['recentOrders'] })
               <div className="flex items-center gap-3 ml-3">
                 {order.totalAmount && (
                   <span className="text-sm font-medium text-surface-900 dark:text-surface-100">
-                    {'\u20A6'}{Number(order.totalAmount).toLocaleString()}
+                    {hidden ? HIDDEN_AMOUNT : formatNaira(Number(order.totalAmount))}
                   </span>
                 )}
                 <OrderStatusBadge status={order.status} />

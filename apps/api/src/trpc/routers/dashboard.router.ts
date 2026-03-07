@@ -118,7 +118,8 @@ export const dashboardRouter = router({
       }
       const safeMarketingMetrics = marketingMetrics ?? {
         totalSpend: 0, totalOrders: 0, deliveredOrders: 0,
-        deliveredRevenue: 0, cpa: 0, trueRoas: 0, deliveryRate: 0,
+        deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0,
+        cpa: 0, trueRoas: 0, deliveryRate: 0,
       };
       const safePayoutSummary = payoutSummary ?? { totalPaid: 0, totalPending: 0, staffCount: 0 };
       const safeCSWorkloads = csWorkloads ?? [];
