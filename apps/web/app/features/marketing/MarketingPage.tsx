@@ -83,6 +83,7 @@ export function MarketingPage({
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
   const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  const [fundingReceiptModal, setFundingReceiptModal] = useState<FundingRecord | null>(null);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
@@ -655,7 +656,9 @@ export function MarketingPage({
                       <td className="table-cell text-right font-medium">{'\u20A6'}{Number(f.amount).toLocaleString()}</td>
                       <td className="table-cell">
                         {f.receiptUrl ? (
-                          <a href={f.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:text-brand-600 text-sm">View</a>
+                          <Button type="button" variant="ghost" size="sm" className="text-xs text-brand-500 hover:text-brand-600" onClick={() => setFundingReceiptModal(f)}>
+                            View
+                          </Button>
                         ) : '\u2014'}
                       </td>
                       <td className="table-cell">
@@ -709,6 +712,11 @@ export function MarketingPage({
                       )}
                     </DeferredSection>
                   </p>
+                  {f.receiptUrl && (
+                    <Button type="button" variant="ghost" size="sm" className="text-brand-500 hover:text-brand-600 text-sm" onClick={() => setFundingReceiptModal(f)}>
+                      View receipt
+                    </Button>
+                  )}
                   {f.status === 'SENT' && f.receiverId === currentUserId && (
                     <div className="flex gap-2 pt-1">
                       <fetcher.Form method="post" className="inline">
@@ -772,7 +780,9 @@ export function MarketingPage({
                     </td>
                     <td className="table-cell">
                       {r.receiptUrl ? (
-                        <a href={r.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:text-brand-600 text-sm">View</a>
+                        <Button type="button" variant="ghost" size="sm" className="text-xs text-brand-500 hover:text-brand-600" onClick={() => setReceiptPreviewUrl(r.receiptUrl!)}>
+                          View
+                        </Button>
                       ) : '\u2014'}
                     </td>
                     <td className="table-cell">
@@ -803,6 +813,11 @@ export function MarketingPage({
                 </div>
                 <p className="text-sm text-surface-800 dark:text-surface-200">{'\u20A6'}{Number(r.amount).toLocaleString()}</p>
                 {r.reason && <p className="text-sm text-surface-700 dark:text-surface-300">{r.reason}</p>}
+                {r.receiptUrl && (
+                  <Button type="button" variant="ghost" size="sm" className="text-brand-500 hover:text-brand-600 text-sm" onClick={() => setReceiptPreviewUrl(r.receiptUrl!)}>
+                    View receipt
+                  </Button>
+                )}
                 {r.status === 'PENDING' && r.requesterId !== currentUserId && (
                   <div className="flex gap-2 pt-1">
                     <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => setApprovingRequestId(r.id)}>Approve</Button>
@@ -920,6 +935,60 @@ export function MarketingPage({
                 </Button>
               </div>
             </fetcher.Form>
+        </Modal>
+      )}
+
+      {/* Funding receipt modal */}
+      {fundingReceiptModal?.receiptUrl && (
+        <Modal open onClose={() => setFundingReceiptModal(null)} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
+          <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Funding receipt</h3>
+            <button type="button" onClick={() => setFundingReceiptModal(null)} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
+            <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
+              <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Amount</p>
+              <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
+                {'\u20A6'}{Number(fundingReceiptModal.amount).toLocaleString()}
+              </p>
+              <DeferredSection resolve={users} skeleton="inline">
+                {(resolvedUsers: User[]) => (
+                  <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
+                    <span>{resolvedUsers.find((u) => u.id === fundingReceiptModal.senderId)?.name ?? truncateId(fundingReceiptModal.senderId)} → {resolvedUsers.find((u) => u.id === fundingReceiptModal.receiverId)?.name ?? truncateId(fundingReceiptModal.receiverId)}</span>
+                    <span>·</span>
+                    <span>{new Date(fundingReceiptModal.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    <span>·</span>
+                    <span className={FUNDING_COLORS[fundingReceiptModal.status] ?? 'badge'}>{fundingReceiptModal.status}</span>
+                  </div>
+                )}
+              </DeferredSection>
+            </div>
+            <div className="rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50">
+              <img
+                src={fundingReceiptModal.receiptUrl}
+                alt="Funding receipt"
+                className="w-full max-h-[400px] object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                  const fallback = (e.target as HTMLImageElement).nextElementSibling;
+                  if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                }}
+              />
+              <div className="items-center justify-center gap-2 p-8 hidden">
+                <span className="text-sm text-surface-500 dark:text-surface-400">Receipt image could not be loaded</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-200 dark:border-surface-700 shrink-0 px-4 sm:px-5 pb-4">
+            <a href={fundingReceiptModal.receiptUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+              Open in new tab
+            </a>
+            <Button variant="secondary" size="sm" onClick={() => setFundingReceiptModal(null)}>Close</Button>
+          </div>
         </Modal>
       )}
 

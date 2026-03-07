@@ -68,6 +68,40 @@ function formatValue(val: unknown): string {
   return String(val);
 }
 
+// ── Twilio error formatting (call modal + event log) ──
+
+interface ParsedTwilioError {
+  code?: number;
+  message?: string;
+  more_info?: string;
+  status?: number;
+}
+
+function parseTwilioError(raw: string | undefined): ParsedTwilioError | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      ...(typeof parsed.code === 'number' && { code: parsed.code }),
+      ...(typeof parsed.message === 'string' && { message: parsed.message }),
+      ...(typeof parsed.more_info === 'string' && { more_info: parsed.more_info }),
+      ...(typeof parsed.status === 'number' && { status: parsed.status }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatTwilioErrorForLog(raw: string | undefined): string {
+  const parsed = parseTwilioError(raw);
+  if (parsed?.message != null) {
+    const codePart = parsed.code != null ? `Twilio ${parsed.code}: ` : 'Twilio: ';
+    const morePart = parsed.more_info ? ` (More info: ${parsed.more_info})` : '';
+    return codePart + parsed.message + morePart;
+  }
+  return raw != null ? `Twilio error: ${raw}` : 'Twilio error';
+}
+
 // ── Order Details field config (dynamic, show-only when value present or alwaysShow) ──
 
 function hasValue(v: unknown): boolean {
@@ -914,7 +948,7 @@ export function OrderDetailPage({
       setCallDebugLog((prev) => [
         ...prev,
         `Response received at ${new Date().toLocaleTimeString()}`,
-        `Call status: ${data.callLog?.callStatus ?? '—'}${data.twilioError ? ` | Twilio error: ${data.twilioError}` : ''}`,
+        `Call status: ${data.callLog?.callStatus ?? '—'}${data.twilioError ? ` | ${formatTwilioErrorForLog(data.twilioError)}` : ''}`,
       ]);
     }
     prevFetcherStateRef.current = fetcher.state;
@@ -1711,11 +1745,40 @@ export function OrderDetailPage({
                     </svg>
                     Start call
                   </Button>
-                  {(fetcher.data as { callLog?: { callStatus?: string }; twilioError?: string })?.twilioError && (
-                    <p className="text-sm text-danger-600 dark:text-danger-400 rounded-md bg-danger-50 dark:bg-danger-900/20 p-2">
-                      Twilio error: {(fetcher.data as { twilioError?: string }).twilioError}
-                    </p>
-                  )}
+                  {(fetcher.data as { callLog?: { callStatus?: string }; twilioError?: string })?.twilioError && (() => {
+                    const twilioError = (fetcher.data as { twilioError?: string }).twilioError;
+                    const parsed = parseTwilioError(twilioError);
+                    return (
+                      <div className="text-sm text-danger-600 dark:text-danger-400 rounded-md bg-danger-50 dark:bg-danger-900/20 p-3 space-y-2">
+                        <p className="font-semibold">Call failed</p>
+                        {parsed ? (
+                          <>
+                            {parsed.message != null && <p>{parsed.message}</p>}
+                            {parsed.code != null && (
+                              <p className="text-xs opacity-90">Error code: {parsed.code}</p>
+                            )}
+                            {parsed.more_info && (
+                              <a
+                                href={parsed.more_info}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="text-xs underline hover:no-underline"
+                              >
+                                More info
+                              </a>
+                            )}
+                            {parsed.code === 21211 && (
+                              <p className="text-xs mt-2 pt-2 border-t border-danger-200 dark:border-danger-700">
+                                Tip: Phone numbers must be in E.164 format (e.g. +2348021300202 for Nigeria).
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <p>Twilio error: {twilioError}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <p className="text-sm text-surface-600 dark:text-surface-400">
                     Status: {fetcher.state === 'submitting' ? 'Connecting...' : (fetcher.data as { callLog?: { callStatus?: string } })?.callLog?.callStatus ?? order.callLogs[0]?.callStatus ?? 'Idle'}
                   </p>

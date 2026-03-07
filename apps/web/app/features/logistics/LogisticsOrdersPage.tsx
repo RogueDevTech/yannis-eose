@@ -537,7 +537,7 @@ export function LogisticsOrdersPage({
                             View
                           </Button>
                         </Link>
-                        {canEditDeliveryDate && (order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
+                        {canEditDeliveryDate && (
                           <Button
                             variant="secondary"
                             size="sm"
@@ -671,21 +671,21 @@ export function LogisticsOrdersPage({
                       View
                     </Button>
                   </Link>
-                  {canEditDeliveryDate && (order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() =>
-                        setEditDeliveryDateOrder({
-                          orderId: order.id,
-                          customerName: order.customerName,
-                          preferredDeliveryDate: order.preferredDeliveryDate ?? null,
-                        })
-                      }
-                    >
-                      Resolve order
-                    </Button>
-                  )}
+                        {canEditDeliveryDate && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              setEditDeliveryDateOrder({
+                                orderId: order.id,
+                                customerName: order.customerName,
+                                preferredDeliveryDate: order.preferredDeliveryDate ?? null,
+                              })
+                            }
+                          >
+                            Resolve order
+                          </Button>
+                        )}
                   {order.status === 'IN_TRANSIT' && (
                     <Button
                       variant="success"

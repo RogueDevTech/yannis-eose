@@ -3,6 +3,7 @@ import { useFetcher, Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { FileUpload } from '~/components/ui/file-upload';
+import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -74,6 +75,7 @@ export function RemitPage({
   const [receiptUploaded, setReceiptUploaded] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [deliveryReceiptUrls, setDeliveryReceiptUrls] = useState<string[]>([]);
+  const [remittanceReceiptModal, setRemittanceReceiptModal] = useState<RemittanceRecord | null>(null);
 
   useFetcherToast(fetcher.data, {
     successMessage:
@@ -396,14 +398,9 @@ export function RemitPage({
                         {new Date(r.sentAt).toLocaleDateString()}
                       </td>
                       <td className="py-2 px-3">
-                        <a
-                          href={r.receiptUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-brand-600 dark:text-brand-400 hover:underline"
-                        >
+                        <Button type="button" variant="ghost" size="sm" className="text-brand-600 dark:text-brand-400 hover:underline h-auto p-0" onClick={() => setRemittanceReceiptModal(r)}>
                           View
-                        </a>
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -432,20 +429,61 @@ export function RemitPage({
                     <div>Qty: {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : r.quantitySent}</div>
                     <div>Sent: {new Date(r.sentAt).toLocaleDateString()}</div>
                   </div>
-                  <a
-                    href={r.receiptUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-ghost btn-sm inline-block"
-                  >
+                  <Button type="button" variant="ghost" size="sm" className="btn-ghost btn-sm" onClick={() => setRemittanceReceiptModal(r)}>
                     View receipt
-                  </a>
+                  </Button>
                 </div>
               ))}
             </div>
           </>
         )}
       </div>
+
+      {/* Remittance receipt modal */}
+      {remittanceReceiptModal?.receiptUrl && (
+        <Modal open onClose={() => setRemittanceReceiptModal(null)} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
+          <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Remittance receipt</h3>
+            <button type="button" onClick={() => setRemittanceReceiptModal(null)} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
+            <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
+              <p className="font-medium text-surface-900 dark:text-white">{remittanceReceiptModal.productName}</p>
+              <p className="text-sm text-surface-600 dark:text-surface-400 mt-1">
+                To: {remittanceReceiptModal.toLocationName}
+              </p>
+              <p className="text-sm text-surface-600 dark:text-surface-400 mt-0.5">
+                Qty: {remittanceReceiptModal.quantityReceived != null ? `${remittanceReceiptModal.quantityReceived} / ${remittanceReceiptModal.quantitySent}` : remittanceReceiptModal.quantitySent} · Sent {new Date(remittanceReceiptModal.sentAt).toLocaleDateString()} · {STATUS_LABEL[remittanceReceiptModal.status] ?? remittanceReceiptModal.status}
+              </p>
+            </div>
+            <div className="rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50">
+              <img
+                src={remittanceReceiptModal.receiptUrl}
+                alt="Remittance receipt"
+                className="w-full max-h-[400px] object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                  const fallback = (e.target as HTMLImageElement).nextElementSibling;
+                  if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                }}
+              />
+              <div className="items-center justify-center gap-2 p-8 hidden">
+                <span className="text-sm text-surface-500 dark:text-surface-400">Receipt image could not be loaded</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-200 dark:border-surface-700 shrink-0 px-4 sm:px-5 pb-4">
+            <a href={remittanceReceiptModal.receiptUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+              Open in new tab
+            </a>
+            <Button variant="secondary" size="sm" onClick={() => setRemittanceReceiptModal(null)}>Close</Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

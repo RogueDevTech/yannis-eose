@@ -24,6 +24,18 @@ function toTwilioClientIdentity(agentId: string): string {
   return `agent_${safe}`;
 }
 
+/**
+ * Normalize Nigerian local format (0XXXXXXXXX) to E.164 (+234XXXXXXXXX) for Twilio.
+ * Twilio requires E.164; error 21211 means the number format is invalid.
+ * Returns the original string if it doesn't look like Nigerian local (e.g. already +234...).
+ */
+function toE164Nigeria(phone: string): string {
+  const trimmed = phone.trim();
+  const match = trimmed.match(/^0(\d{10})$/);
+  if (match) return `+234${match[1]}`;
+  return trimmed;
+}
+
 @Injectable()
 export class VoipService {
   private readonly logger = new Logger(VoipService.name);
@@ -472,8 +484,9 @@ export class VoipService {
     try {
       const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`;
 
+      const toNumber = toE164Nigeria(customerPhone);
       const params = new URLSearchParams();
-      params.append('To', customerPhone);
+      params.append('To', toNumber);
       params.append('From', twilioPhoneNumber);
       params.append('StatusCallback', `${webhookBaseUrl}/voip/webhook/status?callToken=${callLog.callToken}`);
       params.append('StatusCallbackEvent', 'initiated ringing answered completed');
