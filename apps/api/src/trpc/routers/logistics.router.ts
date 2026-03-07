@@ -12,6 +12,7 @@ import {
   listDeliveryRemittancesSchema,
   markDeliveryRemittanceReceivedSchema,
   getDeliveryRemittanceSchema,
+  disputeDeliveryRemittanceSchema,
   submitDeliveryConfirmationSchema,
   listDeliveryConfirmationRequestsSchema,
   approveDeliveryConfirmationSchema,
@@ -156,6 +157,12 @@ export const logisticsRouter = router({
     .input(getDeliveryRemittanceSchema)
     .query(async ({ input, ctx }) => {
       return getLogisticsService().getDeliveryRemittance(input.deliveryRemittanceId, ctx.user);
+    }),
+
+  disputeDeliveryRemittance: permissionProcedure('finance.approve')
+    .input(disputeDeliveryRemittanceSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getLogisticsService().disputeDeliveryRemittance(input, ctx.user);
     }),
 
   // Delivery confirmation requests (rider/3PL submit → HOL approve/reject)

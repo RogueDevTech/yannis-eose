@@ -14,10 +14,18 @@ interface RealtimeNotification {
 let socketInstance: Socket | null = null;
 let connectionCount = 0;
 
+function getSocketBaseUrl(): string {
+  const raw = typeof window !== 'undefined' ? window.__ENV?.API_URL : '';
+  const url = raw || 'http://localhost:4444';
+  if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && url.startsWith('http://')) {
+    return url.replace(/^http:\/\//, 'https://');
+  }
+  return url;
+}
+
 function getSocket(): Socket {
   if (!socketInstance) {
-    const apiUrl = typeof window !== 'undefined' ? window.__ENV?.API_URL : '';
-    socketInstance = io(apiUrl || 'http://localhost:4444', {
+    socketInstance = io(getSocketBaseUrl(), {
       withCredentials: true,
       autoConnect: false,
       transports: ['websocket', 'polling'],

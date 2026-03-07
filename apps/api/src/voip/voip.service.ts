@@ -497,7 +497,11 @@ export class VoipService {
    * The token allows the agent's browser to register as a Twilio Device
    * and receive/make calls via the VOIP bridge.
    *
-   * Requires: TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET, TWILIO_TWIML_APP_SID
+   * Required env:
+   * - TWILIO_ACCOUNT_SID (starts with AC)
+   * - TWILIO_API_KEY_SID (starts with SK) — from Console → Account → API keys → Create API Key
+   * - TWILIO_API_KEY_SECRET — the SECRET of that API Key (NOT the Account Auth Token). Twilio error 31202 "JWT signature validation failed" means you used the wrong secret.
+   * - TWILIO_TWIML_APP_SID (starts with AP) — from Console → Voice → TwiML Apps
    */
   async generateAccessToken(agentId: string): Promise<{ token: string; identity: string }> {
     const voipEnabled = await this.isVoipEnabled();
@@ -512,6 +516,12 @@ export class VoipService {
     const apiKeySid = process.env['TWILIO_API_KEY_SID'];
     const apiKeySecret = process.env['TWILIO_API_KEY_SECRET'];
     const twimlAppSid = process.env['TWILIO_TWIML_APP_SID'];
+
+    if (!apiKeySid?.startsWith('SK')) {
+      this.logger.warn(
+        'TWILIO_API_KEY_SID should start with SK (API Key SID from Console → API keys). Using Auth Token as secret causes Twilio error 31202.',
+      );
+    }
 
     if (!accountSid || !apiKeySid || !apiKeySecret || !twimlAppSid) {
       // In dev without full Twilio config, return a mock token

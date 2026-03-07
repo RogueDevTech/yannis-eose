@@ -22,6 +22,7 @@ import type {
   ListDeliveryConfirmationRequestsInput,
   ApproveDeliveryConfirmationInput,
   RejectDeliveryConfirmationInput,
+  DisputeDeliveryRemittanceInput,
 } from '@yannis/shared';
 import { DRIZZLE, PG_CLIENT } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -813,6 +814,57 @@ export class LogisticsService {
         type: 'delivery_remittance:received',
         title: 'Delivery remittance marked received',
         body: 'Your delivery remittance has been marked as received by Finance. Payment confirmed.',
+        data: { deliveryRemittanceId: remittance.id },
+      })
+      .catch(() => {});
+
+    return { success: true };
+  }
+
+  /**
+   * Finance disputes a delivery remittance (payment not received / receipt invalid). Notifies 3PL location.
+   */
+  async disputeDeliveryRemittance(input: DisputeDeliveryRemittanceInput, actor: SessionUser) {
+    if (actor.role !== 'FINANCE_OFFICER' && actor.role !== 'SUPER_ADMIN') {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only Finance or Super Admin can dispute delivery remittances',
+      });
+    }
+
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+
+    const [remittance] = await this.db
+      .select()
+      .from(schema.deliveryRemittances)
+      .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId))
+      .limit(1);
+
+    if (!remittance) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery remittance not found' });
+    }
+    if (remittance.status !== 'SENT') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Delivery remittance is already ${remittance.status}`,
+      });
+    }
+
+    await this.db
+      .update(schema.deliveryRemittances)
+      .set({
+        status: 'DISPUTED',
+        disputeReason: input.disputeReason,
+        receivedAt: new Date(),
+        receivedBy: actor.id,
+      })
+      .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId));
+
+    this.notifications
+      .createForLocation(remittance.logisticsLocationId, {
+        type: 'delivery_remittance:disputed',
+        title: 'Delivery remittance disputed',
+        body: `Your delivery remittance has been disputed by Finance. Reason: ${input.disputeReason}`,
         data: { deliveryRemittanceId: remittance.id },
       })
       .catch(() => {});
