@@ -1,6 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 /**
+ * Debug info captured when VOIP init or device fails — for troubleshooting in prod.
+ */
+export interface VoipDebugInfo {
+  /** Failure phase: token_fetch | token_parse | device_init | unknown */
+  phase: string;
+  /** HTTP status when phase is token_fetch */
+  status?: number;
+  /** Response body (truncated) when phase is token_fetch */
+  responseBody?: string;
+  /** Raw error message */
+  errorMessage?: string;
+  /** Error stack if available */
+  stack?: string;
+  /** Extra context (e.g. parsed response keys, Twilio error code) */
+  raw?: string;
+  /** ISO timestamp when the error occurred */
+  timestamp: string;
+}
+
+/**
  * VOIP Device state — tracks the lifecycle of the Twilio WebRTC device
  * and the active call.
  */
@@ -19,6 +39,8 @@ export interface VoipDeviceState {
   error: string | null;
   /** Is the device currently connecting? */
   connecting: boolean;
+  /** Last error debug details (for Technical details panel when error is set) */
+  debugInfo: VoipDebugInfo | null;
 }
 
 export interface UseVoipDeviceReturn extends VoipDeviceState {
@@ -111,6 +133,7 @@ export function useVoipDevice(opts: {
     muted: false,
     error: null,
     connecting: false,
+    debugInfo: null,
   });
 
   // Refs for cleanup
@@ -137,11 +160,26 @@ export function useVoipDevice(opts: {
     }
   }, []);
 
+  // ── Helper: set error + debug and log to console ─────────────────
+  const setErrorWithDebug = useCallback((
+    message: string,
+    debug: VoipDebugInfo,
+  ) => {
+    const payload = { tag: '[VOIP]', ...debug };
+    console.error('[VOIP] Init failed:', message, payload);
+    setState((prev) => ({
+      ...prev,
+      connecting: false,
+      error: message,
+      debugInfo: debug,
+    }));
+  }, []);
+
   // ── Init device ────────────────────────────────────────────────
   const initDevice = useCallback(async () => {
     if (deviceRef.current) return; // Already initialized
 
-    setState((prev) => ({ ...prev, connecting: true, error: null }));
+    setState((prev) => ({ ...prev, connecting: true, error: null, debugInfo: null }));
 
     try {
       // Fetch the access token from the API
@@ -154,15 +192,50 @@ export function useVoipDevice(opts: {
       if (!res.ok) {
         const errBody = await res.text();
         const message = formatVoipTokenError(res.status, errBody);
-        throw new Error(message);
+        const debug: VoipDebugInfo = {
+          phase: 'token_fetch',
+          status: res.status,
+          responseBody: errBody.length > 500 ? errBody.slice(0, 500) + '…' : errBody,
+          errorMessage: message,
+          timestamp: new Date().toISOString(),
+        };
+        setErrorWithDebug(message, debug);
+        return;
       }
 
-      const data = await res.json();
-      const trpcResult = data?.result?.data ?? data;
+      let data: unknown;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        const msg = parseErr instanceof Error ? parseErr.message : 'Invalid JSON from token endpoint';
+        const debug: VoipDebugInfo = {
+          phase: 'token_parse',
+          errorMessage: msg,
+          stack: parseErr instanceof Error ? parseErr.stack : undefined,
+          raw: String(parseErr),
+          timestamp: new Date().toISOString(),
+        };
+        setErrorWithDebug('Token response was not valid JSON.', debug);
+        return;
+      }
+
+      const trpcResult = (data as { result?: { data?: { token?: string } }; token?: string })?.result?.data ?? data as { token?: string };
       const token = trpcResult?.token as string | undefined;
 
       if (!token) {
-        throw new Error('No token received from VOIP service');
+        const raw = JSON.stringify(
+          typeof data === 'object' && data !== null
+            ? Object.keys(data as object)
+            : typeof data,
+        );
+        const debug: VoipDebugInfo = {
+          phase: 'token_parse',
+          errorMessage: 'No token in response',
+          raw: `Response keys/top-level: ${raw}`,
+          timestamp: new Date().toISOString(),
+        };
+        setErrorWithDebug('No token received from VOIP service', debug);
+        return;
       }
 
       // Check if this is a mock token (dev mode without Twilio)
@@ -172,6 +245,7 @@ export function useVoipDevice(opts: {
           ready: true,
           connecting: false,
           error: null,
+          debugInfo: null,
         }));
         return;
       }
@@ -188,14 +262,30 @@ export function useVoipDevice(opts: {
 
       // Device events
       device.on('registered', () => {
-        setState((prev) => ({ ...prev, ready: true, connecting: false }));
+        setState((prev) => ({ ...prev, ready: true, connecting: false, debugInfo: null }));
       });
 
-      device.on('error', (err: { message?: string }) => {
+      device.on('error', (err: { message?: string; code?: number; twilioError?: unknown }) => {
+        const errMessage = err.message ?? 'VOIP device error';
+        const debug: VoipDebugInfo = {
+          phase: 'device_init',
+          errorMessage: errMessage,
+          raw: err.code != null ? `code=${err.code}` : undefined,
+          timestamp: new Date().toISOString(),
+        };
+        if (err.twilioError != null) {
+          try {
+            debug.raw = (debug.raw ? debug.raw + '; ' : '') + `twilioError: ${JSON.stringify(err.twilioError)}`;
+          } catch {
+            debug.raw = (debug.raw ?? '') + '; twilioError: [non-serializable]';
+          }
+        }
+        console.error('[VOIP] Device error:', errMessage, debug);
         setState((prev) => ({
           ...prev,
-          error: err.message ?? 'VOIP device error',
+          error: errMessage,
           ready: false,
+          debugInfo: debug,
         }));
       });
 
@@ -247,13 +337,17 @@ export function useVoipDevice(opts: {
       await device.register();
       deviceRef.current = device;
     } catch (err) {
-      setState((prev) => ({
-        ...prev,
-        connecting: false,
-        error: err instanceof Error ? err.message : 'Failed to initialize VOIP device',
-      }));
+      const message = err instanceof Error ? err.message : 'Failed to initialize VOIP device';
+      const debug: VoipDebugInfo = {
+        phase: 'unknown',
+        errorMessage: message,
+        stack: err instanceof Error ? err.stack : undefined,
+        raw: err != null ? String(err) : undefined,
+        timestamp: new Date().toISOString(),
+      };
+      setErrorWithDebug(message, debug);
     }
-  }, [tokenUrl, onCallStatusChange, startDurationTimer, stopDurationTimer]);
+  }, [tokenUrl, onCallStatusChange, startDurationTimer, stopDurationTimer, setErrorWithDebug]);
 
   // ── Toggle mute ────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
@@ -301,6 +395,7 @@ export function useVoipDevice(opts: {
       muted: false,
       error: null,
       connecting: false,
+      debugInfo: null,
     });
   }, [stopDurationTimer]);
 
