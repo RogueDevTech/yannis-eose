@@ -759,7 +759,6 @@ export function OrderDetailPage({
   order,
   latestCall,
   history,
-  strictDataMode,
   voipEnabled,
   canEditOrder = true,
   userRole,

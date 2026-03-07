@@ -195,7 +195,6 @@ const ENDPOINTS: TrpcEndpoint[] = [
 
   // Settings
   { procedure: 'settings.getSystemSettings', method: 'GET', summary: 'Get system settings', tag: 'Settings' },
-  { procedure: 'settings.isStrictDataMode', method: 'GET', summary: 'Check strict data mode', tag: 'Settings' },
   { procedure: 'settings.getNotificationEmailConfig', method: 'GET', summary: 'Get notification email config', tag: 'Settings' },
   { procedure: 'settings.updateNotificationEmailConfig', method: 'POST', summary: 'Update notification email config', tag: 'Settings' },
   { procedure: 'settings.updateSystemSetting', method: 'POST', summary: 'Update system setting', tag: 'Settings' },

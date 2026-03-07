@@ -18,6 +18,10 @@ const APP_SHELL_ASSETS = [
   '/admin',
   '/offline',
   '/assets/yannis-logo1.png',
+  '/assets/favicon-32.png',
+  '/assets/icon-180.png',
+  '/assets/icon-192.png',
+  '/assets/icon-512-maskable.png',
   '/manifest.webmanifest',
 ];
 

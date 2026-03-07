@@ -22,12 +22,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const orderDetailPromise = (async (): Promise<OrderDetailStreamData | { notFound: true }> => {
-    const [orderRes, strictModeRes, voipRes] = await Promise.all([
+    const [orderRes, voipRes] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
         { method: 'GET', cookie },
       ),
-      apiRequest<unknown>('/trpc/settings.isStrictDataMode', { method: 'GET', cookie }),
       apiRequest<unknown>('/trpc/voip.isEnabled', { method: 'GET', cookie }),
     ]);
 
@@ -38,8 +37,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     if (!order) return { notFound: true };
 
-    const strictData = strictModeRes.data as { result?: { data?: { enabled: boolean } } };
-    const strictDataMode = strictData?.result?.data?.enabled ?? false;
     const voipData = voipRes.data as { result?: { data?: { enabled: boolean } } };
     const voipEnabled = voipData?.result?.data?.enabled ?? false;
 
@@ -65,7 +62,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       })
       .catch(() => [] as HistoryEntry[]);
 
-    return { order, latestCall, history, strictDataMode, voipEnabled };
+    return { order, latestCall, history, voipEnabled };
   })();
 
   let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
@@ -337,7 +334,6 @@ export default function OrderDetailRoute() {
             order={(data as OrderDetailStreamData).order}
             latestCall={(data as OrderDetailStreamData).latestCall}
             history={(data as OrderDetailStreamData).history}
-            strictDataMode={(data as OrderDetailStreamData).strictDataMode}
             voipEnabled={(data as OrderDetailStreamData).voipEnabled}
             canEditOrder={canEditOrder}
             userRole={userRole}
