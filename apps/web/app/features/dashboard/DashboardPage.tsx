@@ -30,7 +30,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
   const firstName = userName?.split(' ')[0] ?? 'User';
   const isKnownRole = role && KNOWN_ROLES.includes(role as (typeof KNOWN_ROLES)[number]);
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
-  const [amountsHidden, setAmountsHidden] = useState(true);
+  const [amountsHidden, setAmountsHidden] = useState(role === 'SUPER_ADMIN');
 
   /** Format naira or mask when hidden */
   const naira = (amount: number, opts?: Parameters<typeof formatNaira>[1]) =>

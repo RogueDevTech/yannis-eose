@@ -119,6 +119,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const isMediaBuyer = user.role === 'MEDIA_BUYER';
   const isFundingAdmin = ['SUPER_ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(user.role);
+  const canRequestFunding = isMediaBuyer || user.role === 'HEAD_OF_MARKETING';
 
   const fundingInput = JSON.stringify({
     page: 1,
@@ -221,6 +222,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     viewMode: isMediaBuyer ? ('media_buyer' as const) : ('admin' as const),
     currentUserId: user.id,
     canSendFunding: isFundingAdmin,
+    canRequestFunding,
     funding: fundingData?.records ?? [],
     totalFunding: fundingData?.pagination?.total ?? 0,
     fundingRequests,
@@ -388,13 +390,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function MarketingRoute() {
   const data = useLoaderData<typeof loader>();
-  const { filters, viewMode, canSendFunding, ...streamData } = data as typeof data & { filters: { startDate: string; endDate: string; periodAllTime: boolean } };
+  const { filters, viewMode, canSendFunding, canRequestFunding, ...streamData } = data as typeof data & { filters: { startDate: string; endDate: string; periodAllTime: boolean } };
   return (
     <MarketingPage
       {...(streamData as unknown as MarketingStreamData)}
       filters={filters}
       viewMode={viewMode}
       canSendFunding={canSendFunding}
+      canRequestFunding={canRequestFunding}
     />
   );
 }

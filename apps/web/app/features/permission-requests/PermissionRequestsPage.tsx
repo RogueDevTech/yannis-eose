@@ -13,7 +13,7 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
   PERMISSION_GRANT: 'Permission Grant',
 };
 
-export function PermissionRequestsPage({ requests }: { requests: PermissionRequest[] }) {
+export function PermissionRequestsPage({ requests, canApprove = false }: { requests: PermissionRequest[]; canApprove?: boolean }) {
   const fetcher = useFetcher();
   const [modal, setModal] = useState<{ requestId: string; action: 'APPROVED' | 'REJECTED' } | null>(null);
   const [reason, setReason] = useState('');
@@ -55,7 +55,7 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
                 <th className="table-header">Requested</th>
                 <th className="table-header">Reason</th>
                 <th className="table-header">Date</th>
-                <th className="table-header">Actions</th>
+                {canApprove && <th className="table-header">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -102,33 +102,35 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
                   <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
                     {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </td>
-                  <td className="table-cell">
-                    <div className="flex gap-1.5">
-                      <Button
-                        type="button"
-                        variant="success"
-                        size="sm"
-                        className="text-xs"
-                        onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        className="text-xs"
-                        onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  </td>
+                  {canApprove && (
+                    <td className="table-cell">
+                      <div className="flex gap-1.5">
+                        <Button
+                          type="button"
+                          variant="success"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
               {requests.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
+                  <td colSpan={canApprove ? 7 : 6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                     No pending permission requests
                   </td>
                 </tr>
@@ -150,26 +152,28 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
                 {req.requesterName} → {req.requestedRole?.replace(/_/g, ' ') ?? req.permissionCode ?? '—'}
               </p>
               <p className="text-sm text-surface-600 dark:text-surface-200">{req.reason}</p>
-              <div className="flex gap-2 pt-1">
-                <Button
-                  type="button"
-                  variant="success"
-                  size="sm"
-                  className="text-xs flex-1"
-                  onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
-                >
-                  Approve
-                </Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  className="text-xs flex-1"
-                  onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
-                >
-                  Reject
-                </Button>
-              </div>
+              {canApprove && (
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="success"
+                    size="sm"
+                    className="text-xs flex-1"
+                    onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    className="text-xs flex-1"
+                    onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
           {requests.length === 0 && (

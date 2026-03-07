@@ -14,8 +14,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const statusParam = url.searchParams.get('status');
-  const statusFilter = statusParam === null || statusParam === '' ? 'PENDING' : statusParam;
-  const statusApi = statusParam === null || statusParam === '' ? undefined : statusParam;
+  const statusFilter = statusParam === null ? 'PENDING' : statusParam;
+  const statusApi = statusParam === null ? 'PENDING' : (statusParam === '' ? undefined : statusParam);
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
   const limit = 20;
 

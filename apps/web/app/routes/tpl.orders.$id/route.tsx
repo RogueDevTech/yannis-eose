@@ -1,10 +1,9 @@
 import { useMemo } from 'react';
 import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import { json } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
-import { defer, json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
-import { DeferredSection } from '~/components/ui/deferred-section';
 import { LogisticsOrderDetailPage } from '~/features/logistics/LogisticsOrderDetailPage';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
@@ -35,13 +34,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   ]);
 
   if (!orderRes.ok) {
-    return defer({ orderDetail: Promise.resolve({ notFound: true }), locations: [], riders: [], allocatableLocations: [] });
+    return { order: null, history: Promise.resolve([]) as Promise<HistoryEntry[]>, locations: [] as Location[], riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>, allocatableLocations: [] as Location[] };
   }
 
   const trpcData = orderRes.data as { result?: { data?: OrderDetail } };
-  const order = trpcData?.result?.data;
+  const order = trpcData?.result?.data ?? null;
   if (!order) {
-    return defer({ orderDetail: Promise.resolve({ notFound: true }), locations: [], riders: [], allocatableLocations: [] });
+    return { order: null, history: Promise.resolve([]) as Promise<HistoryEntry[]>, locations: [] as Location[], riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>, allocatableLocations: [] as Location[] };
   }
 
   // TPL_MANAGER: only allow orders at their location or CONFIRMED (unallocated) so they can allocate
@@ -49,7 +48,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const atMyLocation = order.logisticsLocationId === user.logisticsLocationId;
     const unallocatedConfirmed = order.status === 'CONFIRMED' && !order.logisticsLocationId;
     if (!atMyLocation && !unallocatedConfirmed) {
-      return defer({ orderDetail: Promise.resolve({ notFound: true }), locations: [], riders: [], allocatableLocations: [] });
+      return { order: null, history: Promise.resolve([]) as Promise<HistoryEntry[]>, locations: [] as Location[], riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>, allocatableLocations: [] as Location[] };
     }
   }
 
@@ -71,23 +70,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     })
     .catch(() => [] as HistoryEntry[]);
 
-  const orderDetail = Promise.resolve({
-    order,
-    history: historyPromise,
-  });
-
   const locations = locationsData?.locations ?? [];
   const allocatableLocations =
     user.role === 'TPL_MANAGER' && user.logisticsLocationId
       ? locations.filter((l) => l.id === user.logisticsLocationId)
       : locations;
 
-  return defer({
-    orderDetail,
+  return {
+    order,
+    history: historyPromise,
     locations,
     riders: ridersData,
     allocatableLocations,
-  });
+  };
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -226,36 +221,34 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed'] as const;
 
 export default function TplOrderDetailRoute() {
-  const { orderDetail, locations, riders, allocatableLocations } = useLoaderData<typeof loader>();
+  const { order, history, locations, riders, allocatableLocations } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
 
+  if (!order) {
+    return (
+      <div className="card text-center py-12">
+        <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
+        <h2 className="text-xl font-bold text-surface-900 dark:text-white">Order not found</h2>
+        <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
+          The order you&apos;re looking for doesn&apos;t exist or you don&apos;t have access.
+        </p>
+        <a href="/tpl/orders" className="btn-primary mt-4 inline-block">
+          Back to Orders
+        </a>
+      </div>
+    );
+  }
+
   return (
-    <DeferredSection resolve={orderDetail as Promise<{ notFound: boolean } | { order: OrderDetail; history: Promise<HistoryEntry[]> }>} skeleton="card">
-      {(data) =>
-        'notFound' in data && data.notFound ? (
-          <div className="card text-center py-12">
-            <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
-            <h2 className="text-xl font-bold text-surface-900 dark:text-white">Order not found</h2>
-            <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
-              The order you&apos;re looking for doesn&apos;t exist or you don&apos;t have access.
-            </p>
-            <a href="/tpl/orders" className="btn-primary mt-4 inline-block">
-              Back to Orders
-            </a>
-          </div>
-        ) : (
-          <LogisticsOrderDetailPage
-            order={(data as unknown as { order: OrderDetail; history: Promise<HistoryEntry[]> }).order}
-            history={(data as unknown as { order: OrderDetail; history: Promise<HistoryEntry[]> }).history}
-            locations={locations}
-            riders={riders}
-            backLink="/tpl/orders"
-            backLabel="Orders"
-            allocatableLocations={allocatableLocations.length > 0 ? allocatableLocations : undefined}
-          />
-        )
-      }
-    </DeferredSection>
+    <LogisticsOrderDetailPage
+      order={order as OrderDetail}
+      history={history as Promise<HistoryEntry[]>}
+      locations={locations as Location[]}
+      riders={riders as Array<{ id: string; name: string; logisticsLocationId: string | null }>}
+      backLink="/tpl/orders"
+      backLabel="Orders"
+      allocatableLocations={allocatableLocations.length > 0 ? (allocatableLocations as Location[]) : undefined}
+    />
   );
 }

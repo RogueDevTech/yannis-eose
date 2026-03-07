@@ -63,6 +63,7 @@ export function MarketingPage({
   filters,
   viewMode = 'admin',
   canSendFunding = true,
+  canRequestFunding = viewMode === 'media_buyer',
   fundingRequests = [],
   myBalance,
   balancesList,
@@ -70,10 +71,11 @@ export function MarketingPage({
 }: MarketingStreamData) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const fetcher = useFetcher();
+  const myRequestsFetcher = useFetcher<{ records: FundingRequestRecord[] }>();
   const revalidator = useRevalidator();
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
-  const [activeTab, setActiveTab] = useState<'metrics' | 'funding' | 'requests' | 'adspend'>(viewMode === 'media_buyer' ? 'funding' : 'metrics');
+  const [activeTab, setActiveTab] = useState<'metrics' | 'funding' | 'requests' | 'myrequests' | 'adspend'>(viewMode === 'media_buyer' ? 'funding' : 'metrics');
   const [showFundingForm, setShowFundingForm] = useState(false);
   const [showRequestFundingForm, setShowRequestFundingForm] = useState(false);
   const [showAdSpendForm, setShowAdSpendForm] = useState(false);
@@ -104,9 +106,17 @@ export function MarketingPage({
     }
   }, [actionSuccess, revalidator.state, revalidator]);
 
+  useEffect(() => {
+    if (activeTab === 'myrequests' && canRequestFunding) {
+      myRequestsFetcher.load('/admin/marketing/funding/my-requests');
+    }
+  }, [activeTab, canRequestFunding]);
+
   /** Truncated ID fallback — used when users list hasn't streamed yet */
   const truncateId = (id: string) => id.slice(0, 8) + '...';
   const pendingRequestCount = fundingRequests.filter((r: FundingRequestRecord) => r.status === 'PENDING').length;
+  const myRequests = canRequestFunding ? fundingRequests.filter((r: FundingRequestRecord) => r.requesterId === currentUserId) : [];
+  const myRequestsDisplay = myRequestsFetcher.data?.records ?? myRequests;
   const showPendingFundingBanner = viewMode !== 'media_buyer' && pendingRequestCount > 0;
 
   return (
@@ -172,7 +182,7 @@ export function MarketingPage({
                 {showFundingForm ? 'Close' : '+ Send Funding'}
               </Button>
             )}
-            {viewMode === 'media_buyer' && (
+            {canRequestFunding && (
               <Button variant="secondary" size="sm" onClick={() => { setShowRequestFundingForm(!showRequestFundingForm); setActiveTab('funding'); }}>
                 {showRequestFundingForm ? 'Close' : '+ Request Funds'}
               </Button>
@@ -255,6 +265,17 @@ export function MarketingPage({
                 {m.totalOrders} orders, {m.deliveredOrders} delivered
               </p>
             </div>
+            {canRequestFunding && (
+              <div className="card">
+                <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">My Requests</p>
+                <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
+                  {myRequestsDisplay.length}
+                </p>
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+                  Your funding requests
+                </p>
+              </div>
+            )}
           </div>
         )}
       </DeferredSection>
@@ -265,8 +286,11 @@ export function MarketingPage({
         tabs={[
           { value: 'metrics', label: 'Performance' },
           { value: 'funding', label: `Funding (${totalFunding})` },
+          ...(canRequestFunding
+            ? [{ value: 'myrequests' as const, label: `My Requests (${myRequestsDisplay.length})` }]
+            : []),
           ...(viewMode !== 'media_buyer'
-            ? [{ value: 'requests' as const, label: `Requests (${fundingRequests.filter((r: FundingRequestRecord) => r.status === 'PENDING').length})` }]
+            ? [{ value: 'requests' as const, label: `Requests (${pendingRequestCount})` }]
             : []),
           { value: 'adspend', label: `Ads spend logging (${totalAdSpend})` },
         ]}
@@ -540,12 +564,14 @@ export function MarketingPage({
       {/* Funding Tab */}
       {activeTab === 'funding' && (
         <>
-          {/* Request Funding Modal — Media Buyer only */}
-          {viewMode === 'media_buyer' && showRequestFundingForm && (
+          {/* Request Funding Modal — Media Buyer or Head of Marketing */}
+          {canRequestFunding && showRequestFundingForm && (
             <Modal open onClose={() => setShowRequestFundingForm(false)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Request Funding</h3>
                 <p className="text-sm text-surface-800 dark:text-surface-200">
-                  Head of Marketing will be notified and can disburse to you once approved.
+                  {viewMode === 'admin'
+                    ? 'Finance will be notified and can disburse to you via Finance → Disbursements once approved.'
+                    : 'Head of Marketing will be notified and can disburse to you once approved.'}
                 </p>
                 <fetcher.Form method="post" className="space-y-3">
                   <input type="hidden" name="intent" value="requestFunding" />
@@ -596,70 +622,6 @@ export function MarketingPage({
                   </div>
                 </fetcher.Form>
             </Modal>
-          )}
-
-          {/* Your funding requests — Media Buyer only */}
-          {viewMode === 'media_buyer' && fundingRequests.length > 0 && (
-            <div className="card p-0 overflow-hidden">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                Your funding requests
-              </h3>
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="table-header text-right">Amount</th>
-                      <th className="table-header">Reason</th>
-                      <th className="table-header">Status</th>
-                      <th className="table-header">Receipt</th>
-                      <th className="table-header">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fundingRequests.map((r: FundingRequestRecord) => (
-                      <tr key={r.id} className="table-row">
-                        <td className="table-cell text-right font-medium">{'\u20A6'}{Number(r.amount).toLocaleString()}</td>
-                        <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">{r.reason ?? '\u2014'}</td>
-                        <td className="table-cell">
-                          <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
-                        </td>
-                        <td className="table-cell">
-                          {r.status === 'APPROVED' && r.receiptUrl ? (
-                            <>
-                              <a href={r.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:text-brand-600 text-sm mr-2">View</a>
-                              <button type="button" onClick={() => setReceiptPreviewUrl(r.receiptUrl!)} className="text-brand-500 hover:text-brand-600 text-sm">Preview</button>
-                            </>
-                          ) : '\u2014'}
-                        </td>
-                        <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
-                          {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="md:hidden space-y-3 px-1">
-                {fundingRequests.map((r: FundingRequestRecord) => (
-                  <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Number(r.amount).toLocaleString()}</span>
-                      <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
-                    </div>
-                    {r.reason && <p className="text-sm text-surface-700 dark:text-surface-300">{r.reason}</p>}
-                    {r.status === 'APPROVED' && r.receiptUrl && (
-                      <div className="flex gap-2 mt-1">
-                        <a href={r.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-brand-500 text-xs">View receipt</a>
-                        <button type="button" onClick={() => setReceiptPreviewUrl(r.receiptUrl!)} className="text-brand-500 text-xs">Preview</button>
-                      </div>
-                    )}
-                    <p className="text-xs text-surface-600 dark:text-surface-400">
-                      {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
           )}
 
           {/* Funding table — renders immediately (critical data) */}
@@ -814,7 +776,7 @@ export function MarketingPage({
                       ) : '\u2014'}
                     </td>
                     <td className="table-cell">
-                      {r.status === 'PENDING' && (
+                      {r.status === 'PENDING' && r.requesterId !== currentUserId && (
                         <div className="flex gap-1.5">
                           <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => setApprovingRequestId(r.id)}>
                             Approve
@@ -841,7 +803,7 @@ export function MarketingPage({
                 </div>
                 <p className="text-sm text-surface-800 dark:text-surface-200">{'\u20A6'}{Number(r.amount).toLocaleString()}</p>
                 {r.reason && <p className="text-sm text-surface-700 dark:text-surface-300">{r.reason}</p>}
-                {r.status === 'PENDING' && (
+                {r.status === 'PENDING' && r.requesterId !== currentUserId && (
                   <div className="flex gap-2 pt-1">
                     <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => setApprovingRequestId(r.id)}>Approve</Button>
                     <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => setRejectingRequestId(r.id)}>Reject</Button>
@@ -971,6 +933,93 @@ export function MarketingPage({
             </div>
             <img src={receiptPreviewUrl} alt="Receipt" className="w-full h-auto max-h-[85dvh] object-contain rounded-lg bg-white shadow-xl" />
         </Modal>
+      )}
+
+      {/* My Requests Tab — Media Buyer sees their own funding requests */}
+      {activeTab === 'myrequests' && canRequestFunding && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Your Funding Requests</h3>
+            <Button type="button" variant="primary" size="sm" onClick={() => setShowRequestFundingForm(true)}>
+              Request Funding
+            </Button>
+          </div>
+
+          {myRequestsFetcher.state === 'loading' && !myRequestsFetcher.data && (
+            <div className="flex items-center justify-center py-8 text-surface-500 dark:text-surface-400">
+              <Spinner size="md" className="shrink-0" />
+              <span className="ml-2 text-sm">Loading your requests...</span>
+            </div>
+          )}
+          {!(myRequestsFetcher.state === 'loading' && !myRequestsFetcher.data) && (
+          <div className="card p-0 overflow-hidden">
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="table-header text-right">Amount</th>
+                    <th className="table-header">Reason</th>
+                    <th className="table-header">Status</th>
+                    <th className="table-header">Requested</th>
+                    <th className="table-header">Resolved</th>
+                    <th className="table-header">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myRequestsDisplay.map((r: FundingRequestRecord) => (
+                    <tr key={r.id} className="table-row">
+                      <td className="table-cell text-right font-medium">{'\u20A6'}{Number(r.amount).toLocaleString()}</td>
+                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm max-w-[200px] truncate" title={r.reason ?? undefined}>{r.reason ?? '\u2014'}</td>
+                      <td className="table-cell">
+                        <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
+                      </td>
+                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                        {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </td>
+                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                        {r.resolvedAt ? new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' }) : '\u2014'}
+                      </td>
+                      <td className="table-cell">
+                        {r.receiptUrl ? (
+                          <button type="button" onClick={() => setReceiptPreviewUrl(r.receiptUrl!)} className="text-brand-500 hover:text-brand-600 text-sm">View Receipt</button>
+                        ) : '\u2014'}
+                      </td>
+                    </tr>
+                  ))}
+                  {myRequestsDisplay.length === 0 && (
+                    <tr><td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">You haven&apos;t made any funding requests yet</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile */}
+            <div className="md:hidden space-y-3 px-1">
+              {myRequestsDisplay.map((r: FundingRequestRecord) => (
+                <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Number(r.amount).toLocaleString()}</span>
+                    <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
+                  </div>
+                  {r.reason && <p className="text-sm text-surface-800 dark:text-surface-200">{r.reason}</p>}
+                  <p className="text-xs text-surface-700 dark:text-surface-300">
+                    {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {r.resolvedAt && ` — Resolved ${new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`}
+                  </p>
+                  {r.receiptUrl && (
+                    <button type="button" onClick={() => setReceiptPreviewUrl(r.receiptUrl!)} className="text-brand-500 hover:text-brand-600 text-sm">
+                      View Receipt
+                    </button>
+                  )}
+                </div>
+              ))}
+              {myRequestsDisplay.length === 0 && (
+                <div className="p-8 text-center text-surface-700 dark:text-surface-300">No funding requests yet</div>
+              )}
+            </div>
+          </div>
+          )}
+        </>
       )}
 
       {/* Ad Spend Tab */}

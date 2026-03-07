@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useFetcher, useNavigation, useSearchParams, Link } from '@remix-run/react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useFetcher, useRevalidator, useNavigation, useSearchParams, Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -29,6 +29,12 @@ const STATUS_LABELS: Record<string, string> = {
   DISPUTED: 'Disputed',
 };
 
+const REQUEST_STATUS_COLORS: Record<string, string> = {
+  PENDING: 'badge-warning',
+  APPROVED: 'badge-success',
+  REJECTED: 'badge-danger',
+};
+
 export interface DisbursementRecord {
   id: string;
   senderId: string;
@@ -38,6 +44,22 @@ export interface DisbursementRecord {
   status: string;
   sentAt: string;
   verifiedAt: string | null;
+  senderName?: string | null;
+  receiverName?: string | null;
+}
+
+export interface FundingRequestRecord {
+  id: string;
+  requesterId: string;
+  amount: string;
+  reason: string | null;
+  status: string;
+  receiptUrl: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  /** Set by API when listing (join with users); fallback to lookup by requesterId */
+  requesterName?: string | null;
 }
 
 export interface DisbursementsPageData {
@@ -69,6 +91,8 @@ export interface DisbursementsPageData {
     totalCompleted: string;
     totalDisputed: string;
   };
+  fundingRequests?: FundingRequestRecord[];
+  requestersList?: Array<{ id: string; name: string; email: string; role: string }>;
 }
 
 /** Receipt preview modal — shows image inline with disbursement amount */
@@ -267,13 +291,37 @@ export function DisbursementsPage({
   filters = { startDate: '', endDate: '', periodAllTime: false, status: '', receiver: '' },
   recipientBalances = [],
   summary = { totalSent: '0', totalCompleted: '0', totalDisputed: '0' },
+  fundingRequests = [],
+  requestersList = [],
 }: DisbursementsPageData) {
   const navigation = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = navigation.state === 'loading';
   const [showForm, setShowForm] = useState(!!preselectedReceiverId);
-  const [activeTab, setActiveTab] = useState<'disbursements' | 'balances'>('disbursements');
+  const [activeTab, setActiveTab] = useState<'disbursements' | 'balances' | 'requests'>('disbursements');
   const [receiptModal, setReceiptModal] = useState<DisbursementRecord | null>(null);
+  const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
+  const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
+  const [requestReceiptModal, setRequestReceiptModal] = useState<FundingRequestRecord | null>(null);
+
+  const requestActionFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const RequestActionForm = requestActionFetcher.Form;
+  const revalidator = useRevalidator();
+  useFetcherToast(requestActionFetcher.data, { successMessage: 'Request updated' });
+
+  useEffect(() => {
+    const data = requestActionFetcher.data;
+    if (data?.success && revalidator.state === 'idle') {
+      revalidator.revalidate();
+      setApprovingRequestId(null);
+      setRejectingRequestId(null);
+    }
+  }, [requestActionFetcher.data, revalidator.state, revalidator]);
+
+  const getRequesterName = useCallback(
+    (requesterId: string) => requestersList.find((u) => u.id === requesterId)?.name ?? requesterId.slice(0, 8) + '...',
+    [requestersList],
+  );
 
   // Optimistic filter state: switch tab/filter immediately, then fetch in background
   const [optimisticStatus, setOptimisticStatus] = useState(filters.status || 'ALL');
@@ -285,7 +333,20 @@ export function DisbursementsPage({
 
   const canCreate = canDisburseToHoM;
   const recipients = canDisburseToHoM ? users : [];
-  const getName = useCallback((id: string) => users.find((u) => u.id === id)?.name ?? id.slice(0, 8) + '...', [users]);
+
+  const nameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const b of recipientBalances) {
+      map.set(b.userId, b.name);
+    }
+    for (const f of funding) {
+      if (f.senderName != null && f.senderName !== '') map.set(f.senderId, f.senderName);
+      if (f.receiverName != null && f.receiverName !== '') map.set(f.receiverId, f.receiverName);
+    }
+    return map;
+  }, [recipientBalances, funding]);
+
+  const getName = useCallback((id: string) => nameMap.get(id) ?? id.slice(0, 8) + '...', [nameMap]);
 
   const selectedStatus = optimisticStatus;
   const selectedReceiver = optimisticReceiver;
@@ -460,6 +521,18 @@ export function DisbursementsPage({
           Recipient balances
           <span className="ml-1.5 text-xs text-surface-400">({recipientBalances.length})</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('requests')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'requests'
+              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+              : 'border-transparent text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-300'
+          }`}
+        >
+          Requests
+          <span className="ml-1.5 text-xs text-surface-400">({fundingRequests.length})</span>
+        </button>
       </div>
 
       {/* Disbursements tab */}
@@ -514,7 +587,7 @@ export function DisbursementsPage({
               <table className="w-full">
                 <thead>
                   <tr>
-                    <th className="table-header">ID</th>
+                    <th className="table-header">Reference</th>
                     <th className="table-header">Sender</th>
                     <th className="table-header">Receiver</th>
                     <th className="table-header text-right">Amount</th>
@@ -527,8 +600,8 @@ export function DisbursementsPage({
                 <tbody>
                   {funding.map((f) => (
                     <tr key={f.id} className="table-row">
-                      <td className="table-cell">
-                        <span className="font-mono text-xs text-surface-500 dark:text-surface-400">{f.id.slice(0, 8)}...</span>
+                      <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
+                        {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </td>
                       <td className="table-cell text-sm">
                         <Link to={`/hr/users/${f.senderId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300">
@@ -584,7 +657,9 @@ export function DisbursementsPage({
               {funding.map((f) => (
                 <div key={f.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs text-surface-500 dark:text-surface-400">{f.id.slice(0, 8)}...</span>
+                    <span className="text-sm font-medium text-surface-800 dark:text-surface-200">
+                      {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
                     <span className={STATUS_COLORS[f.status] ?? 'badge'}>{STATUS_LABELS[f.status] ?? f.status}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2">
@@ -707,23 +782,27 @@ export function DisbursementsPage({
                             {formatNaira(balance)}
                           </td>
                           <td className="table-cell text-center">
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => {
-                                setSearchParams((p) => {
-                                  const next = new URLSearchParams(p);
-                                  next.set('receiverId', b.userId);
-                                  return next;
-                                });
-                                setShowForm(true);
-                                setActiveTab('disbursements');
-                              }}
-                              className="text-xs"
-                            >
-                              Send funds
-                            </Button>
+                            {b.role === 'HEAD_OF_MARKETING' ? (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => {
+                                  setSearchParams((p) => {
+                                    const next = new URLSearchParams(p);
+                                    next.set('receiverId', b.userId);
+                                    return next;
+                                  });
+                                  setShowForm(true);
+                                  setActiveTab('disbursements');
+                                }}
+                                className="text-xs"
+                              >
+                                Send funds
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-surface-400">&mdash;</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -751,23 +830,25 @@ export function DisbursementsPage({
                         <div>Received: &#8358;{Number(b.totalReceived).toLocaleString()}</div>
                         <div>Spent: &#8358;{Number(b.totalSpend).toLocaleString()}</div>
                       </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.set('receiverId', b.userId);
-                            return next;
-                          });
-                          setShowForm(true);
-                          setActiveTab('disbursements');
-                        }}
-                        className="text-xs"
-                      >
-                        Send funds
-                      </Button>
+                      {b.role === 'HEAD_OF_MARKETING' && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('receiverId', b.userId);
+                              return next;
+                            });
+                            setShowForm(true);
+                            setActiveTab('disbursements');
+                          }}
+                          className="text-xs"
+                        >
+                          Send funds
+                        </Button>
+                      )}
                     </div>
                   );
                 })}
@@ -779,6 +860,255 @@ export function DisbursementsPage({
             </div>
           )}
         </div>
+      )}
+
+      {/* Requests tab — funding requests from Media Buyers / HoM */}
+      {activeTab === 'requests' && (
+        <div className="card p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
+            <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Funding requests</h2>
+            <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">
+              Send the money to the requester manually, then approve with a receipt image. They will be notified.
+            </p>
+          </div>
+          {fundingRequests.length > 0 ? (
+            <>
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="table-header">Requester</th>
+                    <th className="table-header text-right">Amount</th>
+                    <th className="table-header">Reason</th>
+                    <th className="table-header">Status</th>
+                    <th className="table-header">Requested</th>
+                    <th className="table-header">Resolved</th>
+                    <th className="table-header">Receipt</th>
+                    <th className="table-header">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                    {fundingRequests.map((r) => (
+                      <tr key={r.id} className="table-row">
+                        <td className="table-cell text-sm">
+                          <Link to={`/hr/users/${r.requesterId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400">
+                            {r.requesterName ?? getRequesterName(r.requesterId)}
+                          </Link>
+                        </td>
+                        <td className="table-cell text-right font-medium">&#8358;{Number(r.amount).toLocaleString()}</td>
+                        <td className="table-cell text-surface-800 dark:text-surface-200 text-sm max-w-[200px] truncate" title={r.reason ?? undefined}>
+                          {r.reason ?? '—'}
+                        </td>
+                        <td className="table-cell">
+                          <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
+                        </td>
+                        <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                          {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </td>
+                        <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                          {r.resolvedAt
+                            ? new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
+                            : '—'}
+                        </td>
+                        <td className="table-cell">
+                          {r.receiptUrl ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs inline-flex items-center gap-1 text-brand-500 hover:text-brand-600"
+                              onClick={() => setRequestReceiptModal(r)}
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                              View
+                            </Button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="table-cell">
+                          {r.status === 'PENDING' && (
+                            <div className="flex gap-1.5">
+                              <Button
+                                type="button"
+                                variant="primary"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => setApprovingRequestId(r.id)}
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="danger"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => setRejectingRequestId(r.id)}
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="md:hidden space-y-3 px-1">
+                {fundingRequests.map((r) => (
+                  <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <Link to={`/hr/users/${r.requesterId}`} className="font-medium text-surface-900 dark:text-white text-sm">
+                        {r.requesterName ?? getRequesterName(r.requesterId)}
+                      </Link>
+                      <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
+                    </div>
+                    <p className="text-sm text-surface-800 dark:text-surface-200">&#8358;{Number(r.amount).toLocaleString()}</p>
+                    {r.reason && <p className="text-sm text-surface-700 dark:text-surface-300">{r.reason}</p>}
+                    <p className="text-xs text-surface-500 dark:text-surface-400">
+                      {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {r.resolvedAt &&
+                        ` — Resolved ${new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`}
+                    </p>
+                    {r.receiptUrl && (
+                      <Button type="button" variant="ghost" size="sm" className="text-brand-500 hover:text-brand-600 text-sm" onClick={() => setRequestReceiptModal(r)}>
+                        View receipt
+                      </Button>
+                    )}
+                    {r.status === 'PENDING' && (
+                      <div className="flex gap-2 pt-1">
+                        <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => setApprovingRequestId(r.id)}>
+                          Approve
+                        </Button>
+                        <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => setRejectingRequestId(r.id)}>
+                          Reject
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="px-4 py-12 text-center text-surface-500 dark:text-surface-400">
+              <p className="text-sm">No funding requests</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Funding request receipt modal */}
+      {requestReceiptModal?.receiptUrl && (
+        <Modal open onClose={() => setRequestReceiptModal(null)} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
+          <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Funding request receipt</h3>
+            <button type="button" onClick={() => setRequestReceiptModal(null)} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
+            <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
+              <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Amount</p>
+              <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
+                &#8358;{Number(requestReceiptModal.amount).toLocaleString()}
+              </p>
+              <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
+                <span>{requestReceiptModal.requesterName ?? getRequesterName(requestReceiptModal.requesterId)}</span>
+                <span>&middot;</span>
+                <span>{new Date(requestReceiptModal.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <span>&middot;</span>
+                <span className={REQUEST_STATUS_COLORS[requestReceiptModal.status] ?? 'badge'}>{requestReceiptModal.status}</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50">
+              <img
+                src={requestReceiptModal.receiptUrl}
+                alt="Funding request receipt"
+                className="w-full max-h-[400px] object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                  const fallback = (e.target as HTMLImageElement).nextElementSibling;
+                  if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                }}
+              />
+              <div className="items-center justify-center gap-2 p-8 hidden">
+                <span className="text-sm text-surface-500 dark:text-surface-400">Receipt image could not be loaded</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-200 dark:border-surface-700 shrink-0 px-4 sm:px-5 pb-4">
+            <a
+              href={requestReceiptModal.receiptUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary btn-sm inline-flex items-center gap-1.5"
+            >
+              Open in new tab
+            </a>
+            <Button variant="secondary" size="sm" onClick={() => setRequestReceiptModal(null)}>Close</Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Approve funding request modal */}
+      {approvingRequestId && (
+        <Modal open onClose={() => setApprovingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
+          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Approve funding request</h3>
+          <p className="text-sm text-surface-800 dark:text-surface-200">
+            Send the money to the requester manually (e.g. bank transfer), then attach the receipt image below. They will be notified and can preview the receipt.
+          </p>
+          <RequestActionForm method="post" className="space-y-3">
+            <input type="hidden" name="intent" value="approveFundingRequest" />
+            <input type="hidden" name="requestId" value={approvingRequestId} />
+            <FileUpload
+              folder={S3_FOLDERS.RECEIPTS}
+              name="receiptUrl"
+              label="Receipt image"
+              required
+              onUpload={() => {}}
+            />
+            <div className="flex gap-2">
+              <Button type="submit" variant="primary" size="sm" loading={requestActionFetcher.state === 'submitting'} loadingText="Approving...">
+                Approve & notify
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setApprovingRequestId(null)}>
+                Cancel
+              </Button>
+            </div>
+          </RequestActionForm>
+        </Modal>
+      )}
+
+      {/* Reject funding request modal */}
+      {rejectingRequestId && (
+        <Modal open onClose={() => setRejectingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
+          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Reject funding request</h3>
+          <p className="text-sm text-surface-800 dark:text-surface-200">
+            The requester will be notified that their request was not approved.
+          </p>
+          <RequestActionForm method="post" className="space-y-3">
+            <input type="hidden" name="intent" value="rejectFundingRequest" />
+            <input type="hidden" name="requestId" value={rejectingRequestId} />
+            <div>
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Reason (optional)</label>
+              <textarea name="reason" rows={2} maxLength={500} placeholder="Optional note for records..." className="input" />
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit" variant="danger" size="sm" loading={requestActionFetcher.state === 'submitting'} loadingText="Rejecting...">
+                Reject
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setRejectingRequestId(null)}>
+                Cancel
+              </Button>
+            </div>
+          </RequestActionForm>
+        </Modal>
       )}
     </div>
   );

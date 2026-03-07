@@ -123,7 +123,7 @@ const navStructure: NavGroupDef[] = [
     items: [
       { label: 'Notifications', href: '/admin/notifications', icon: SidebarIcons.notifications },
       { label: 'Settings', href: '/admin/settings', icon: SidebarIcons.settings },
-      { label: 'Permission Requests', href: '/admin/permission-requests', icon: SidebarIcons.audit, permission: 'audit.read' },
+      { label: 'Permission Requests', href: '/admin/permission-requests', icon: SidebarIcons.audit },
     ],
   },
   {

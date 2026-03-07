@@ -1,7 +1,8 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { redirect } from '@remix-run/node';
 import { PermissionRequestsPage } from '~/features/permission-requests/PermissionRequestsPage';
 import type { PermissionRequest } from '~/features/permission-requests/types';
 
@@ -10,7 +11,8 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'audit.read');
+  const user = await getCurrentUser(request);
+  if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   const cookie = getSessionCookie(request);
 
   const res = await apiRequest<unknown>(
@@ -22,7 +24,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? ((res.data as { result?: { data?: PermissionRequest[] } })?.result?.data ?? [])
     : [];
 
-  return { requests };
+  // Only SuperAdmin and users with audit.read can approve/reject
+  const canApprove = user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('audit.read');
+
+  return { requests, canApprove };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -67,6 +72,6 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function PermissionRequestsRoute() {
-  const { requests } = useLoaderData<typeof loader>();
-  return <PermissionRequestsPage requests={requests} />;
+  const { requests, canApprove } = useLoaderData<typeof loader>();
+  return <PermissionRequestsPage requests={requests} canApprove={canApprove} />;
 }
