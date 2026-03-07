@@ -654,7 +654,7 @@ function VoipCallPanel({
         )}
       </div>
 
-      {/* Device error — friendly message, no raw HTML */}
+      {/* Device error — friendly message + technical details for debugging */}
       {voip.error && (
         <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-3 py-2.5 mb-3 flex items-start gap-2">
           <svg className="w-4 h-4 text-danger-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -671,6 +671,28 @@ function VoipCallPanel({
             >
               Try again
             </Button>
+            {voip.debugInfo && (
+              <details className="mt-3 border border-danger-200 dark:border-danger-700/50 rounded-md bg-danger-100/50 dark:bg-danger-800/30">
+                <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-medium text-danger-700 dark:text-danger-300">
+                  Technical details (for debugging)
+                </summary>
+                <pre className="p-2 text-[11px] text-surface-700 dark:text-surface-300 whitespace-pre-wrap break-all overflow-x-auto max-h-48 overflow-y-auto font-mono">
+                  {JSON.stringify(
+                    {
+                      phase: voip.debugInfo.phase,
+                      status: voip.debugInfo.status,
+                      errorMessage: voip.debugInfo.errorMessage,
+                      responseBody: voip.debugInfo.responseBody,
+                      raw: voip.debugInfo.raw,
+                      stack: voip.debugInfo.stack,
+                      timestamp: voip.debugInfo.timestamp,
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </details>
+            )}
           </div>
         </div>
       )}

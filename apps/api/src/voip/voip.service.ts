@@ -542,7 +542,12 @@ export class VoipService {
         identity,
       };
     } catch (error) {
-      this.logger.error('Failed to generate Twilio access token:', error);
+      const errMessage = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack : undefined;
+      const errCode = error && typeof error === 'object' && 'code' in error ? (error as { code?: string }).code : undefined;
+      this.logger.error(
+        `Failed to generate Twilio access token: ${errMessage}${errCode != null ? ` [code=${String(errCode)}]` : ''}${errStack ? `\n${errStack}` : ''}`,
+      );
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to generate VOIP access token',
