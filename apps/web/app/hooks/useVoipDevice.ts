@@ -160,6 +160,8 @@ export function useVoipDevice(opts: {
   const callRef = useRef<unknown>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartRef = useRef<number>(0);
+  /** When register() rejects with undefined, Twilio may still emit 'error' shortly after; we defer fallback so that event can set the real message. */
+  const deviceErrorReceivedRef = useRef<boolean>(false);
 
   // ── Duration timer ─────────────────────────────────────────────
   const startDurationTimer = useCallback(() => {
@@ -291,7 +293,7 @@ export function useVoipDevice(opts: {
         // @ts-expect-error Twilio types expect Codec[]; opus/pcmu are valid at runtime
         codecPreferences: ['opus', 'pcmu'],
         closeProtection: true,
-        logLevel: 1, // warn
+        logLevel: 0, // 0=TRACE (see Twilio logs in console when registration fails); set to 1 for less noise once stable
       });
 
       // Device events
@@ -300,6 +302,7 @@ export function useVoipDevice(opts: {
       });
 
       device.on('error', (err: { message?: string; code?: number; twilioError?: unknown }) => {
+        deviceErrorReceivedRef.current = true;
         const errMessage = err.message ?? 'VOIP device error';
         const debug: VoipDebugInfo = {
           phase: 'device_init',
@@ -368,18 +371,39 @@ export function useVoipDevice(opts: {
         });
       });
 
+      deviceErrorReceivedRef.current = false;
       try {
         await device.register();
       } catch (registerErr) {
-        const msg = registerErr instanceof Error ? registerErr.message : String(registerErr);
+        const isEmptyRejection = registerErr == null || registerErr === undefined;
+        const msg = registerErr instanceof Error
+          ? registerErr.message
+          : (isEmptyRejection
+            ? 'Twilio rejected registration without error details (check console for [VOIP] or Twilio logs)'
+            : String(registerErr));
         const debug: VoipDebugInfo = {
           phase: 'device_register',
           errorMessage: msg,
           stack: registerErr instanceof Error ? registerErr.stack : undefined,
-          raw: serializeErrorRaw(registerErr),
+          raw: isEmptyRejection
+            ? 'Promise rejected with null/undefined. Twilio may emit the real error on device "error" event — check browser console for [VOIP] Device error.'
+            : serializeErrorRaw(registerErr),
           timestamp: new Date().toISOString(),
         };
-        setErrorWithDebug(`Call device registration failed: ${msg}`, debug);
+        const setFallback = () => {
+          if (deviceErrorReceivedRef.current) return;
+          setErrorWithDebug(
+            isEmptyRejection
+              ? 'Call device registration failed. Check the browser console (F12) for "[VOIP] Device error" or Twilio messages.'
+              : `Call device registration failed: ${msg}`,
+            debug,
+          );
+        };
+        if (isEmptyRejection) {
+          setTimeout(setFallback, 150);
+        } else {
+          setFallback();
+        }
         return;
       }
       deviceRef.current = device;
