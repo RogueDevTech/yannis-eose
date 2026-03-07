@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useFetcher, useSearchParams, useNavigation } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -12,7 +12,10 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Spinner } from '~/components/ui/spinner';
 import { Tabs } from '~/components/ui/tabs';
+import { formatNaira } from '~/lib/format-amount';
 import type { FinanceStreamData, Invoice, ApprovalRequest } from './types';
+
+const ITEMS_PER_PAGE = 15;
 
 const INVOICE_COLORS: Record<string, string> = {
   DRAFT: 'badge-warning',
@@ -61,6 +64,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
   ]);
   const [approvalModal, setApprovalModal] = useState<{ requestId: string; action: string } | null>(null);
   const [approvalReason, setApprovalReason] = useState('');
+  const [invoicePage, setInvoicePage] = useState(1);
 
   useFetcherToast(fetcher.data, { successMessage: 'Invoice updated' });
   useFetcherToast(approvalFetcher.data, { successMessage: 'Approval processed' });
@@ -75,8 +79,8 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
   if (actionSuccess && showInvoiceForm) setShowInvoiceForm(false);
 
-  // Cost waterfall items for visual display
-  const costWaterfall = [
+  // Memoize cost calculations
+  const costWaterfall = useMemo(() => [
     { label: 'Revenue', value: profit.revenue, type: 'revenue' as const },
     { label: 'Landed COGS', value: profit.landedCost, type: 'cost' as const },
     { label: 'Delivery Fees', value: profit.deliveryFee, type: 'cost' as const },
@@ -84,10 +88,23 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
     { label: 'Commission', value: profit.commission, type: 'cost' as const },
     { label: 'Fulfillment', value: profit.fulfillmentCost, type: 'cost' as const },
     { label: 'Operational Loss', value: profit.operationalLoss, type: 'cost' as const },
-  ];
+  ], [profit]);
 
-  const totalCosts = profit.landedCost + profit.deliveryFee + profit.adSpend + profit.commission + profit.fulfillmentCost + profit.operationalLoss;
+  const totalCosts = useMemo(() =>
+    profit.landedCost + profit.deliveryFee + profit.adSpend + profit.commission + profit.fulfillmentCost + profit.operationalLoss,
+    [profit],
+  );
   const getBarWidth = (value: number) => profit.revenue > 0 ? Math.max((value / profit.revenue) * 100, 2) : 0;
+
+  // Client-side invoice pagination
+  const invoiceTotalPages = Math.ceil(invoices.length / ITEMS_PER_PAGE);
+  const paginatedInvoices = useMemo(() =>
+    invoices.slice((invoicePage - 1) * ITEMS_PER_PAGE, invoicePage * ITEMS_PER_PAGE),
+    [invoices, invoicePage],
+  );
+
+  // Reset page when filters change
+  useEffect(() => { setInvoicePage(1); }, [filters.invoiceStatus, filters.startDate, filters.endDate]);
 
   const addLineItem = () => {
     setLineItems([...lineItems, { description: '', quantity: 1, unitPrice: '' }]);
@@ -170,7 +187,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Revenue</p>
           <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
-            &#8358;{Math.round(profit.revenue).toLocaleString()}
+            {formatNaira(Math.round(profit.revenue))}
           </p>
           <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
             {profit.orderCount} delivered orders
@@ -179,7 +196,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">True Profit</p>
           <p className={`text-2xl font-bold mt-1 ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
-            &#8358;{Math.round(profit.trueProfit).toLocaleString()}
+            {formatNaira(Math.round(profit.trueProfit))}
           </p>
           <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
             After all costs
@@ -197,7 +214,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Costs</p>
           <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
-            &#8358;{Math.round(totalCosts).toLocaleString()}
+            {formatNaira(Math.round(totalCosts))}
           </p>
           <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
             All cost layers
@@ -243,7 +260,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-sm text-surface-800 dark:text-surface-200">{item.label}</span>
                     <span className={`text-sm font-medium ${item.type === 'revenue' ? 'text-surface-900 dark:text-white' : 'text-danger-600 dark:text-danger-400'}`}>
-                      {item.type === 'cost' ? '-' : ''}&#8358;{Math.round(item.value).toLocaleString()}
+                      {item.type === 'cost' ? formatNaira(-Math.round(item.value)) : formatNaira(Math.round(item.value))}
                     </span>
                   </div>
                   <div className="w-full bg-surface-100 dark:bg-surface-800 rounded-full h-2.5">
@@ -258,7 +275,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-sm font-semibold text-surface-900 dark:text-white">True Profit</span>
                   <span className={`text-lg font-bold ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
-                    &#8358;{Math.round(profit.trueProfit).toLocaleString()}
+                    {formatNaira(Math.round(profit.trueProfit))}
                   </span>
                 </div>
                 <div className="w-full bg-surface-100 dark:bg-surface-800 rounded-full h-2.5">
@@ -293,7 +310,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                           <span className="text-sm text-surface-800 dark:text-surface-200">{item.label}</span>
                         </div>
                         <div className="text-right">
-                          <span className="text-sm font-medium text-surface-900 dark:text-white">&#8358;{Math.round(item.value).toLocaleString()}</span>
+                          <span className="text-sm font-medium text-surface-900 dark:text-white">{formatNaira(Math.round(item.value))}</span>
                           <span className="text-xs text-surface-700 dark:text-surface-300 ml-2">({item.pct.toFixed(1)}%)</span>
                         </div>
                       </div>
@@ -330,25 +347,25 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-surface-800 dark:text-surface-200">Draft</span>
                         <span className="text-sm font-medium text-surface-800 dark:text-surface-200">
-                          &#8358;{draftTotal.toLocaleString()} ({summary['DRAFT']?.count ?? 0})
+                          {formatNaira(draftTotal)} ({summary['DRAFT']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-surface-800 dark:text-surface-200">Paid</span>
                         <span className="text-sm font-medium text-success-600 dark:text-success-400">
-                          &#8358;{paidTotal.toLocaleString()} ({summary['PAID']?.count ?? 0})
+                          {formatNaira(paidTotal)} ({summary['PAID']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-surface-800 dark:text-surface-200">Outstanding</span>
                         <span className="text-sm font-medium text-warning-600 dark:text-warning-400">
-                          &#8358;{outstandingTotal.toLocaleString()} ({summary['SENT']?.count ?? 0})
+                          {formatNaira(outstandingTotal)} ({summary['SENT']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-surface-800 dark:text-surface-200">Overdue</span>
                         <span className="text-sm font-medium text-danger-600 dark:text-danger-400">
-                          &#8358;{overdueTotal.toLocaleString()} ({summary['OVERDUE']?.count ?? 0})
+                          {formatNaira(overdueTotal)} ({summary['OVERDUE']?.count ?? 0})
                         </span>
                       </div>
                     </div>
@@ -435,7 +452,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                       <div className="col-span-2 flex items-center justify-between">
                         {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1 invisible">Del</label>}
                         <span className="text-xs font-medium text-surface-800 dark:text-surface-200">
-                          &#8358;{(item.quantity * Number(item.unitPrice || 0)).toLocaleString()}
+                          {formatNaira(item.quantity * Number(item.unitPrice || 0))}
                         </span>
                         {lineItems.length > 1 && (
                           <button type="button" onClick={() => removeLineItem(idx)} className="text-danger-500 hover:text-danger-600 ml-1">
@@ -448,7 +465,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                 </div>
                 <div className="flex justify-end mt-2">
                   <p className="text-sm font-medium text-surface-900 dark:text-white">
-                    Subtotal: &#8358;{invoiceSubtotal.toLocaleString()}
+                    Subtotal: {formatNaira(invoiceSubtotal)}
                   </p>
                 </div>
               </div>
@@ -496,13 +513,13 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {invoices.map((inv: Invoice) => (
+                  {paginatedInvoices.map((inv: Invoice) => (
                     <tr key={inv.id} className="table-row">
                       <td className="table-cell font-mono font-medium text-surface-900 dark:text-surface-100 text-sm">{inv.referenceFormatted}</td>
                       <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
                         {inv.recipientInfo?.name ?? '\u2014'}
                       </td>
-                      <td className="table-cell text-right font-medium">&#8358;{Number(inv.totalAmount).toLocaleString()}</td>
+                      <td className="table-cell text-right font-medium">{formatNaira(Number(inv.totalAmount))}</td>
                       <td className="table-cell">
                         <span className={INVOICE_COLORS[inv.status] ?? 'badge'}>{inv.status}</span>
                       </td>
@@ -567,7 +584,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                       </td>
                     </tr>
                   ))}
-                  {invoices.length === 0 && (
+                  {paginatedInvoices.length === 0 && (
                     <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No invoices yet</td></tr>
                   )}
                 </tbody>
@@ -576,7 +593,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
             {/* Mobile */}
             <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
-              {invoices.map((inv: Invoice) => (
+              {paginatedInvoices.map((inv: Invoice) => (
                 <div key={inv.id} className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-mono font-medium text-surface-900 dark:text-white text-sm">{inv.referenceFormatted}</span>
@@ -595,7 +612,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-surface-800 dark:text-surface-200">{inv.recipientInfo?.name ?? '\u2014'}</span>
-                    <span className="font-medium text-surface-900 dark:text-white">&#8358;{Number(inv.totalAmount).toLocaleString()}</span>
+                    <span className="font-medium text-surface-900 dark:text-white">{formatNaira(Number(inv.totalAmount))}</span>
                   </div>
                   {inv.status === 'DRAFT' && (
                     <fetcher.Form method="post" className="pt-1">
@@ -623,183 +640,60 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   )}
                 </div>
               ))}
-              {invoices.length === 0 && (
+              {paginatedInvoices.length === 0 && (
                 <div className="p-8 text-center text-surface-700 dark:text-surface-300">No invoices yet</div>
               )}
             </div>
+
+            {/* Pagination */}
+            {invoiceTotalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-surface-100 dark:border-surface-800">
+                <p className="text-xs text-surface-700 dark:text-surface-300">
+                  Showing {((invoicePage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(invoicePage * ITEMS_PER_PAGE, invoices.length)} of {invoices.length}
+                </p>
+                <div className="flex gap-1">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="text-xs"
+                    disabled={invoicePage <= 1}
+                    onClick={() => setInvoicePage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="text-xs"
+                    disabled={invoicePage >= invoiceTotalPages}
+                    onClick={() => setInvoicePage((p) => Math.min(invoiceTotalPages, p + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
 
       {activeTab === 'approvals' && (
         <DeferredSection resolve={data.approvals} skeleton="table">
-          {(approvals) => (
-            <>
-              {/* Approval Status Filter */}
-              <div className="flex gap-2 flex-wrap">
-                {['', 'PENDING', 'APPROVED', 'REJECTED', 'QUERIED'].map((status) => (
-                  <button
-                    key={status}
-                    onClick={() => {
-                      const params = new URLSearchParams(searchParams);
-                      if (status) params.set('approvalStatus', status);
-                      else params.delete('approvalStatus');
-                      setSearchParams(params);
-                    }}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                      filters.approvalStatus === status
-                        ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-400'
-                        : 'bg-white dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-800 dark:text-surface-200 hover:border-surface-300 dark:hover:border-surface-600'
-                    }`}
-                  >
-                    {status || 'All'}
-                  </button>
-                ))}
-              </div>
-
-              {/* Approval Queue Table */}
-              <div className="card p-0 overflow-hidden mt-4">
-                <div className="hidden md:block overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr>
-                        <th className="table-header">Type</th>
-                        <th className="table-header">Description</th>
-                        <th className="table-header text-right">Amount</th>
-                        <th className="table-header">Status</th>
-                        <th className="table-header">Submitted</th>
-                        <th className="table-header">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(approvals as ApprovalRequest[]).map((req) => (
-                        <tr key={req.id} className="table-row">
-                          <td className="table-cell">
-                            <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
-                              {APPROVAL_TYPE_LABELS[req.type] ?? req.type}
-                            </span>
-                          </td>
-                          <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-xs truncate">
-                            {req.description}
-                          </td>
-                          <td className="table-cell text-right font-medium text-surface-900 dark:text-white">
-                            &#8358;{Number(req.amount).toLocaleString()}
-                          </td>
-                          <td className="table-cell">
-                            <span className={APPROVAL_STATUS_COLORS[req.status] ?? 'badge'}>{req.status}</span>
-                          </td>
-                          <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
-                            {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                          </td>
-                          <td className="table-cell">
-                            {(req.status === 'PENDING' || req.status === 'QUERIED') && (
-                              <div className="flex gap-1.5">
-                                <Button
-                                  type="button"
-                                  variant="success"
-                                  size="sm"
-                                  className="text-xs"
-                                  onClick={() => { setApprovalModal({ requestId: req.id, action: 'APPROVED' }); setApprovalReason(''); }}
-                                >
-                                  Approve
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="danger"
-                                  size="sm"
-                                  className="text-xs"
-                                  onClick={() => { setApprovalModal({ requestId: req.id, action: 'REJECTED' }); setApprovalReason(''); }}
-                                >
-                                  Reject
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="secondary"
-                                  size="sm"
-                                  className="text-xs"
-                                  onClick={() => { setApprovalModal({ requestId: req.id, action: 'QUERIED' }); setApprovalReason(''); }}
-                                >
-                                  Query
-                                </Button>
-                              </div>
-                            )}
-                            {req.status === 'APPROVED' && req.approvalReason && (
-                              <span className="text-xs text-surface-700 dark:text-surface-300 italic truncate max-w-[150px] block">{req.approvalReason}</span>
-                            )}
-                            {req.status === 'REJECTED' && req.approvalReason && (
-                              <span className="text-xs text-danger-500 dark:text-danger-400 italic truncate max-w-[150px] block">{req.approvalReason}</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                      {(approvals as ApprovalRequest[]).length === 0 && (
-                        <tr><td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No approval requests</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Mobile */}
-                <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
-                  {(approvals as ApprovalRequest[]).map((req) => (
-                    <div key={req.id} className="p-4 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
-                          {APPROVAL_TYPE_LABELS[req.type] ?? req.type}
-                        </span>
-                        <span className={APPROVAL_STATUS_COLORS[req.status] ?? 'badge'}>{req.status}</span>
-                      </div>
-                      <p className="text-sm text-surface-800 dark:text-surface-200">{req.description}</p>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-surface-700 dark:text-surface-300">
-                          {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                        </span>
-                        <span className="font-medium text-surface-900 dark:text-white">&#8358;{Number(req.amount).toLocaleString()}</span>
-                      </div>
-                      {(req.status === 'PENDING' || req.status === 'QUERIED') && (
-                        <div className="flex gap-2 pt-1">
-                          <Button
-                            type="button"
-                            variant="success"
-                            size="sm"
-                            className="text-xs flex-1"
-                            onClick={() => { setApprovalModal({ requestId: req.id, action: 'APPROVED' }); setApprovalReason(''); }}
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            className="text-xs flex-1"
-                            onClick={() => { setApprovalModal({ requestId: req.id, action: 'REJECTED' }); setApprovalReason(''); }}
-                          >
-                            Reject
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="text-xs flex-1"
-                            onClick={() => { setApprovalModal({ requestId: req.id, action: 'QUERIED' }); setApprovalReason(''); }}
-                          >
-                            Query
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {(approvals as ApprovalRequest[]).length === 0 && (
-                    <div className="p-8 text-center text-surface-700 dark:text-surface-300">No approval requests</div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
+          {(resolvedApprovals) => {
+            const allApprovals = resolvedApprovals as ApprovalRequest[];
+            return <ApprovalsTab
+              approvals={allApprovals}
+              filters={filters}
+              searchParams={searchParams}
+              setSearchParams={setSearchParams}
+              setApprovalModal={setApprovalModal}
+              setApprovalReason={setApprovalReason}
+            />;
+          }}
         </DeferredSection>
       )}
 
-      {/* Approval Reason Modal */}
+      {/* Approval Modal + rest */}
       {approvalModal && (
         <>
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setApprovalModal(null)} />
@@ -851,5 +745,184 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         </>
       )}
     </div>
+  );
+}
+
+/* ── Approvals sub-component with built-in pagination ── */
+function ApprovalsTab({
+  approvals,
+  filters,
+  searchParams,
+  setSearchParams,
+  setApprovalModal,
+  setApprovalReason,
+}: {
+  approvals: ApprovalRequest[];
+  filters: { approvalStatus: string };
+  searchParams: URLSearchParams;
+  setSearchParams: (p: URLSearchParams) => void;
+  setApprovalModal: (v: { requestId: string; action: string } | null) => void;
+  setApprovalReason: (v: string) => void;
+}) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.ceil(approvals.length / ITEMS_PER_PAGE);
+  const paginated = useMemo(
+    () => approvals.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE),
+    [approvals, page],
+  );
+
+  useEffect(() => { setPage(1); }, [filters.approvalStatus]);
+
+  return (
+    <>
+      {/* Approval Status Filter */}
+      <div className="flex gap-2 flex-wrap">
+        {['', 'PENDING', 'APPROVED', 'REJECTED', 'QUERIED'].map((status) => (
+          <button
+            key={status}
+            onClick={() => {
+              const params = new URLSearchParams(searchParams);
+              if (status) params.set('approvalStatus', status);
+              else params.delete('approvalStatus');
+              setSearchParams(params);
+            }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+              filters.approvalStatus === status
+                ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-400'
+                : 'bg-white dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-800 dark:text-surface-200 hover:border-surface-300 dark:hover:border-surface-600'
+            }`}
+          >
+            {status || 'All'}
+          </button>
+        ))}
+      </div>
+
+      {/* Approval Queue Table */}
+      <div className="card p-0 overflow-hidden mt-4">
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr>
+                <th className="table-header">Type</th>
+                <th className="table-header">Description</th>
+                <th className="table-header text-right">Amount</th>
+                <th className="table-header">Status</th>
+                <th className="table-header">Submitted</th>
+                <th className="table-header">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginated.map((req) => (
+                <tr key={req.id} className="table-row">
+                  <td className="table-cell">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
+                      {APPROVAL_TYPE_LABELS[req.type] ?? req.type}
+                    </span>
+                  </td>
+                  <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-xs truncate">
+                    {req.description}
+                  </td>
+                  <td className="table-cell text-right font-medium text-surface-900 dark:text-white">
+                    {formatNaira(Number(req.amount))}
+                  </td>
+                  <td className="table-cell">
+                    <span className={APPROVAL_STATUS_COLORS[req.status] ?? 'badge'}>{req.status}</span>
+                  </td>
+                  <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                    {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+                  </td>
+                  <td className="table-cell">
+                    {(req.status === 'PENDING' || req.status === 'QUERIED') && (
+                      <div className="flex gap-1.5">
+                        <Button type="button" variant="success" size="sm" className="text-xs"
+                          onClick={() => { setApprovalModal({ requestId: req.id, action: 'APPROVED' }); setApprovalReason(''); }}>
+                          Approve
+                        </Button>
+                        <Button type="button" variant="danger" size="sm" className="text-xs"
+                          onClick={() => { setApprovalModal({ requestId: req.id, action: 'REJECTED' }); setApprovalReason(''); }}>
+                          Reject
+                        </Button>
+                        <Button type="button" variant="secondary" size="sm" className="text-xs"
+                          onClick={() => { setApprovalModal({ requestId: req.id, action: 'QUERIED' }); setApprovalReason(''); }}>
+                          Query
+                        </Button>
+                      </div>
+                    )}
+                    {req.status === 'APPROVED' && req.approvalReason && (
+                      <span className="text-xs text-surface-700 dark:text-surface-300 italic truncate max-w-[150px] block">{req.approvalReason}</span>
+                    )}
+                    {req.status === 'REJECTED' && req.approvalReason && (
+                      <span className="text-xs text-danger-500 dark:text-danger-400 italic truncate max-w-[150px] block">{req.approvalReason}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {paginated.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No approval requests</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile */}
+        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          {paginated.map((req) => (
+            <div key={req.id} className="p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
+                  {APPROVAL_TYPE_LABELS[req.type] ?? req.type}
+                </span>
+                <span className={APPROVAL_STATUS_COLORS[req.status] ?? 'badge'}>{req.status}</span>
+              </div>
+              <p className="text-sm text-surface-800 dark:text-surface-200">{req.description}</p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-surface-700 dark:text-surface-300">
+                  {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+                </span>
+                <span className="font-medium text-surface-900 dark:text-white">{formatNaira(Number(req.amount))}</span>
+              </div>
+              {(req.status === 'PENDING' || req.status === 'QUERIED') && (
+                <div className="flex gap-2 pt-1">
+                  <Button type="button" variant="success" size="sm" className="text-xs flex-1"
+                    onClick={() => { setApprovalModal({ requestId: req.id, action: 'APPROVED' }); setApprovalReason(''); }}>
+                    Approve
+                  </Button>
+                  <Button type="button" variant="danger" size="sm" className="text-xs flex-1"
+                    onClick={() => { setApprovalModal({ requestId: req.id, action: 'REJECTED' }); setApprovalReason(''); }}>
+                    Reject
+                  </Button>
+                  <Button type="button" variant="secondary" size="sm" className="text-xs flex-1"
+                    onClick={() => { setApprovalModal({ requestId: req.id, action: 'QUERIED' }); setApprovalReason(''); }}>
+                    Query
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+          {paginated.length === 0 && (
+            <div className="p-8 text-center text-surface-700 dark:text-surface-300">No approval requests</div>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-surface-100 dark:border-surface-800">
+            <p className="text-xs text-surface-700 dark:text-surface-300">
+              Showing {((page - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(page * ITEMS_PER_PAGE, approvals.length)} of {approvals.length}
+            </p>
+            <div className="flex gap-1">
+              <Button variant="secondary" size="sm" className="text-xs" disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                Previous
+              </Button>
+              <Button variant="secondary" size="sm" className="text-xs" disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }

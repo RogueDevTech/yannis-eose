@@ -58,6 +58,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const deliveredQuantity = formData.get('deliveredQuantity')?.toString();
   const returnedQuantity = formData.get('returnedQuantity')?.toString();
   const deliveryFeeAddOnStr = formData.get('deliveryFeeAddOn')?.toString();
+  const deliveryDiscountAmountStr = formData.get('deliveryDiscountAmount')?.toString();
 
   const metadata: Record<string, unknown> = {};
   if (otp) metadata.otp = otp;
@@ -69,6 +70,10 @@ export async function action({ request }: ActionFunctionArgs) {
   if (deliveryFeeAddOnStr) {
     const addOn = parseFloat(deliveryFeeAddOnStr);
     if (!Number.isNaN(addOn) && addOn >= 0) metadata.deliveryFeeAddOn = addOn;
+  }
+  if (deliveryDiscountAmountStr !== undefined && deliveryDiscountAmountStr !== '') {
+    const discount = parseFloat(deliveryDiscountAmountStr);
+    if (!Number.isNaN(discount) && discount >= 0) metadata.deliveryDiscountAmount = discount;
   }
 
   // DELIVERED and PARTIALLY_DELIVERED require HOL approval: submit request instead of direct transition

@@ -74,7 +74,7 @@ export default function App() {
       <body className="h-full">
         <Outlet />
         <ScrollToTopButton />
-        <ScrollRestoration />
+        <ScrollRestoration getKey={(location) => location.pathname} />
         <script dangerouslySetInnerHTML={{ __html: `window.__ENV = ${envScript};` }} />
         <Scripts />
         <script dangerouslySetInnerHTML={{ __html: `

@@ -183,6 +183,20 @@
       "when": 1772425000000,
       "tag": "0038_add_ceo_overview_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1772426000000,
+      "tag": "0039_add_orders_delivery_discount",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1772427000000,
+      "tag": "0040_add_orders_resolve_receipt_url",
+      "breakpoints": true
     }
   ]
 }

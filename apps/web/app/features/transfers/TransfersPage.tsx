@@ -9,7 +9,7 @@ import { Tabs } from '~/components/ui/tabs';
 import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from './types';
 import { STATUS_BADGE } from './types';
 
-export function TransfersPage({ transfers, locations, products, levels }: TransfersStreamData) {
+export function TransfersPage({ transfers, locations, products, levels, canInitiate = true }: TransfersStreamData) {
   const fetcher = useFetcher();
   const [activeTab, setActiveTab] = useState<'all' | 'in_transit' | 'received' | 'disputed'>('all');
   const [showInitiateForm, setShowInitiateForm] = useState(false);
@@ -61,9 +61,11 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
             Dual-entry stock transfers between warehouse and 3PL locations
           </p>
         </div>
-        <Button variant="primary" size="sm" onClick={() => setShowInitiateForm(!showInitiateForm)}>
-          {showInitiateForm ? 'Close' : '+ Initiate Transfer'}
-        </Button>
+        {canInitiate && (
+          <Button variant="primary" size="sm" onClick={() => setShowInitiateForm(!showInitiateForm)}>
+            {showInitiateForm ? 'Close' : '+ Initiate Transfer'}
+          </Button>
+        )}
       </div>
 
       {/* Error banner */}
@@ -100,7 +102,8 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
         </div>
       </div>
 
-      {/* Initiate Transfer Form — product/levels dropdowns wrapped in DeferredSection */}
+      {/* Initiate Transfer Form — only when canInitiate (admin); TPL only verifies receipt */}
+      {canInitiate && (
       <ResponsiveFormPanel open={showInitiateForm} onClose={() => setShowInitiateForm(false)}>
         <DeferredSection resolve={products} skeleton="card">
           {(resolvedProducts) => (
@@ -230,6 +233,7 @@ export function TransfersPage({ transfers, locations, products, levels }: Transf
           )}
         </DeferredSection>
       </ResponsiveFormPanel>
+      )}
 
       {/* Verify Transfer Modal */}
       {verifyingTransfer && (

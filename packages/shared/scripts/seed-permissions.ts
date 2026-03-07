@@ -92,7 +92,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   FINANCE_OFFICER: ['finance.read', 'finance.costView', 'finance.approve', 'finance.disburse', 'marketing.fundingSummary', 'orders.read'],
   HEAD_OF_LOGISTICS: ['orders.read', 'orders.bulkTransition', 'logistics.read', 'logistics.write', 'inventory.read', 'inventory.lowStockAlerts'],
   WAREHOUSE_MANAGER: ['inventory.read', 'inventory.intake', 'inventory.transfer', 'inventory.adjust', 'inventory.lowStockAlerts', 'inventory.createReconciliation', 'inventory.resolveReconciliation', 'inventory.reconciliations', 'transfers.read', 'returns.read', 'products.read', 'products.create', 'categories.read', 'categories.write'],
-  TPL_MANAGER: ['inventory.verifyTransfer', 'inventory.returnedOrders', 'inventory.createReconciliation', 'inventory.reconciliations', 'logistics.read', 'logistics.remit', 'orders.read', 'transfers.read', 'returns.read'],
+  TPL_MANAGER: ['inventory.read', 'inventory.verifyTransfer', 'inventory.returnedOrders', 'inventory.createReconciliation', 'inventory.reconciliations', 'logistics.read', 'logistics.remit', 'orders.read', 'transfers.read', 'returns.read'],
   TPL_RIDER: ['rider.dashboard'],
   HR_MANAGER: ['hr.read', 'hr.write', 'users.read', 'users.create', 'users.update'],
   // hr.approveAdjustment: SuperAdmin only (not in any role — bypass)

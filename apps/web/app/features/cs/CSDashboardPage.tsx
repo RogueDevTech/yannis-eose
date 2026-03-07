@@ -67,6 +67,24 @@ function AgentWorkloadCard({ agent, className }: { agent: AgentWorkload; classNa
   );
 }
 
+// ─── Live cart card (mobile horizontal strip) ───
+
+function LiveCartCard({ cart, className }: { cart: PendingCart; className?: string }) {
+  return (
+    <div className={className ?? 'rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-3 shadow-sm'}>
+      <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">{cart.customerName}</p>
+      <p className="text-xs font-mono text-surface-700 dark:text-surface-300 truncate mt-0.5">{cart.customerPhoneDisplay}</p>
+      <p className="text-xs text-surface-800 dark:text-surface-200 truncate mt-1">{cart.productName ?? cart.id.slice(0, 8) + '...'}</p>
+      <p className="text-xs text-surface-600 dark:text-surface-400 truncate">{cart.campaignName ?? '—'}</p>
+      <p className="text-xs text-surface-500 dark:text-surface-500 mt-2">
+        {new Date(cart.updatedAt).toLocaleDateString('en-NG', {
+          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+        })}
+      </p>
+    </div>
+  );
+}
+
 // ─── Component ──────────────────────────────────────────
 
 export function CSDashboardPage({
@@ -82,17 +100,21 @@ export function CSDashboardPage({
   leaderboard,
   leaderboardPeriod = 'this_month',
   cartStats,
-  pendingCarts,
   liveEvents,
   canCreateOffline = false,
   productsForOfflineOrder = [],
+  initialTab,
+  initialHotSwapFrom,
 }: CSDashboardStreamData) {
   const fetcher = useFetcher();
+  const cartsFetcher = useFetcher<{ pendingCarts?: PendingCart[]; abandonedCarts?: PendingCart[] }>();
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'queue' | 'active' | 'callbacks' | 'duplicates' | 'carts' | 'hotswap' | 'performance'>('active');
+  const [activeTab, setActiveTab] = useState<'queue' | 'active' | 'callbacks' | 'duplicates' | 'carts' | 'hotswap' | 'performance'>(
+    initialTab === 'hotswap' ? 'hotswap' : 'active',
+  );
   const [assignAgent, setAssignAgent] = useState<Record<string, string>>({});
-  const [hotSwapFrom, setHotSwapFrom] = useState('');
+  const [hotSwapFrom, setHotSwapFrom] = useState(initialHotSwapFrom ?? '');
   const [hotSwapTo, setHotSwapTo] = useState('');
   const [hotSwapOrderIds, setHotSwapOrderIds] = useState<string[]>([]);
   /** Reassign order modal: order + current assignee so we can pick new agent */
@@ -102,13 +124,24 @@ export function CSDashboardPage({
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ orderId: string; customerName: string } | null>(null);
   /** Live carts table pagination (5 rows per page) */
   const [cartPage, setCartPage] = useState(1);
+  /** Cart Abandonment tab: abandoned carts pagination (10 rows per page) */
+  const [abandonedCartPage, setAbandonedCartPage] = useState(1);
   /** Agent Workloads: View all modal and pagination */
   const [viewAllAgentsOpen, setViewAllAgentsOpen] = useState(false);
   const [viewAllPage, setViewAllPage] = useState(1);
   const agentScrollRef = useRef<HTMLDivElement>(null);
+  const liveCartsStripRef = useRef<HTMLDivElement>(null);
+  const liveCartsTabStripRef = useRef<HTMLDivElement>(null);
 
   const scrollAgentStrip = useCallback((delta: number) => {
     agentScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  }, []);
+
+  const scrollLiveCartsStrip = useCallback((delta: number) => {
+    liveCartsStripRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  }, []);
+  const scrollLiveCartsTabStrip = useCallback((delta: number) => {
+    liveCartsTabStripRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
 
   useEffect(() => {
@@ -123,6 +156,13 @@ export function CSDashboardPage({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [viewAllAgentsOpen]);
+
+  // Fetch cart data when user switches to Cart Abandonment tab (refetch each time for fresh data)
+  useEffect(() => {
+    if (activeTab === 'carts') {
+      cartsFetcher.load('/admin/cs/queue/carts');
+    }
+  }, [activeTab]);
 
   const actionError = (fetcher.data as { error?: string })?.error;
   const [dismissedError, setDismissedError] = useState(false);
@@ -349,95 +389,125 @@ export function CSDashboardPage({
         </div>
       </div>
 
-      {/* Live carts — fixed height, 5 rows per page, prev/next */}
-      {pendingCarts && (
+      {/* Live carts overview — only after cart data has been loaded (open Cart Abandonment tab once) */}
+      {cartsFetcher.data != null && (
         <div className="card">
-          <h2 className="text-sm font-semibold text-surface-900 dark:text-white mb-2">Live carts</h2>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Live carts</h2>
+            {(cartsFetcher.data.pendingCarts?.length ?? 0) > 0 && (
+              <div className="flex md:hidden items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => scrollLiveCartsStrip(-260)}
+                  className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
+                  aria-label="Scroll left"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollLiveCartsStrip(260)}
+                  className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
+                  aria-label="Scroll right"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
           <p className="text-xs text-surface-700 dark:text-surface-300 mb-3">
             Carts in progress: customers filled name + phone but haven&apos;t submitted yet. May convert soon.
           </p>
           <div className="flex flex-col">
-            <DeferredSection resolve={pendingCarts} skeleton="table">
-              {(carts: PendingCart[]) => {
-                const pageSize = 5;
-                const totalPages = Math.max(1, Math.ceil(carts.length / pageSize));
-                const page = Math.min(cartPage, totalPages);
-                const start = (page - 1) * pageSize;
-                const rows = carts.slice(start, start + pageSize);
-
-                return carts.length > 0 ? (
-                  <>
-                    <div className="overflow-x-auto overflow-y-auto -mx-4 px-4 min-h-0 max-h-[15rem]">
-                      <table className="w-full text-sm table-fixed">
-                        <thead>
-                          <tr className="h-10">
-                            <th className="table-header text-left">Customer</th>
-                            <th className="table-header text-left">Phone</th>
-                            <th className="table-header text-left">Product</th>
-                            <th className="table-header text-left">Campaign</th>
-                            <th className="table-header text-left">Last activity</th>
+            {(() => {
+              const carts = cartsFetcher.data.pendingCarts ?? [];
+              const pageSize = 5;
+              const totalPages = Math.max(1, Math.ceil(carts.length / pageSize));
+              const page = Math.min(cartPage, totalPages);
+              const start = (page - 1) * pageSize;
+              const rows = carts.slice(start, start + pageSize);
+              return carts.length > 0 ? (
+                <>
+                  <div
+                    ref={liveCartsStripRef}
+                    className="flex md:hidden flex-nowrap gap-3 overflow-x-auto overflow-y-hidden pb-1 -mx-1 px-1"
+                    style={{ scrollbarWidth: 'thin' } as React.CSSProperties}
+                  >
+                    {carts.map((c) => (
+                      <LiveCartCard key={c.id} cart={c} className="shrink-0 w-[260px] rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-3 shadow-sm" />
+                    ))}
+                  </div>
+                  <div className="hidden md:block overflow-x-auto overflow-y-auto -mx-4 px-4 min-h-0 max-h-[15rem]">
+                    <table className="w-full text-sm table-fixed">
+                      <thead>
+                        <tr className="h-10">
+                          <th className="table-header text-left">Customer</th>
+                          <th className="table-header text-left">Phone</th>
+                          <th className="table-header text-left">Product</th>
+                          <th className="table-header text-left">Campaign</th>
+                          <th className="table-header text-left">Last activity</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((c) => (
+                          <tr key={c.id} className="table-row h-10">
+                            <td className="table-cell font-medium text-surface-900 dark:text-surface-100 truncate">{c.customerName}</td>
+                            <td className="table-cell font-mono text-xs truncate">{c.customerPhoneDisplay}</td>
+                            <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
+                            <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.campaignName ?? '—'}</td>
+                            <td className="table-cell text-surface-700 dark:text-surface-300 whitespace-nowrap">
+                              {new Date(c.updatedAt).toLocaleDateString('en-NG', {
+                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                              })}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((c) => (
-                            <tr key={c.id} className="table-row h-10">
-                              <td className="table-cell font-medium text-surface-900 dark:text-surface-100 truncate">{c.customerName}</td>
-                              <td className="table-cell font-mono text-xs truncate">{c.customerPhoneDisplay}</td>
-                              <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
-                              <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.campaignName ?? '—'}</td>
-                              <td className="table-cell text-surface-700 dark:text-surface-300 whitespace-nowrap">
-                                {new Date(c.updatedAt).toLocaleDateString('en-NG', {
-                                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                                })}
-                              </td>
+                        ))}
+                        {rows.length < pageSize &&
+                          Array.from({ length: pageSize - rows.length }).map((_, i) => (
+                            <tr key={`empty-${i}`} className="h-10" aria-hidden="true">
+                              <td colSpan={5} className="table-cell border-b border-transparent" />
                             </tr>
                           ))}
-                          {/* Spacer rows so height is always 5 rows */}
-                          {rows.length < pageSize &&
-                            Array.from({ length: pageSize - rows.length }).map((_, i) => (
-                              <tr key={`empty-${i}`} className="h-10" aria-hidden="true">
-                                <td colSpan={5} className="table-cell border-b border-transparent" />
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-surface-100 dark:border-surface-800 shrink-0">
-                      <span className="text-xs text-surface-600 dark:text-surface-400">
-                        Page {page} of {totalPages}
-                        {carts.length > 0 && (
-                          <span className="ml-1">
-                            ({start + 1}–{Math.min(start + pageSize, carts.length)} of {carts.length})
-                          </span>
-                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="hidden md:flex items-center justify-between gap-2 mt-3 pt-3 border-t border-surface-100 dark:border-surface-800 shrink-0">
+                    <span className="text-xs text-surface-600 dark:text-surface-400">
+                      Page {page} of {totalPages}
+                      <span className="ml-1">
+                        ({start + 1}–{Math.min(start + pageSize, carts.length)} of {carts.length})
                       </span>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          disabled={page <= 1}
-                          onClick={() => setCartPage((p) => Math.max(1, p - 1))}
-                        >
-                          Prev
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          disabled={page >= totalPages}
-                          onClick={() => setCartPage((p) => Math.min(totalPages, p + 1))}
-                        >
-                          Next
-                        </Button>
-                      </div>
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={page <= 1}
+                        onClick={() => setCartPage((p) => Math.max(1, p - 1))}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={page >= totalPages}
+                        onClick={() => setCartPage((p) => Math.min(totalPages, p + 1))}
+                      >
+                        Next
+                      </Button>
                     </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-surface-700 dark:text-surface-300 py-3 text-center">No live carts</p>
-                );
-              }}
-            </DeferredSection>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-surface-700 dark:text-surface-300 py-3 text-center">No live carts</p>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -539,18 +609,14 @@ export function CSDashboardPage({
             {
               value: 'carts',
               label: 'Cart Abandonment',
-              badge:
-                cartStats && pendingCarts ? (
-                  <DeferredSection resolve={cartStats} skeleton="inline">
-                    {(stats: { pending: number }) =>
-                      stats.pending > 0 ? (
-                        <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-surface-200 dark:bg-surface-600 text-surface-700 dark:text-surface-200 text-xs font-bold">
-                          {stats.pending}
-                        </span>
-                      ) : null
-                    }
-                  </DeferredSection>
-                ) : undefined,
+              badge: cartStats ? (
+                <DeferredSection resolve={cartStats} skeleton="inline">
+                  {(stats: { pending: number; abandonedLast24h: number }) => {
+                    const n = stats.abandonedLast24h + stats.pending;
+                    return n > 0 ? <span> ({n})</span> : null;
+                  }}
+                </DeferredSection>
+              ) : undefined,
             },
             { value: 'hotswap', label: 'Hot Swap' },
             { value: 'performance', label: 'Performance' },
@@ -1366,28 +1432,60 @@ export function CSDashboardPage({
         </DeferredSection>
       )}
 
-      {/* ── Cart Abandonment Tab ─────────────────────────── */}
-      {activeTab === 'carts' && pendingCarts && (
+      {/* ── Cart Abandonment Tab (fetched when tab is selected) ─────────────────────────── */}
+      {activeTab === 'carts' && (
         <div className="card p-0 overflow-hidden flex flex-col h-[28rem]">
-          <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Cart Abandonment</h2>
-            <p className="text-sm text-surface-700 dark:text-surface-300 mt-0.5">
-              Live carts: customers filled name + phone but haven&apos;t submitted yet. May convert soon.
-            </p>
-          </div>
-          <div className="flex flex-col flex-1 min-h-0">
-            <DeferredSection resolve={pendingCarts} skeleton="table">
-              {(carts: PendingCart[]) => {
-                const pageSize = 5;
-                const totalPages = Math.max(1, Math.ceil(carts.length / pageSize));
-                const page = Math.min(cartPage, totalPages);
-                const start = (page - 1) * pageSize;
-                const rows = carts.slice(start, start + pageSize);
-
-                return carts.length > 0 ? (
-                  <>
-                    <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
-                      <table className="w-full text-sm table-fixed">
+          {cartsFetcher.state === 'loading' || (cartsFetcher.state === 'idle' && !cartsFetcher.data) ? (
+            <div className="flex-1 flex items-center justify-center p-8">
+              <p className="text-sm text-surface-600 dark:text-surface-400">Loading cart data…</p>
+            </div>
+          ) : (
+            (() => {
+              const abandonedCarts = cartsFetcher.data?.abandonedCarts ?? [];
+              const pageSize = 10;
+              const totalPages = Math.max(1, Math.ceil(abandonedCarts.length / pageSize));
+              const page = Math.min(abandonedCartPage, totalPages);
+              const start = (page - 1) * pageSize;
+              const rows = abandonedCarts.slice(start, start + pageSize);
+              return (
+                <div className="flex flex-col flex-1 min-h-0">
+                  <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Abandoned (last 24h)</h2>
+                      <p className="text-sm text-surface-700 dark:text-surface-300 mt-0.5">
+                        Carts marked abandoned (no order submitted). Same count as the stat above.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={page <= 1}
+                        onClick={() => setAbandonedCartPage((p) => Math.max(1, p - 1))}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={page >= totalPages}
+                        onClick={() => setAbandonedCartPage((p) => Math.min(totalPages, p + 1))}
+                      >
+                        Next
+                      </Button>
+                      <Link
+                        to="/admin/cs/orders?status=UNPROCESSED"
+                        className="btn-primary btn-sm inline-flex items-center justify-center"
+                      >
+                        View all
+                      </Link>
+                    </div>
+                  </div>
+                  <div className="flex flex-col shrink-0" style={{ height: '14rem' }}>
+                    {abandonedCarts.length > 0 ? (
+                      <table className="w-full text-sm table-fixed border-collapse">
                         <thead>
                           <tr className="h-10">
                             <th className="table-header text-left">Customer</th>
@@ -1419,44 +1517,30 @@ export function CSDashboardPage({
                             ))}
                         </tbody>
                       </table>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-surface-100 dark:border-surface-800 shrink-0">
-                      <span className="text-xs text-surface-600 dark:text-surface-400">
-                        Page {page} of {totalPages}
-                        {carts.length > 0 && (
-                          <span className="ml-1">
-                            ({start + 1}–{Math.min(start + pageSize, carts.length)} of {carts.length})
-                          </span>
-                        )}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          disabled={page <= 1}
-                          onClick={() => setCartPage((p) => Math.max(1, p - 1))}
-                        >
-                          Prev
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          disabled={page >= totalPages}
-                          onClick={() => setCartPage((p) => Math.min(totalPages, p + 1))}
-                        >
-                          Next
-                        </Button>
+                    ) : (
+                      <div className="flex-1 flex items-center justify-center">
+                        <p className="text-sm text-surface-700 dark:text-surface-300">No abandoned carts in the last 24h</p>
                       </div>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-surface-700 dark:text-surface-300 py-8 text-center">No live carts</p>
-                );
-              }}
-            </DeferredSection>
-          </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 px-4 py-3 border-t border-surface-100 dark:border-surface-800 shrink-0">
+                    <span className="text-xs text-surface-600 dark:text-surface-400">
+                      {abandonedCarts.length > 0 ? (
+                        <>
+                          Page {page} of {totalPages}
+                          <span className="ml-1">
+                            ({start + 1}–{Math.min(start + pageSize, abandonedCarts.length)} of {abandonedCarts.length})
+                          </span>
+                        </>
+                      ) : (
+                        '0 carts'
+                      )}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()
+          )}
         </div>
       )}
 

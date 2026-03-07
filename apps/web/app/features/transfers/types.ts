@@ -49,4 +49,6 @@ export interface TransfersStreamData {
   locations: Location[];
   products: Promise<Product[]>;
   levels: Promise<InventoryLevel[]>;
+  /** When false (e.g. TPL view), hide Initiate Transfer button and form */
+  canInitiate?: boolean;
 }

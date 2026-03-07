@@ -695,7 +695,32 @@ export class MarketingService {
     if (periodEnd) deliveredConditions.push(lte(schema.orders.deliveredAt, periodEnd));
     const deliveredWhere = and(...deliveredConditions);
 
-    const [totalSpendRows, totalOrdersRows, deliveredOrdersRows, deliveredRevenueRows] = await Promise.all([
+    // Orders that CS have scheduled (reached CONFIRMED or beyond)
+    const confirmedStatuses = [
+      'CONFIRMED',
+      'ALLOCATED',
+      'DISPATCHED',
+      'IN_TRANSIT',
+      'DELIVERED',
+      'PARTIALLY_DELIVERED',
+      'RETURNED',
+      'RESTOCKED',
+      'WRITTEN_OFF',
+      'COMPLETED',
+    ] as const;
+    const confirmedConditions: Parameters<typeof and>[0][] = [inArray(schema.orders.status, [...confirmedStatuses])];
+    if (mediaBuyerId) confirmedConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+    if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
+    if (periodEnd) confirmedConditions.push(lte(schema.orders.createdAt, periodEnd));
+    const confirmedWhere = and(...confirmedConditions);
+
+    const [
+      totalSpendRows,
+      totalOrdersRows,
+      deliveredOrdersRows,
+      deliveredRevenueRows,
+      confirmedOrdersRows,
+    ] = await Promise.all([
       this.db
         .select({ total: sum(schema.adSpendLogs.spendAmount) })
         .from(schema.adSpendLogs)
@@ -712,18 +737,26 @@ export class MarketingService {
         .select({ total: sum(schema.orders.totalAmount) })
         .from(schema.orders)
         .where(deliveredWhere),
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(confirmedWhere),
     ]);
 
     const totalSpend = Number(totalSpendRows[0]?.total ?? 0);
     const totalOrders = totalOrdersRows[0]?.count ?? 0;
     const deliveredOrders = deliveredOrdersRows[0]?.count ?? 0;
     const deliveredRevenue = Number(deliveredRevenueRows[0]?.total ?? 0);
+    const confirmedOrders = confirmedOrdersRows[0]?.count ?? 0;
+    const confirmationRate = totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0;
 
     return {
       totalSpend,
       totalOrders,
       deliveredOrders,
       deliveredRevenue,
+      confirmedOrders,
+      confirmationRate,
       cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
       trueRoas: totalSpend > 0 ? deliveredRevenue / totalSpend : 0,
       deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0,
@@ -759,8 +792,11 @@ export class MarketingService {
       }),
     );
 
-    // Sort by True ROAS descending (best performer first)
-    leaderboard.sort((a, b) => b.trueRoas - a.trueRoas);
+    // Sort by True ROAS descending, then by confirmation rate descending (tiebreaker)
+    leaderboard.sort((a, b) => {
+      if (b.trueRoas !== a.trueRoas) return b.trueRoas - a.trueRoas;
+      return b.confirmationRate - a.confirmationRate;
+    });
 
     return leaderboard;
   }

@@ -122,22 +122,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : { pending: 0, abandonedLast24h: 0 },
   ).catch(() => ({ pending: 0, abandonedLast24h: 0 }));
 
-  const pendingCarts: Promise<Array<{
-    id: string;
-    customerName: string;
-    customerPhoneDisplay: string;
-    productName: string | null;
-    campaignName: string | null;
-    offerLabel: string | null;
-    updatedAt: string;
-  }>> = apiRequest<unknown>(
-    `/trpc/cart.listPending?input=${encodeURIComponent(JSON.stringify({ limit: 30 }))}`,
-    { method: 'GET', cookie },
-  ).then((res) =>
-    res.ok
-      ? (res.data as { result?: { data?: Array<{ id: string; customerName: string; customerPhoneDisplay: string; productName: string | null; campaignName: string | null; offerLabel: string | null; updatedAt: string }> } })?.result?.data ?? []
-      : [],
-  ).catch(() => []);
+  const tabParam = url.searchParams.get('tab');
+  const fromParam = url.searchParams.get('from');
+  const initialTab = tabParam === 'hotswap' ? 'hotswap' : undefined;
+  const initialHotSwapFrom = initialTab && fromParam?.trim() ? fromParam.trim() : undefined;
 
   return {
     criticalData,
@@ -147,9 +135,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboard,
     leaderboardPeriod,
     cartStats,
-    pendingCarts,
     canCreateOffline,
     productsForOfflineOrder,
+    initialTab,
+    initialHotSwapFrom,
   };
 }
 
@@ -387,9 +376,10 @@ export default function CSQueueRoute() {
       leaderboard={data.leaderboard}
       leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
       cartStats={data.cartStats}
-      pendingCarts={data.pendingCarts}
       canCreateOffline={data.canCreateOffline}
       productsForOfflineOrder={data.productsForOfflineOrder}
+      initialTab={data.initialTab}
+      initialHotSwapFrom={data.initialHotSwapFrom}
     />
   );
 }

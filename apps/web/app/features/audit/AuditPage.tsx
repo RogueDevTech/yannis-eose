@@ -6,6 +6,7 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { Spinner } from '~/components/ui/spinner';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { exportToCsv } from '~/lib/csv-export';
+import { formatNaira } from '~/lib/format-amount';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import type { AuditEntry, AuditPageProps } from './types';
@@ -331,7 +332,7 @@ const CURRENCY_FIELDS = new Set([
 function formatCurrency(val: unknown): string {
   const num = Number(val);
   if (isNaN(num)) return String(val);
-  return `\u20A6${num.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatNaira(num, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function parseOffersArray(val: unknown): Array<Record<string, unknown>> {

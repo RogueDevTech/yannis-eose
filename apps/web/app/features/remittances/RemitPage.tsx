@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { FileUpload } from '~/components/ui/file-upload';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useFetcherToast } from '~/components/ui/toast';
 
@@ -97,6 +98,14 @@ export function RemitPage({
     });
   };
 
+  const selectAllOrders = () => {
+    setSelectedOrderIds(new Set(eligibleOrders.map((o) => o.id)));
+  };
+
+  const clearOrderSelection = () => {
+    setSelectedOrderIds(new Set());
+  };
+
   const addDeliveryReceipt = (url: string) => {
     setDeliveryReceiptUrls((prev) => (prev.includes(url) ? prev : [...prev, url]));
   };
@@ -122,31 +131,71 @@ export function RemitPage({
       <div className="card p-6">
         <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Delivery remittance</h2>
         <p className="text-sm text-surface-600 dark:text-surface-400 mb-4">
-          Select delivered orders and attach payment receipt(s). Finance will review and mark as received (end of day).
+          Select the delivered orders you want to include in this remittance and attach payment receipt(s). Finance will review and mark as received (end of day).
         </p>
         <fetcher.Form method="post" className="space-y-4">
           <input type="hidden" name="intent" value="createDeliveryRemittance" />
           <input type="hidden" name="orderIds" value={JSON.stringify([...selectedOrderIds])} />
           <input type="hidden" name="receiptUrls" value={JSON.stringify(deliveryReceiptUrls)} />
           <div>
-            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">
-              Select delivered orders
-            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
+                Select orders to remit
+                {eligibleOrders.length > 0 && (
+                  <span className="font-normal text-surface-500 dark:text-surface-400 ml-1">
+                    ({eligibleOrders.length} available)
+                  </span>
+                )}
+              </label>
+              {eligibleOrders.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <PageRefreshButton />
+                  <button
+                    type="button"
+                    onClick={selectAllOrders}
+                    disabled={isSubmittingDelivery}
+                    className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50"
+                  >
+                    Select all
+                  </button>
+                  <span className="text-surface-400">·</span>
+                  <button
+                    type="button"
+                    onClick={clearOrderSelection}
+                    disabled={isSubmittingDelivery}
+                    className="text-xs font-medium text-surface-600 dark:text-surface-400 hover:underline disabled:opacity-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
             {eligibleOrders.length === 0 ? (
-              <p className="text-sm text-surface-500 dark:text-surface-400">No delivered orders available to remit.</p>
+              <div className="rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 px-4 py-4 text-sm text-surface-600 dark:text-surface-400">
+                <p className="font-medium text-surface-700 dark:text-surface-300 mb-1">No delivered orders available to remit</p>
+                <p className="mb-2">
+                  Orders delivered at your location will appear here once they are marked as Delivered and not yet included in a remittance.
+                </p>
+                <Link to="/tpl/orders" className="text-brand-600 dark:text-brand-400 font-medium hover:underline">
+                  View orders →
+                </Link>
+              </div>
             ) : (
-              <div className="max-h-48 overflow-y-auto rounded-lg border border-surface-200 dark:border-surface-700 divide-y divide-surface-100 dark:divide-surface-800">
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-surface-200 dark:border-surface-700 divide-y divide-surface-100 dark:divide-surface-800">
                 {eligibleOrders.map((order) => (
                   <label
                     key={order.id}
-                    className="flex items-center gap-3 px-3 py-2 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer"
+                    className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer"
                   >
                     <Checkbox
                       checked={selectedOrderIds.has(order.id)}
                       onChange={() => toggleOrder(order.id)}
                       disabled={isSubmittingDelivery}
                     />
-                    <span className="text-sm text-surface-900 dark:text-white truncate">{order.customerName}</span>
+                    <span className="font-mono text-xs text-surface-500 dark:text-surface-400 shrink-0 w-20 truncate" title={order.id}>
+                      {order.id.slice(0, 8)}…
+                    </span>
+                    <span className="text-sm text-surface-900 dark:text-white truncate min-w-0">{order.customerName}</span>
                     <span className="text-xs text-surface-500 dark:text-surface-400 shrink-0">
                       {order.deliveredAt ? new Date(order.deliveredAt).toLocaleDateString() : '—'}
                     </span>
@@ -158,6 +207,11 @@ export function RemitPage({
                   </label>
                 ))}
               </div>
+            )}
+            {eligibleOrders.length > 0 && selectedOrderIds.size > 0 && (
+              <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">
+                {selectedOrderIds.size} order(s) selected for this remittance
+              </p>
             )}
           </div>
           <div>

@@ -1,4 +1,5 @@
 import { Link } from '@remix-run/react';
+import { formatNaira } from '~/lib/format-amount';
 import type { FundingBalanceRow } from './types';
 
 export interface MediaBuyerBalanceCardProps {
@@ -38,25 +39,46 @@ export function MediaBuyerBalanceCard({ row, className = '' }: MediaBuyerBalance
         <div className="flex justify-between">
           <span className="text-surface-700 dark:text-surface-300">Balance</span>
           <span className="font-medium text-brand-600 dark:text-brand-400">
-            ₦{Number(row.balance).toLocaleString()}
+            {formatNaira(Number(row.balance))}
           </span>
         </div>
         <div className="flex justify-between text-surface-500 dark:text-surface-400">
           <span>Received</span>
-          <span>₦{Number(row.totalReceived).toLocaleString()}</span>
+          <span>{formatNaira(Number(row.totalReceived))}</span>
         </div>
         <div className="flex justify-between text-surface-500 dark:text-surface-400">
           <span>Spent</span>
-          <span>₦{Number(row.totalSpend).toLocaleString()}</span>
+          <span>{formatNaira(Number(row.totalSpend))}</span>
         </div>
+        {row.confirmationRate != null && (
+          <div className="flex justify-between text-surface-500 dark:text-surface-400">
+            <span>Confirmation rate</span>
+            <span className="font-medium text-surface-900 dark:text-surface-100">{Math.round(row.confirmationRate)}%</span>
+          </div>
+        )}
+        {row.deliveryRate != null && (
+          <div className="flex justify-between text-surface-500 dark:text-surface-400">
+            <span>Delivery rate</span>
+            <span className="font-medium text-surface-900 dark:text-surface-100">{Math.round(row.deliveryRate)}%</span>
+          </div>
+        )}
       </div>
-      <Link
-        to={`/hr/users/${row.userId}`}
-        prefetch="intent"
-        className="mt-3 block text-center text-xs font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
-      >
-        View profile
-      </Link>
+      <div className="mt-3 flex flex-nowrap items-center gap-2">
+        <Link
+          to={`/admin/marketing/orders?mediaBuyerId=${row.userId}`}
+          prefetch="intent"
+          className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
+        >
+          View orders
+        </Link>
+        <Link
+          to={`/hr/users/${row.userId}`}
+          prefetch="intent"
+          className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
+        >
+          View profile
+        </Link>
+      </div>
     </div>
   );
 }

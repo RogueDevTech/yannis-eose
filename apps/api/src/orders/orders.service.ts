@@ -708,12 +708,19 @@ export class OrdersService {
     }
 
     // Role check: only Head of Logistics or SuperAdmin can transition IN_TRANSIT → DELIVERED/PARTIALLY_DELIVERED.
-    // Riders and TPL_MANAGER must submit a delivery confirmation request for HOL approval.
+    // TPL_MANAGER may mark delivered when the order has been resolved (resolveReceiptUrl set) via Resolve order.
+    // Riders must still submit a delivery confirmation request for HOL approval.
     if (
       currentStatus === 'IN_TRANSIT' &&
       (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED')
     ) {
-      if (actor.role !== 'HEAD_OF_LOGISTICS' && actor.role !== 'SUPER_ADMIN') {
+      const hasResolveReceipt = !!order.resolveReceiptUrl?.trim();
+      const tplManagerMayDeliver = actor.role === 'TPL_MANAGER' && hasResolveReceipt;
+      if (
+        actor.role !== 'HEAD_OF_LOGISTICS' &&
+        actor.role !== 'SUPER_ADMIN' &&
+        !tplManagerMayDeliver
+      ) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message:
@@ -797,6 +804,20 @@ export class OrdersService {
       if (!Number.isNaN(addOn) && addOn >= 0) {
         const current = parseFloat(String(order.deliveryFee ?? 0)) || 0;
         updateFields['deliveryFee'] = (current + addOn).toFixed(2);
+      }
+    }
+
+    // Delivery discount when marking DELIVERED or PARTIALLY_DELIVERED (3PL can reduce order total at delivery)
+    if (
+      (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED') &&
+      input.metadata?.deliveryDiscountAmount !== undefined
+    ) {
+      const discount = Number(input.metadata.deliveryDiscountAmount);
+      if (!Number.isNaN(discount) && discount >= 0) {
+        const currentTotal = parseFloat(String(order.totalAmount ?? 0)) || 0;
+        const newTotal = Math.max(0, currentTotal - discount);
+        updateFields['totalAmount'] = newTotal.toFixed(2);
+        updateFields['deliveryDiscountAmount'] = discount.toFixed(2);
       }
     }
 
@@ -895,17 +916,52 @@ export class OrdersService {
       }
     }
 
+    // TPL_MANAGER may update preferred delivery date, optional delivery fee/discount, and required receipt (Resolve order)
+    const effectiveInput =
+      actor.role === 'TPL_MANAGER'
+        ? {
+            orderId: input.orderId,
+            preferredDeliveryDate: input.preferredDeliveryDate,
+            deliveryFeeAddOn: input.deliveryFeeAddOn,
+            deliveryDiscountAmount: input.deliveryDiscountAmount,
+            resolveReceiptUrl: input.resolveReceiptUrl,
+          }
+        : input;
+
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (input.customerAddress !== undefined) updateFields['customerAddress'] = input.customerAddress;
-    if (input.deliveryAddress !== undefined) updateFields['deliveryAddress'] = input.deliveryAddress;
-    if (input.deliveryNotes !== undefined) updateFields['deliveryNotes'] = input.deliveryNotes;
-    if (input.deliveryState !== undefined) updateFields['deliveryState'] = input.deliveryState;
-    if (input.customerGender !== undefined) updateFields['customerGender'] = input.customerGender;
-    if (input.preferredDeliveryDate !== undefined) updateFields['preferredDeliveryDate'] = input.preferredDeliveryDate;
-    if (input.paymentMethod !== undefined) updateFields['paymentMethod'] = input.paymentMethod;
-    if (input.customerEmail !== undefined) updateFields['customerEmail'] = input.customerEmail;
-    if (input.totalAmount !== undefined) updateFields['totalAmount'] = String(input.totalAmount);
-    if (input.items !== undefined) updateFields['items'] = input.items;
+    if (effectiveInput.customerAddress !== undefined) updateFields['customerAddress'] = effectiveInput.customerAddress;
+    if (effectiveInput.deliveryAddress !== undefined) updateFields['deliveryAddress'] = effectiveInput.deliveryAddress;
+    if (effectiveInput.deliveryNotes !== undefined) updateFields['deliveryNotes'] = effectiveInput.deliveryNotes;
+    if (effectiveInput.deliveryState !== undefined) updateFields['deliveryState'] = effectiveInput.deliveryState;
+    if (effectiveInput.customerGender !== undefined) updateFields['customerGender'] = effectiveInput.customerGender;
+    if (effectiveInput.preferredDeliveryDate !== undefined) updateFields['preferredDeliveryDate'] = effectiveInput.preferredDeliveryDate;
+
+    // Delivery fee add-on (Resolve order / TPL)
+    if (effectiveInput.deliveryFeeAddOn !== undefined) {
+      const addOn = Number(effectiveInput.deliveryFeeAddOn);
+      if (!Number.isNaN(addOn) && addOn >= 0) {
+        const current = parseFloat(String(order.deliveryFee ?? 0)) || 0;
+        updateFields['deliveryFee'] = (current + addOn).toFixed(2);
+      }
+    }
+    // Delivery discount (Resolve order / TPL) — reduces total and stores amount
+    if (effectiveInput.deliveryDiscountAmount !== undefined) {
+      const discount = Number(effectiveInput.deliveryDiscountAmount);
+      if (!Number.isNaN(discount) && discount >= 0) {
+        const currentTotal = parseFloat(String(order.totalAmount ?? 0)) || 0;
+        const newTotal = Math.max(0, currentTotal - discount);
+        updateFields['totalAmount'] = newTotal.toFixed(2);
+        updateFields['deliveryDiscountAmount'] = discount.toFixed(2);
+      }
+    }
+    // Resolve order receipt (required when TPL resolves)
+    if (effectiveInput.resolveReceiptUrl !== undefined) {
+      updateFields['resolveReceiptUrl'] = effectiveInput.resolveReceiptUrl.trim();
+    }
+    if (effectiveInput.paymentMethod !== undefined) updateFields['paymentMethod'] = effectiveInput.paymentMethod;
+    if (effectiveInput.customerEmail !== undefined) updateFields['customerEmail'] = effectiveInput.customerEmail;
+    if (effectiveInput.totalAmount !== undefined) updateFields['totalAmount'] = String(effectiveInput.totalAmount);
+    if (effectiveInput.items !== undefined) updateFields['items'] = effectiveInput.items;
 
     const updatedRows = await this.db
       .update(schema.orders)
@@ -919,13 +975,13 @@ export class OrdersService {
     }
 
     // Update order items if provided
-    if (input.items) {
+    if (effectiveInput.items) {
       await this.db
         .delete(schema.orderItems)
         .where(eq(schema.orderItems.orderId, input.orderId));
 
       await this.db.insert(schema.orderItems).values(
-        input.items.map((item) => ({
+        effectiveInput.items.map((item) => ({
           orderId: input.orderId,
           productId: item.productId,
           quantity: item.quantity,
@@ -1290,6 +1346,135 @@ export class OrdersService {
     if (redistributed > 0) {
       this.events.emitToRoom('cs-all', 'order:assignments_changed', { redistributed });
     }
+    return { redistributed };
+  }
+
+  /**
+   * Redistribute one agent's CS_ASSIGNED and CS_ENGAGED orders to other agents using the same
+   * load-balanced or performance strategy. Used from CS Team page (Head of CS). Excludes the source
+   * agent from receiving orders. Returns the number of orders reassigned.
+   */
+  async redistributeOrdersFromAgent(agentId: string, actor: SessionUser): Promise<{ redistributed: number }> {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    await this.releaseExpiredLocks(actor.id);
+
+    const orders = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.assignedCsId, agentId),
+          inArray(schema.orders.status, ['CS_ASSIGNED', 'CS_ENGAGED']),
+        ),
+      )
+      .orderBy(asc(schema.orders.createdAt));
+
+    if (orders.length === 0) {
+      return { redistributed: 0 };
+    }
+
+    const workloads = await this.getCSAgentWorkloads();
+    const targetWorkloads = workloads.filter((w) => w.agentId !== agentId);
+    const workloadMap = new Map(
+      targetWorkloads.map((w) => [
+        w.agentId,
+        { pendingCount: w.pendingCount, capacity: w.capacity, lastActionAt: w.lastActionAt },
+      ]),
+    );
+
+    const dispatchSetting = await this.settingsService.get('CS_DISPATCH_STRATEGY');
+    const strategy = dispatchSetting?.strategy === 'performance' ? 'performance' : 'load_balanced';
+    let perfMap: Map<string, { deliveryRate: number; confirmationRate: number }> = new Map();
+    if (strategy === 'performance') {
+      const leaderboard = await this.getCSAgentLeaderboard('this_month');
+      perfMap = new Map(
+        leaderboard.map((e) => [e.agentId, { deliveryRate: e.deliveryRate, confirmationRate: e.confirmationRate }]),
+      );
+    }
+
+    function sortAvailable(
+      available: Array<{ agentId: string; pendingCount: number; capacity: number; lastActionAt: Date | null }>,
+    ) {
+      if (strategy === 'performance') {
+        available.sort((a, b) => {
+          const aPerf = perfMap.get(a.agentId) ?? { deliveryRate: 0, confirmationRate: 0 };
+          const bPerf = perfMap.get(b.agentId) ?? { deliveryRate: 0, confirmationRate: 0 };
+          if (bPerf.deliveryRate !== aPerf.deliveryRate) return bPerf.deliveryRate - aPerf.deliveryRate;
+          if (bPerf.confirmationRate !== aPerf.confirmationRate)
+            return bPerf.confirmationRate - aPerf.confirmationRate;
+          if (a.pendingCount !== b.pendingCount) return a.pendingCount - b.pendingCount;
+          const aTime = a.lastActionAt?.getTime() ?? 0;
+          const bTime = b.lastActionAt?.getTime() ?? 0;
+          return aTime - bTime;
+        });
+      } else {
+        available.sort((a, b) => {
+          if (a.pendingCount !== b.pendingCount) return a.pendingCount - b.pendingCount;
+          const aTime = a.lastActionAt?.getTime() ?? 0;
+          const bTime = b.lastActionAt?.getTime() ?? 0;
+          return aTime - bTime;
+        });
+      }
+    }
+
+    let redistributed = 0;
+    const ordersByTarget = new Map<string, string[]>();
+
+    for (const order of orders) {
+      const available = targetWorkloads
+        .map((w) => {
+          const state = workloadMap.get(w.agentId)!;
+          return { agentId: w.agentId, ...state };
+        })
+        .filter((s) => s.pendingCount < s.capacity);
+
+      sortAvailable(available);
+      const target = available[0];
+      if (!target) continue;
+
+      await this.assignToCS(order.id, target.agentId, actor);
+
+      const prev = workloadMap.get(target.agentId);
+      if (prev) workloadMap.set(target.agentId, { ...prev, pendingCount: prev.pendingCount + 1 });
+      const list = ordersByTarget.get(target.agentId) ?? [];
+      list.push(order.id);
+      ordersByTarget.set(target.agentId, list);
+      redistributed++;
+    }
+
+    if (redistributed > 0) {
+      this.events.emitToUser(agentId, 'order:reassigned', {
+        count: redistributed,
+        toAgentId: undefined,
+      });
+      this.notifications
+        .create({
+          userId: agentId,
+          type: 'order:reassigned',
+          title: 'Orders redistributed',
+          body: `${redistributed} order(s) have been redistributed to other agents.`,
+          data: { count: redistributed },
+        })
+        .catch(() => {});
+      for (const [toAgentId, orderIds] of ordersByTarget) {
+        this.events.emitToUser(toAgentId, 'order:assigned_bulk', {
+          count: orderIds.length,
+          fromAgentId: agentId,
+          orderIds,
+        });
+        this.notifications
+          .create({
+            userId: toAgentId,
+            type: 'order:assigned_bulk',
+            title: 'Orders assigned to you',
+            body: `${orderIds.length} order(s) have been reassigned to you.`,
+            data: { count: orderIds.length, fromAgentId: agentId, orderIds },
+          })
+          .catch(() => {});
+      }
+      this.events.emitToRoom('cs-all', 'order:assignments_changed', { redistributed });
+    }
+
     return { redistributed };
   }
 

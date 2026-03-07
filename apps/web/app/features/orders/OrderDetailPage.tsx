@@ -9,6 +9,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useVoipDevice } from '~/hooks/useVoipDevice';
+import { formatNaira } from '~/lib/format-amount';
 import type { CallLogEntry, HistoryEntry, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
@@ -225,20 +226,20 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   {
     label: 'Total amount',
     getValue: (o) => o.totalAmount,
-    format: (v) => (v != null && v !== '' ? `\u20A6${Number(v).toLocaleString()}` : ''),
+    format: (v) => (v != null && v !== '' ? formatNaira(Number(v)) : ''),
     ddClassName: DETAIL_CURRENCY_CLASS,
     rowAccent: 'border-l-4 border-l-success-200 dark:border-l-success-900/40',
   },
   {
     label: 'Landed cost',
     getValue: (o) => o.landedCost,
-    format: (v) => (v != null && v !== '' ? `\u20A6${Number(v).toLocaleString()}` : ''),
+    format: (v) => (v != null && v !== '' ? formatNaira(Number(v)) : ''),
     ddClassName: DETAIL_CURRENCY_CLASS,
   },
   {
     label: 'Delivery fee',
     getValue: (o) => o.deliveryFee,
-    format: (v) => (v != null && v !== '' ? `\u20A6${Number(v).toLocaleString()}` : ''),
+    format: (v) => (v != null && v !== '' ? formatNaira(Number(v)) : ''),
     ddClassName: DETAIL_CURRENCY_CLASS,
   },
   {

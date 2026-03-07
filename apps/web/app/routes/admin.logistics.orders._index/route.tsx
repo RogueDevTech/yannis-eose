@@ -123,6 +123,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       periodAllTime,
     },
     isTplManagerScoped: !!effectiveLogisticsLocationId,
+    canEditDeliveryDate: false,
   };
 }
 
@@ -187,6 +188,40 @@ export async function action({ request }: ActionFunctionArgs) {
       failed: data?.failed ?? 0,
       results: data?.results ?? [],
     });
+  }
+
+  if (intent === 'transition') {
+    await requirePermission(request, 'logistics.read');
+    const orderId = formData.get('orderId')?.toString();
+    const newStatus = formData.get('newStatus')?.toString()?.trim();
+    if (!orderId || !newStatus) {
+      return json({ success: false, error: 'Order and status are required' }, { status: 400 });
+    }
+    const metadata: Record<string, unknown> = {};
+    const deliveryFeeAddOnStr = formData.get('deliveryFeeAddOn')?.toString();
+    if (deliveryFeeAddOnStr !== undefined && deliveryFeeAddOnStr !== '') {
+      const addOn = parseFloat(deliveryFeeAddOnStr);
+      if (!Number.isNaN(addOn) && addOn >= 0) metadata.deliveryFeeAddOn = addOn;
+    }
+    const deliveryDiscountAmountStr = formData.get('deliveryDiscountAmount')?.toString();
+    if (deliveryDiscountAmountStr !== undefined && deliveryDiscountAmountStr !== '') {
+      const discount = parseFloat(deliveryDiscountAmountStr);
+      if (!Number.isNaN(discount) && discount >= 0) metadata.deliveryDiscountAmount = discount;
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.transition', {
+      method: 'POST',
+      cookie,
+      body: {
+        orderId,
+        newStatus,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+      },
+    });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Transition failed';
+      return json({ success: false, error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
   }
 
   if (intent === 'dispatch') {

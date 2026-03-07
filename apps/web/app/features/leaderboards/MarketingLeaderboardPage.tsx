@@ -115,6 +115,9 @@ export function MarketingLeaderboardPage({
                           <span className="text-success-600 dark:text-success-400">
                             Delivered <strong>{b.deliveredOrders}</strong>
                           </span>
+                          <span className="text-success-600 dark:text-success-400">
+                            Confirmed <strong>{b.confirmedOrders}</strong>
+                          </span>
                           <span className="text-surface-600 dark:text-surface-400 font-medium">
                             {'\u20A6'}{Math.round(b.deliveredRevenue).toLocaleString()} revenue
                           </span>
@@ -123,6 +126,9 @@ export function MarketingLeaderboardPage({
                           </span>
                           <span className="text-surface-600 dark:text-surface-400">
                             Del. rate <strong className="text-surface-900 dark:text-white">{b.deliveryRate.toFixed(1)}%</strong>
+                          </span>
+                          <span className="text-surface-600 dark:text-surface-400">
+                            Conf. rate <strong className="text-surface-900 dark:text-white">{b.confirmationRate.toFixed(1)}%</strong>
                           </span>
                         </div>
                       </div>

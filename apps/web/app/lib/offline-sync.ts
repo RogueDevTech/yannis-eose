@@ -241,6 +241,7 @@ export async function queueDeliveryConfirmation(params: {
   gpsLat?: number;
   gpsLng?: number;
   deliveryFeeAddOn?: number;
+  deliveryDiscountAmount?: number;
 }): Promise<void> {
   const API_URL = (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__ENV_API_URL)
     ? String((window as unknown as Record<string, unknown>).__ENV_API_URL)
@@ -256,6 +257,9 @@ export async function queueDeliveryConfirmation(params: {
   };
   if (params.deliveryFeeAddOn !== undefined && params.deliveryFeeAddOn >= 0) {
     metadata.deliveryFeeAddOn = params.deliveryFeeAddOn;
+  }
+  if (params.deliveryDiscountAmount !== undefined && params.deliveryDiscountAmount >= 0) {
+    metadata.deliveryDiscountAmount = params.deliveryDiscountAmount;
   }
 
   // DELIVERED and PARTIALLY_DELIVERED require HOL approval: submit request instead of direct transition

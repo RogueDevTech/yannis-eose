@@ -65,9 +65,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
     const isViewerHeadOfMarketing = currentUser?.role === 'HEAD_OF_MARKETING';
     const isViewerHeadOfCS = currentUser?.role === 'HEAD_OF_CS';
+    // Disbursements page is Finance → HoM only; HoM distributes to Media Buyers from Marketing → Funding.
     const canDisburseToThisUser =
-      (user.role === 'HEAD_OF_MARKETING' && (isSuperAdmin || perms.includes('finance.disburse'))) ||
-      (user.role === 'MEDIA_BUYER' && (isSuperAdmin || perms.includes('marketing.funding')));
+      user.role === 'HEAD_OF_MARKETING' && (isSuperAdmin || perms.includes('finance.disburse'));
 
     // ── Build role-specific order filter ───────────────────
     const orderFilter: Record<string, unknown> = { limit: 10 };

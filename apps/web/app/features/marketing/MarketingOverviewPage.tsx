@@ -7,6 +7,7 @@ import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { useLiveIndicator } from '~/hooks/useSocket';
+import { formatNaira } from '~/lib/format-amount';
 import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
 import type { LeaderboardEntry, Metrics, FundingBalanceRow, MarketingOverviewRecentOrder } from './types';
 
@@ -49,7 +50,7 @@ function renderMediaBuyerLeaderboardCard(
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
           <span className="text-surface-700 dark:text-surface-300">Spend</span>
-          <span className="font-medium">₦{Math.round(buyer.totalSpend).toLocaleString()}</span>
+          <span className="font-medium">{formatNaira(Math.round(buyer.totalSpend))}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-surface-700 dark:text-surface-300">Orders</span>
@@ -60,9 +61,13 @@ function renderMediaBuyerLeaderboardCard(
           <span className="text-success-600 dark:text-success-400">{buyer.deliveredOrders}</span>
         </div>
         <div className="flex justify-between">
+          <span className="text-surface-700 dark:text-surface-300">Confirmed</span>
+          <span className="text-success-600 dark:text-success-400">{buyer.confirmedOrders}</span>
+        </div>
+        <div className="flex justify-between">
           <span className="text-surface-700 dark:text-surface-300">CPA</span>
           <span className={isHighCpa ? 'font-medium text-danger-600 dark:text-danger-400' : ''}>
-            ₦{Math.round(buyer.cpa).toLocaleString()}
+            {formatNaira(Math.round(buyer.cpa))}
           </span>
         </div>
         <div className="flex justify-between">
@@ -73,11 +78,15 @@ function renderMediaBuyerLeaderboardCard(
           <span className="text-surface-700 dark:text-surface-300">Del. Rate</span>
           <span>{buyer.deliveryRate.toFixed(1)}%</span>
         </div>
+        <div className="flex justify-between">
+          <span className="text-surface-700 dark:text-surface-300">Conf. Rate</span>
+          <span>{buyer.confirmationRate.toFixed(1)}%</span>
+        </div>
         {balanceRow != null && (
           <div className="flex justify-between pt-1 border-t border-surface-100 dark:border-surface-800">
             <span className="text-surface-700 dark:text-surface-300">Balance</span>
             <span className="font-medium text-brand-600 dark:text-brand-400">
-              ₦{Number(balanceRow.balance).toLocaleString()}
+              {formatNaira(Number(balanceRow.balance))}
             </span>
           </div>
         )}
@@ -204,7 +213,7 @@ export function MarketingOverviewPage({
               Total Spend
             </p>
             <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
-              ₦{Math.round(metrics.totalSpend).toLocaleString()}
+              {formatNaira(Math.round(metrics.totalSpend))}
             </p>
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
@@ -221,10 +230,16 @@ export function MarketingOverviewPage({
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
             <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              Confirmed
+            </p>
+            <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">{metrics.confirmedOrders}</p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
               Avg CPA
             </p>
             <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
-              ₦{Math.round(avgCpa).toLocaleString()}
+              {formatNaira(Math.round(avgCpa))}
             </p>
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
@@ -233,6 +248,14 @@ export function MarketingOverviewPage({
             </p>
             <p className={`text-xl font-bold mt-1 ${metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400'}`}>
               {metrics.deliveryRate.toFixed(1)}%
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+              Confirmation Rate
+            </p>
+            <p className={`text-xl font-bold mt-1 ${metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400'}`}>
+              {metrics.confirmationRate.toFixed(1)}%
             </p>
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
@@ -246,7 +269,7 @@ export function MarketingOverviewPage({
               Del. Revenue
             </p>
             <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
-              ₦{Math.round(metrics.deliveredRevenue).toLocaleString()}
+              {formatNaira(Math.round(metrics.deliveredRevenue))}
             </p>
           </div>
         </div>
@@ -315,7 +338,7 @@ export function MarketingOverviewPage({
                                 </span>
                               </td>
                               <td className="table-cell text-right font-medium">
-                                {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
+                                {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
                               </td>
                               <td className="table-cell text-surface-800 dark:text-surface-200 truncate">
                                 {order.mediaBuyerName ?? '—'}
@@ -394,7 +417,7 @@ export function MarketingOverviewPage({
                           <div className="flex items-center justify-between text-sm text-surface-800 dark:text-surface-200">
                             <span>{order.mediaBuyerName ?? '—'}</span>
                             <span className="font-medium">
-                              {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
+                              {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
                             </span>
                           </div>
                           <p className="text-xs text-surface-700 dark:text-surface-300">

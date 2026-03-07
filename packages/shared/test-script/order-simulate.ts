@@ -2,15 +2,17 @@
  * order-simulate — Creates random orders against the API via the cart flow.
  *
  * Pre-fetches campaigns + products from DB, then for each of ORDER_COUNT rounds:
- * 1. Saves one cart (cart.save) per user.
- * 2. Submits one order (orders.create) with that cart ID. One order per user, no duplicate phones.
- * 3. Optional INTERVAL_MS between rounds (default 0 for speed). CONCURRENCY runs multiple rounds in parallel.
+ * 1. Saves one cart via cart endpoint (cart.save) per user.
+ * 2. Waits CART_TO_ORDER_DELAY_MS (default 1s) to simulate user pause before submit.
+ * 3. Submits one order (orders.create) with that cart ID. One order per user, no duplicate phones.
+ * 4. Optional INTERVAL_MS between rounds (default 0 for speed). CONCURRENCY runs multiple rounds in parallel.
  * Resilient: logs errors and continues.
  *
  * Usage:
  *   pnpm simulate:orders
  *   ORDER_COUNT=50 pnpm simulate:orders
  *   CONCURRENCY=5 pnpm simulate:orders
+ *   CART_TO_ORDER_DELAY_MS=2000 pnpm simulate:orders  # 2s between cart and order
  */
 
 import { config } from 'dotenv';
@@ -27,6 +29,8 @@ import { trpcPost, hashPhone, sleep, logStep, logSummary } from './lib/api';
 // ═══════════════════════════════════════════════════════════
 
 const INTERVAL_MS = Number(process.env['SIMULATE_INTERVAL_MS'] ?? 0);
+/** Delay between cart save and order submit (simulates user pause). Default 1 second. */
+const CART_TO_ORDER_DELAY_MS = Math.max(0, Number(process.env['CART_TO_ORDER_DELAY_MS'] ?? 1000));
 const API_URL = process.env['API_URL'] ?? 'http://localhost:4444';
 const DATABASE_URL = process.env['DATABASE_URL'] ?? '';
 const ORDER_COUNT = Math.min(500, Math.max(1, Number(process.env['SIMULATE_ORDER_COUNT'] ?? 30)));
@@ -61,6 +65,7 @@ async function main() {
   console.log(`  Count:       ${ORDER_COUNT}`);
   console.log(`  Concurrency: ${CONCURRENCY}`);
   console.log(`  Interval:    ${INTERVAL_MS}ms`);
+  console.log(`  Cart→Order:  ${CART_TO_ORDER_DELAY_MS}ms`);
   console.log('═══════════════════════════════════════════════════\n');
 
   // ── Phase 1: Pre-fetch campaigns + products ────────────
@@ -182,6 +187,12 @@ async function main() {
     }
 
     const cartId = cartRes.data.id;
+    logStep('Cart', roundIndex, ORDER_COUNT, `saved, cartId=${cartId}`);
+
+    if (CART_TO_ORDER_DELAY_MS > 0) {
+      await sleep(CART_TO_ORDER_DELAY_MS);
+    }
+
     const orderPayload = {
       campaignId: target.campaignId,
       mediaBuyerId: target.mediaBuyerId,

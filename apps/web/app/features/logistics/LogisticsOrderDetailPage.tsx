@@ -56,22 +56,28 @@ export function LogisticsOrderDetailPage({
 
   const [deliveryProofUrl, setDeliveryProofUrl] = useState('');
   const [deliveryCost, setDeliveryCost] = useState('');
+  const [deliveryDiscount, setDeliveryDiscount] = useState('');
   const [partialDeliveryProofUrl, setPartialDeliveryProofUrl] = useState('');
   const [partialDeliveryCost, setPartialDeliveryCost] = useState('');
+  const [partialDeliveryDiscount, setPartialDeliveryDiscount] = useState('');
 
   useEffect(() => {
     setDeliveryProofUrl('');
     setDeliveryCost('');
+    setDeliveryDiscount('');
     setPartialDeliveryProofUrl('');
     setPartialDeliveryCost('');
+    setPartialDeliveryDiscount('');
   }, [order.id]);
 
   useEffect(() => {
     if (fetcher.data && (fetcher.data as { success?: boolean }).success) {
       setDeliveryProofUrl('');
       setDeliveryCost('');
+      setDeliveryDiscount('');
       setPartialDeliveryProofUrl('');
       setPartialDeliveryCost('');
+      setPartialDeliveryDiscount('');
     }
   }, [fetcher.data]);
 
@@ -345,6 +351,22 @@ export function LogisticsOrderDetailPage({
                       disabled={isSubmitting}
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-0.5">
+                      Discount at delivery (₦) — optional
+                    </label>
+                    <input
+                      type="number"
+                      name="deliveryDiscountAmount"
+                      min={0}
+                      step="0.01"
+                      value={deliveryDiscount}
+                      onChange={(e) => setDeliveryDiscount(e.target.value)}
+                      className="input w-24 py-1.5"
+                      placeholder="0"
+                      disabled={isSubmitting}
+                    />
+                  </div>
                   <div className="min-w-[180px]">
                     <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-0.5">
                       Screenshot — optional
@@ -405,6 +427,22 @@ export function LogisticsOrderDetailPage({
                       step="0.01"
                       value={partialDeliveryCost}
                       onChange={(e) => setPartialDeliveryCost(e.target.value)}
+                      className="input w-24 py-1.5"
+                      placeholder="0"
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-0.5">
+                      Discount at delivery (₦) — optional
+                    </label>
+                    <input
+                      type="number"
+                      name="deliveryDiscountAmount"
+                      min={0}
+                      step="0.01"
+                      value={partialDeliveryDiscount}
+                      onChange={(e) => setPartialDeliveryDiscount(e.target.value)}
                       className="input w-24 py-1.5"
                       placeholder="0"
                       disabled={isSubmitting}

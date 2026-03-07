@@ -5,6 +5,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { AmountInput } from '~/components/ui/amount-input';
+import { formatNaira } from '~/lib/format-amount';
 import { Button } from '~/components/ui/button';
 import { FileUpload } from '~/components/ui/file-upload';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -66,11 +67,8 @@ export function DisbursementsPage({
 
   if (actionSuccess && showForm) setShowForm(false);
 
-  const canCreate = canDisburseToHoM || canDisburseToMediaBuyers;
-  const recipients = [
-    ...(canDisburseToHoM ? users.filter((u) => u.role === 'HEAD_OF_MARKETING') : []),
-    ...(canDisburseToMediaBuyers ? users.filter((u) => u.role === 'MEDIA_BUYER') : []),
-  ];
+  const canCreate = canDisburseToHoM;
+  const recipients = canDisburseToHoM ? users.filter((u) => u.role === 'HEAD_OF_MARKETING') : [];
 
   const truncateId = (id: string) => id.slice(0, 8) + '...';
 
@@ -82,7 +80,7 @@ export function DisbursementsPage({
         <div>
           <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Disbursements</h1>
           <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Tier 1: Super Admin / Finance → Head of Marketing. Tier 2: HoM → Media Buyers
+            Send funds to Head of Marketing only. HoM distributes to Media Buyers from Marketing → Funding & Ad Spend.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -130,7 +128,7 @@ export function DisbursementsPage({
                   <option value="">Select recipient...</option>
                   {recipients.map((u) => {
                     const bal = recipientBalances.find((b) => b.userId === u.id);
-                    const balanceLabel = bal != null ? ` — Balance: ₦${Number(bal.balance).toLocaleString()}` : '';
+                    const balanceLabel = bal != null ? ` — Balance: ${formatNaira(Number(bal.balance))}` : '';
                     return (
                       <option key={u.id} value={u.id}>
                         {u.name} ({u.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'Media Buyer'}){balanceLabel}
@@ -195,7 +193,7 @@ export function DisbursementsPage({
                     </td>
                     <td className="table-cell text-right text-sm">₦{Number(b.totalReceived).toLocaleString()}</td>
                     <td className="table-cell text-right text-sm">₦{Number(b.totalSpend).toLocaleString()}</td>
-                    <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400">₦{Number(b.balance).toLocaleString()}</td>
+                    <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400">{formatNaira(Number(b.balance))}</td>
                   </tr>
                 ))}
               </tbody>

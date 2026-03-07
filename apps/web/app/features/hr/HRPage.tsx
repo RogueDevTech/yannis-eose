@@ -4,6 +4,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { exportToCsv } from '~/lib/csv-export';
 import { AmountInput } from '~/components/ui/amount-input';
+import { formatNaira } from '~/lib/format-amount';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -186,17 +187,17 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="card">
                       <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Draft Payouts</p>
-                      <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">&#8358;{draftTotal.toLocaleString()}</p>
+                      <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{formatNaira(draftTotal)}</p>
                       <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['DRAFT']?.count ?? 0} staff</p>
                     </div>
                     <div className="card">
                       <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Approved</p>
-                      <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">&#8358;{approvedTotal.toLocaleString()}</p>
+                      <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{formatNaira(approvedTotal)}</p>
                       <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['APPROVED']?.count ?? 0} staff</p>
                     </div>
                     <div className="card">
                       <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Paid</p>
-                      <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">&#8358;{paidTotal.toLocaleString()}</p>
+                      <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{formatNaira(paidTotal)}</p>
                       <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['PAID']?.count ?? 0} staff</p>
                     </div>
                     <div className="card">
@@ -428,7 +429,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                             <td className="table-cell text-right text-sm text-danger-600 dark:text-danger-400">
                               {Number(p.deductionsTotal) > 0 ? `-\u20A6${Number(p.deductionsTotal).toLocaleString()}` : '\u2014'}
                             </td>
-                            <td className="table-cell text-right font-medium">&#8358;{Number(p.totalPayout).toLocaleString()}</td>
+                            <td className="table-cell text-right font-medium">{formatNaira(Number(p.totalPayout))}</td>
                             <td className="table-cell">
                               <span className={PAYOUT_COLORS[p.status] ?? 'badge'}>{p.status}</span>
                             </td>
@@ -492,7 +493,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                                 </div>
                                 <div className="mt-3 pt-3 border-t border-surface-200 dark:border-surface-700 flex justify-between">
                                   <span className="text-sm font-semibold text-surface-900 dark:text-white">Net Payout</span>
-                                  <span className="text-lg font-bold text-surface-900 dark:text-white">&#8358;{Number(p.totalPayout).toLocaleString()}</span>
+                                  <span className="text-lg font-bold text-surface-900 dark:text-white">{formatNaira(Number(p.totalPayout))}</span>
                                 </div>
                               </td>
                             </tr>
@@ -528,7 +529,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                         </div>
                         <div>
                           <span className="text-surface-700 dark:text-surface-300">Total</span>
-                          <p className="font-bold text-surface-900 dark:text-white">&#8358;{Number(p.totalPayout).toLocaleString()}</p>
+                          <p className="font-bold text-surface-900 dark:text-white">{formatNaira(Number(p.totalPayout))}</p>
                         </div>
                       </div>
                       {Number(p.deductionsTotal) > 0 && (

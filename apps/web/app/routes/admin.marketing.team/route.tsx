@@ -52,9 +52,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   if (!cookie) throw new Response('Session cookie missing', { status: 401 });
 
-  const [balancesRes, summaryRes] = await Promise.all([
+  const [balancesRes, summaryRes, leaderboardRes] = await Promise.all([
     apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie }),
+    apiRequest<unknown>(
+      `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify({ period: 'this_month' }))}`,
+      { method: 'GET', cookie },
+    ),
   ]);
   redirectIfUnauthorized(balancesRes, new URL(request.url).pathname);
   let teamMembers = parseBalancesList(balancesRes);
@@ -73,7 +77,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     teamMembers = toBalanceRows(merged);
   }
 
-  return { teamMembers, fundingSummary };
+  type LeaderboardEntry = { mediaBuyerId: string; confirmationRate: number; deliveryRate: number };
+  const leaderboard: LeaderboardEntry[] = leaderboardRes.ok
+    ? (leaderboardRes.data as { result?: { data?: LeaderboardEntry[] } })?.result?.data ?? []
+    : [];
+  const metricsByUser = new Map(leaderboard.map((e) => [e.mediaBuyerId, { confirmationRate: e.confirmationRate, deliveryRate: e.deliveryRate }]));
+
+  const teamMembersWithMetrics: FundingBalanceRow[] = teamMembers.map((m) => {
+    const metrics = metricsByUser.get(m.userId);
+    return metrics
+      ? { ...m, confirmationRate: metrics.confirmationRate, deliveryRate: metrics.deliveryRate }
+      : m;
+  });
+
+  return { teamMembers: teamMembersWithMetrics, fundingSummary };
 }
 
 export default function MarketingTeamRoute() {

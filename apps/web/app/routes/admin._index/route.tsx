@@ -157,7 +157,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // All other roles: role-specific dashboard — all deferred for navigate-first
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
-  const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 10 })), deferredOpt);
+  const ordersListInput: { page: number; limit: number; startDate?: string; endDate?: string } = { page: 1, limit: 10 };
+  if (!periodAllTime && startDate) ordersListInput.startDate = startDate;
+  if (!periodAllTime && endDate) ordersListInput.endDate = endDate;
+  const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify(ordersListInput)), deferredOpt);
   const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, deferredOpt);
 
   const needsMetrics = role && ROLES_NEED_METRICS.includes(role);

@@ -29,13 +29,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'finance.disburse');
   const cookie = getSessionCookie(request);
   const user = await getCurrentUser(request);
+
+  // This page is for Finance → Head of Marketing only. HoM distributes to Media Buyers from Marketing → Funding.
+  if (user?.role === 'HEAD_OF_MARKETING') {
+    throw new Response(null, { status: 403, statusText: 'Forbidden' });
+  }
+
   const url = new URL(request.url);
   const preselectedReceiverId = url.searchParams.get('receiverId') || null;
 
   const perms = user?.permissions ?? [];
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const canDisburseToHoM = isSuperAdmin || perms.includes('finance.disburse');
-  const canDisburseToMediaBuyers = isSuperAdmin || perms.includes('marketing.funding');
+  // Disbursements page is tier-1 only: Finance → HoM. HoM uses Marketing → Funding for Media Buyers.
+  const canDisburseToMediaBuyers = false;
 
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
@@ -66,7 +73,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ]);
 
   const balancesRes = await apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie });
-  const recipientBalances = parseBalancesList(balancesRes);
+  const allBalances = parseBalancesList(balancesRes);
+  const recipientBalances = allBalances.filter((b) => b.role === 'HEAD_OF_MARKETING');
 
   const fundingData = parseFunding(fundingRes);
   const users = parseUsers(usersRes);
@@ -84,6 +92,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requirePermission(request, 'finance.disburse');
+  const user = await getCurrentUser(request);
+  if (user?.role === 'HEAD_OF_MARKETING') {
+    return json({ error: 'Forbidden' }, { status: 403 });
+  }
+
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();

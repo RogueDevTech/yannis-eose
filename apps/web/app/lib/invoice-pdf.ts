@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { formatNaira as formatNairaAmount } from './format-amount';
 
 interface LineItem {
   description: string;
@@ -193,5 +194,5 @@ export function generateInvoicePdf(invoice: InvoicePdfData) {
 }
 
 function formatNaira(amount: number): string {
-  return `\u20A6${amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatNairaAmount(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

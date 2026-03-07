@@ -64,28 +64,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (profitRes.data as { result?: { data?: ProfitReport } })?.result?.data
     : null;
 
-  // Await secondary data in parallel
-  const [invoiceSummary, approvalsParsed, budgets] = await Promise.all([
-    overviewPromise.then((res) => {
-      if (!res.ok) return {};
-      return (res.data as { result?: { data?: Record<string, { count: number; total: string }> } })?.result?.data ?? {};
-    }).catch(() => ({} as Record<string, { count: number; total: string }>)),
+  // Stream secondary data — don't await, return as promises for DeferredSection
+  const invoiceSummary = overviewPromise.then((res) => {
+    if (!res.ok) return {};
+    return (res.data as { result?: { data?: Record<string, { count: number; total: string }> } })?.result?.data ?? {};
+  }).catch(() => ({} as Record<string, { count: number; total: string }>));
 
-    approvalsPromise.then((res) => {
-      if (!res.ok) return { requests: [] as ApprovalRequest[], total: 0 };
-      const d = (res.data as { result?: { data?: { requests: ApprovalRequest[]; pagination: { total: number } } } })?.result?.data;
-      return { requests: d?.requests ?? [], total: d?.pagination?.total ?? 0 };
-    }).catch(() => ({ requests: [] as ApprovalRequest[], total: 0 })),
+  const approvalsParsed = approvalsPromise.then((res) => {
+    if (!res.ok) return { requests: [] as ApprovalRequest[], total: 0 };
+    const d = (res.data as { result?: { data?: { requests: ApprovalRequest[]; pagination: { total: number } } } })?.result?.data;
+    return { requests: d?.requests ?? [], total: d?.pagination?.total ?? 0 };
+  }).catch(() => ({ requests: [] as ApprovalRequest[], total: 0 }));
 
-    budgetsPromise.then((res) => {
-      if (!res.ok) return [];
-      return (res.data as { result?: { data?: Budget[] } })?.result?.data ?? [];
-    }).catch(() => [] as Budget[]),
-  ]);
+  const budgets = budgetsPromise.then((res) => {
+    if (!res.ok) return [];
+    return (res.data as { result?: { data?: Budget[] } })?.result?.data ?? [];
+  }).catch(() => [] as Budget[]);
 
-  const approvals = approvalsParsed.requests;
-  const totalApprovals = approvalsParsed.total;
-  const pendingApprovals = approvalsParsed.requests.filter((r) => r.status === 'PENDING' || r.status === 'QUERIED').length;
+  const approvals = approvalsParsed.then((p) => p.requests);
+  const totalApprovals = approvalsParsed.then((p) => p.total);
+  const pendingApprovals = approvalsParsed.then((p) =>
+    p.requests.filter((r) => r.status === 'PENDING' || r.status === 'QUERIED').length,
+  );
 
   return {
     invoices: invoicesData?.invoices ?? [],

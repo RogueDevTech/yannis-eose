@@ -125,6 +125,8 @@ export const transitionOrderSchema = z.object({
     deliveryFeeAddOn: z.number().min(0).optional(),
     /** URL of screenshot from 3PL delivery app (required when marking DELIVERED/PARTIALLY_DELIVERED in v1) */
     deliveryProofUrl: z.string().url().optional(),
+    /** Discount amount applied at delivery when marking DELIVERED/PARTIALLY_DELIVERED; reduces order totalAmount */
+    deliveryDiscountAmount: z.number().min(0).optional(),
     /** Scheduled delivery date set by CS agent when confirming the order */
     preferredDeliveryDate: z.string().optional(),
   }).optional(),
@@ -144,6 +146,12 @@ export const updateOrderSchema = z.object({
   deliveryState: z.string().max(100).optional(),
   customerGender: z.enum(['male', 'female']).optional(),
   preferredDeliveryDate: z.string().max(100).optional(),
+  /** Optional delivery fee add-on (e.g. from Resolve order modal). Added to existing deliveryFee. */
+  deliveryFeeAddOn: z.number().min(0).optional(),
+  /** Optional discount at delivery. Reduces totalAmount and stored on order. */
+  deliveryDiscountAmount: z.number().min(0).optional(),
+  /** Required when resolving order (3PL): URL of uploaded receipt. */
+  resolveReceiptUrl: z.string().url().optional(),
   items: z.array(orderItemSchema).min(1).optional(),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
   paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),

@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, count, sql } from 'drizzle-orm';
+import { eq, and, or, desc, count, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -457,6 +457,14 @@ export class InventoryService {
     }
     if (input.movementType) {
       conditions.push(eq(schema.stockMovements.movementType, input.movementType));
+    }
+    if (input.locationId) {
+      conditions.push(
+        or(
+          eq(schema.stockMovements.fromLocationId, input.locationId),
+          eq(schema.stockMovements.toLocationId, input.locationId),
+        )!,
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

@@ -57,3 +57,23 @@ export function formatAmountDisplay(raw: string): string {
   if (parts.length > 1) return `${withSign}.`;
   return withSign;
 }
+
+const NAIRA = '\u20A6';
+
+/**
+ * Format a number as Naira with correct sign placement.
+ * Negative amounts render as -₦6,398,626 (minus before symbol), not ₦-6,398,626.
+ */
+export function formatNaira(
+  amount: number,
+  options?: { minimumFractionDigits?: number; maximumFractionDigits?: number }
+): string {
+  const frac = options?.maximumFractionDigits ?? options?.minimumFractionDigits ?? 0;
+  const opts: Intl.NumberFormatOptions = {
+    minimumFractionDigits: options?.minimumFractionDigits ?? frac,
+    maximumFractionDigits: options?.maximumFractionDigits ?? frac,
+  };
+  const absNum = Math.abs(amount);
+  const formatted = absNum.toLocaleString('en-NG', opts);
+  return amount < 0 ? `-${NAIRA}${formatted}` : `${NAIRA}${formatted}`;
+}
