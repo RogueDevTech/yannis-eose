@@ -528,7 +528,7 @@ function TransfersTab({
           <div className="fixed inset-0 bg-black/50" onClick={() => setVerifyingTransfer(null)} />
           <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-lg w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Verify Transfer Receipt</h3>
+              <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Verify Transfer Delivery</h3>
               <button onClick={() => setVerifyingTransfer(null)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -576,7 +576,7 @@ function TransfersTab({
                 </select>
               </div>
               <div className="flex gap-2 pt-2">
-                <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Verifying...">Confirm Receipt</Button>
+                <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Verifying...">Confirm Delivery</Button>
                 <Button type="button" variant="secondary" size="sm" onClick={() => setVerifyingTransfer(null)}>Cancel</Button>
               </div>
             </fetcher.Form>
@@ -638,7 +638,7 @@ function TransfersTab({
                     </td>
                     <td className="table-cell">
                       {t.transferStatus === 'IN_TRANSIT' && (
-                        <Button variant="primary" size="sm" className="text-xs" onClick={() => setVerifyingTransfer(t)}>Verify Receipt</Button>
+                        <Button variant="primary" size="sm" className="text-xs" onClick={() => setVerifyingTransfer(t)}>Verify Delivery</Button>
                       )}
                       {t.transferStatus === 'DISPUTED' && t.shrinkageReason && (
                         <span className="text-xs text-danger-600 dark:text-danger-400" title={t.shrinkageReason}>{t.shrinkageReason}</span>
