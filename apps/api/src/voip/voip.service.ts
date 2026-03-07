@@ -18,6 +18,12 @@ const VOIP_SETTING_KEY = 'VOIP_ENABLED';
 const VOIP_CACHE_KEY = 'yannis:voip:enabled';
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
+/** Twilio Client identity must be alphanumeric + underscore only (no hyphens). See Twilio error 53000. */
+function toTwilioClientIdentity(agentId: string): string {
+  const safe = agentId.replace(/-/g, '_').replace(/[^a-zA-Z0-9_]/g, '_');
+  return `agent_${safe}`;
+}
+
 @Injectable()
 export class VoipService {
   private readonly logger = new Logger(VoipService.name);
@@ -458,7 +464,7 @@ export class VoipService {
       params.append('StatusCallback', `${webhookBaseUrl}/voip/webhook/status?callToken=${callLog.callToken}`);
       params.append('StatusCallbackEvent', 'initiated ringing answered completed');
       params.append('StatusCallbackMethod', 'POST');
-      params.append('Twiml', '<Response><Say>Connecting you to an agent.</Say><Dial><Client>agent_' + callLog.agentId + '</Client></Dial></Response>');
+      params.append('Twiml', '<Response><Say>Connecting you to an agent.</Say><Dial><Client>' + toTwilioClientIdentity(callLog.agentId) + '</Client></Dial></Response>');
 
       const response = await fetch(url, {
         method: 'POST',
@@ -512,7 +518,7 @@ export class VoipService {
       this.logger.warn('Twilio credentials not fully configured — returning mock access token');
       return {
         token: `mock_token_${agentId}_${Date.now()}`,
-        identity: `agent_${agentId}`,
+        identity: toTwilioClientIdentity(agentId),
       };
     }
 
@@ -523,7 +529,7 @@ export class VoipService {
       const AccessToken = twilio.jwt.AccessToken;
       const VoiceGrant = AccessToken.VoiceGrant;
 
-      const identity = `agent_${agentId}`;
+      const identity = toTwilioClientIdentity(agentId);
 
       const voiceGrant = new VoiceGrant({
         outgoingApplicationSid: twimlAppSid,

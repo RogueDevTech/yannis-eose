@@ -50,9 +50,9 @@ const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('yannis_theme')
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
-  { rel: 'icon', type: 'image/png', href: '/assets/yannis-logo1.png' },
+  { rel: 'icon', type: 'image/png', href: '/assets/favicon-32.png', sizes: '32x32' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
-  { rel: 'apple-touch-icon', href: '/assets/yannis-logo1.png' },
+  { rel: 'apple-touch-icon', href: '/assets/icon-180.png', sizes: '180x180' },
 ];
 
 export default function App() {
@@ -64,7 +64,7 @@ export default function App() {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#6366f1" />
+        <meta name="theme-color" content="#1565C0" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />

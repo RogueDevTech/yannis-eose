@@ -120,8 +120,6 @@ export interface OrderDetailStreamData {
   // Deferred (streaming promises)
   latestCall: Promise<CallLogEntry | null>;
   history: Promise<HistoryEntry[]>;
-  // Strict Data Mode flag
-  strictDataMode: boolean;
   // VOIP feature flag
   voipEnabled: boolean;
 }

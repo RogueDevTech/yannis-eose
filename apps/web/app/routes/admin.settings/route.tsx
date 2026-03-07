@@ -105,7 +105,6 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'updateSystemSettings') {
-    const strictDataMode = formData.get('strictDataMode')?.toString() === 'true';
     const voipEnabled = formData.get('voipEnabled')?.toString() === 'true';
     const csDispatchStrategy = formData.get('csDispatchStrategy')?.toString() ?? 'load_balanced';
     if (csDispatchStrategy !== 'load_balanced' && csDispatchStrategy !== 'performance') {
@@ -123,18 +122,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: errorData?.error?.message ?? 'Failed to update VOIP setting' }, { status: safeStatus(voipRes.status) });
     }
 
-    // 2. Strict Data Mode
-    const strictRes = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
-      method: 'POST',
-      cookie,
-      body: { key: 'STRICT_DATA_MODE', value: { enabled: strictDataMode } },
-    });
-    if (!strictRes.ok) {
-      const errorData = strictRes.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update Data Security setting' }, { status: safeStatus(strictRes.status) });
-    }
-
-    // 3. CS dispatch strategy
+    // 2. CS dispatch strategy
     const csRes = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
       method: 'POST',
       cookie,

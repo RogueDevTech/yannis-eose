@@ -34,15 +34,6 @@ export const settingsRouter = router({
   }),
 
   /**
-   * Check if strict data mode is enabled.
-   * Lightweight endpoint for CS agents to check mode.
-   */
-  isStrictDataMode: authedProcedure.query(async () => {
-    const enabled = await getSettingsService().isStrictDataMode();
-    return { enabled };
-  }),
-
-  /**
    * Get notification email config — which types send email.
    * SuperAdmin only.
    */

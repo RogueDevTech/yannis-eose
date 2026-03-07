@@ -70,25 +70,19 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   }, [actionData?.error, actionData?.success]);
 
   // Derive feature flag states from system settings
-  const strictSetting = systemSettings.find((s) => s.key === 'STRICT_DATA_MODE');
-  const isStrictMode = strictSetting?.value?.['enabled'] === true;
-
   const voipSetting = systemSettings.find((s) => s.key === 'VOIP_ENABLED');
   const isVoipEnabled = voipSetting?.value?.['enabled'] === true;
 
   // Local state for System tab: user can toggle all then submit once
-  const [localStrictMode, setLocalStrictMode] = useState(isStrictMode);
   const [localVoipEnabled, setLocalVoipEnabled] = useState(isVoipEnabled);
   useEffect(() => {
-    setLocalStrictMode(isStrictMode);
     setLocalVoipEnabled(isVoipEnabled);
-  }, [isStrictMode, isVoipEnabled]);
+  }, [isVoipEnabled]);
   useEffect(() => {
     setSelectedDispatchStrategy(dispatchStrategyFromSettings);
   }, [dispatchStrategyFromSettings]);
 
   const hasSystemChanges =
-    localStrictMode !== isStrictMode ||
     localVoipEnabled !== isVoipEnabled ||
     selectedDispatchStrategy !== dispatchStrategyFromSettings;
 
@@ -222,72 +216,14 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
         </div>
       )}
 
-      {/* System Tab — grouped form: toggle Data Security, VOIP, CS distribution then submit once */}
+      {/* System Tab — grouped form: toggle VOIP, CS distribution then submit once */}
       {activeTab === 'system' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {isSuperAdmin ? (
             <fetcher.Form method="post" className="contents">
               <input type="hidden" name="intent" value="updateSystemSettings" />
-              <input type="hidden" name="strictDataMode" value={localStrictMode ? 'true' : 'false'} />
               <input type="hidden" name="voipEnabled" value={localVoipEnabled ? 'true' : 'false'} />
               <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
-
-              {/* Data Security */}
-              <div className="card lg:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Data Security</h3>
-                    <p className="text-sm text-surface-800 dark:text-surface-200">
-                      Control how CS agents communicate with customers
-                    </p>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
-                        <p className="text-sm font-semibold text-surface-900 dark:text-white">Strict Data Mode (VOIP)</p>
-                        {localStrictMode ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
-                            <span className="w-1.5 h-1.5 rounded-full bg-success-500" /> VOIP Active
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-warning-50 dark:bg-warning-700/20 px-2.5 py-0.5 text-xs font-medium text-warning-700 dark:text-warning-400">
-                            <span className="w-1.5 h-1.5 rounded-full bg-warning-500" /> Manual Call Mode
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-surface-800 dark:text-surface-200 leading-relaxed">
-                        {localStrictMode
-                          ? 'CS agents connect via secure VOIP bridge (Twilio). Customer phone numbers are never visible. Call duration is tracked and the 15-second confirm gate is enforced.'
-                          : 'CS agents can reveal customer phone numbers for manual calling. Call duration is not tracked by the system. Confirm is enabled after clicking Call.'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setLocalStrictMode(!localStrictMode)}
-                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
-                        localStrictMode ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
-                      }`}
-                      disabled={fetcher.state === 'submitting'}
-                      role="switch"
-                      aria-checked={localStrictMode}
-                      aria-label="Toggle Strict Data Mode"
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                          localStrictMode ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
-                  </div>
-                </div>
-              </div>
 
               {/* VOIP Integration */}
               <div className="card lg:col-span-2">
@@ -415,37 +351,6 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
           ) : (
             <>
               {/* Read-only cards for non–SuperAdmin */}
-              <div className="card lg:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Data Security</h3>
-                    <p className="text-sm text-surface-800 dark:text-surface-200">Control how CS agents communicate with customers</p>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-surface-900 dark:text-white">Strict Data Mode (VOIP)</p>
-                      <p className="text-xs text-surface-800 dark:text-surface-200 mt-1">
-                        {isStrictMode ? 'VOIP Active' : 'Manual Call Mode'}
-                      </p>
-                    </div>
-                    <div
-                      className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent opacity-50 cursor-not-allowed ${
-                        isStrictMode ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
-                      }`}
-                      title="Only Super Admin can change this"
-                    >
-                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 ${isStrictMode ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </div>
-                  </div>
-                </div>
-              </div>
               <div className="card lg:col-span-2">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">

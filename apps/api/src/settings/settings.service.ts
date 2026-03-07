@@ -103,15 +103,4 @@ export class SettingsService {
     // Invalidate Redis cache
     await this.redis.del(`${REDIS_PREFIX}${key}`);
   }
-
-  /**
-   * Shorthand: check if Strict Data Mode is enabled.
-   * Returns true = VOIP mode (phone numbers hidden).
-   * Returns false = Manual Call mode (phone numbers can be revealed).
-   */
-  async isStrictDataMode(): Promise<boolean> {
-    const value = await this.get('STRICT_DATA_MODE');
-    if (!value) return false;
-    return value['enabled'] === true;
-  }
 }
