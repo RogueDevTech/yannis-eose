@@ -133,8 +133,20 @@ const RATE_LIMIT_WINDOW_SECONDS = 300; // 5 minutes
 const RATE_LIMIT_MAX_REQUESTS = 5;
 const RATE_LIMIT_CAPTCHA_THRESHOLD = 3; // After 3 submissions, require CAPTCHA
 const DEDUP_WINDOW_SECONDS = 21600; // 6 hours
-const CIRCUIT_BREAKER_TIMEOUT_MS = 10000; // 10s — relaxed for local dev; tighten to 2000 in production
+const CIRCUIT_BREAKER_TIMEOUT_MS = 10000; // 10s production
+const CIRCUIT_BREAKER_TIMEOUT_LOCAL_MS = 30000; // 30s for localhost (cold starts, slow DB)
 const VIRTUAL_BUFFER_PCT = 0.10; // 10% stock buffer
+
+/** Use longer timeout when calling localhost so local dev doesn't 503 on slow API. */
+function getApiTimeoutMs(apiUrl: string): number {
+  try {
+    const u = new URL(apiUrl);
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return CIRCUIT_BREAKER_TIMEOUT_LOCAL_MS;
+  } catch {
+    // ignore
+  }
+  return CIRCUIT_BREAKER_TIMEOUT_MS;
+}
 const CAMPAIGN_CACHE_TTL = 300; // 5 min cache for campaign configs
 
 // ── CORS Headers ───────────────────────────────────────────────
@@ -351,7 +363,7 @@ async function getCampaignConfig(campaignId: string, env: Env): Promise<Campaign
   // Fetch from API
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), CIRCUIT_BREAKER_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
     const encodedInput = encodeURIComponent(JSON.stringify({ campaignId }));
 
     const response = await fetch(`${env.API_URL}/trpc/marketing.getPublic?input=${encodedInput}`, {
@@ -386,7 +398,7 @@ async function forwardCartToApi(
   env: Env,
 ): Promise<{ ok: boolean; data: unknown }> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), CIRCUIT_BREAKER_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
 
   try {
     const response = await fetch(`${env.API_URL}/trpc/cart.save`, {
@@ -412,7 +424,7 @@ async function forwardToApi(
   env: Env,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), CIRCUIT_BREAKER_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
 
   try {
     const response = await fetch(`${env.API_URL}/trpc/orders.create`, {
@@ -431,7 +443,11 @@ async function forwardToApi(
     return { ok: response.ok, status: response.status, data };
   } catch (err) {
     clearTimeout(timeoutId);
-    console.error('[edge] orders.create unreachable:', err);
+    const isTimeout = err instanceof Error && err.name === 'AbortError';
+    console.error(
+      isTimeout ? '[edge] orders.create timed out (increase getApiTimeoutMs or check API)' : '[edge] orders.create unreachable:',
+      err,
+    );
     return { ok: false, status: 503, data: { error: 'API unreachable' } };
   }
 }
@@ -443,7 +459,7 @@ async function forwardPreparePaystackToApi(
   env: Env,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), CIRCUIT_BREAKER_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
 
   try {
     const response = await fetch(`${env.API_URL}/trpc/orders.preparePaystackOrder`, {
@@ -462,7 +478,11 @@ async function forwardPreparePaystackToApi(
     return { ok: response.ok, status: response.status, data };
   } catch (err) {
     clearTimeout(timeoutId);
-    console.error('[edge] orders.preparePaystackOrder unreachable:', err);
+    const isTimeout = err instanceof Error && err.name === 'AbortError';
+    console.error(
+      isTimeout ? '[edge] orders.preparePaystackOrder timed out' : '[edge] orders.preparePaystackOrder unreachable:',
+      err,
+    );
     return { ok: false, status: 503, data: { error: 'API unreachable' } };
   }
 }

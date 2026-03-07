@@ -22,7 +22,7 @@ import { login, trpcPost, trpcGet, sleep, logStep, logSummary } from './lib/api'
 // ═══════════════════════════════════════════════════════════
 
 const INTERVAL_MS = Number(process.env['SIMULATE_INTERVAL_MS'] ?? 3000);
-const API_URL = process.env['API_URL'] ?? 'http://localhost:4000';
+const API_URL = process.env['API_URL'] ?? 'http://localhost:4444';
 const TPL_EMAIL = process.env['SIMULATE_3PL_EMAIL'] ?? 'kbshowkb+hol@gmail.com';
 const TPL_PASSWORD = process.env['SIMULATE_3PL_PASSWORD'] ?? 'password123';
 const TPL_COUNT = Math.min(200, Math.max(1, Number(process.env['SIMULATE_3PL_COUNT'] ?? 20)));

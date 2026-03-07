@@ -11,9 +11,7 @@ import {
   useLoaderData,
   useRouteError,
 } from '@remix-run/react';
-import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { ScrollToTopButton } from '~/components/ui/scroll-to-top-button';
-import { useIsMobile } from '~/hooks/useIsMobile';
 import stylesheet from '~/tailwind.css?url';
 
 declare global {
@@ -59,7 +57,6 @@ export const links: LinksFunction = () => [
 
 export default function App() {
   const { ENV } = useLoaderData<typeof loader>();
-  const isMobile = useIsMobile();
   const envScript = JSON.stringify(ENV).replace(/<\/script>/gi, '<\\/script>');
 
   return (
@@ -84,9 +81,7 @@ export default function App() {
         <Links />
       </head>
       <body className="h-full">
-        <PullToRefresh disabled={!isMobile}>
-          <Outlet />
-        </PullToRefresh>
+        <Outlet />
         <ScrollToTopButton />
         <ScrollRestoration getKey={(location) => location.pathname} />
         <script dangerouslySetInnerHTML={{ __html: `window.__ENV = ${envScript};` }} />

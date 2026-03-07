@@ -1772,6 +1772,11 @@ export function OrderDetailPage({
                                 Tip: Phone numbers must be in E.164 format (e.g. +2348021300202 for Nigeria).
                               </p>
                             )}
+                            {parsed.code === 21219 && (
+                              <p className="text-xs mt-2 pt-2 border-t border-danger-200 dark:border-danger-700">
+                                Tip: Trial accounts can only call verified numbers. Add this number in Twilio Console under Phone Numbers → Verified Caller IDs, or upgrade your Twilio account.
+                              </p>
+                            )}
                           </>
                         ) : (
                           <p>Twilio error: {twilioError}</p>

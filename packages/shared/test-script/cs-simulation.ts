@@ -21,7 +21,7 @@ import { login, trpcPost, trpcGet, sleep, logStep, logSummary } from './lib/api'
 // ═══════════════════════════════════════════════════════════
 
 const INTERVAL_MS = Number(process.env['SIMULATE_INTERVAL_MS'] ?? 3000);
-const API_URL = process.env['API_URL'] ?? 'http://localhost:4000';
+const API_URL = process.env['API_URL'] ?? 'http://localhost:4444';
 const CS_EMAIL = process.env['SIMULATE_CS_EMAIL'] ?? 'kbshowkb+hocs@gmail.com';
 const CS_PASSWORD = process.env['SIMULATE_CS_PASSWORD'] ?? 'password123';
 const CS_COUNT = Math.min(200, Math.max(1, Number(process.env['SIMULATE_CS_COUNT'] ?? 20)));
