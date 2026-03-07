@@ -3,6 +3,7 @@ import { useFetcher } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
@@ -524,9 +525,7 @@ function TransfersTab({
     <>
       {/* Verify Transfer Modal */}
       {verifyingTransfer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setVerifyingTransfer(null)} />
-          <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-lg w-full p-6 space-y-4">
+        <Modal open onClose={() => setVerifyingTransfer(null)} maxWidth="max-w-lg" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Verify Transfer Delivery</h3>
               <button onClick={() => setVerifyingTransfer(null)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
@@ -580,8 +579,7 @@ function TransfersTab({
                 <Button type="button" variant="secondary" size="sm" onClick={() => setVerifyingTransfer(null)}>Cancel</Button>
               </div>
             </fetcher.Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Status filter pills */}
@@ -733,9 +731,7 @@ function ReturnsTab({
 
       {/* Write-off modal */}
       {writeOffOrderId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setWriteOffOrderId(null)} />
-          <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+        <Modal open onClose={() => setWriteOffOrderId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Write Off — Damaged Item</h3>
             <p className="text-sm text-surface-800 dark:text-surface-200">This will permanently mark the item as damaged and log it as an Operational Loss.</p>
             <fetcher.Form method="post" className="space-y-3">
@@ -750,8 +746,7 @@ function ReturnsTab({
                 <Button type="button" variant="secondary" size="sm" onClick={() => setWriteOffOrderId(null)}>Cancel</Button>
               </div>
             </fetcher.Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Returns table */}

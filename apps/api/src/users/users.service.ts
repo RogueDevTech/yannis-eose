@@ -175,6 +175,22 @@ export class UsersService {
       });
     }
 
+    // Check for duplicate phone
+    if (input.phone) {
+      const phoneRows = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.phone, input.phone))
+        .limit(1);
+
+      if (phoneRows[0]) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'A user with this phone number already exists',
+        });
+      }
+    }
+
     // Auto-generate a secure password for the new user
     const plainPassword = this.generatePassword();
     const passwordHash = await this.authService.hashPassword(plainPassword);
@@ -573,7 +589,23 @@ export class UsersService {
     if (input.capacity !== undefined) updateFields['capacity'] = input.capacity;
     if (input.logisticsLocationId !== undefined) updateFields['logisticsLocationId'] = input.logisticsLocationId;
     if (input.status !== undefined) updateFields['status'] = input.status;
-    if (input.phone !== undefined) updateFields['phone'] = input.phone;
+    if (input.phone !== undefined) {
+      if (input.phone) {
+        const phoneRows = await this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(and(eq(schema.users.phone, input.phone), ne(schema.users.id, input.userId)))
+          .limit(1);
+
+        if (phoneRows[0]) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'A user with this phone number already exists',
+          });
+        }
+      }
+      updateFields['phone'] = input.phone;
+    }
     if (input.visibleOrderStatuses !== undefined) updateFields['visibleOrderStatuses'] = input.visibleOrderStatuses;
     if (input.restrictProductAccess !== undefined) updateFields['restrictProductAccess'] = input.restrictProductAccess;
 

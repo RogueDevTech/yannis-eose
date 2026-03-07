@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useFetcher, useSearchParams, useNavigation, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { Checkbox } from '~/components/ui/checkbox';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
@@ -227,6 +228,9 @@ export function OrdersListPage({
     }
   };
 
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('Customer not picking');
+
   const clearSelection = () => {
     setSelectedIds(new Set());
     setBulkAction(null);
@@ -259,12 +263,30 @@ export function OrdersListPage({
   }
 
   const submitBulkTransition = (newStatus: string) => {
+    if (newStatus === 'CANCELLED') {
+      setCancelModalOpen(true);
+      return;
+    }
     setBulkResult(null);
     fetcher.submit(
       {
         intent: 'bulkTransition',
         orderIds: JSON.stringify([...selectedIds]),
         newStatus,
+      },
+      { method: 'post' },
+    );
+  };
+
+  const submitBulkCancel = () => {
+    setBulkResult(null);
+    setCancelModalOpen(false);
+    fetcher.submit(
+      {
+        intent: 'bulkTransition',
+        orderIds: JSON.stringify([...selectedIds]),
+        newStatus: 'CANCELLED',
+        reason: cancelReason,
       },
       { method: 'post' },
     );
@@ -768,7 +790,7 @@ export function OrdersListPage({
                     <div className="flex flex-wrap items-center justify-center gap-1.5">
                       <Link
                         to={`/admin/orders/${order.id}`}
-                        className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                        className="btn-secondary btn-sm"
                       >
                         View
                       </Link>
@@ -781,9 +803,10 @@ export function OrdersListPage({
                         )
                         .map((req) => (
                           <span key={req.id} className="inline-flex items-center gap-1">
-                            <button
+                            <Button
                               type="button"
-                              className="text-xs font-medium text-success-600 dark:text-success-400 hover:underline disabled:opacity-50"
+                              variant="success"
+                              size="sm"
                               disabled={transferFetcher.state !== 'idle'}
                               onClick={() =>
                                 transferFetcher.submit(
@@ -793,10 +816,11 @@ export function OrdersListPage({
                               }
                             >
                               Accept
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
-                              className="text-xs font-medium text-danger-600 dark:text-danger-400 hover:underline disabled:opacity-50"
+                              variant="danger"
+                              size="sm"
                               disabled={transferFetcher.state !== 'idle'}
                               onClick={() =>
                                 transferFetcher.submit(
@@ -806,13 +830,14 @@ export function OrdersListPage({
                               }
                             >
                               Reject
-                            </button>
+                            </Button>
                           </span>
                         ))}
                       {canTransferOrder(order) && (
-                        <button
+                        <Button
                           type="button"
-                          className="text-xs font-medium text-surface-600 dark:text-surface-400 hover:underline"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => {
                             setTransferModalOrder(order);
                             setTransferToAgentId('');
@@ -820,7 +845,7 @@ export function OrdersListPage({
                           }}
                         >
                           Transfer
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </td>
@@ -875,9 +900,10 @@ export function OrdersListPage({
                   {showCSAgentColumn && (order.assignedCsName || order.assignedCsId) && (
                     <div className="text-xs mb-0.5 text-surface-600 dark:text-surface-400">
                       {order.assignedCsId ? (
-                        <button
+                        <Button
                           type="button"
-                          className="text-brand-500 hover:text-brand-600 hover:underline"
+                          variant="ghost"
+                          size="sm"
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -885,7 +911,7 @@ export function OrdersListPage({
                           }}
                         >
                           {order.assignedCsName ?? 'View user'}
-                        </button>
+                        </Button>
                       ) : (
                         <span>{order.assignedCsName ?? '—'}</span>
                       )}
@@ -909,14 +935,15 @@ export function OrdersListPage({
                 <div className="flex flex-wrap items-center gap-3 mt-2 pt-2 border-t border-surface-100 dark:border-surface-700">
                   <Link
                     to={`/admin/orders/${order.id}`}
-                    className="text-xs text-brand-600 dark:text-brand-400 font-medium"
+                    className="btn-secondary btn-sm"
                   >
                     View
                   </Link>
                   {canTransferOrder(order) && (
-                    <button
+                    <Button
                       type="button"
-                      className="text-xs text-surface-600 dark:text-surface-400 font-medium"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => {
                         setTransferModalOrder(order);
                         setTransferToAgentId('');
@@ -924,7 +951,7 @@ export function OrdersListPage({
                       }}
                     >
                       Transfer to agent...
-                    </button>
+                    </Button>
                   )}
                   {pendingTransferRequests.some(
                     (req) =>
@@ -933,9 +960,11 @@ export function OrdersListPage({
                       req.toCsId === currentUserId,
                   ) && (
                     <>
-                      <button
+                      <Button
                         type="button"
-                        className="text-xs font-medium text-success-600 dark:text-success-400"
+                        variant="success"
+                        size="sm"
+                        disabled={transferFetcher.state !== 'idle'}
                         onClick={() => {
                           const req = pendingTransferRequests.find(
                             (r) =>
@@ -951,10 +980,12 @@ export function OrdersListPage({
                         }}
                       >
                         Accept
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="text-xs font-medium text-danger-600 dark:text-danger-400"
+                        variant="danger"
+                        size="sm"
+                        disabled={transferFetcher.state !== 'idle'}
                         onClick={() => {
                           const req = pendingTransferRequests.find(
                             (r) =>
@@ -970,7 +1001,7 @@ export function OrdersListPage({
                         }}
                       >
                         Reject
-                      </button>
+                      </Button>
                     </>
                   )}
                 </div>
@@ -1017,8 +1048,7 @@ export function OrdersListPage({
 
       {/* Transfer modal */}
       {transferModalOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" aria-modal="true" role="dialog">
-          <div className="card max-w-md w-full shadow-xl">
+        <Modal open onClose={() => { setTransferModalOrder(null); setTransferToAgentId(''); setTransferReason(''); }} maxWidth="max-w-md" role="dialog" contentClassName="p-6">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
               {canAssignDirectly ? 'Assign order' : 'Request transfer'}
             </h3>
@@ -1097,8 +1127,74 @@ export function OrdersListPage({
                 </Button>
               </div>
             </transferFetcher.Form>
-          </div>
-        </div>
+        </Modal>
+      )}
+
+      {/* Bulk cancel confirmation modal */}
+      {cancelModalOpen && (
+        <Modal open onClose={() => { setCancelModalOpen(false); setCancelReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">
+              Cancel {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}?
+            </h3>
+            <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+              Please provide a reason (at least 10 characters). Selected orders will be moved to Cancelled.
+            </p>
+            {/* Preset reason buttons */}
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate', 'Other'].map((preset) => {
+                const isOther = preset === 'Other';
+                const isActive = isOther
+                  ? cancelReason.length > 0 && !['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate'].includes(cancelReason)
+                  : cancelReason === preset;
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setCancelReason(isOther ? '' : preset)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700'
+                        : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 border border-surface-200 dark:border-surface-700 hover:bg-surface-200 dark:hover:bg-surface-700'
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Textarea for custom reason */}
+            <textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Enter cancellation reason..."
+              className="input w-full min-h-[80px]"
+              rows={3}
+            />
+            {/* Modal actions */}
+            <div className="flex gap-2 mt-4 justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setCancelModalOpen(false);
+                  setCancelReason('Customer not picking');
+                }}
+              >
+                Back
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                className="border-danger-500 bg-danger-500 hover:bg-danger-600 text-white"
+                disabled={cancelReason.trim().length < 10 || isSubmitting}
+                loading={isSubmitting}
+                loadingText="Cancelling..."
+                onClick={submitBulkCancel}
+              >
+                Cancel {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
+              </Button>
+            </div>
+        </Modal>
       )}
 
     </div>

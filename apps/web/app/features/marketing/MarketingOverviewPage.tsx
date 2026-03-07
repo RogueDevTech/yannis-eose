@@ -6,6 +6,7 @@ import { MediaBuyerBalanceCard } from '~/features/marketing/MediaBuyerBalanceCar
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
 import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
@@ -569,17 +570,14 @@ export function MarketingOverviewPage({
         const pageItems = allItems.slice(start, start + modalPageSize);
 
         return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-            onClick={() => setViewAllMediaBuyersOpen(false)}
+          <Modal
+            open
+            onClose={() => setViewAllMediaBuyersOpen(false)}
+            maxWidth="max-w-4xl"
             role="dialog"
-            aria-modal="true"
             aria-labelledby="view-all-media-buyers-title"
+            contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col"
           >
-            <div
-              className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-4xl w-full max-h-[90dvh] overflow-hidden flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-            >
               <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
                 <h2 id="view-all-media-buyers-title" className="text-lg font-semibold text-surface-900 dark:text-white">
                   Media Buyer Performance
@@ -641,8 +639,7 @@ export function MarketingOverviewPage({
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+          </Modal>
         );
       })()}
 

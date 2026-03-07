@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -179,10 +180,7 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
 
       {/* Approve/Reject Modal */}
       {modal && (
-        <>
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setModal(null)} />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="rounded-xl bg-white dark:bg-surface-800 shadow-2xl border border-surface-200 dark:border-surface-700 p-6 flex flex-col max-h-[80dvh] overflow-hidden w-full max-w-md">
+        <Modal open onClose={() => setModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">
               <h3 className="text-lg font-semibold text-surface-900 dark:text-white shrink-0">
                 {modal.action === 'APPROVED' ? 'Approve Request' : 'Reject Request'}
               </h3>
@@ -221,9 +219,7 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
                   </Button>
                 </fetcher.Form>
               </div>
-            </div>
-          </div>
-        </>
+        </Modal>
       )}
     </div>
   );

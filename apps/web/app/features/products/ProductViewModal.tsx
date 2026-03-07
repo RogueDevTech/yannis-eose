@@ -1,4 +1,5 @@
 import { Link } from '@remix-run/react';
+import { Modal } from '~/components/ui/modal';
 import { PRODUCT_STATUS_COLORS } from './types';
 import type { Product } from './types';
 
@@ -10,17 +11,14 @@ export interface ProductViewModalProps {
 
 export function ProductViewModal({ product, canEditProduct, onClose }: ProductViewModalProps) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      aria-modal="true"
+    <Modal
+      open
+      onClose={onClose}
+      maxWidth="max-w-2xl"
       role="dialog"
       aria-labelledby="product-view-modal-title"
-      onClick={onClose}
+      contentClassName="p-0 max-h-[90dvh] flex flex-col overflow-hidden border border-surface-200 dark:border-surface-700"
     >
-      <div
-        className="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-700 shadow-xl w-full max-w-2xl max-h-[90dvh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
         {/* Header */}
         <div className="flex items-center justify-between gap-3 p-4 border-b border-surface-200 dark:border-surface-700 shrink-0">
           <h2 id="product-view-modal-title" className="text-lg font-semibold text-surface-900 dark:text-white truncate">
@@ -129,7 +127,6 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
             Close
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

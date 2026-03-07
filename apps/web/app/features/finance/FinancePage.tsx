@@ -6,6 +6,7 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -695,10 +696,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
       {/* Approval Modal + rest */}
       {approvalModal && (
-        <>
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setApprovalModal(null)} />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="rounded-xl bg-white dark:bg-surface-800 shadow-2xl border border-surface-200 dark:border-surface-700 p-6 flex flex-col max-h-[80dvh] overflow-hidden w-full max-w-md">
+        <Modal open onClose={() => setApprovalModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">
               <h3 className="text-lg font-semibold text-surface-900 dark:text-white shrink-0">
                 {approvalModal.action === 'APPROVED' ? 'Approve Request' : approvalModal.action === 'REJECTED' ? 'Reject Request' : 'Query Request'}
               </h3>
@@ -740,9 +738,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   </Button>
                 </approvalFetcher.Form>
               </div>
-            </div>
-          </div>
-        </>
+        </Modal>
       )}
     </div>
   );

@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigation } from '@remix-run/react';
 import { Sidebar, SidebarIcons, type SidebarGroup } from './sidebar';
 import { Header } from './header';
-import { BottomNav, type BottomNavItem } from './bottom-nav';
+import { BottomNav, type BottomNavItem, type BottomNavGroup } from './bottom-nav';
 import { useSocket, useRealtimeNotifications } from '~/hooks/useSocket';
+import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { ToastProvider } from '~/components/ui/toast';
 import { NotificationsStateProvider, useNotificationsState } from '~/contexts/notifications-state';
 import { subscribeToPush } from '~/lib/offline-sync';
@@ -91,8 +92,8 @@ const navStructure: NavGroupDef[] = [
     group: 'Finance',
     items: [
       { label: 'Finance', href: '/admin/finance/overview', icon: SidebarIcons.finance, permission: 'finance.read' },
-      { label: 'Delivery remittances', href: '/admin/finance/delivery-remittances', icon: SidebarIcons.finance, permission: 'finance.read' },
-      { label: 'Disbursements', href: '/admin/finance/disbursements', icon: SidebarIcons.finance, permission: 'finance.disburse' },
+      { label: 'Delivery remittances', href: '/admin/finance/delivery-remittances', icon: SidebarIcons.remittances, permission: 'finance.read' },
+      { label: 'Disbursements', href: '/admin/finance/disbursements', icon: SidebarIcons.disbursements, permission: 'finance.disburse' },
     ],
   },
   {
@@ -248,6 +249,7 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
   const [darkMode, setDarkMode] = useState(false);
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const { isConnected } = useSocket();
+  const { canInstall, install } = usePwaInstall();
   const { realtimeCount, realtimeNotifications, removeRealtimeNotification, pruneServerKnown, clearRealtimeNotifications } = useRealtimeNotifications();
   const { displayUnreadCount } = useNotificationsState();
   const navigation = useNavigation();
@@ -337,7 +339,9 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
 
   const navGroups = getNavGroupsForUser(user);
   const bottomNavItems = getBottomNavItemsForUser(user);
-  const allNavItemsForModal: BottomNavItem[] = getNavGroupsForUser(user, { forMobile: true }).flatMap((g) => g.items);
+  const allNavGroups = getNavGroupsForUser(user, { forMobile: true });
+  const allNavGroupsForModal: BottomNavGroup[] = allNavGroups.map((g) => ({ group: g.group, items: g.items }));
+  const allNavItemsForModal: BottomNavItem[] = allNavGroups.flatMap((g) => g.items);
   const barItems = bottomNavItems.slice(0, 4);
 
   // Show a global content loader only during real route transitions
@@ -380,6 +384,7 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
         onRemoveRealtimeNotification={removeRealtimeNotification}
         onPruneServerKnown={pruneServerKnown}
         onClearRealtimeNotifications={clearRealtimeNotifications}
+        pwaInstall={canInstall ? { canInstall, install } : undefined}
       />
 
       {/* Main content area */}
@@ -412,7 +417,7 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
           </div>
         </div>
       </main>
-      <BottomNav barItems={barItems} allItems={allNavItemsForModal} currentPathname={location.pathname} />
+      <BottomNav barItems={barItems} allItems={allNavItemsForModal} allGroups={allNavGroupsForModal} currentPathname={location.pathname} />
       </div>
   );
 }

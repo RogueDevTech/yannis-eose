@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { useSearchParams, useNavigation } from '@remix-run/react';
 
 export interface DateFilterBarProps {
@@ -196,17 +197,7 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
       </button>
 
       {modalOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-            onClick={closeModal}
-            aria-hidden
-          />
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeModal}>
-            <div
-              className="bg-white dark:bg-surface-900 rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-sm max-h-[90dvh] overflow-y-auto flex flex-col gap-4 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5"
-              onClick={(e) => e.stopPropagation()}
-            >
+        <Modal open onClose={closeModal} maxWidth="max-w-sm" backdropBlur contentClassName="flex flex-col gap-4 p-5">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Filter by date</h3>
                 <button
@@ -281,9 +272,7 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
               >
                 Done
               </Button>
-            </div>
-          </div>
-        </>
+        </Modal>
       )}
     </>
   );

@@ -144,6 +144,8 @@ export type CreateDeliveryRemittanceInput = z.infer<typeof createDeliveryRemitta
 export const listDeliveryRemittancesSchema = z.object({
   logisticsLocationId: z.string().uuid().optional(),
   status: z.enum(['SENT', 'RECEIVED', 'DISPUTED']).optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });

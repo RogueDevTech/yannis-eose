@@ -3,6 +3,7 @@ import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
@@ -772,6 +773,43 @@ function VoipCallPanel({
   );
 }
 
+/** Wrapper that runs call-status polling only while there is an active call (INITIATED/RINGING/IN_PROGRESS). */
+function VoipCallPanelWithPolling({
+  order,
+  resolvedCall,
+  canConfirm,
+  fetcher,
+  revalidate,
+}: {
+  order: OrderDetailStreamData['order'];
+  resolvedCall: CallLogEntry | null;
+  canConfirm: boolean;
+  fetcher: ReturnType<typeof useFetcher>;
+  revalidate: () => void;
+}) {
+  const isCallRelatedStatus =
+    order.status === 'CS_ENGAGED' || order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED';
+  const isActiveCall =
+    resolvedCall != null && ['INITIATED', 'RINGING', 'IN_PROGRESS'].includes(resolvedCall.callStatus);
+  const needsCallStatusPolling = isCallRelatedStatus && isActiveCall;
+
+  useEffect(() => {
+    if (!needsCallStatusPolling) return;
+    const interval = setInterval(revalidate, 3000);
+    return () => clearInterval(interval);
+  }, [needsCallStatusPolling, revalidate]);
+
+  return (
+    <VoipCallPanel
+      order={order}
+      latestCall={resolvedCall}
+      canConfirm={canConfirm}
+      fetcher={fetcher}
+      hasActiveCall={isActiveCall}
+    />
+  );
+}
+
 // ── Main Feature Component ───────────────────────────────────────
 
 export function OrderDetailPage({
@@ -880,23 +918,32 @@ export function OrderDetailPage({
   // - VOIP disabled: require at least one call log (agent clicked Call)
   const canConfirm = voipEnabled ? hasQualifyingVoipCall : hasAnyCallLog;
 
-  // Poll for call status updates only while order is in a call-related state (CS_ENGAGED, etc.).
-  // Stop polling once order is CONFIRMED or beyond so we don't refetch in a loop after confirm.
+  // Revalidate callback for VOIP call-status polling (used inside call panel wrapper).
   const revalidate = useCallback(() => {
     if (revalidator.state === 'idle') {
       revalidator.revalidate();
     }
   }, [revalidator]);
 
-  const needsCallStatusPolling =
-    Boolean(callInitiated) &&
-    (order.status === 'CS_ENGAGED' || order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED');
-
+  // Immediate revalidate when "Call Customer" succeeds so in-call UI appears without waiting for first poll.
+  const revalidatedForCallInitiatedRef = useRef(false);
   useEffect(() => {
-    if (!needsCallStatusPolling) return;
-    const interval = setInterval(revalidate, 3000);
-    return () => clearInterval(interval);
-  }, [needsCallStatusPolling, revalidate]);
+    if (
+      fetcher.state === 'idle' &&
+      (fetcher.data as { callInitiated?: boolean })?.callInitiated &&
+      revalidator.state === 'idle' &&
+      !revalidatedForCallInitiatedRef.current
+    ) {
+      revalidatedForCallInitiatedRef.current = true;
+      revalidator.revalidate();
+    }
+  }, [fetcher.state, fetcher.data, revalidator]);
+  useEffect(() => {
+    revalidatedForCallInitiatedRef.current = false;
+  }, [order.id]);
+  useEffect(() => {
+    if (fetcher.state === 'submitting') revalidatedForCallInitiatedRef.current = false;
+  }, [fetcher.state]);
 
   const revealData = revealFetcher.data as {
     phoneRevealed?: boolean;
@@ -1296,15 +1343,12 @@ export function OrderDetailPage({
             {canEditOrder && voipEnabled && canPerformCSActionsOnOrder && (order.status === 'CS_ENGAGED' || ((order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && canTransitionTo('CS_ENGAGED'))) && (
               <DeferredSection resolve={latestCall} skeleton="card">
                 {(resolvedCall) => (
-                  <VoipCallPanel
+                  <VoipCallPanelWithPolling
                     order={order}
-                    latestCall={resolvedCall}
+                    resolvedCall={resolvedCall}
                     canConfirm={canConfirm}
                     fetcher={fetcher}
-                    hasActiveCall={
-                      resolvedCall != null &&
-                      ['INITIATED', 'RINGING', 'IN_PROGRESS'].includes(resolvedCall.callStatus)
-                    }
+                    revalidate={revalidate}
                   />
                 )}
               </DeferredSection>
@@ -1360,8 +1404,7 @@ export function OrderDetailPage({
 
       {/* Confirm order modal — Confirm now or Schedule callback */}
       {confirmModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <Modal open onClose={() => { setConfirmModalOpen(false); setDeliveryDate(''); setScheduleDelayMinutes(120); setScheduleNotes(''); }} maxWidth="max-w-md" contentClassName="p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Confirm order</h3>
             <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
               Confirm the order now or schedule a callback for later.
@@ -1461,14 +1504,12 @@ export function OrderDetailPage({
                 Close
               </Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Delete order modal (cancel with reason) */}
       {cancelModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6">
+        <Modal open onClose={() => { setCancelModalOpen(false); setCancelReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Delete order</h3>
             <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
               Please provide a reason (at least 10 characters). This will move the order to Cancelled.
@@ -1531,14 +1572,12 @@ export function OrderDetailPage({
                 </Button>
               </fetcher.Form>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Request transfer modal */}
       {transferModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6">
+        <Modal open onClose={() => { setTransferModalOpen(false); setTransferToId(''); setTransferReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Request transfer</h3>
             <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
               Transfer this order to another CS agent. They will need to accept the transfer.
@@ -1598,14 +1637,12 @@ export function OrderDetailPage({
                 </Button>
               </fetcher.Form>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Call customer modal — VOIP off: reveal number, copy, open dialer */}
       {callCustomerModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6">
+        <Modal open onClose={() => setCallCustomerModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Call customer</h3>
             {!revealData?.phoneRevealed ? (
               <>
@@ -1725,19 +1762,12 @@ export function OrderDetailPage({
                 </div>
               </>
             )}
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Adjust order items modal */}
       {adjustItemsModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="adjust-items-title"
-        >
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-lg w-full max-h-[90dvh] overflow-hidden flex flex-col">
+        <Modal open onClose={() => setAdjustItemsModalOpen(false)} maxWidth="max-w-lg" role="dialog" aria-labelledby="adjust-items-title" contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col">
             <h2 id="adjust-items-title" className="text-lg font-semibold text-surface-900 dark:text-white p-6 pb-2">
               Adjust order items
             </h2>
@@ -1838,8 +1868,7 @@ export function OrderDetailPage({
                 </Button>
               </div>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

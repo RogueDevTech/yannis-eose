@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { useFetcher, useRevalidator } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -458,8 +459,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
 
       {/* Edit Provider Modal */}
       {editingProvider && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl w-full max-w-md">
+        <Modal open onClose={() => setEditingProvider(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-0">
             <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
               <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Edit Provider</h3>
               <button
@@ -522,8 +522,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 </Button>
               </div>
             </fetcher.Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       <Tabs
@@ -557,82 +556,138 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {/* Content */}
       {activeTab === 'providers' && (
         <div className="card p-0 overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Name</th>
-                <th className="table-header">Contact</th>
-                <th className="table-header">Coverage</th>
-                <th className="table-header">Status</th>
-                <th className="table-header"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {providers.map((p: Provider) => (
-                <tr key={p.id} className="table-row">
-                  <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{p.name}</td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200">{p.contactInfo ?? '—'}</td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200">{p.coverageArea ?? '—'}</td>
-                  <td className="table-cell">
-                    <span className={p.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{p.status}</span>
-                  </td>
-                  <td className="table-cell text-right">
-                    <button
-                      type="button"
-                      onClick={() => setEditingProvider(p)}
-                      className="text-brand-500 hover:text-brand-600 text-sm font-medium"
-                    >
-                      Edit
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {providers.length === 0 && (
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full">
+              <thead>
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                    No logistics providers yet
-                  </td>
+                  <th className="table-header">Name</th>
+                  <th className="table-header">Contact</th>
+                  <th className="table-header">Coverage</th>
+                  <th className="table-header">Status</th>
+                  <th className="table-header"></th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {providers.map((p: Provider) => (
+                  <tr key={p.id} className="table-row">
+                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{p.name}</td>
+                    <td className="table-cell text-surface-800 dark:text-surface-200">{p.contactInfo ?? '—'}</td>
+                    <td className="table-cell text-surface-800 dark:text-surface-200">{p.coverageArea ?? '—'}</td>
+                    <td className="table-cell">
+                      <span className={p.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{p.status}</span>
+                    </td>
+                    <td className="table-cell text-right">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditingProvider(p)}
+                      >
+                        Edit
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {providers.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
+                      No logistics providers yet
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            {providers.length === 0 ? (
+              <div className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
+                No logistics providers yet
+              </div>
+            ) : (
+              providers.map((p: Provider) => (
+                <div key={p.id} className="p-4">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <p className="font-medium text-surface-900 dark:text-surface-100">{p.name}</p>
+                    <span className={p.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{p.status}</span>
+                  </div>
+                  <div className="text-sm text-surface-800 dark:text-surface-200 space-y-0.5 mb-2">
+                    {p.contactInfo && <div>Contact: {p.contactInfo}</div>}
+                    {p.coverageArea && <div>Coverage: {p.coverageArea}</div>}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setEditingProvider(p)}
+                  >
+                    Edit
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
       {activeTab === 'locations' && (
         <div className="card p-0 overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Location</th>
-                <th className="table-header">Address</th>
-                <th className="table-header">Provider</th>
-                <th className="table-header">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {locations.map((l: Location) => {
-                const provider = providers.find((p: Provider) => p.id === l.providerId);
-                return (
-                  <tr key={l.id} className="table-row">
-                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{l.name}</td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">{l.address}</td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">{provider?.name ?? l.providerId.slice(0, 8)}</td>
-                    <td className="table-cell">
-                      <span className={l.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{l.status}</span>
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr>
+                  <th className="table-header">Location</th>
+                  <th className="table-header">Address</th>
+                  <th className="table-header">Provider</th>
+                  <th className="table-header">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {locations.map((l: Location) => {
+                  const provider = providers.find((p: Provider) => p.id === l.providerId);
+                  return (
+                    <tr key={l.id} className="table-row">
+                      <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{l.name}</td>
+                      <td className="table-cell text-surface-800 dark:text-surface-200">{l.address}</td>
+                      <td className="table-cell text-surface-800 dark:text-surface-200">{provider?.name ?? l.providerId.slice(0, 8)}</td>
+                      <td className="table-cell">
+                        <span className={l.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{l.status}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {locations.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
+                      No locations yet. Add a provider first, then add locations.
                     </td>
                   </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            {locations.length === 0 ? (
+              <div className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
+                No locations yet. Add a provider first, then add locations.
+              </div>
+            ) : (
+              locations.map((l: Location) => {
+                const provider = providers.find((p: Provider) => p.id === l.providerId);
+                return (
+                  <div key={l.id} className="p-4">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <p className="font-medium text-surface-900 dark:text-surface-100">{l.name}</p>
+                      <span className={l.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{l.status}</span>
+                    </div>
+                    <div className="text-sm text-surface-800 dark:text-surface-200 space-y-0.5">
+                      <div>Address: {l.address}</div>
+                      <div>Provider: {provider?.name ?? l.providerId.slice(0, 8)}</div>
+                    </div>
+                  </div>
                 );
-              })}
-              {locations.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                    No locations yet. Add a provider first, then add locations.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              })
+            )}
+          </div>
         </div>
       )}
 

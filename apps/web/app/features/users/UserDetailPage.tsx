@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -1031,8 +1032,7 @@ export function UserDetailPage({
 
       {/* ─── Reset Password Modal ────────────────────────── */}
       {showResetPassword && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="card w-full max-w-md space-y-4">
+        <Modal open onClose={() => setShowResetPassword(false)} maxWidth="max-w-md" contentClassName="p-6 space-y-4">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Reset Password</h3>
             <p className="text-sm text-surface-700 dark:text-surface-200">
               Set a new password for <strong>{user.name}</strong>. This will log them out of all sessions.
@@ -1052,14 +1052,12 @@ export function UserDetailPage({
                 </div>
               </div>
             </Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ─── Email Change Approval Modal ─────────────────── */}
       {showEmailChangeModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="card w-full max-w-md space-y-4">
+        <Modal open onClose={() => { setShowEmailChangeModal(null); setEmailChangeReason(''); }} maxWidth="max-w-md" contentClassName="p-6 space-y-4">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
               {showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'} Email Change
             </h3>
@@ -1100,14 +1098,12 @@ export function UserDetailPage({
                 </div>
               </div>
             </Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ─── Deactivate Confirmation Modal ───────────────── */}
       {showDeactivateConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" aria-modal="true" role="alertdialog" aria-labelledby="deactivate-modal-title" aria-describedby="deactivate-modal-desc">
-          <div className="card w-full max-w-lg space-y-5 border-2 border-danger-200 dark:border-danger-800 bg-white dark:bg-surface-900 shadow-xl">
+        <Modal open onClose={() => setShowDeactivateConfirm(false)} maxWidth="max-w-lg" role="alertdialog" aria-labelledby="deactivate-modal-title" aria-describedby="deactivate-modal-desc" contentClassName="p-6 space-y-5 border-2 border-danger-200 dark:border-danger-800">
             <div className="flex items-center gap-3 pb-2 border-b border-danger-100 dark:border-danger-900/50">
               <div className="flex-shrink-0 w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/50 flex items-center justify-center">
                 <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1158,8 +1154,7 @@ export function UserDetailPage({
                 </Button>
               </Form>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Form, useNavigation, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Spinner } from '~/components/ui/spinner';
 
@@ -57,9 +58,7 @@ function CategoryModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-surface-900 rounded-xl shadow-2xl w-full max-w-lg max-h-[90dvh] overflow-y-auto">
+    <Modal open onClose={onClose} maxWidth="max-w-lg" contentClassName="p-0 max-h-[90dvh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
           <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
@@ -216,7 +215,6 @@ function CategoryModal({
           </div>
         </Form>
         </div>
-      </div>
 
       {showArchiveConfirm && category && (
         <ConfirmActionModal
@@ -238,7 +236,7 @@ function CategoryModal({
           }}
         />
       )}
-    </div>
+    </Modal>
   );
 }
 
@@ -335,7 +333,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
 
       {/* Table */}
       <div className="card p-0 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr>
@@ -383,17 +381,62 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
                     </span>
                   </td>
                   <td className="table-cell text-right">
-                    <button
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setModalCategory(cat)}
-                      className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 text-sm font-medium"
                     >
                       Edit
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile card list */}
+        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          {categories.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
+              No categories found. Create one to get started.
+            </div>
+          ) : (
+            categories.map((cat) => (
+              <div key={cat.id} className="p-4">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div>
+                    <p className="font-medium text-surface-900 dark:text-white">{cat.name}</p>
+                    <p className="text-sm text-surface-700 dark:text-surface-300">{cat.brandName}</p>
+                  </div>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium shrink-0 ${
+                    cat.status === 'ACTIVE'
+                      ? 'bg-success-50 dark:bg-success-700/20 text-success-700 dark:text-success-400'
+                      : 'bg-surface-100 dark:bg-surface-700 text-surface-800 dark:text-surface-200'
+                  }`}>
+                    {cat.status === 'ACTIVE' ? 'Active' : cat.status === 'INACTIVE' ? 'Inactive' : 'Archived'}
+                  </span>
+                </div>
+                {(cat.brandPhone || cat.brandEmail || cat.brandWhatsapp || cat.smsSenderId) && (
+                  <div className="text-xs text-surface-600 dark:text-surface-400 space-y-0.5 mb-2">
+                    {cat.brandPhone && <div>Phone: {cat.brandPhone}</div>}
+                    {cat.brandEmail && <div className="text-brand-500 dark:text-brand-400">{cat.brandEmail}</div>}
+                    {cat.brandWhatsapp && <div>WhatsApp: {cat.brandWhatsapp}</div>}
+                    {cat.smsSenderId && <div>Sender ID: {cat.smsSenderId}</div>}
+                  </div>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setModalCategory(cat)}
+                >
+                  Edit
+                </Button>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

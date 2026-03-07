@@ -132,7 +132,7 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
       {receivedOrDisputed.length > 0 && (
         <div>
           <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Received / Disputed</h2>
-          <div className="overflow-x-auto">
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-surface-200 dark:border-surface-700">
@@ -171,6 +171,29 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            {receivedOrDisputed.map((r) => (
+              <div key={r.id} className="p-4">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <p className="font-medium text-surface-900 dark:text-white">{r.productName}</p>
+                  <span
+                    className={`inline-flex px-2 py-0.5 rounded text-xs font-medium shrink-0 ${
+                      r.status === 'RECEIVED'
+                        ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
+                        : 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
+                    }`}
+                  >
+                    {r.status}
+                  </span>
+                </div>
+                <div className="text-sm text-surface-800 dark:text-surface-200 space-y-0.5">
+                  <div>From → To: {r.fromLocationName} → {r.toLocationName}</div>
+                  <div>Qty: {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : '—'}</div>
+                  <div>Sent: {new Date(r.sentAt).toLocaleDateString()}</div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

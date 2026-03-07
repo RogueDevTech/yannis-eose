@@ -188,11 +188,11 @@ async function boostSeed() {
     const locationRiders = ridersByLocation[locationId] ?? riders.map((r: Record<string, unknown>) => r.id as string);
     const riderId = faker.helpers.arrayElement(locationRiders);
 
-    // Status — heavily skewed towards DELIVERED/COMPLETED
+    // Status — heavily skewed towards DELIVERED (finance counts DELIVERED only)
     const status = faker.helpers.weightedArrayElement([
-      { weight: 55, value: 'DELIVERED' },
-      { weight: 40, value: 'COMPLETED' },
-      { weight: 5, value: 'IN_TRANSIT' },
+      { weight: 90, value: 'DELIVERED' },
+      { weight: 8, value: 'COMPLETED' },
+      { weight: 2, value: 'IN_TRANSIT' },
     ]);
 
     // Dates — spread over last 60 days

@@ -7,6 +7,7 @@ import { InlineNotification } from '~/components/ui/inline-notification';
 import { AmountInput } from '~/components/ui/amount-input';
 import { formatNaira } from '~/lib/format-amount';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
@@ -541,9 +542,7 @@ export function MarketingPage({
         <>
           {/* Request Funding Modal — Media Buyer only */}
           {viewMode === 'media_buyer' && showRequestFundingForm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="fixed inset-0 bg-black/50" onClick={() => setShowRequestFundingForm(false)} />
-              <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <Modal open onClose={() => setShowRequestFundingForm(false)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Request Funding</h3>
                 <p className="text-sm text-surface-800 dark:text-surface-200">
                   Head of Marketing will be notified and can disburse to you once approved.
@@ -567,15 +566,12 @@ export function MarketingPage({
                     </Button>
                   </div>
                 </fetcher.Form>
-              </div>
-            </div>
+            </Modal>
           )}
 
           {/* Dispute modal */}
           {disputingFundingId && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="fixed inset-0 bg-black/50" onClick={() => setDisputingFundingId(null)} />
-              <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <Modal open onClose={() => setDisputingFundingId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Dispute Funding</h3>
                 <p className="text-sm text-surface-800 dark:text-surface-200">
                   This will alert the CEO and Head of Marketing.
@@ -599,8 +595,7 @@ export function MarketingPage({
                     </Button>
                   </div>
                 </fetcher.Form>
-              </div>
-            </div>
+            </Modal>
           )}
 
           {/* Your funding requests — Media Buyer only */}
@@ -863,9 +858,7 @@ export function MarketingPage({
 
       {/* Send Funding Modal — Admin / HoM only */}
       {canSendFunding && showFundingForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setShowFundingForm(false)} />
-          <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+        <Modal open onClose={() => setShowFundingForm(false)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Send Funding to Media Buyer</h3>
             <p className="text-sm text-surface-800 dark:text-surface-200">
               Select the recipient, amount, and upload the receipt. The Media Buyer will be notified and can mark as received.
@@ -910,15 +903,12 @@ export function MarketingPage({
                 </Button>
               </div>
             </fetcher.Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Approve funding request modal — HoM: attach receipt after sending money manually */}
       {approvingRequestId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setApprovingRequestId(null)} />
-          <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+        <Modal open onClose={() => setApprovingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Approve funding request</h3>
             <p className="text-sm text-surface-800 dark:text-surface-200">
               Send the money to the Media Buyer manually (e.g. bank transfer), then attach the receipt image below. They will be notified and can preview the receipt.
@@ -942,15 +932,12 @@ export function MarketingPage({
                 </Button>
               </div>
             </fetcher.Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Reject funding request modal */}
       {rejectingRequestId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setRejectingRequestId(null)} />
-          <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+        <Modal open onClose={() => setRejectingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Reject funding request</h3>
             <p className="text-sm text-surface-800 dark:text-surface-200">
               The Media Buyer will be notified that their request was not approved.
@@ -971,23 +958,19 @@ export function MarketingPage({
                 </Button>
               </div>
             </fetcher.Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Receipt preview modal — Media Buyer */}
       {receiptPreviewUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setReceiptPreviewUrl(null)}>
-          <div className="fixed inset-0 bg-black/70" />
-          <div className="relative max-w-2xl max-h-[90dvh] w-full" onClick={(e) => e.stopPropagation()}>
+        <Modal open onClose={() => setReceiptPreviewUrl(null)} maxWidth="max-w-2xl" contentClassName="p-0 bg-transparent shadow-none max-h-[90dvh]">
             <div className="flex justify-end mb-2">
               <button type="button" onClick={() => setReceiptPreviewUrl(null)} className="text-surface-100 hover:text-white p-1 rounded">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
             <img src={receiptPreviewUrl} alt="Receipt" className="w-full h-auto max-h-[85dvh] object-contain rounded-lg bg-white shadow-xl" />
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Ad Spend Tab */}

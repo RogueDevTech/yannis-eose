@@ -455,11 +455,19 @@ export class VoipService {
       return;
     }
 
+    const customerPhone = order.customerPhone?.trim();
+    if (!customerPhone) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Cannot place VOIP call: customer phone number is not available for this order.',
+      });
+    }
+
     try {
       const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`;
 
       const params = new URLSearchParams();
-      params.append('To', order.customerPhoneHash);
+      params.append('To', customerPhone);
       params.append('From', twilioPhoneNumber);
       params.append('StatusCallback', `${webhookBaseUrl}/voip/webhook/status?callToken=${callLog.callToken}`);
       params.append('StatusCallbackEvent', 'initiated ringing answered completed');

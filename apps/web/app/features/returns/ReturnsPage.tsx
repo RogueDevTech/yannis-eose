@@ -3,6 +3,7 @@ import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Tabs } from '~/components/ui/tabs';
@@ -148,9 +149,7 @@ export function ReturnsPage({
         <>
           {/* Write-off modal */}
           {writeOffOrderId && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="fixed inset-0 bg-black/50" onClick={() => setWriteOffOrderId(null)} />
-              <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <Modal open onClose={() => setWriteOffOrderId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
                 <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Write Off — Damaged Item</h3>
                 <p className="text-sm text-surface-800 dark:text-surface-200">
                   This will permanently mark the item as damaged and log it as an Operational Loss.
@@ -180,8 +179,7 @@ export function ReturnsPage({
                     </Button>
                   </div>
                 </fetcher.Form>
-              </div>
-            </div>
+          </Modal>
           )}
 
           {/* Returns table */}

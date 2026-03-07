@@ -3,6 +3,7 @@ import { Link, useFetcher, useSearchParams, useNavigation } from '@remix-run/rea
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -896,19 +897,13 @@ function EditDeliveryDateModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 min-h-0"
-      aria-modal="true"
-      role="dialog"
-      aria-labelledby="edit-delivery-date-title"
-    >
-      <div className="card w-full max-w-md shadow-xl bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700">
-        <div className="flex items-center justify-between pb-2 border-b border-surface-200 dark:border-surface-700">
+    <Modal open onClose={onClose} maxWidth="max-w-md" role="dialog" aria-labelledby="edit-delivery-date-title" contentClassName="p-0 border border-surface-200 dark:border-surface-700">
+        <div className="flex items-center justify-between pb-2 border-b border-surface-200 dark:border-surface-700 px-4 pt-4 sm:px-5 sm:pt-5">
           <h3 id="edit-delivery-date-title" className="text-lg font-semibold text-surface-900 dark:text-white">
             Resolve order
           </h3>
         </div>
-        <div className="space-y-4 pt-4">
+        <div className="space-y-4 pt-4 px-4 sm:px-5">
           <p className="text-sm text-surface-700 dark:text-surface-200">
             Order <strong>{orderId.slice(0, 8)}...</strong> · {customerName}
           </p>
@@ -961,7 +956,7 @@ function EditDeliveryDateModal({
             />
           </div>
         </div>
-        <div className="flex items-center justify-end gap-3 pt-4 mt-4 border-t border-surface-200 dark:border-surface-700">
+        <div className="flex items-center justify-end gap-3 pt-4 mt-4 border-t border-surface-200 dark:border-surface-700 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
@@ -969,8 +964,7 @@ function EditDeliveryDateModal({
             Save
           </Button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

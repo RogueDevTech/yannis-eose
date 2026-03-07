@@ -1,6 +1,6 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, ilike, count, lt, inArray, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, desc, ilike, count, lt, gte, lte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
@@ -718,6 +718,12 @@ export class LogisticsService {
     if (input.status) {
       conditions.push(eq(schema.deliveryRemittances.status, input.status));
     }
+    if (input.startDate) {
+      conditions.push(gte(schema.deliveryRemittances.sentAt, new Date(input.startDate + 'T00:00:00')));
+    }
+    if (input.endDate) {
+      conditions.push(lte(schema.deliveryRemittances.sentAt, new Date(input.endDate + 'T23:59:59')));
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
@@ -756,6 +762,32 @@ export class LogisticsService {
       ),
     );
 
+    // Summary aggregation: total remitted amounts by status (across all matching remittances, not just current page)
+    // Build conditions without status filter for summary (we want all statuses)
+    const summaryConditions = conditions.filter((c) => c !== (input.status ? eq(schema.deliveryRemittances.status, input.status) : undefined));
+    const summaryWhere = summaryConditions.length > 0 ? and(...summaryConditions) : undefined;
+
+    const summaryRows = await this.db
+      .select({
+        totalRemitted: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        totalCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittances.id})::text`,
+        pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittances.id} END)::text`,
+        receivedCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.deliveryRemittances.id} END)::text`,
+        disputedCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.deliveryRemittances.id} END)::text`,
+      })
+      .from(schema.deliveryRemittances)
+      .innerJoin(schema.deliveryRemittanceOrders, eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id))
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+      .where(summaryWhere);
+
+    const summary = summaryRows[0] ?? {
+      totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
+      totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
+    };
+
     return {
       records: records.map((r, i) => ({
         ...r,
@@ -768,6 +800,7 @@ export class LogisticsService {
         total,
         totalPages: Math.ceil(total / input.limit),
       },
+      summary,
     };
   }
 

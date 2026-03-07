@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -237,9 +238,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
       {/* Verify Transfer Modal */}
       {verifyingTransfer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setVerifyingTransfer(null)} />
-          <div className="relative bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-lg w-full p-6 space-y-4">
+        <Modal open onClose={() => setVerifyingTransfer(null)} maxWidth="max-w-lg" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Verify Transfer Receipt</h3>
               <button onClick={() => setVerifyingTransfer(null)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
@@ -326,8 +325,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 </Button>
               </div>
             </fetcher.Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       <Tabs
