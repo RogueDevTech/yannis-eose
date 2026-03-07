@@ -158,3 +158,9 @@ export const getDeliveryRemittanceSchema = z.object({
   deliveryRemittanceId: z.string().uuid(),
 });
 export type GetDeliveryRemittanceInput = z.infer<typeof getDeliveryRemittanceSchema>;
+
+export const disputeDeliveryRemittanceSchema = z.object({
+  deliveryRemittanceId: z.string().uuid(),
+  disputeReason: z.string().min(10, 'Dispute reason must be at least 10 characters').max(1000),
+});
+export type DisputeDeliveryRemittanceInput = z.infer<typeof disputeDeliveryRemittanceSchema>;

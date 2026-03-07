@@ -164,7 +164,8 @@ function getNavGroupsForUser(
 
   for (const groupDef of navStructure) {
     // Head of Logistics has their own Logistics Orders page; hide Sales & CS group.
-    if (groupDef.group === 'SALES & CS' && role === 'HEAD_OF_LOGISTICS') continue;
+    // Finance Officer has no business in CS; hide Sales & CS group.
+    if (groupDef.group === 'SALES & CS' && (role === 'HEAD_OF_LOGISTICS' || role === 'FINANCE_OFFICER')) continue;
     // Logistics-only roles: hide Catalog, HR, Analytics, Finance (defense in depth).
     if (isLogisticsOnly && groupDef.group != null && logisticsHiddenGroups.includes(groupDef.group)) continue;
 

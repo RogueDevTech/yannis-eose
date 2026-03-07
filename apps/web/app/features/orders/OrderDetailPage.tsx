@@ -671,6 +671,25 @@ function VoipCallPanel({
             >
               Try again
             </Button>
+            {(voip.error?.toLowerCase().includes('31202') || voip.error?.toLowerCase().includes('jwt signature')) && (
+              <div className="mt-3 rounded-md border border-warning-300 dark:border-warning-600 bg-warning-50 dark:bg-warning-900/30 px-2 py-2 text-xs text-surface-700 dark:text-surface-300">
+                <p className="font-semibold text-warning-800 dark:text-warning-200 mb-1">Twilio 31202 — JWT signature validation failed</p>
+                <p className="mb-1">Use an <strong>API Key Secret</strong> in <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_API_KEY_SECRET</code>, not the account Auth Token. In Twilio Console: Account → API keys → Create API Key, then copy the <strong>Secret</strong> (not the SID) into your API env.</p>
+                <p className="text-surface-600 dark:text-surface-400">API Key SID should start with <code>SK</code>; Account SID starts with <code>AC</code>.</p>
+              </div>
+            )}
+            {(voip.debugInfo?.raw?.includes('53000') || voip.debugInfo?.phase === 'device_init') && (
+              <div className="mt-3 rounded-md border border-warning-300 dark:border-warning-600 bg-warning-50 dark:bg-warning-900/30 px-2 py-2 text-xs text-surface-700 dark:text-surface-300">
+                <p className="font-semibold text-warning-800 dark:text-warning-200 mb-1">Error 53000 / device init — things to check:</p>
+                <ul className="list-disc list-inside space-y-0.5 ml-1">
+                  <li><strong>31202 in browser console?</strong> Use <strong>API Key Secret</strong> in <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_API_KEY_SECRET</code> (Console → API keys → Create → copy <strong>Secret</strong>), not the account Auth Token.</li>
+                  <li><code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_API_KEY_SID</code> must start with <code>SK</code>; <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_TWIML_APP_SID</code> with <code>AP</code>.</li>
+                  <li>Identity uses only letters, numbers, underscore (no hyphens).</li>
+                  <li>If not in the US: set <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_VOICE_REGION=ie1</code> or <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">au1</code>.</li>
+                  <li>Network: firewall must allow WebSocket (wss) to Twilio.</li>
+                </ul>
+              </div>
+            )}
             {voip.debugInfo && (
               <details className="mt-3 border border-danger-200 dark:border-danger-700/50 rounded-md bg-danger-100/50 dark:bg-danger-800/30">
                 <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-medium text-danger-700 dark:text-danger-300">

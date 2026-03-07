@@ -54,12 +54,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
 
-  if (intent === 'markReceived') {
-    const deliveryRemittanceId = formData.get('deliveryRemittanceId')?.toString();
-    if (!deliveryRemittanceId) {
-      return json({ error: 'Missing delivery remittance ID' }, { status: 400 });
-    }
+  const deliveryRemittanceId = formData.get('deliveryRemittanceId')?.toString();
+  if (!deliveryRemittanceId) {
+    return json({ error: 'Missing delivery remittance ID' }, { status: 400 });
+  }
 
+  if (intent === 'markReceived') {
     const res = await apiRequest<unknown>('/trpc/logistics.markDeliveryRemittanceReceived', {
       method: 'POST',
       cookie,
@@ -68,6 +68,25 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to mark received';
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'dispute') {
+    const disputeReason = formData.get('disputeReason')?.toString();
+    if (!disputeReason || disputeReason.length < 10) {
+      return json({ error: 'Dispute reason must be at least 10 characters' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/logistics.disputeDeliveryRemittance', {
+      method: 'POST',
+      cookie,
+      body: { deliveryRemittanceId, disputeReason },
+    });
+
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to dispute remittance';
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });

@@ -2,6 +2,15 @@ import { io, type Socket } from 'socket.io-client';
 
 let socket: Socket | null = null;
 
+/** When page is HTTPS, use HTTPS/WSS for the API URL to avoid mixed-content blocking. */
+function getSocketBaseUrl(): string {
+  const raw = (window as Window & { ENV?: { API_URL?: string } }).ENV?.API_URL ?? 'http://localhost:4444';
+  if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && raw.startsWith('http://')) {
+    return raw.replace(/^http:\/\//, 'https://');
+  }
+  return raw;
+}
+
 /**
  * Get or create the Socket.io connection.
  * The connection is authenticated via the session cookie.
@@ -9,7 +18,7 @@ let socket: Socket | null = null;
  */
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io((window as Window & { ENV?: { API_URL?: string } }).ENV?.API_URL ?? 'http://localhost:4444', {
+    socket = io(getSocketBaseUrl(), {
       withCredentials: true,
       autoConnect: true,
       reconnection: true,
