@@ -28,8 +28,8 @@ export interface ModalProps {
 }
 
 /**
- * Responsive modal: on mobile slides up from bottom (full width, rounded top);
- * on sm+ centered with max width. Use for all dialogs so mobile gets consistent slide-up UX.
+ * Responsive modal: on mobile only, slides up from bottom (full width, rounded top);
+ * on sm+ (desktop) centered with max width and fade-in (no slide-up). Slide-up is mobile-only.
  */
 export function Modal({
   open,
@@ -75,8 +75,8 @@ export function Modal({
             'w-full max-h-[90dvh] overflow-y-auto',
             'rounded-t-2xl sm:rounded-xl',
             'bg-white dark:bg-surface-900 shadow-xl',
-            'pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5',
-            'animate-slide-up-from-bottom',
+            'pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:pb-5',
+            'animate-slide-up-from-bottom sm:animate-fade-in',
             maxWidthClass,
             contentClassName,
           ].join(' ')}

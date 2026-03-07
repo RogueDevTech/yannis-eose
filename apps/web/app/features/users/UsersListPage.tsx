@@ -215,12 +215,12 @@ export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = '
         </div>
 
         {/* Mobile card list */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {filteredUsers.map((user) => (
             <Link
               key={user.id}
               to={`/hr/users/${user.id}`}
-              className="block p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
+              className="block rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
             >
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-9 h-9 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">

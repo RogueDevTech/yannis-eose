@@ -257,16 +257,16 @@ export function ReturnsPage({
             </div>
 
             {/* Mobile */}
-            <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="md:hidden space-y-3 px-1">
               {returnedOrders.map((order: ReturnedOrder) => (
-                <div key={order.id} className="p-4 space-y-2">
+                <div key={order.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-surface-900 dark:text-white text-sm">
                       {order.customerName}
                     </span>
                     <span className="badge-warning">RETURNED</span>
                   </div>
-                  <p className="text-xs text-surface-700 dark:text-surface-300">
+                  <p className="text-sm text-surface-700 dark:text-surface-300">
                     {getLocationName(order.logisticsLocationId)} · {new Date(order.updatedAt).toLocaleDateString('en-NG', {
                       month: 'short', day: 'numeric',
                     })}
@@ -502,9 +502,9 @@ function ReconciliationTable({
       </div>
 
       {/* Mobile */}
-      <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+      <div className="md:hidden space-y-3 px-1">
         {reconciliations.map((r: Reconciliation) => (
-          <div key={r.id} className="p-4 space-y-2">
+          <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-medium text-surface-900 dark:text-white text-sm">
                 {getLocationName(r.locationId)}
@@ -513,7 +513,7 @@ function ReconciliationTable({
                 {r.reconciliationStatus}
               </span>
             </div>
-            <p className="text-xs text-surface-800 dark:text-surface-200">
+            <p className="text-sm text-surface-800 dark:text-surface-200">
               <DeferredSection resolve={products} skeleton="inline">
                 {(resolvedProducts) => {
                   const prod = (resolvedProducts as Product[]).find((p: Product) => p.id === r.productId);

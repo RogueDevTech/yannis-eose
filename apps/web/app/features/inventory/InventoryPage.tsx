@@ -340,13 +340,13 @@ export function InventoryPage({
           </div>
 
           {/* Mobile */}
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          <div className="md:hidden space-y-3 px-1">
             {levels.map((level) => (
-              <div key={level.id} className="p-4">
+              <div key={level.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className="font-medium text-sm text-surface-900 dark:text-white">{productName(level.productId)}</p>
-                    <p className="text-xs text-surface-600 dark:text-surface-400">{locationName(level.locationId)}</p>
+                    <p className="text-sm text-surface-600 dark:text-surface-400">{locationName(level.locationId)}</p>
                   </div>
                   <span className="badge-success">{level.status}</span>
                 </div>
@@ -432,9 +432,9 @@ export function InventoryPage({
               </div>
 
               {/* Mobile */}
-              <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+              <div className="md:hidden space-y-3 px-1">
                 {resolvedMovements.map((m: StockMovement) => (
-                  <div key={m.id} className="p-4">
+                  <div key={m.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                     <div className="flex items-center justify-between mb-1">
                       <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
                         {formatMovementType(m.movementType)}
@@ -444,7 +444,7 @@ export function InventoryPage({
                       </span>
                     </div>
                     <p className="text-sm font-medium text-surface-900 dark:text-white mb-0.5">{productName(m.productId)}</p>
-                    <p className="text-xs text-surface-600 dark:text-surface-400">
+                    <p className="text-sm text-surface-600 dark:text-surface-400">
                       {locationName(m.fromLocationId)} {m.fromLocationId && m.toLocationId ? '→' : ''} {locationName(m.toLocationId)}
                     </p>
                     <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
@@ -653,16 +653,16 @@ function TransfersTab({
         </div>
 
         {/* Mobile */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {filtered.map((t) => {
             const shrinkage = t.quantityReceived !== null ? t.quantitySent - t.quantityReceived : 0;
             return (
-              <div key={t.id} className="p-4 space-y-2">
+              <div key={t.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-surface-900 dark:text-white text-sm">{productName(t.productId)}</span>
                   <span className={TRANSFER_STATUS_BADGE[t.transferStatus] ?? 'badge'}>{t.transferStatus.replace(/_/g, ' ')}</span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-surface-800 dark:text-surface-200">
+                <div className="flex items-center gap-2 text-sm text-surface-800 dark:text-surface-200">
                   <span>{locationName(t.fromLocationId)}</span>
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
                   <span>{locationName(t.toLocationId)}</span>
@@ -793,14 +793,14 @@ function ReturnsTab({
         </div>
 
         {/* Mobile */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {returnedOrders.map((order) => (
-            <div key={order.id} className="p-4 space-y-2">
+            <div key={order.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-surface-900 dark:text-white text-sm">{order.customerName}</span>
                 <span className="badge-warning">RETURNED</span>
               </div>
-              <p className="text-xs text-surface-700 dark:text-surface-300">
+              <p className="text-sm text-surface-700 dark:text-surface-300">
                 {locationName(order.logisticsLocationId)} · {new Date(order.updatedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
               </p>
               <div className="flex gap-2 pt-1">
@@ -956,14 +956,14 @@ function ReconciliationTab({
             </div>
 
             {/* Mobile */}
-            <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="md:hidden space-y-3 px-1">
               {(resolved as Reconciliation[]).map((r) => (
-                <div key={r.id} className="p-4 space-y-2">
+                <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-surface-900 dark:text-white text-sm">{locationName(r.locationId)}</span>
                     <span className={RECON_STATUS_BADGE[r.reconciliationStatus] ?? 'badge'}>{r.reconciliationStatus}</span>
                   </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-200">{productName(r.productId)} · {REASON_LABELS[r.reasonCode] ?? r.reasonCode}</p>
+                  <p className="text-sm text-surface-800 dark:text-surface-200">{productName(r.productId)} · {REASON_LABELS[r.reasonCode] ?? r.reasonCode}</p>
                   <div className="flex gap-4 text-sm">
                     <span>Digital: <strong>{r.digitalCount}</strong></span>
                     <span>Physical: <strong>{r.physicalCount}</strong></span>

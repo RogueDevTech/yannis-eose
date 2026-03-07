@@ -599,12 +599,14 @@ function VoipCallPanel({
   canConfirm,
   fetcher,
   hasActiveCall,
+  onOpenCallModal,
 }: {
   order: OrderDetailStreamData['order'];
   latestCall: CallLogEntry | null;
   canConfirm: boolean;
   fetcher: ReturnType<typeof useFetcher>;
   hasActiveCall: boolean;
+  onOpenCallModal?: () => void;
 }) {
   const revalidator = useRevalidator();
 
@@ -737,25 +739,41 @@ function VoipCallPanel({
         </div>
       )}
 
-      {/* Call button — sends initiateCall action to backend */}
+      {/* Call button — opens modal when onOpenCallModal provided; otherwise submits form (legacy) */}
       {!showInCallUI && (
-        <fetcher.Form method="post">
-          <input type="hidden" name="intent" value="initiateCall" />
+        onOpenCallModal ? (
           <Button
-            type="submit"
+            type="button"
             variant="primary"
             className="w-full"
             disabled={hasActiveCall || !voip.ready}
-            loading={fetcher.state === 'submitting'}
-            loadingText="Connecting..."
             title={!voip.ready ? 'VOIP device is initializing...' : undefined}
+            onClick={onOpenCallModal}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
             </svg>
             {hasActiveCall ? 'Call in progress...' : 'Call Customer'}
           </Button>
-        </fetcher.Form>
+        ) : (
+          <fetcher.Form method="post">
+            <input type="hidden" name="intent" value="initiateCall" />
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full"
+              disabled={hasActiveCall || !voip.ready}
+              loading={fetcher.state === 'submitting'}
+              loadingText="Connecting..."
+              title={!voip.ready ? 'VOIP device is initializing...' : undefined}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+              </svg>
+              {hasActiveCall ? 'Call in progress...' : 'Call Customer'}
+            </Button>
+          </fetcher.Form>
+        )
       )}
 
       {/* Gate status hint */}
@@ -780,12 +798,14 @@ function VoipCallPanelWithPolling({
   canConfirm,
   fetcher,
   revalidate,
+  onOpenCallModal,
 }: {
   order: OrderDetailStreamData['order'];
   resolvedCall: CallLogEntry | null;
   canConfirm: boolean;
   fetcher: ReturnType<typeof useFetcher>;
   revalidate: () => void;
+  onOpenCallModal?: () => void;
 }) {
   const isCallRelatedStatus =
     order.status === 'CS_ENGAGED' || order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED';
@@ -806,6 +826,7 @@ function VoipCallPanelWithPolling({
       canConfirm={canConfirm}
       fetcher={fetcher}
       hasActiveCall={isActiveCall}
+      onOpenCallModal={onOpenCallModal}
     />
   );
 }
@@ -845,6 +866,7 @@ export function OrderDetailPage({
   const [scheduleNotes, setScheduleNotes] = useState('');
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number }>>([]);
+  const [callDebugLog, setCallDebugLog] = useState<string[]>([]);
 
   const currentStatusIndex = STATUS_FLOW.indexOf(order.status as (typeof STATUS_FLOW)[number]);
   const actionError = (fetcher.data as { error?: string })?.error;
@@ -876,6 +898,27 @@ export function OrderDetailPage({
       );
     }
   }, [callCustomerModalOpen, order.status, fetcher.state]);
+
+  // Reset call debug log when opening the call modal (VOIP path)
+  useEffect(() => {
+    if (callCustomerModalOpen && voipEnabled) {
+      setCallDebugLog([]);
+    }
+  }, [callCustomerModalOpen, voipEnabled]);
+
+  // Append response to call debug log when initiateCall returns
+  const prevFetcherStateRef = useRef(fetcher.state);
+  useEffect(() => {
+    const data = fetcher.data as { callInitiated?: boolean; callLog?: { callStatus?: string }; twilioError?: string } | undefined;
+    if (prevFetcherStateRef.current === 'submitting' && fetcher.state === 'idle' && data != null && (data.callInitiated ?? data.callLog)) {
+      setCallDebugLog((prev) => [
+        ...prev,
+        `Response received at ${new Date().toLocaleTimeString()}`,
+        `Call status: ${data.callLog?.callStatus ?? '—'}${data.twilioError ? ` | Twilio error: ${data.twilioError}` : ''}`,
+      ]);
+    }
+    prevFetcherStateRef.current = fetcher.state;
+  }, [fetcher.state, fetcher.data]);
 
   const showActionError = actionError && !dismissedError;
 
@@ -1349,6 +1392,7 @@ export function OrderDetailPage({
                     canConfirm={canConfirm}
                     fetcher={fetcher}
                     revalidate={revalidate}
+                    onOpenCallModal={() => setCallCustomerModalOpen(true)}
                   />
                 )}
               </DeferredSection>
@@ -1640,11 +1684,85 @@ export function OrderDetailPage({
         </Modal>
       )}
 
-      {/* Call customer modal — VOIP off: reveal number, copy, open dialer */}
+      {/* Call customer modal — VOIP: Start call + status + debug; VOIP off: reveal number, copy, open dialer */}
       {callCustomerModalOpen && (
         <Modal open onClose={() => setCallCustomerModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Call customer</h3>
-            {!revealData?.phoneRevealed ? (
+            {voipEnabled ? (
+              <>
+                <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+                  Start the call from here. The modal stays open so you can see status and debug info. Close when done.
+                </p>
+                <div className="flex flex-col gap-3 mb-4">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    className="w-full"
+                    disabled={fetcher.state === 'submitting'}
+                    loading={fetcher.state === 'submitting'}
+                    loadingText="Connecting..."
+                    onClick={() => {
+                      setCallDebugLog((prev) => [...prev, `Initiate sent at ${new Date().toLocaleTimeString()}`]);
+                      fetcher.submit({ intent: 'initiateCall' }, { method: 'post' });
+                    }}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                    </svg>
+                    Start call
+                  </Button>
+                  {(fetcher.data as { callLog?: { callStatus?: string }; twilioError?: string })?.twilioError && (
+                    <p className="text-sm text-danger-600 dark:text-danger-400 rounded-md bg-danger-50 dark:bg-danger-900/20 p-2">
+                      Twilio error: {(fetcher.data as { twilioError?: string }).twilioError}
+                    </p>
+                  )}
+                  <p className="text-sm text-surface-600 dark:text-surface-400">
+                    Status: {fetcher.state === 'submitting' ? 'Connecting...' : (fetcher.data as { callLog?: { callStatus?: string } })?.callLog?.callStatus ?? order.callLogs[0]?.callStatus ?? 'Idle'}
+                  </p>
+                </div>
+                <details className="mb-4 rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden">
+                  <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 bg-surface-50 dark:bg-surface-800/50">
+                    Logs &amp; debug
+                  </summary>
+                  <div className="p-3 border-t border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/30">
+                    <p className="text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Last response</p>
+                    <pre className="p-2 text-[11px] text-surface-700 dark:text-surface-300 whitespace-pre-wrap break-all overflow-x-auto max-h-32 overflow-y-auto font-mono bg-surface-100 dark:bg-surface-800 rounded mb-2">
+                      {fetcher.data != null ? JSON.stringify(fetcher.data, null, 2) : '—'}
+                    </pre>
+                    <p className="text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Latest call</p>
+                    <pre className="p-2 text-[11px] text-surface-700 dark:text-surface-300 whitespace-pre-wrap break-all overflow-x-auto max-h-24 overflow-y-auto font-mono bg-surface-100 dark:bg-surface-800 rounded mb-2">
+                      {order.callLogs[0] != null
+                        ? JSON.stringify(
+                            {
+                              id: order.callLogs[0].id,
+                              callStatus: order.callLogs[0].callStatus,
+                              durationSeconds: order.callLogs[0].durationSeconds,
+                              startedAt: order.callLogs[0].startedAt,
+                            },
+                            null,
+                            2,
+                          )
+                        : '—'}
+                    </pre>
+                    {callDebugLog.length > 0 && (
+                      <>
+                        <p className="text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Event log</p>
+                        <ul className="list-disc list-inside text-[11px] text-surface-600 dark:text-surface-400 space-y-0.5">
+                          {callDebugLog.map((line, i) => (
+                            <li key={i}>{line}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                </details>
+                <div className="flex justify-end">
+                  <Button type="button" variant="secondary" onClick={() => setCallCustomerModalOpen(false)}>
+                    Close
+                  </Button>
+                </div>
+              </>
+            ) : !revealData?.phoneRevealed ? (
               <>
                 <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
                   Reveal the customer&apos;s number to call them manually. The call is recorded when you click &quot;Copy number&quot; or &quot;Call on my phone&quot;.
@@ -1722,7 +1840,6 @@ export function OrderDetailPage({
                         setCopyFeedback(true);
                         setTimeout(() => setCopyFeedback(false), 2000);
                       }
-                      setCallCustomerModalOpen(false);
                     }}
                     disabled={recordCallFetcher.state === 'submitting'}
                   >
@@ -1742,7 +1859,6 @@ export function OrderDetailPage({
                       if (phone) {
                         window.location.href = `tel:${phone}`;
                       }
-                      setCallCustomerModalOpen(false);
                     }}
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

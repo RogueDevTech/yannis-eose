@@ -149,7 +149,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: errorData?.error?.message ?? 'Failed to initiate call' }, { status: safeStatus(res.status) });
     }
 
-    return json({ success: true, callInitiated: true });
+    const data = res.data as { result?: { data?: { callLog: unknown; twilioError?: string } } };
+    const payload = data?.result?.data;
+    return json({
+      success: true,
+      callInitiated: true,
+      callLog: payload?.callLog ?? null,
+      twilioError: payload?.twilioError,
+    });
   }
 
   if (intent === 'revealPhone') {

@@ -12,6 +12,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Spinner } from '~/components/ui/spinner';
 import { exportToCsv } from '~/lib/csv-export';
 import { S3_FOLDERS } from '~/lib/s3-upload';
+import { formatRole } from '~/features/users/types';
 
 const STATUS_OPTIONS = ['ALL', 'SENT', 'COMPLETED', 'DISPUTED'] as const;
 
@@ -171,7 +172,7 @@ function CreateDisbursementModal({
 }: {
   open: boolean;
   onClose: () => void;
-  recipients: Array<{ id: string; name: string }>;
+  recipients: Array<{ id: string; name: string; role?: string }>;
   recipientBalances: Array<{ userId: string; balance: string }>;
   preselectedReceiverId: string | null;
 }) {
@@ -214,7 +215,7 @@ function CreateDisbursementModal({
                 const balanceLabel = bal != null ? ` — Balance: ${formatNaira(Number(bal.balance))}` : '';
                 return (
                   <option key={u.id} value={u.id}>
-                    {u.name} (HoM){balanceLabel}
+                    {u.name}{u.role ? ` (${formatRole(u.role)})` : ''}{balanceLabel}
                   </option>
                 );
               })}
@@ -283,7 +284,7 @@ export function DisbursementsPage({
   }, [filters.status, filters.receiver]);
 
   const canCreate = canDisburseToHoM;
-  const recipients = canDisburseToHoM ? users.filter((u) => u.role === 'HEAD_OF_MARKETING') : [];
+  const recipients = canDisburseToHoM ? users : [];
   const getName = useCallback((id: string) => users.find((u) => u.id === id)?.name ?? id.slice(0, 8) + '...', [users]);
 
   const selectedStatus = optimisticStatus;
@@ -579,9 +580,9 @@ export function DisbursementsPage({
             </div>
 
             {/* Mobile cards */}
-            <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="md:hidden space-y-3 px-1">
               {funding.map((f) => (
-                <div key={f.id} className="p-3 space-y-2">
+                <div key={f.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-xs text-surface-500 dark:text-surface-400">{f.id.slice(0, 8)}...</span>
                     <span className={STATUS_COLORS[f.status] ?? 'badge'}>{STATUS_LABELS[f.status] ?? f.status}</span>
@@ -730,11 +731,11 @@ export function DisbursementsPage({
                   </tbody>
                 </table>
               </div>
-              <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+              <div className="md:hidden space-y-3 px-1">
                 {recipientBalances.map((b) => {
                   const balance = Number(b.balance);
                   return (
-                    <div key={b.userId} className="p-4">
+                    <div key={b.userId} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <Link to={`/hr/users/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 font-medium">
                           {b.name}

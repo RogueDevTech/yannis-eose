@@ -172,9 +172,9 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
               </tbody>
             </table>
           </div>
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          <div className="md:hidden space-y-3 px-1">
             {receivedOrDisputed.map((r) => (
-              <div key={r.id} className="p-4">
+              <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <p className="font-medium text-surface-900 dark:text-white">{r.productName}</p>
                   <span

@@ -95,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ]);
 
   const allBalances = parseBalancesList(balancesRes);
-  const recipientBalances = allBalances.filter((b) => b.role === 'HEAD_OF_MARKETING');
+  const recipientBalances = allBalances;
 
   const fundingData = parseFunding(fundingRes);
   const users = parseUsers(usersRes);

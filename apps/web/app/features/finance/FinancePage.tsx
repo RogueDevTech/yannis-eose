@@ -205,7 +205,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         </div>
         <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Net Margin</p>
-          <p className={`text-2xl font-bold mt-1 ${profit.margin >= 20 ? 'text-success-600 dark:text-success-400' : profit.margin >= 10 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'}`}>
+          <p className={`text-2xl font-bold mt-1 ${profit.margin >= 20 ? 'text-success-600 dark:text-success-400' : profit.margin > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'}`}>
             {profit.margin.toFixed(1)}%
           </p>
           <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
@@ -593,9 +593,9 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             </div>
 
             {/* Mobile */}
-            <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="md:hidden space-y-3 px-1">
               {paginatedInvoices.map((inv: Invoice) => (
-                <div key={inv.id} className="p-4 space-y-2">
+                <div key={inv.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="font-mono font-medium text-surface-900 dark:text-white text-sm">{inv.referenceFormatted}</span>
                     <div className="flex items-center gap-2">
@@ -861,9 +861,9 @@ function ApprovalsTab({
         </div>
 
         {/* Mobile */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {paginated.map((req) => (
-            <div key={req.id} className="p-4 space-y-2">
+            <div key={req.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
                   {APPROVAL_TYPE_LABELS[req.type] ?? req.type}

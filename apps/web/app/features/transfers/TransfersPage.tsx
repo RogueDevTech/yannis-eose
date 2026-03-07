@@ -426,11 +426,11 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
         </div>
 
         {/* Mobile */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {filteredTransfers.map((t: Transfer) => {
             const shrinkage = t.quantityReceived !== null ? t.quantitySent - t.quantityReceived : 0;
             return (
-              <div key={t.id} className="p-4 space-y-2">
+              <div key={t.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-surface-900 dark:text-white text-sm">
                     <DeferredSection resolve={products} skeleton="inline">
@@ -445,7 +445,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-surface-800 dark:text-surface-200">
+                <div className="flex items-center gap-2 text-sm text-surface-800 dark:text-surface-200">
                   <span>{getLocationName(t.fromLocationId)}</span>
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />

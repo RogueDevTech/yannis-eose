@@ -5,6 +5,7 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { FileUpload } from '~/components/ui/file-upload';
 import { Tabs } from '~/components/ui/tabs';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { formatNaira } from '~/lib/format-amount';
 import { STATUS_DOT_CLASS, STATUS_LABELS } from '~/features/shared/order-status';
@@ -25,6 +26,8 @@ export interface LogisticsOrderDetailPageProps {
   riders: RiderOption[];
   /** Back link (e.g. "/tpl/orders" for TPL, "/admin/logistics/orders" for admin) */
   backLink?: string;
+  /** Breadcrumb label for back link (e.g. "Orders" for TPL, "Logistics Orders" for admin) */
+  backLabel?: string;
   /** When provided (e.g. TPL), only these locations in allocate dropdown */
   allocatableLocations?: Location[];
 }
@@ -127,14 +130,6 @@ function formatValue(val: unknown): string {
 }
 
 // ── Icons ───────────────────────────────────────────────────────
-
-function ArrowLeftIcon() {
-  return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-    </svg>
-  );
-}
 
 function UserIcon() {
   return (
@@ -439,6 +434,7 @@ export function LogisticsOrderDetailPage({
   locations,
   riders,
   backLink = DEFAULT_BACK_LINK,
+  backLabel = 'Logistics Orders',
   allocatableLocations: allocatableLocationsProp,
 }: LogisticsOrderDetailPageProps) {
   const fetcher = useFetcher();
@@ -499,63 +495,67 @@ export function LogisticsOrderDetailPage({
   ];
 
   return (
-    <div className="space-y-4">
-      {/* ── Header ──────────────────────────────────────────────── */}
-      <div className="flex items-start gap-3">
-        <Link
-          to={backLink}
-          className="mt-1 p-1.5 rounded-lg text-surface-500 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-white transition-colors"
-          aria-label="Back"
-        >
-          <ArrowLeftIcon />
+    <div className="space-y-4 overflow-x-hidden min-w-0">
+      {/* Breadcrumb */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <Link to={backLink} className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
+          {backLabel}
         </Link>
+        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+        <span className="text-surface-900 dark:text-white font-medium truncate min-w-0">{order.id.slice(0, 8)}...</span>
+      </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-lg font-bold text-surface-900 dark:text-white font-mono tracking-tight">
-              #{order.id.slice(0, 8)}
-            </h1>
-            <OrderStatusBadge status={order.status} />
-            {isOverdue && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                <ClockIcon /> OVERDUE
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
-            Created {formatDate(order.createdAt)} &middot; {daysSinceCreated}d ago
+      {/* Header — matches OrderDetailPage / ProductViewPage */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 min-w-0">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-white truncate">
+            {order.customerName}
+          </h1>
+          <p className="text-sm text-surface-800 dark:text-surface-200 font-mono mt-0.5 break-all">
+            {order.id.slice(0, 8)}... &middot; Created {formatDate(order.createdAt)}
           </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <PageRefreshButton />
+          {isOverdue && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+              <ClockIcon /> OVERDUE
+            </span>
+          )}
+          <OrderStatusBadge status={order.status} />
         </div>
       </div>
 
-      {/* ── Status Pipeline ─────────────────────────────────────── */}
+      {/* Status Pipeline */}
       <div className="card p-4">
         <StatusPipeline status={order.status} order={order} />
       </div>
 
-      {/* ── Quick Stats Row ─────────────────────────────────────── */}
+      {/* Quick Stats — matches LogisticsOrdersPage stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card p-3 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium">Amount</p>
-          <p className="text-base font-bold text-surface-900 dark:text-white tabular-nums mt-0.5">
-            {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '---'}
+        <div className="card">
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Amount</p>
+          <p className="text-2xl font-bold text-surface-900 dark:text-white tabular-nums mt-1">
+            {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
           </p>
         </div>
-        <div className="card p-3 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium">Items</p>
-          <p className="text-base font-bold text-surface-900 dark:text-white tabular-nums mt-0.5">
-            {totalQty} <span className="text-xs font-normal text-surface-400">units</span>
+        <div className="card">
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Items</p>
+          <p className="text-2xl font-bold text-surface-900 dark:text-white tabular-nums mt-1">
+            {totalQty} <span className="text-sm font-normal text-surface-500 dark:text-surface-400">units</span>
           </p>
         </div>
-        <div className="card p-3 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium">Delivery Fee</p>
-          <p className="text-base font-bold text-surface-900 dark:text-white tabular-nums mt-0.5">
-            {order.deliveryFee ? formatNaira(Number(order.deliveryFee)) : '---'}
+        <div className="card">
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivery Fee</p>
+          <p className="text-2xl font-bold text-surface-900 dark:text-white tabular-nums mt-1">
+            {order.deliveryFee ? formatNaira(Number(order.deliveryFee)) : '—'}
           </p>
         </div>
-        <div className="card p-3 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium">Remittance</p>
-          <p className="mt-0.5">
+        <div className="card">
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Remittance</p>
+          <p className="mt-1">
             {order.remittanceStatus ? (
               <span
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -578,25 +578,25 @@ export function LogisticsOrderDetailPage({
                 {order.remittanceStatus === 'SENT' ? 'Pending' : order.remittanceStatus === 'RECEIVED' ? 'Received' : order.remittanceStatus}
               </span>
             ) : (
-              <span className="text-xs text-surface-400 dark:text-surface-500">Not remitted</span>
+              <span className="text-sm text-surface-500 dark:text-surface-400">Not remitted</span>
             )}
           </p>
         </div>
       </div>
 
-      {/* ── Tabs ────────────────────────────────────────────────── */}
-      <Tabs value={activeTab} onChange={setActiveTab} tabs={tabs} variant="pill" />
+      {/* Tabs — underline variant to match OrderDetailPage */}
+      <Tabs value={activeTab} onChange={setActiveTab} tabs={tabs} />
 
       {/* ── TAB: Overview ───────────────────────────────────────── */}
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Customer Card */}
           <div className="card p-4">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-4">
               <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center">
                 <UserIcon />
               </div>
-              <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Customer</h2>
+              <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Customer</h2>
             </div>
             <div className="space-y-0.5">
               <InfoRow icon={<UserIcon />} label="Name" value={order.customerName} />
@@ -623,11 +623,11 @@ export function LogisticsOrderDetailPage({
 
           {/* Logistics Card */}
           <div className="card p-4">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-4">
               <div className="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                 <TruckIcon />
               </div>
-              <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Logistics</h2>
+              <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Logistics</h2>
             </div>
             <div className="space-y-0.5">
               {order.logisticsLocationName && (
@@ -704,11 +704,11 @@ export function LogisticsOrderDetailPage({
 
           {/* Assignment / Origin Card */}
           <div className="card p-4 lg:col-span-2">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-4">
               <div className="w-7 h-7 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
                 <BanknotesIcon />
               </div>
-              <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Order Origin</h2>
+              <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Order Origin</h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6">
               {order.assignedCsName && (
@@ -1110,7 +1110,7 @@ export function LogisticsOrderDetailPage({
       {/* ── TAB: History ────────────────────────────────────────── */}
       {activeTab === 'history' && (
         <div className="card p-4">
-          <h2 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Audit Trail</h2>
+          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Audit Trail</h2>
           <DeferredSection resolve={history} skeleton="list">
             {(rows) => <HistoryTimeline history={rows} />}
           </DeferredSection>

@@ -427,7 +427,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                             <td className="table-cell">
                               <div>
                                 <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{getStaffName(p.staffId)}</p>
-                                <p className="text-xs text-surface-700 dark:text-surface-300">{getStaffRole(p.staffId)}</p>
+                                <p className="text-sm text-surface-700 dark:text-surface-300">{getStaffRole(p.staffId)}</p>
                               </div>
                             </td>
                             <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
@@ -518,17 +518,17 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                 </div>
 
                 {/* Mobile payouts */}
-                <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+                <div className="md:hidden space-y-3 px-1">
                   {payouts.map((p: Payout) => (
-                    <div key={p.id} className="p-4 space-y-2">
+                    <div key={p.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="font-medium text-surface-900 dark:text-white text-sm">{getStaffName(p.staffId)}</p>
-                          <p className="text-xs text-surface-700 dark:text-surface-300">{getStaffRole(p.staffId)}</p>
+                          <p className="text-sm text-surface-700 dark:text-surface-300">{getStaffRole(p.staffId)}</p>
                         </div>
                         <span className={PAYOUT_COLORS[p.status] ?? 'badge'}>{p.status}</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="grid grid-cols-3 gap-2 text-sm">
                         <div>
                           <span className="text-surface-700 dark:text-surface-300">Base</span>
                           <p className="font-medium text-surface-900 dark:text-white">&#8358;{Number(p.baseSalary).toLocaleString()}</p>
@@ -625,14 +625,14 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
           </div>
 
           {/* Mobile plans */}
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          <div className="md:hidden space-y-3 px-1">
             {plans.map((plan: CommissionPlan) => (
-              <div key={plan.id} className="p-4 space-y-2 cursor-pointer active:bg-surface-50 dark:active:bg-surface-800/50" onClick={() => setViewPlan(plan)}>
+              <div key={plan.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3 cursor-pointer active:bg-surface-50 dark:active:bg-surface-800/50" onClick={() => setViewPlan(plan)}>
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-surface-900 dark:text-white text-sm">{plan.planName}</span>
                   <span className="badge-info text-xs">{plan.role.replace(/_/g, ' ')}</span>
                 </div>
-                <p className="text-xs text-surface-700 dark:text-surface-300">{formatRules(plan.rules)}</p>
+                <p className="text-sm text-surface-700 dark:text-surface-300">{formatRules(plan.rules)}</p>
                 <p className="text-xs text-surface-700 dark:text-surface-300">
                   From {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                   {plan.effectiveTo ? ` to ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}` : ' — Ongoing'}
@@ -884,9 +884,9 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                     </div>
 
                     {/* Mobile adjustments */}
-                    <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+                    <div className="md:hidden space-y-3 px-1">
                       {resolvedAdjustments.map((adj: Adjustment) => (
-                        <div key={adj.id} className="p-4 space-y-2">
+                        <div key={adj.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="font-medium text-surface-900 dark:text-white text-sm">{getStaffName(adj.staffId)}</span>
                             <span className={ADJUSTMENT_COLORS[adj.category] ?? 'badge'}>{adj.category.replace(/_/g, ' ')}</span>

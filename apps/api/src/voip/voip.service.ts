@@ -85,8 +85,9 @@ export class VoipService {
    * When VOIP is enabled and Twilio is configured: places a real Twilio call.
    * When VOIP is enabled but Twilio not configured: uses mock simulation.
    * When VOIP is disabled: creates a MANUAL_CALL log (fallback mode).
+   * Returns the current call log (re-fetched after Twilio so FAILED is reflected) and optional twilioError for debugging.
    */
-  async initiateCall(orderId: string, actor: SessionUser): Promise<CallLog> {
+  async initiateCall(orderId: string, actor: SessionUser): Promise<{ callLog: CallLog; twilioError?: string }> {
     // Set actor for audit trail
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
 
@@ -145,7 +146,7 @@ export class VoipService {
         status: 'MANUAL_CALL',
       });
 
-      return manualLog;
+      return { callLog: manualLog };
     }
 
     // ── VOIP Mode ─────────────────────────────────────────────
@@ -209,8 +210,10 @@ export class VoipService {
       .where(eq(schema.orders.id, orderId));
 
     // 9. Initiate call: real Twilio or mock
+    let twilioError: string | undefined;
     if (process.env['TWILIO_ACCOUNT_SID'] && process.env['TWILIO_AUTH_TOKEN']) {
-      await this.initiateTwilioCall(callLog, order);
+      const result = await this.initiateTwilioCall(callLog, order);
+      twilioError = result.twilioError;
     } else {
       this.simulateMockCall(callLog.id, orderId);
     }
@@ -228,7 +231,9 @@ export class VoipService {
       status: 'INITIATED',
     });
 
-    return callLog;
+    // Re-fetch call log so client gets actual status (e.g. FAILED if Twilio failed)
+    const reFetched = await this.getCallLog(callLog.id);
+    return { callLog: reFetched, twilioError };
   }
 
   // ─── Query Helpers ─────────────────────────────────────────────
@@ -440,11 +445,12 @@ export class VoipService {
   /**
    * Initiate a real Twilio call.
    * Connects the agent to the customer via a VOIP bridge.
+   * Returns { success, twilioError? } so caller can surface the error to the client.
    */
   private async initiateTwilioCall(
     callLog: CallLog,
     order: typeof schema.orders.$inferSelect,
-  ): Promise<void> {
+  ): Promise<{ success: boolean; twilioError?: string }> {
     const accountSid = process.env['TWILIO_ACCOUNT_SID'];
     const authToken = process.env['TWILIO_AUTH_TOKEN'];
     const twilioPhoneNumber = process.env['TWILIO_PHONE_NUMBER'];
@@ -452,7 +458,7 @@ export class VoipService {
 
     if (!accountSid || !authToken || !twilioPhoneNumber) {
       this.simulateMockCall(callLog.id, callLog.orderId);
-      return;
+      return { success: true };
     }
 
     const customerPhone = order.customerPhone?.trim();
@@ -485,18 +491,24 @@ export class VoipService {
 
       if (!response.ok) {
         const errorBody = await response.text();
-        this.logger.error(`Twilio API error: ${errorBody}`);
+        this.logger.error(`Twilio API error orderId=${order.id} callLogId=${callLog.id}: ${errorBody}`);
         await this.updateCallStatus(callLog.id, 'FAILED');
         this.events.emitToRoom(`order:${callLog.orderId}`, 'call:status_changed', {
           callLogId: callLog.id, orderId: callLog.orderId, status: 'FAILED',
         });
+        return { success: false, twilioError: errorBody };
       }
+
+      this.logger.log(`Twilio call initiated orderId=${order.id} callLogId=${callLog.id}`);
+      return { success: true };
     } catch (error) {
-      this.logger.error(`Twilio call initiation error:`, error);
+      const errMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Twilio call initiation error orderId=${order.id} callLogId=${callLog.id}:`, error);
       await this.updateCallStatus(callLog.id, 'FAILED');
       this.events.emitToRoom(`order:${callLog.orderId}`, 'call:status_changed', {
         callLogId: callLog.id, orderId: callLog.orderId, status: 'FAILED',
       });
+      return { success: false, twilioError: errMessage };
     }
   }
 

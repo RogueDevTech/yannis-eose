@@ -1588,7 +1588,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
         </div>
 
         {/* Mobile cards */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {rows.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
               No audit entries found. Try adjusting your filters.
@@ -1597,7 +1597,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             rows.map((entry, idx) => (
               <div
                 key={`${entry.recordId}-${entry.validFrom}-${idx}`}
-                className="p-3 space-y-2"
+                className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3"
               >
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-xs text-surface-700 dark:text-surface-300">
@@ -1607,7 +1607,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                     {formatTableName(entry.tableName)}
                   </span>
                 </div>
-                <div className="text-xs text-surface-700 dark:text-surface-300 break-words min-w-0">
+                <div className="text-sm text-surface-700 dark:text-surface-300 break-words min-w-0">
                   <DeferredSection resolve={actorNames} skeleton="inline">
                     {(resolvedActorNames) => (
                       <AuditDescription entry={entry} actorNames={resolvedActorNames} />

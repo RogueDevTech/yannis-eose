@@ -169,6 +169,7 @@ export function LogisticsOrdersPage({
   const dispatchedCount = statusCounts['DISPATCHED'] ?? 0;
   const inTransitCount = statusCounts['IN_TRANSIT'] ?? 0;
   const deliveredCount = statusCounts['DELIVERED'] ?? 0;
+  const totalOrdersCount = Object.values(statusCounts).reduce((sum, n) => sum + (n ?? 0), 0);
 
   const handleStatusChange = (status: string) => {
     setSelectedStatus(status);
@@ -254,7 +255,13 @@ export function LogisticsOrdersPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="card">
+          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+            Total Orders
+          </p>
+          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{totalOrdersCount.toLocaleString()}</p>
+        </div>
         <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
             Awaiting allocation
@@ -632,14 +639,14 @@ export function LogisticsOrdersPage({
         )}
 
         {/* Mobile cards */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {orders.map((order) => {
             const ridersForOrder =
               order.logisticsLocationId && order.status === 'ALLOCATED'
                 ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
                 : [];
             return (
-              <div key={order.id} className="p-4 space-y-2">
+              <div key={order.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <Link
                     to={`${orderDetailBasePath}/${order.id}`}
@@ -650,7 +657,7 @@ export function LogisticsOrdersPage({
                   <OrderStatusBadge status={order.status} />
                 </div>
                 <p className="text-sm text-surface-900 dark:text-surface-100">{order.customerName}</p>
-                <div className="flex items-center gap-2 text-xs text-surface-700 dark:text-surface-300">
+                <div className="flex items-center gap-2 text-sm text-surface-700 dark:text-surface-300">
                   <span>{order.locationName} · {order.riderName}</span>
                   {order.preferredDeliveryDate && (
                     <span className="text-brand-600 dark:text-brand-400 font-medium">

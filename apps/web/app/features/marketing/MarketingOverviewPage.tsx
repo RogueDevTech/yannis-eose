@@ -403,9 +403,9 @@ export function MarketingOverviewPage({
                     </div>
                   </div>
                   <div className="md:hidden flex flex-col flex-1 min-h-0">
-                    <div className="flex-1 min-h-0 overflow-auto divide-y divide-surface-100 dark:divide-surface-800">
+                    <div className="flex-1 min-h-0 overflow-auto space-y-3 px-1 py-1">
                       {rows.map((order) => (
-                        <div key={order.id} className="p-4 space-y-2">
+                        <div key={order.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                           <div className="flex items-center justify-between">
                             <Link
                               to={`/admin/orders/${order.id}`}

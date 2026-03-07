@@ -397,14 +397,14 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         </div>
 
         {/* Mobile card list */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {categories.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
               No categories found. Create one to get started.
             </div>
           ) : (
             categories.map((cat) => (
-              <div key={cat.id} className="p-4">
+              <div key={cat.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
                     <p className="font-medium text-surface-900 dark:text-white">{cat.name}</p>
@@ -419,7 +419,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
                   </span>
                 </div>
                 {(cat.brandPhone || cat.brandEmail || cat.brandWhatsapp || cat.smsSenderId) && (
-                  <div className="text-xs text-surface-600 dark:text-surface-400 space-y-0.5 mb-2">
+                  <div className="text-sm text-surface-600 dark:text-surface-400 space-y-0.5 mb-2">
                     {cat.brandPhone && <div>Phone: {cat.brandPhone}</div>}
                     {cat.brandEmail && <div className="text-brand-500 dark:text-brand-400">{cat.brandEmail}</div>}
                     {cat.brandWhatsapp && <div>WhatsApp: {cat.brandWhatsapp}</div>}
