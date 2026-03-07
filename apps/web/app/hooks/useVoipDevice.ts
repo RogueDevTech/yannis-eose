@@ -82,6 +82,25 @@ function getDefaultVoipTokenUrl(): string {
   return BROWSER_VOIP_TOKEN_URL;
 }
 
+/** Serialize any thrown value to a string for debugInfo.raw (always produce something). */
+function serializeErrorRaw(err: unknown): string {
+  if (err == null) return 'null';
+  if (err instanceof Error) {
+    const parts = [`name=${err.name}`, `message=${err.message}`];
+    if (err.stack) parts.push(`stack=${err.stack}`);
+    if (err.cause != null) parts.push(`cause=${err.cause instanceof Error ? err.cause.message : String(err.cause)}`);
+    return parts.join('; ');
+  }
+  if (typeof err === 'object') {
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return Object.prototype.toString.call(err);
+    }
+  }
+  return String(err);
+}
+
 /** Turn a failed token response into a short, user-friendly message (no HTML dump). */
 function formatVoipTokenError(status: number, bodyText: string): string {
   if (status === 401) {
@@ -251,7 +270,22 @@ export function useVoipDevice(opts: {
       }
 
       // Real Twilio mode — dynamically import the SDK
-      const { Device } = await import('@twilio/voice-sdk');
+      let Device: typeof import('@twilio/voice-sdk').Device;
+      try {
+        const mod = await import('@twilio/voice-sdk');
+        Device = mod.Device;
+      } catch (importErr) {
+        const msg = importErr instanceof Error ? importErr.message : String(importErr);
+        const debug: VoipDebugInfo = {
+          phase: 'sdk_import',
+          errorMessage: msg,
+          stack: importErr instanceof Error ? importErr.stack : undefined,
+          raw: serializeErrorRaw(importErr),
+          timestamp: new Date().toISOString(),
+        };
+        setErrorWithDebug(`Failed to load call SDK: ${msg}`, debug);
+        return;
+      }
 
       const device = new Device(token, {
         // @ts-expect-error Twilio types expect Codec[]; opus/pcmu are valid at runtime
@@ -334,7 +368,20 @@ export function useVoipDevice(opts: {
         });
       });
 
-      await device.register();
+      try {
+        await device.register();
+      } catch (registerErr) {
+        const msg = registerErr instanceof Error ? registerErr.message : String(registerErr);
+        const debug: VoipDebugInfo = {
+          phase: 'device_register',
+          errorMessage: msg,
+          stack: registerErr instanceof Error ? registerErr.stack : undefined,
+          raw: serializeErrorRaw(registerErr),
+          timestamp: new Date().toISOString(),
+        };
+        setErrorWithDebug(`Call device registration failed: ${msg}`, debug);
+        return;
+      }
       deviceRef.current = device;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to initialize VOIP device';
@@ -342,7 +389,7 @@ export function useVoipDevice(opts: {
         phase: 'unknown',
         errorMessage: message,
         stack: err instanceof Error ? err.stack : undefined,
-        raw: err != null ? String(err) : undefined,
+        raw: serializeErrorRaw(err),
         timestamp: new Date().toISOString(),
       };
       setErrorWithDebug(message, debug);
