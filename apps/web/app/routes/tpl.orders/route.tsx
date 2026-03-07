@@ -1,7 +1,14 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import * as fs from 'node:fs';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+
+const DEBUG_LOG_PATH = '/Users/Apple/Desktop/PROJECTS/ROGUE-DEVTECH/yannis-eose/.cursor/debug-c05241.log';
+function debugLog(msg: string, data: Record<string, unknown>, hypothesisId: string) {
+  const line = JSON.stringify({ sessionId: 'c05241', location: 'tpl.orders/route.tsx', message: msg, data, timestamp: Date.now(), hypothesisId }) + '\n';
+  try { fs.appendFileSync(DEBUG_LOG_PATH, line); } catch { /* ignore */ }
+}
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type LogisticsOrderRow } from '~/features/logistics/LogisticsOrdersPage';
 import type { Location } from '~/features/logistics/types';
@@ -335,6 +342,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'updateDeliveryDate') {
+    // #region agent log
+    debugLog('updateDeliveryDate intent', { intent: intent ?? null }, 'entry');
+    // #endregion
     await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
     const orderId = formData.get('orderId')?.toString();
     const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString()?.trim();
@@ -370,6 +380,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Update failed';
+      debugLog('orders.update failed', { orderId, resStatus: res.status, error: err }, 'updateFailed');
       return json({ success: false, error: err }, { status: safeStatus(res.status) });
     }
     // Resolve order: transition to DELIVERED then COMPLETED so the order is always marked delivered and completed.
@@ -377,12 +388,19 @@ export async function action({ request }: ActionFunctionArgs) {
     const updatedOrder = res.data?.result?.data;
     const status = updatedOrder?.status;
 
+    // #region agent log
+    debugLog('After orders.update', { orderId, hasResultData: !!res.data?.result?.data, status, statusType: typeof status, rawResultKeys: res.data ? Object.keys(res.data as object) : [] }, 'A');
+    // #endregion
+
     if (status === 'DISPATCHED') {
       const inTransitRes = await apiRequest<unknown>('/trpc/orders.transition', {
         method: 'POST',
         cookie,
         body: { orderId, newStatus: 'IN_TRANSIT' },
       });
+      // #region agent log
+      debugLog('IN_TRANSIT transition', { orderId, ok: inTransitRes.ok, status: inTransitRes.status }, 'B');
+      // #endregion
       if (!inTransitRes.ok) {
         const err = (inTransitRes.data as { error?: { message?: string } })?.error?.message ?? 'Mark in transit failed';
         return json({ success: false, error: err }, { status: safeStatus(inTransitRes.status) });
@@ -399,6 +417,9 @@ export async function action({ request }: ActionFunctionArgs) {
           metadata: { deliveryProofUrl: resolveReceiptUrl },
         },
       });
+      // #region agent log
+      debugLog('DELIVERED transition', { orderId, ok: transitionRes.ok, status: transitionRes.status }, 'C');
+      // #endregion
       if (!transitionRes.ok) {
         const err = (transitionRes.data as { error?: { message?: string } })?.error?.message ?? 'Mark delivered failed';
         return json({ success: false, error: err }, { status: safeStatus(transitionRes.status) });
@@ -408,10 +429,21 @@ export async function action({ request }: ActionFunctionArgs) {
         cookie,
         body: { orderId, newStatus: 'COMPLETED' },
       });
+      // #region agent log
+      debugLog('COMPLETED transition', { orderId, ok: completedRes.ok, status: completedRes.status }, 'D');
+      // #endregion
       if (!completedRes.ok) {
         const err = (completedRes.data as { error?: { message?: string } })?.error?.message ?? 'Mark completed failed';
         return json({ success: false, error: err }, { status: safeStatus(completedRes.status) });
       }
+    } else {
+      // #region agent log
+      debugLog('Skipped DELIVERED block', { orderId, status }, 'E');
+      // #endregion
+      return json(
+        { success: false, error: 'Order must be dispatched or in transit to resolve as delivered. Allocate and dispatch the order first.' },
+        { status: 400 },
+      );
     }
     return json({ success: true, intent: 'updateDeliveryDate' });
   }

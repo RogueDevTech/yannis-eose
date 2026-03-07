@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { router, permissionProcedure } from '../trpc';
+import { router, authedProcedure, permissionProcedure } from '../trpc';
 import type { PermissionRequestsService } from '../../permission-requests/permission-requests.service';
 
 let permissionRequestsServiceInstance: PermissionRequestsService | null = null;
@@ -17,11 +17,11 @@ function getService(): PermissionRequestsService {
 
 /**
  * Permission requests router.
- * listPending: SuperAdmin only (audit.read implies super admin access to approval queues)
- * approve/reject: SuperAdmin only (same)
+ * listPending: all authenticated users can view
+ * approve/reject: audit.read required (SuperAdmin + Finance Officer)
  */
 export const permissionRequestsRouter = router({
-  listPending: permissionProcedure('audit.read')
+  listPending: authedProcedure
     .query(async () => {
       return getService().listPending();
     }),

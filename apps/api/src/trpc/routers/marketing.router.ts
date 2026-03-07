@@ -74,7 +74,7 @@ export const marketingRouter = router({
         return next({ ctx });
       }
       const perms = ctx.user.permissions ?? [];
-      const hasAny = ['marketing.fundingSummary', 'marketing.read', 'marketing.teamOverview'].some((p) => perms.includes(p));
+      const hasAny = ['marketing.fundingSummary', 'marketing.read', 'marketing.teamOverview', 'finance.disburse'].some((p) => perms.includes(p));
       if (!hasAny) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to list funding balances' });
       }
@@ -84,7 +84,7 @@ export const marketingRouter = router({
       return getMarketingService().listFundingBalances(ctx.user);
     }),
 
-  /** Media Buyer only: submit a funding request; notifies Head of Marketing. */
+  /** Media Buyer or Head of Marketing: submit a funding request. MB notifies HoM; HoM notifies SuperAdmin + Finance. */
   requestFunding: authedProcedure
     .input(
       z.object({
@@ -93,10 +93,15 @@ export const marketingRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'MEDIA_BUYER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Media Buyers can request funding' });
+      if (ctx.user.role !== 'MEDIA_BUYER' && ctx.user.role !== 'HEAD_OF_MARKETING') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Media Buyers or Head of Marketing can request funding' });
       }
-      return getMarketingService().requestFunding(input.amount, input.reason ?? '', ctx.user.id);
+      return getMarketingService().requestFunding(
+        input.amount,
+        input.reason ?? '',
+        ctx.user.id,
+        ctx.user.role as 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
+      );
     }),
 
   listFundingRequests: authedProcedure
@@ -110,22 +115,22 @@ export const marketingRouter = router({
       });
     }),
 
-  /** HoM/SuperAdmin: approve a funding request (after sending money manually) by attaching receipt. Notifies Media Buyer. */
+  /** HoM/SuperAdmin/Finance: approve a funding request (after sending money manually) by attaching receipt. Notifies Media Buyer. */
   approveFundingRequest: authedProcedure
     .input(approveFundingRequestSchema)
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && ctx.user.role !== 'SUPER_ADMIN') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can approve funding requests' });
+      if (ctx.user.role !== 'HEAD_OF_MARKETING' && ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'FINANCE_OFFICER') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing, Finance Officer, or Super Admin can approve funding requests' });
       }
       return getMarketingService().approveFundingRequest(input.requestId, input.receiptUrl, ctx.user.id);
     }),
 
-  /** HoM/SuperAdmin: reject a funding request. Notifies Media Buyer. */
+  /** HoM/SuperAdmin/Finance: reject a funding request. Notifies Media Buyer. */
   rejectFundingRequest: authedProcedure
     .input(rejectFundingRequestSchema)
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && ctx.user.role !== 'SUPER_ADMIN') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can reject funding requests' });
+      if (ctx.user.role !== 'HEAD_OF_MARKETING' && ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'FINANCE_OFFICER') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing, Finance Officer, or Super Admin can reject funding requests' });
       }
       return getMarketingService().rejectFundingRequest(input.requestId, input.reason, ctx.user.id);
     }),

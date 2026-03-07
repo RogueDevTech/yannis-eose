@@ -38,6 +38,8 @@ export interface FundingRequestRecord {
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
+  /** Requester display name when returned by API (e.g. listFundingRequests join) */
+  requesterName?: string | null;
 }
 
 export interface AdSpendRecord {
@@ -154,6 +156,8 @@ export interface MarketingStreamData {
   viewMode?: 'admin' | 'media_buyer';
   /** True for Head of Marketing, SuperAdmin, Finance Officer — can use Send Funding */
   canSendFunding?: boolean;
+  /** True for Media Buyer or Head of Marketing — can submit a funding request */
+  canRequestFunding?: boolean;
   /** Current user id — used to show Received/Not Received only for the funding recipient */
   currentUserId?: string;
 }

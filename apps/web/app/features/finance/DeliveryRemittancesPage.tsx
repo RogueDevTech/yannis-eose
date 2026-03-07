@@ -163,7 +163,7 @@ function ReceiptReviewModal({
   return (
     <Modal open onClose={onClose} maxWidth="max-w-2xl" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0">
+        <div className="flex items-center justify-between px-4 md:px-5 pt-4 md:pt-5 pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0">
           <div>
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
               {status === 'SENT' ? 'Review remittance' : 'View remittance'}
@@ -189,10 +189,12 @@ function ReceiptReviewModal({
 
         {/* Content */}
         {isLoading || !detail ? (
-          <ModalLoadingSkeleton />
+          <div className="px-4 md:px-5 py-4">
+            <ModalLoadingSkeleton />
+          </div>
         ) : (
           <>
-            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 md:px-5">
               {/* Remittance Price */}
               <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
                 <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Remittance total</p>
@@ -279,33 +281,31 @@ function ReceiptReviewModal({
                 )}
               </div>
 
-              {/* Orders list */}
+              {/* Orders list — grid so at least 3 per row on desktop */}
               <div>
                 <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Orders included ({detail.orders.length})</h4>
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                   {detail.orders.map((o) => (
                     <Link
                       key={o.id}
                       to={`/admin/orders/${o.id}`}
-                      className="block rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 p-3 hover:border-brand-300 dark:hover:border-brand-600 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                      className="block rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 p-2.5 hover:border-brand-300 dark:hover:border-brand-600 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors min-w-0"
                     >
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span className="text-sm font-medium text-surface-900 dark:text-white truncate">{o.customerName}</span>
+                      <div className="flex items-center justify-between gap-1.5 mb-1">
+                        <span className="text-xs font-medium text-surface-900 dark:text-white truncate min-w-0">{o.customerName}</span>
                         {o.totalAmount != null && (
-                          <span className="text-sm font-semibold text-surface-900 dark:text-white shrink-0">
+                          <span className="text-xs font-semibold text-surface-900 dark:text-white shrink-0">
                             &#8358;{Number(o.totalAmount).toLocaleString()}
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs text-surface-400 dark:text-surface-500">{o.id.slice(0, 8)}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-surface-500 dark:text-surface-400">
-                            {o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '—'}
-                          </span>
-                          <span className="text-xs text-brand-600 dark:text-brand-400 font-medium">View &rarr;</span>
-                        </div>
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="font-mono text-[10px] text-surface-400 dark:text-surface-500 truncate">{o.id.slice(0, 8)}</span>
+                        <span className="text-[10px] text-surface-500 dark:text-surface-400 shrink-0">
+                          {o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '—'}
+                        </span>
                       </div>
+                      <span className="text-[10px] text-brand-600 dark:text-brand-400 font-medium mt-0.5 inline-block">View &rarr;</span>
                     </Link>
                   ))}
                 </div>
@@ -342,7 +342,7 @@ function ReceiptReviewModal({
 
             {/* Actions */}
             {hasApprovePermission && detail.status === 'SENT' && (
-              <div className="flex items-center justify-between gap-3 pt-3 border-t border-surface-200 dark:border-surface-700 shrink-0">
+              <div className="flex items-center justify-between gap-3 px-4 md:px-5 pt-3 pb-4 md:pb-5 border-t border-surface-200 dark:border-surface-700 shrink-0">
                 <div className="text-xs text-surface-500 dark:text-surface-400">
                   {!receiptViewed && 'View the receipt above to unlock actions'}
                 </div>

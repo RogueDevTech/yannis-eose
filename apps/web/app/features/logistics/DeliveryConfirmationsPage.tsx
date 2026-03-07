@@ -81,7 +81,7 @@ export function DeliveryConfirmationsPage({
       <div className="card p-0 overflow-hidden">
         {requests.length > 0 ? (
           <>
-            <div className="hidden md:block overflow-x-auto">
+            <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr>
@@ -165,72 +165,6 @@ export function DeliveryConfirmationsPage({
                   })}
                 </tbody>
               </table>
-            </div>
-            <div className="md:hidden space-y-3 px-1">
-              {requests.map((req) => {
-                const order = req.order;
-                const newStatus = (req.payload?.newStatus as string) ?? 'DELIVERED';
-                return (
-                  <div key={req.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <Link
-                          to={`/admin/logistics/orders/${req.orderId}`}
-                          className="font-medium text-brand-500 hover:text-brand-600"
-                        >
-                          {req.orderId.slice(0, 8)}…
-                        </Link>
-                        {order && (
-                          <p className="text-sm text-surface-700 dark:text-surface-300 mt-0.5">
-                            {order.customerName}
-                            {order.deliveryAddress ? ` · ${order.deliveryAddress.slice(0, 40)}…` : ''}
-                          </p>
-                        )}
-                        <p className="text-sm text-surface-500 dark:text-surface-500 mt-0.5">{newStatus}</p>
-                      </div>
-                      <span
-                        className={`text-sm font-medium shrink-0 ${
-                          req.status === 'PENDING'
-                            ? 'text-amber-600 dark:text-amber-400'
-                            : req.status === 'APPROVED'
-                              ? 'text-green-600 dark:text-green-400'
-                              : 'text-red-600 dark:text-red-400'
-                        }`}
-                      >
-                        {req.status}
-                      </span>
-                    </div>
-                    <div className="text-sm text-surface-700 dark:text-surface-300">
-                      Requested by: {req.requesterName ?? req.requestedBy.slice(0, 8)}
-                    </div>
-                    <div className="text-sm text-surface-700 dark:text-surface-300">
-                      {new Date(req.requestedAt).toLocaleString('en-NG', {
-                        dateStyle: 'short',
-                        timeStyle: 'short',
-                      })}
-                    </div>
-                    {statusFilter === 'PENDING' && req.status === 'PENDING' && (
-                      <div className="flex gap-2 pt-2 border-t border-surface-100 dark:border-surface-800">
-                        <fetcher.Form method="post">
-                          <input type="hidden" name="intent" value="approve" />
-                          <input type="hidden" name="requestId" value={req.id} />
-                          <Button type="submit" variant="success" size="sm" disabled={fetcher.state !== 'idle'}>
-                            Approve
-                          </Button>
-                        </fetcher.Form>
-                        <Button
-                          type="button"
-                          variant="danger"
-                          size="sm"
-                          onClick={() => { setRejectModal({ requestId: req.id }); setRejectReason(''); }}
-                        >
-                          Reject
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
             </div>
           </>
         ) : (

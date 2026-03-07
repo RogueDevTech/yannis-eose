@@ -184,8 +184,26 @@ export class MarketingService {
       this.db.select({ count: count() }).from(schema.marketingFunding).where(whereClause),
     ]);
 
+    const nameById = new Map<string, string>();
+    if (records.length > 0) {
+      const userIds = [...new Set(records.flatMap((r) => [r.senderId, r.receiverId]))];
+      const userRows = await this.db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.users)
+        .where(inArray(schema.users.id, userIds));
+      for (const u of userRows) {
+        nameById.set(u.id, u.name);
+      }
+    }
+
+    const recordsWithNames = records.map((r) => ({
+      ...r,
+      senderName: nameById.get(r.senderId) ?? null,
+      receiverName: nameById.get(r.receiverId) ?? null,
+    }));
+
     return {
-      records,
+      records: recordsWithNames,
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
     };
   }
@@ -384,9 +402,15 @@ export class MarketingService {
   }
 
   /**
-   * Media Buyer requests funds. Persists the request and notifies Head of Marketing only.
+   * Media Buyer or Head of Marketing requests funds. Persists the request.
+   * Media Buyer → notifies Head of Marketing. Head of Marketing → notifies SuperAdmin + Finance Officer.
    */
-  async requestFunding(amount: number, reason: string, requesterId: string) {
+  async requestFunding(
+    amount: number,
+    reason: string,
+    requesterId: string,
+    requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
+  ) {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${requesterId}, true)`;
 
     const rows = await this.db
@@ -410,19 +434,38 @@ export class MarketingService {
       .where(eq(schema.users.id, requesterId))
       .limit(1);
 
-    const name = requester?.name ?? 'A Media Buyer';
-    const body = reason.trim()
-      ? `${name} requested ₦${Number(amount).toLocaleString()}. Reason: ${reason}`
-      : `${name} requested ₦${Number(amount).toLocaleString()}`;
+    const name = requester?.name ?? (requesterRole === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'A Media Buyer');
+    const bodySuffix = reason.trim() ? ` Reason: ${reason}` : '';
+    const body = `${name} requested ₦${Number(amount).toLocaleString()}.${bodySuffix}`;
 
-    await this.notifications
-      .createForRole('HEAD_OF_MARKETING', {
-        type: 'funding:request',
-        title: 'Funding request',
-        body,
-        data: { requesterId, amount, reason: reason || null, requestId: request.id },
-      })
-      .catch(() => {});
+    if (requesterRole === 'HEAD_OF_MARKETING') {
+      const bodyWithAction = `${body} Disburse via Finance → Disbursements.`;
+      await this.notifications
+        .createForRole('SUPER_ADMIN', {
+          type: 'funding:request',
+          title: 'Funding request',
+          body: bodyWithAction,
+          data: { requesterId, amount, reason: reason || null, requestId: request.id },
+        })
+        .catch(() => {});
+      await this.notifications
+        .createForRole('FINANCE_OFFICER', {
+          type: 'funding:request',
+          title: 'Funding request',
+          body: bodyWithAction,
+          data: { requesterId, amount, reason: reason || null, requestId: request.id },
+        })
+        .catch(() => {});
+    } else {
+      await this.notifications
+        .createForRole('HEAD_OF_MARKETING', {
+          type: 'funding:request',
+          title: 'Funding request',
+          body,
+          data: { requesterId, amount, reason: reason || null, requestId: request.id },
+        })
+        .catch(() => {});
+    }
 
     return request;
   }
@@ -438,10 +481,22 @@ export class MarketingService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
-    const [records, totalRows] = await Promise.all([
+    const [rows, totalRows] = await Promise.all([
       this.db
-        .select()
+        .select({
+          id: schema.marketingFundingRequests.id,
+          requesterId: schema.marketingFundingRequests.requesterId,
+          amount: schema.marketingFundingRequests.amount,
+          reason: schema.marketingFundingRequests.reason,
+          status: schema.marketingFundingRequests.status,
+          receiptUrl: schema.marketingFundingRequests.receiptUrl,
+          createdAt: schema.marketingFundingRequests.createdAt,
+          resolvedAt: schema.marketingFundingRequests.resolvedAt,
+          resolvedBy: schema.marketingFundingRequests.resolvedBy,
+          requesterName: schema.users.name,
+        })
         .from(schema.marketingFundingRequests)
+        .leftJoin(schema.users, eq(schema.marketingFundingRequests.requesterId, schema.users.id))
         .where(whereClause)
         .orderBy(desc(schema.marketingFundingRequests.createdAt))
         .limit(input.limit)
@@ -450,7 +505,7 @@ export class MarketingService {
     ]);
 
     return {
-      records,
+      records: rows,
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
     };
   }

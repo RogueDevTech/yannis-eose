@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
 
 const MAX_WIDTH_CLASSES: Record<string, string> = {
-  'max-w-sm': 'sm:max-w-sm',
-  'max-w-md': 'sm:max-w-md',
-  'max-w-lg': 'sm:max-w-lg',
-  'max-w-xl': 'sm:max-w-xl',
-  'max-w-2xl': 'sm:max-w-2xl',
-  'max-w-4xl': 'sm:max-w-4xl',
+  'max-w-sm': 'md:max-w-sm',
+  'max-w-md': 'md:max-w-md',
+  'max-w-lg': 'md:max-w-lg',
+  'max-w-xl': 'md:max-w-xl',
+  'max-w-2xl': 'md:max-w-2xl',
+  'max-w-4xl': 'md:max-w-4xl',
 };
 
 export type ModalMaxWidth = keyof typeof MAX_WIDTH_CLASSES;
@@ -28,8 +28,8 @@ export interface ModalProps {
 }
 
 /**
- * Responsive modal: on mobile only, slides up from bottom (full width, rounded top);
- * on sm+ (desktop) centered with max width and fade-in (no slide-up). Slide-up is mobile-only.
+ * Responsive modal: on mobile/tablet (< md), slides up from bottom (full width, rounded top);
+ * on md+ (desktop) centered with max width and fade-in. Slide-up is mobile-only.
  */
 export function Modal({
   open,
@@ -53,7 +53,7 @@ export function Modal({
 
   if (!open) return null;
 
-  const maxWidthClass = MAX_WIDTH_CLASSES[maxWidth] ?? 'sm:max-w-lg';
+  const maxWidthClass = MAX_WIDTH_CLASSES[maxWidth] ?? 'md:max-w-lg';
 
   return (
     <>
@@ -63,7 +63,7 @@ export function Modal({
         aria-hidden
       />
       <div
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+        className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4"
         onClick={onClose}
         aria-modal="true"
         role={role}
@@ -73,10 +73,10 @@ export function Modal({
         <div
           className={[
             'w-full max-h-[90dvh] overflow-y-auto',
-            'rounded-t-2xl sm:rounded-xl',
+            'rounded-t-2xl md:rounded-xl',
             'bg-white dark:bg-surface-900 shadow-xl',
-            'pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:pb-5',
-            'animate-slide-up-from-bottom sm:animate-fade-in',
+            'pb-[max(2.5rem,env(safe-area-inset-bottom))] md:pb-5',
+            'max-md:animate-slide-up-from-bottom md:animate-fade-in',
             maxWidthClass,
             contentClassName,
           ].join(' ')}

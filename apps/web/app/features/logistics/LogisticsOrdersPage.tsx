@@ -537,7 +537,7 @@ export function LogisticsOrdersPage({
                             View
                           </Button>
                         </Link>
-                        {canEditDeliveryDate && (
+                        {canEditDeliveryDate && (order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
                           <Button
                             variant="secondary"
                             size="sm"
@@ -671,7 +671,7 @@ export function LogisticsOrdersPage({
                       View
                     </Button>
                   </Link>
-                  {canEditDeliveryDate && (
+                  {canEditDeliveryDate && (order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
                     <Button
                       variant="secondary"
                       size="sm"
