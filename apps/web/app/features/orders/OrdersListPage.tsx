@@ -863,9 +863,9 @@ export function OrdersListPage({
         </div>
 
         {/* Mobile card list */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {filteredOrders.map((order) => (
-            <div key={order.id} className={`relative ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}>
+            <div key={order.id} className={`rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 relative ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}>
               {canBulkAction && (
                 <div className="absolute top-4 left-4 z-10">
                   <Checkbox
@@ -898,7 +898,7 @@ export function OrdersListPage({
                     </div>
                   </div>
                   {showCSAgentColumn && (order.assignedCsName || order.assignedCsId) && (
-                    <div className="text-xs mb-0.5 text-surface-600 dark:text-surface-400">
+                    <div className="text-sm mb-0.5 text-surface-600 dark:text-surface-400">
                       {order.assignedCsId ? (
                         <Button
                           type="button"

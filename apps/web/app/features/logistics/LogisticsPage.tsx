@@ -186,19 +186,19 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
     <div className="space-y-4">
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className={`card border-l-4 ${shrinkageAlerts.length > 0 ? 'border-l-red-500' : 'border-l-green-500'}`}>
+        <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Shrinkage Alerts</p>
           <p className={`text-2xl font-bold mt-1 ${shrinkageAlerts.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-surface-900 dark:text-white'}`}>
             {shrinkageAlerts.length}
           </p>
         </div>
-        <div className={`card border-l-4 ${stuckOrders.length > 0 ? 'border-l-yellow-500' : 'border-l-green-500'}`}>
+        <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Stuck Orders (&gt;24h)</p>
           <p className={`text-2xl font-bold mt-1 ${stuckOrders.length > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-surface-900 dark:text-white'}`}>
             {stuckOrders.length}
           </p>
         </div>
-        <div className={`card border-l-4 ${transferDelays.length > 0 ? 'border-l-orange-500' : 'border-l-green-500'}`}>
+        <div className="card">
           <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Transfer Delays (&gt;48h)</p>
           <p className={`text-2xl font-bold mt-1 ${transferDelays.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-surface-900 dark:text-white'}`}>
             {transferDelays.length}
@@ -340,6 +340,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [viewingProvider, setViewingProvider] = useState<Provider | null>(null);
 
   const actionError = (fetcher.data as { error?: string })?.error;
   const actionSuccess = (fetcher.data as { success?: boolean })?.success;
@@ -408,14 +409,14 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         {canViewEscalations && healthDashboard && (
           <DeferredSection resolve={healthDashboard} skeleton="stat">
             {(resolvedHealth) => resolvedHealth ? (
-              <div className={`card border-l-4 ${resolvedHealth.totalEscalations > 0 ? 'border-l-red-500' : 'border-l-green-500'}`}>
+              <div className="card">
                 <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Escalations</p>
                 <p className={`text-2xl font-bold mt-1 ${resolvedHealth.totalEscalations > 0 ? 'text-red-600 dark:text-red-400' : 'text-surface-900 dark:text-white'}`}>
                   {resolvedHealth.totalEscalations}
                 </p>
               </div>
             ) : (
-              <div className="card border-l-4 border-l-surface-300">
+              <div className="card">
                 <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Escalations</p>
                 <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">--</p>
               </div>
@@ -525,6 +526,89 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         </Modal>
       )}
 
+      {/* Partner details view modal */}
+      {viewingProvider && (
+        <Modal open onClose={() => setViewingProvider(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-0">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Partner details</h3>
+            <button
+              type="button"
+              onClick={() => setViewingProvider(null)}
+              className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-200 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="px-6 py-4 space-y-4">
+            <dl className="space-y-3">
+              <div>
+                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Name</dt>
+                <dd className="mt-0.5 text-sm text-surface-900 dark:text-white">{viewingProvider.name}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Contact info</dt>
+                <dd className="mt-0.5 text-sm text-surface-900 dark:text-white">{viewingProvider.contactInfo ?? '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Coverage area</dt>
+                <dd className="mt-0.5 text-sm text-surface-900 dark:text-white">{viewingProvider.coverageArea ?? '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Status</dt>
+                <dd className="mt-0.5">
+                  <span className={viewingProvider.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{viewingProvider.status}</span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Created</dt>
+                <dd className="mt-0.5 text-sm text-surface-800 dark:text-surface-200">
+                  {new Date(viewingProvider.createdAt).toLocaleString('en-NG', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </dd>
+              </div>
+            </dl>
+            <div>
+              <h4 className="text-sm font-medium text-surface-900 dark:text-white mb-2">Locations</h4>
+              {locations.filter((l) => l.providerId === viewingProvider.id).length === 0 ? (
+                <p className="text-sm text-surface-600 dark:text-surface-400">No locations.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {locations
+                    .filter((l) => l.providerId === viewingProvider.id)
+                    .map((l) => (
+                      <li key={l.id} className="rounded-lg border border-surface-200 dark:border-surface-700 p-3 text-sm">
+                        <p className="font-medium text-surface-900 dark:text-white">{l.name}</p>
+                        <p className="text-surface-800 dark:text-surface-200 mt-0.5">{l.address}</p>
+                        {l.coordinates && (
+                          <p className="text-surface-600 dark:text-surface-400 mt-0.5 text-xs">{l.coordinates}</p>
+                        )}
+                        <span className={`inline-block mt-1 ${l.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}`}>{l.status}</span>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2 px-6 py-4 border-t border-surface-200 dark:border-surface-700">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setEditingProvider(viewingProvider);
+                setViewingProvider(null);
+              }}
+            >
+              Edit
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setViewingProvider(null)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
+
       <Tabs
         value={activeTab}
         onChange={(v) => setActiveTab(v as typeof activeTab)}
@@ -577,14 +661,24 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                       <span className={p.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{p.status}</span>
                     </td>
                     <td className="table-cell text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingProvider(p)}
-                      >
-                        Edit
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setViewingProvider(p)}
+                        >
+                          View
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditingProvider(p)}
+                        >
+                          Edit
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -598,14 +692,14 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               </tbody>
             </table>
           </div>
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          <div className="md:hidden space-y-3 px-1">
             {providers.length === 0 ? (
               <div className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                 No logistics providers yet
               </div>
             ) : (
               providers.map((p: Provider) => (
-                <div key={p.id} className="p-4">
+                <div key={p.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <p className="font-medium text-surface-900 dark:text-surface-100">{p.name}</p>
                     <span className={p.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{p.status}</span>
@@ -614,14 +708,24 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                     {p.contactInfo && <div>Contact: {p.contactInfo}</div>}
                     {p.coverageArea && <div>Coverage: {p.coverageArea}</div>}
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setEditingProvider(p)}
-                  >
-                    Edit
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setViewingProvider(p)}
+                    >
+                      View
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditingProvider(p)}
+                    >
+                      Edit
+                    </Button>
+                  </div>
                 </div>
               ))
             )}
@@ -665,7 +769,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               </tbody>
             </table>
           </div>
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          <div className="md:hidden space-y-3 px-1">
             {locations.length === 0 ? (
               <div className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                 No locations yet. Add a provider first, then add locations.
@@ -674,7 +778,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               locations.map((l: Location) => {
                 const provider = providers.find((p: Provider) => p.id === l.providerId);
                 return (
-                  <div key={l.id} className="p-4">
+                  <div key={l.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <p className="font-medium text-surface-900 dark:text-surface-100">{l.name}</p>
                       <span className={l.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{l.status}</span>

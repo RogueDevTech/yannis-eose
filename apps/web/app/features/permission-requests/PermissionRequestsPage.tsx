@@ -138,9 +138,9 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
         </div>
 
         {/* Mobile */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {requests.map((req) => (
-            <div key={req.id} className="p-4 space-y-2">
+            <div key={req.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
                   {REQUEST_TYPE_LABELS[req.type] ?? req.type}
@@ -149,7 +149,7 @@ export function PermissionRequestsPage({ requests }: { requests: PermissionReque
               <p className="text-sm font-medium text-surface-900 dark:text-white">
                 {req.requesterName} → {req.requestedRole?.replace(/_/g, ' ') ?? req.permissionCode ?? '—'}
               </p>
-              <p className="text-xs text-surface-600 dark:text-surface-200">{req.reason}</p>
+              <p className="text-sm text-surface-600 dark:text-surface-200">{req.reason}</p>
               <div className="flex gap-2 pt-1">
                 <Button
                   type="button"

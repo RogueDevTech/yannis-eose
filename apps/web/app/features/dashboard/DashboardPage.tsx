@@ -155,7 +155,7 @@ function SuperAdminDashboard({ data, naira, hidden }: { data: DashboardPageData;
   return (
     <>
       {/* Top KPIs — Revenue/Profit deferred, Orders/Unprocessed immediate */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <DeferredSection resolve={data.profit} skeleton="stat">
           {(profit) => <StatCard label="Revenue" value={naira(Math.round(profit.revenue))} icon="revenue" />}
         </DeferredSection>
@@ -167,9 +167,9 @@ function SuperAdminDashboard({ data, naira, hidden }: { data: DashboardPageData;
       </div>
 
       {/* Secondary KPIs — all deferred */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <DeferredSection resolve={data.profit} skeleton="stat">
-          {(profit) => <StatCard label="Margin" value={`${profit.margin.toFixed(1)}%`} icon="margin" highlight={profit.margin >= 20 ? 'success' : profit.margin >= 10 ? 'warning' : 'danger'} />}
+          {(profit) => <StatCard label="Margin" value={`${profit.margin.toFixed(1)}%`} icon="margin" highlight={profit.margin >= 20 ? 'success' : profit.margin > 0 ? 'warning' : 'danger'} />}
         </DeferredSection>
         <DeferredSection resolve={data.metrics} skeleton="stat">
           {(metrics) => <StatCard label="True ROAS" value={`${metrics.trueRoas.toFixed(2)}x`} icon="roas" />}
@@ -259,7 +259,7 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
 
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Pending Queue" value={pendingQueue.toString()} icon="pending" highlight={pendingQueue > 20 ? 'danger' : pendingQueue > 0 ? 'warning' : 'success'} />
         <StatCard label="Currently Engaged" value={engaged.toString()} icon="orders" />
         <StatCard label="Confirmed" value={confirmed.toString()} icon="orders" highlight="success" />
@@ -315,7 +315,7 @@ function MarketingDashboard({ data, role, naira, hidden }: { data: DashboardPage
     <>
       <DeferredSection resolve={data.metrics} skeleton="stat">
         {(metrics) => (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard label="CPA" value={naira(Math.round(metrics.cpa))} icon="revenue" />
             <StatCard label="True ROAS" value={`${metrics.trueRoas.toFixed(2)}x`} icon="roas" highlight={metrics.trueRoas >= 2 ? 'success' : metrics.trueRoas >= 1 ? 'warning' : 'danger'} />
             <StatCard label="Delivery Rate" value={`${metrics.deliveryRate.toFixed(1)}%`} icon="margin" highlight={metrics.deliveryRate >= 70 ? 'success' : 'warning'} />
@@ -372,10 +372,10 @@ function FinanceDashboard({ data, naira, hidden }: { data: DashboardPageData; na
           const totalCosts = profit.landedCost + profit.deliveryFee + profit.adSpend + profit.commission + profit.fulfillmentCost + profit.operationalLoss;
           return (
             <>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatCard label="Revenue" value={naira(Math.round(profit.revenue))} icon="revenue" />
                 <StatCard label="True Profit" value={naira(Math.round(profit.trueProfit))} icon="profit" highlight={profit.trueProfit >= 0 ? 'success' : 'danger'} />
-                <StatCard label="Net Margin" value={`${profit.margin.toFixed(1)}%`} icon="margin" highlight={profit.margin >= 20 ? 'success' : profit.margin >= 10 ? 'warning' : 'danger'} />
+                <StatCard label="Net Margin" value={`${profit.margin.toFixed(1)}%`} icon="margin" highlight={profit.margin >= 20 ? 'success' : profit.margin > 0 ? 'warning' : 'danger'} />
                 <StatCard label="Total Costs" value={naira(Math.round(totalCosts))} icon="orders" highlight="danger" />
               </div>
 
@@ -419,7 +419,7 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
 
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <StatCard label="Awaiting Allocation" value={confirmed.toString()} icon="pending" highlight={confirmed > 10 ? 'danger' : confirmed > 0 ? 'warning' : undefined} />
         <StatCard label="Allocated" value={allocated.toString()} icon="orders" />
         <StatCard label="Dispatched" value={dispatched.toString()} icon="orders" highlight="warning" />
@@ -473,7 +473,7 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
 function WarehouseDashboard({ data }: { data: DashboardPageData }) {
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <DeferredSection resolve={data.totalProducts} skeleton="stat">
           {(total) => <StatCard label="Products" value={total.toString()} icon="products" />}
         </DeferredSection>
@@ -513,7 +513,7 @@ function HRDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: 
 
         return (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <StatCard label="Draft Payouts" value={naira(draftTotal)} icon="pending" highlight={draftTotal > 0 ? 'warning' : undefined} />
               <StatCard label="Approved" value={naira(approvedTotal)} icon="orders" />
               <StatCard label="Paid" value={naira(paidTotal)} icon="profit" highlight="success" />
@@ -686,7 +686,7 @@ function StatCard({ label, value, icon, highlight }: { label: string; value: str
           <StatIcon type={icon} />
         </div>
       </div>
-      <p className={`text-2xl font-bold mt-2 ${valueColor}`}>{value}</p>
+      <p className={`text-2xl font-bold mt-2 truncate ${valueColor}`}>{value}</p>
     </div>
   );
 }

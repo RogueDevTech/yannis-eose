@@ -294,19 +294,19 @@ export function MarketingOrdersPage({
         )}
 
         {/* Mobile */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {orders.map((order) => (
             <Link
               key={order.id}
               to={`/admin/orders/${order.id}`}
-              className="block p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
+              className="block rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="font-medium text-surface-900 dark:text-surface-100">{order.customerName}</span>
                 <OrderStatusBadge status={order.status} />
               </div>
               {showMediaBuyerColumn && order.mediaBuyerName && (
-                <div className="text-xs mb-0.5">
+                <div className="text-sm mb-0.5">
                   {order.mediaBuyerId ? (
                     <button
                       type="button"

@@ -1,7 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { DeliveryConfirmationsPage } from '~/features/logistics/DeliveryConfirmationsPage';
 import type { DeliveryConfirmationRequest } from '~/features/logistics/types';
 
@@ -19,18 +19,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
   const limit = 20;
 
-  const res = await apiRequest<unknown>(
-    `/trpc/logistics.listDeliveryConfirmationRequests?input=${encodeURIComponent(JSON.stringify({
-      status: statusApi,
-      page,
-      limit,
-    }))}`,
-    { method: 'GET', cookie },
-  );
+  let startDate = url.searchParams.get('startDate') ?? undefined;
+  let endDate = url.searchParams.get('endDate') ?? undefined;
+  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  if (!periodAllTime && !startDate && !endDate) {
+    const def = defaultThisMonthRange();
+    startDate = def.startDate;
+    endDate = def.endDate;
+  }
+  if (periodAllTime) {
+    startDate = undefined;
+    endDate = undefined;
+  }
+  const countsInput: { startDate?: string; endDate?: string } = {};
+  if (startDate) countsInput.startDate = startDate;
+  if (endDate) countsInput.endDate = endDate;
+
+  const [res, countsRes] = await Promise.all([
+    apiRequest<unknown>(
+      `/trpc/logistics.listDeliveryConfirmationRequests?input=${encodeURIComponent(JSON.stringify({
+        status: statusApi,
+        page,
+        limit,
+      }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      `/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify(countsInput))}`,
+      { method: 'GET', cookie },
+    ),
+  ]);
 
   if (!res.ok) {
     return json(
-      { requests: [], total: 0, page: 1, limit, statusFilter },
+      { requests: [], total: 0, page: 1, limit, statusFilter, orderCounts: {} as Record<string, number> },
       { status: 200 },
     );
   }
@@ -40,12 +62,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const requests = result?.requests ?? [];
   const total = result?.pagination?.total ?? 0;
 
+  const orderCounts = countsRes.ok
+    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+    : {};
+
   return json({
     requests,
     total,
     page,
     limit,
     statusFilter,
+    orderCounts,
   });
 }
 
@@ -104,6 +131,7 @@ export default function DeliveryConfirmationsRoute() {
       page={data.page}
       limit={data.limit}
       statusFilter={data.statusFilter}
+      orderCounts={data.orderCounts ?? {}}
     />
   );
 }

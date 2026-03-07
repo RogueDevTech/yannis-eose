@@ -210,7 +210,7 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
                   </svg>
                 </button>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {(
                   [
                     { id: 'today' as const, label: 'Today' },
@@ -225,8 +225,7 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
                     key={id}
                     type="button"
                     variant="secondary"
-                    size="sm"
-                    className="text-xs"
+                    size="md"
                     onClick={() => setDraftPreset(id)}
                   >
                     {label}
@@ -257,14 +256,14 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
                 </div>
               </div>
               {(hasDraftDates || draftPeriodAllTime) && (
-                <Button type="button" variant="secondary" size="sm" className="text-xs w-full" onClick={clearDraft}>
+                <Button type="button" variant="secondary" size="md" className="w-full" onClick={clearDraft}>
                   Clear
                 </Button>
               )}
               <Button
                 type="button"
                 variant="primary"
-                size="sm"
+                size="md"
                 className="w-full"
                 onClick={applyDraftToUrl}
                 loading={isSubmitting}

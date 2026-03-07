@@ -484,11 +484,11 @@ export function MarketingPage({
                   </div>
 
                   {/* Mobile leaderboard */}
-                  <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+                  <div className="md:hidden space-y-3 px-1">
                     {lb.map((b: LeaderboardEntry, idx: number) => {
                       const isHighCpa = b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0;
                       return (
-                        <div key={b.mediaBuyerId} className={`p-4 space-y-2 ${isHighCpa ? 'bg-warning-50/50 dark:bg-warning-900/10' : ''}`}>
+                        <div key={b.mediaBuyerId} className={`rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3 ${isHighCpa ? 'bg-warning-50/50 dark:bg-warning-900/10' : ''}`}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
@@ -498,7 +498,7 @@ export function MarketingPage({
                               {b.trueRoas.toFixed(2)}x ROAS
                             </span>
                           </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
                             <div>
                               <span className="text-surface-700 dark:text-surface-300">Spend</span>
                               <p className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Math.round(b.totalSpend).toLocaleString()}</p>
@@ -639,14 +639,14 @@ export function MarketingPage({
                   </tbody>
                 </table>
               </div>
-              <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+              <div className="md:hidden space-y-3 px-1">
                 {fundingRequests.map((r: FundingRequestRecord) => (
-                  <div key={r.id} className="p-4 space-y-1">
+                  <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Number(r.amount).toLocaleString()}</span>
                       <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
                     </div>
-                    {r.reason && <p className="text-xs text-surface-700 dark:text-surface-300">{r.reason}</p>}
+                    {r.reason && <p className="text-sm text-surface-700 dark:text-surface-300">{r.reason}</p>}
                     {r.status === 'APPROVED' && r.receiptUrl && (
                       <div className="flex gap-2 mt-1">
                         <a href={r.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-brand-500 text-xs">View receipt</a>
@@ -729,14 +729,14 @@ export function MarketingPage({
             </div>
 
             {/* Mobile */}
-            <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="md:hidden space-y-3 px-1">
               {funding.map((f: FundingRecord) => (
-                <div key={f.id} className="p-4 space-y-2">
+                <div key={f.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Number(f.amount).toLocaleString()}</span>
                     <span className={FUNDING_COLORS[f.status] ?? 'badge'}>{f.status}</span>
                   </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-200">
+                  <p className="text-sm text-surface-800 dark:text-surface-200">
                     <DeferredSection resolve={users} skeleton="inline">
                       {(resolvedUsers: User[]) => (
                         <>
@@ -830,9 +830,9 @@ export function MarketingPage({
               </tbody>
             </table>
           </div>
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          <div className="md:hidden space-y-3 px-1">
             {fundingRequests.map((r: FundingRequestRecord) => (
-              <div key={r.id} className="p-4 space-y-2">
+              <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
                 <div className="flex justify-between items-center">
                   <DeferredSection resolve={users} skeleton="inline">
                     {(resolvedUsers: User[]) => <span className="font-medium text-surface-900 dark:text-white text-sm">{resolvedUsers.find((u) => u.id === r.requesterId)?.name ?? truncateId(r.requesterId)}</span>}
@@ -840,7 +840,7 @@ export function MarketingPage({
                   <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
                 </div>
                 <p className="text-sm text-surface-800 dark:text-surface-200">{'\u20A6'}{Number(r.amount).toLocaleString()}</p>
-                {r.reason && <p className="text-xs text-surface-700 dark:text-surface-300">{r.reason}</p>}
+                {r.reason && <p className="text-sm text-surface-700 dark:text-surface-300">{r.reason}</p>}
                 {r.status === 'PENDING' && (
                   <div className="flex gap-2 pt-1">
                     <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => setApprovingRequestId(r.id)}>Approve</Button>
@@ -1125,16 +1125,16 @@ export function MarketingPage({
             </div>
 
             {/* Mobile */}
-            <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="md:hidden space-y-3 px-1">
               {adSpend.map((s: AdSpendRecord) => (
-                <div key={s.id} className="p-4 space-y-1">
+                <div key={s.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-surface-900 dark:text-white">{'\u20A6'}{Number(s.spendAmount).toLocaleString()}</span>
                     <span className={`badge badge-sm ${AD_SPEND_STATUS_COLORS[s.status ?? 'PENDING'] ?? 'badge-default'}`}>
                       {s.status ?? 'PENDING'}
                     </span>
                   </div>
-                  <p className="text-xs text-surface-800 dark:text-surface-200">
+                  <p className="text-sm text-surface-800 dark:text-surface-200">
                     <DeferredSection resolve={users} skeleton="inline">
                       {(resolvedUsers: User[]) => (
                         <>

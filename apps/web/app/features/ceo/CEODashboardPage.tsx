@@ -241,7 +241,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             label="Net Margin"
             value={pct(margin)}
             icon="margin"
-            highlight={margin >= 20 ? 'success' : margin >= 10 ? 'warning' : 'danger'}
+            highlight={margin >= 20 ? 'success' : margin > 0 ? 'warning' : 'danger'}
           />
           <KPICard
             label="Total Costs"

@@ -251,6 +251,7 @@ export default function TplOrderDetailRoute() {
             locations={locations}
             riders={riders}
             backLink="/tpl/orders"
+            backLabel="Orders"
             allocatableLocations={allocatableLocations.length > 0 ? allocatableLocations : undefined}
           />
         )

@@ -57,9 +57,9 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const STATUS_STYLE: Record<string, string> = {
-  SENT: 'bg-warning-100 text-warning-800 dark:bg-warning-900/30 dark:text-warning-300',
-  RECEIVED: 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300',
-  DISPUTED: 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300',
+  SENT: 'bg-warning-50 text-warning-700 dark:bg-warning-700/20 dark:text-warning-500',
+  RECEIVED: 'bg-success-50 text-success-700 dark:bg-success-700/20 dark:text-success-500',
+  DISPUTED: 'bg-danger-50 text-danger-700 dark:bg-danger-700/20 dark:text-danger-500',
 };
 
 /** Loading skeleton for the modal content */
@@ -80,17 +80,18 @@ function ModalLoadingSkeleton() {
       {/* Orders skeleton */}
       <div className="space-y-2">
         <div className="h-4 w-24 bg-surface-200 dark:bg-surface-700 rounded" />
-        <div className="rounded-lg border border-surface-200 dark:border-surface-700 divide-y divide-surface-100 dark:divide-surface-800">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center justify-between px-3 py-2.5">
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-16 bg-surface-200 dark:bg-surface-700 rounded" />
-                <div className="h-3 w-28 bg-surface-200 dark:bg-surface-700 rounded" />
-              </div>
-              <div className="h-3 w-20 bg-surface-200 dark:bg-surface-700 rounded" />
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="h-4 w-28 bg-surface-200 dark:bg-surface-700 rounded" />
+              <div className="h-4 w-20 bg-surface-200 dark:bg-surface-700 rounded" />
             </div>
-          ))}
-        </div>
+            <div className="flex items-center justify-between">
+              <div className="h-3 w-16 bg-surface-200 dark:bg-surface-700 rounded" />
+              <div className="h-3 w-24 bg-surface-200 dark:bg-surface-700 rounded" />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -280,28 +281,30 @@ function ReceiptReviewModal({
 
               {/* Orders list */}
               <div>
-                <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Orders included</h4>
-                <div className="rounded-lg border border-surface-200 dark:border-surface-700 divide-y divide-surface-100 dark:divide-surface-800 overflow-hidden">
+                <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Orders included ({detail.orders.length})</h4>
+                <div className="space-y-2">
                   {detail.orders.map((o) => (
                     <Link
                       key={o.id}
                       to={`/admin/orders/${o.id}`}
-                      className="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
+                      className="block rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 p-3 hover:border-brand-300 dark:hover:border-brand-600 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-mono text-xs text-surface-400">{o.id.slice(0, 8)}</span>
-                        <span className="text-surface-900 dark:text-white truncate">{o.customerName}</span>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-xs text-surface-500 dark:text-surface-400">
-                          {o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString() : '—'}
-                        </span>
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="text-sm font-medium text-surface-900 dark:text-white truncate">{o.customerName}</span>
                         {o.totalAmount != null && (
-                          <span className="font-medium text-surface-900 dark:text-white">
+                          <span className="text-sm font-semibold text-surface-900 dark:text-white shrink-0">
                             &#8358;{Number(o.totalAmount).toLocaleString()}
                           </span>
                         )}
-                        <span className="text-xs text-brand-600 dark:text-brand-400 font-medium">View order</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-xs text-surface-400 dark:text-surface-500">{o.id.slice(0, 8)}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-surface-500 dark:text-surface-400">
+                            {o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '—'}
+                          </span>
+                          <span className="text-xs text-brand-600 dark:text-brand-400 font-medium">View &rarr;</span>
+                        </div>
                       </div>
                     </Link>
                   ))}
@@ -687,9 +690,9 @@ export function DeliveryRemittancesPage({
         </div>
 
         {/* Mobile cards */}
-        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+        <div className="md:hidden space-y-3 px-1">
           {remittances.map((r) => (
-            <div key={r.id} className="p-3 space-y-2">
+            <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-xs text-surface-500 dark:text-surface-400">{r.id.slice(0, 8)}…</span>
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] ?? ''}`}>

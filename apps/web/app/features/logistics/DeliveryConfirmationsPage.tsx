@@ -3,6 +3,7 @@ import { Link, useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import type { DeliveryConfirmationRequest } from './types';
 
 interface DeliveryConfirmationsPageProps {
@@ -11,7 +12,17 @@ interface DeliveryConfirmationsPageProps {
   page: number;
   limit: number;
   statusFilter?: string;
+  orderCounts?: Record<string, number>;
 }
+
+const PIPELINE_STAGES = [
+  { key: 'CONFIRMED', label: 'Awaiting Allocation', color: 'text-warning-600 dark:text-warning-400' },
+  { key: 'ALLOCATED', label: 'Allocated', color: 'text-brand-600 dark:text-brand-400' },
+  { key: 'DISPATCHED', label: 'Dispatched', color: 'text-info-600 dark:text-info-400' },
+  { key: 'IN_TRANSIT', label: 'In Transit', color: 'text-brand-600 dark:text-brand-400' },
+  { key: 'DELIVERED', label: 'Delivered', color: 'text-success-600 dark:text-success-400' },
+  { key: 'RETURNED', label: 'Returns', color: 'text-danger-600 dark:text-danger-400' },
+] as const;
 
 export function DeliveryConfirmationsPage({
   requests,
@@ -19,6 +30,7 @@ export function DeliveryConfirmationsPage({
   page,
   limit,
   statusFilter = 'PENDING',
+  orderCounts = {},
 }: DeliveryConfirmationsPageProps) {
   const fetcher = useFetcher();
   const [rejectModal, setRejectModal] = useState<{ requestId: string } | null>(null);
@@ -29,55 +41,70 @@ export function DeliveryConfirmationsPage({
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-surface-900 dark:text-white">Delivery confirmations</h1>
-          <p className="text-sm text-surface-600 dark:text-surface-400 mt-0.5">
-            Approve or reject delivery confirmations submitted by riders and 3PL.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Link to="/admin/logistics/delivery-confirmations?status=PENDING">
-            <Button variant={statusFilter === 'PENDING' ? 'primary' : 'secondary'} size="sm">
-              Pending {statusFilter === 'PENDING' ? `(${total})` : ''}
-            </Button>
-          </Link>
-          <Link to="/admin/logistics/delivery-confirmations?status=">
-            <Button variant={statusFilter === '' ? 'primary' : 'secondary'} size="sm">
-              All
-            </Button>
-          </Link>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Delivery confirmations</h1>
+        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+          Approve or reject delivery confirmations submitted by riders and 3PL.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <PageRefreshButton />
+        <Link to="/admin/logistics/delivery-confirmations?status=PENDING">
+          <Button variant={statusFilter === 'PENDING' ? 'primary' : 'secondary'} size="sm">
+            Pending {statusFilter === 'PENDING' ? `(${total})` : ''}
+          </Button>
+        </Link>
+        <Link to="/admin/logistics/delivery-confirmations?status=">
+          <Button variant={statusFilter === '' ? 'primary' : 'secondary'} size="sm">
+            All
+          </Button>
+        </Link>
+      </div>
+
+      {/* Order Pipeline — same card style as dashboard bottom */}
+      <div className="card">
+        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Pipeline</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {PIPELINE_STAGES.map(({ key, label, color }) => {
+            const value = orderCounts[key] ?? 0;
+            return (
+              <div key={key} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
+                <p className={`text-2xl font-bold ${color}`}>{value}</p>
+                <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{label}</p>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      <div className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 overflow-hidden">
+      <div className="card p-0 overflow-hidden">
         {requests.length > 0 ? (
           <>
             <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-surface-50 dark:bg-surface-800/80 border-b border-surface-200 dark:border-surface-700">
+              <table className="w-full">
+                <thead>
                   <tr>
-                    <th className="px-4 py-3 text-xs font-medium text-surface-600 dark:text-surface-400 uppercase">Order / Customer</th>
-                    <th className="px-4 py-3 text-xs font-medium text-surface-600 dark:text-surface-400 uppercase">Requested by</th>
-                    <th className="px-4 py-3 text-xs font-medium text-surface-600 dark:text-surface-400 uppercase">Status</th>
-                    <th className="px-4 py-3 text-xs font-medium text-surface-600 dark:text-surface-400 uppercase">Requested at</th>
+                    <th className="table-header">Order / Customer</th>
+                    <th className="table-header">Requested by</th>
+                    <th className="table-header">Status</th>
+                    <th className="table-header">Requested at</th>
                     {statusFilter === 'PENDING' && (
-                      <th className="px-4 py-3 text-xs font-medium text-surface-600 dark:text-surface-400 uppercase">Actions</th>
+                      <th className="table-header text-right">Actions</th>
                     )}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
+                <tbody>
                   {requests.map((req) => {
                     const order = req.order;
                     const newStatus = (req.payload?.newStatus as string) ?? 'DELIVERED';
                     return (
-                      <tr key={req.id} className="hover:bg-surface-50/50 dark:hover:bg-surface-800/50">
-                        <td className="px-4 py-3">
+                      <tr key={req.id} className="table-row">
+                        <td className="table-cell whitespace-normal">
                           <div className="flex flex-col">
                             <Link
                               to={`/admin/logistics/orders/${req.orderId}`}
-                              className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                              className="font-medium text-brand-500 hover:text-brand-600"
                             >
                               {req.orderId.slice(0, 8)}…
                             </Link>
@@ -90,10 +117,10 @@ export function DeliveryConfirmationsPage({
                             <span className="text-xs text-surface-500 dark:text-surface-500 mt-0.5">{newStatus}</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm text-surface-800 dark:text-surface-200">
+                        <td className="table-cell text-surface-800 dark:text-surface-200">
                           {req.requesterName ?? req.requestedBy.slice(0, 8)}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="table-cell">
                           <span
                             className={
                               req.status === 'PENDING'
@@ -106,15 +133,15 @@ export function DeliveryConfirmationsPage({
                             {req.status}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-surface-600 dark:text-surface-400">
+                        <td className="table-cell text-surface-800 dark:text-surface-200">
                           {new Date(req.requestedAt).toLocaleString('en-NG', {
                             dateStyle: 'short',
                             timeStyle: 'short',
                           })}
                         </td>
                         {statusFilter === 'PENDING' && req.status === 'PENDING' && (
-                          <td className="px-4 py-3">
-                            <div className="flex gap-2">
+                          <td className="table-cell text-right">
+                            <div className="flex gap-2 justify-end">
                               <fetcher.Form method="post">
                                 <input type="hidden" name="intent" value="approve" />
                                 <input type="hidden" name="requestId" value={req.id} />
@@ -139,27 +166,27 @@ export function DeliveryConfirmationsPage({
                 </tbody>
               </table>
             </div>
-            <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="md:hidden space-y-3 px-1">
               {requests.map((req) => {
                 const order = req.order;
                 const newStatus = (req.payload?.newStatus as string) ?? 'DELIVERED';
                 return (
-                  <div key={req.id} className="p-4">
-                    <div className="flex items-start justify-between gap-2 mb-2">
+                  <div key={req.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
                       <div>
                         <Link
                           to={`/admin/logistics/orders/${req.orderId}`}
-                          className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          className="font-medium text-brand-500 hover:text-brand-600"
                         >
                           {req.orderId.slice(0, 8)}…
                         </Link>
                         {order && (
-                          <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">
+                          <p className="text-sm text-surface-700 dark:text-surface-300 mt-0.5">
                             {order.customerName}
                             {order.deliveryAddress ? ` · ${order.deliveryAddress.slice(0, 40)}…` : ''}
                           </p>
                         )}
-                        <p className="text-xs text-surface-500 dark:text-surface-500 mt-0.5">{newStatus}</p>
+                        <p className="text-sm text-surface-500 dark:text-surface-500 mt-0.5">{newStatus}</p>
                       </div>
                       <span
                         className={`text-sm font-medium shrink-0 ${
@@ -173,10 +200,10 @@ export function DeliveryConfirmationsPage({
                         {req.status}
                       </span>
                     </div>
-                    <div className="text-sm text-surface-800 dark:text-surface-200 mb-2">
+                    <div className="text-sm text-surface-700 dark:text-surface-300">
                       Requested by: {req.requesterName ?? req.requestedBy.slice(0, 8)}
                     </div>
-                    <div className="text-sm text-surface-600 dark:text-surface-400 mb-2">
+                    <div className="text-sm text-surface-700 dark:text-surface-300">
                       {new Date(req.requestedAt).toLocaleString('en-NG', {
                         dateStyle: 'short',
                         timeStyle: 'short',
@@ -207,27 +234,29 @@ export function DeliveryConfirmationsPage({
             </div>
           </>
         ) : (
-          <div className="px-4 py-12 text-center text-surface-600 dark:text-surface-400">
+          <div className="py-12 text-center text-surface-700 dark:text-surface-300">
             {statusFilter === 'PENDING' ? 'No pending delivery confirmations.' : 'No delivery confirmation requests.'}
           </div>
         )}
       </div>
 
       {totalPages > 1 && (
-        <div className="flex justify-center gap-2">
-          {page > 1 && (
-            <Link to={`/admin/logistics/delivery-confirmations?status=${statusFilter}&page=${page - 1}`}>
-              <Button variant="secondary" size="sm">Previous</Button>
-            </Link>
-          )}
-          <span className="py-2 text-sm text-surface-600 dark:text-surface-400">
+        <div className="flex items-center justify-center gap-2">
+          <Link
+            to={`/admin/logistics/delivery-confirmations?status=${statusFilter}&page=${page - 1}`}
+            className={`btn-secondary btn-sm ${page <= 1 ? 'opacity-50 pointer-events-none' : ''}`}
+          >
+            Previous
+          </Link>
+          <span className="text-sm text-surface-700 dark:text-surface-300">
             Page {page} of {totalPages}
           </span>
-          {page < totalPages && (
-            <Link to={`/admin/logistics/delivery-confirmations?status=${statusFilter}&page=${page + 1}`}>
-              <Button variant="secondary" size="sm">Next</Button>
-            </Link>
-          )}
+          <Link
+            to={`/admin/logistics/delivery-confirmations?status=${statusFilter}&page=${page + 1}`}
+            className={`btn-secondary btn-sm ${page >= totalPages ? 'opacity-50 pointer-events-none' : ''}`}
+          >
+            Next
+          </Link>
         </div>
       )}
 
