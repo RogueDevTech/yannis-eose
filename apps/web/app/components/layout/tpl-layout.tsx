@@ -276,6 +276,18 @@ export function TplLayout({
               </NavLink>
             );
           })}
+          {canInstall && (
+            <button
+              type="button"
+              onClick={install}
+              className="px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors flex-shrink-0 flex items-center gap-1.5 text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-surface-200"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+              Install
+            </button>
+          )}
         </nav>
         </div>
 
@@ -295,7 +307,7 @@ export function TplLayout({
             </div>
           </div>
         </main>
-        <BottomNav barItems={TPL_BAR_ITEMS} allItems={TPL_ALL_ITEMS} currentPathname={effectivePath} />
+        <BottomNav barItems={TPL_BAR_ITEMS} allItems={TPL_ALL_ITEMS} currentPathname={effectivePath} pwaInstall={canInstall ? { canInstall, install } : undefined} />
       </div>
     </div>
   );

@@ -21,6 +21,12 @@ interface BottomNavProps {
   allGroups?: BottomNavGroup[];
   currentPathname: string;
   darkMode?: boolean;
+  /** When set and canInstall, show an "Install" row at the bottom of the More modal. Hidden when already installed. */
+  pwaInstall?: { canInstall: boolean; install: () => void };
+  /** Controlled More modal open state (e.g. from layout) so it survives BottomNav remounts. */
+  moreOpen?: boolean;
+  /** Called when More modal should open or close. When provided with moreOpen, state is controlled by parent. */
+  onMoreOpenChange?: (open: boolean) => void;
 }
 
 function isActive(pathname: string, href: string): boolean {
@@ -42,20 +48,53 @@ const MoreIcon = (
  * Shows up to 4 items + "More" that opens a modal with all options.
  * Labels use two lines so full text is visible.
  */
-export function BottomNav({ barItems, allItems, allGroups, currentPathname }: BottomNavProps) {
-  const [moreOpen, setMoreOpen] = useState(false);
+const OVERLAY_CLOSE_DELAY_MS = 300;
+
+const InstallIcon = (
+  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+  </svg>
+);
+
+export function BottomNav({ barItems, allItems, allGroups, currentPathname, pwaInstall, moreOpen: moreOpenProp, onMoreOpenChange }: BottomNavProps) {
+  const [internalMoreOpen, setInternalMoreOpen] = useState(false);
+  const isControlled = moreOpenProp !== undefined && onMoreOpenChange !== undefined;
+  const moreOpen = isControlled ? moreOpenProp : internalMoreOpen;
+  const setMoreOpen = isControlled ? (open: boolean) => onMoreOpenChange(open) : setInternalMoreOpen;
+
   const modalRef = useRef<HTMLDivElement>(null);
+  const openedAtRef = useRef<number | null>(null);
 
   const showMore = allItems.length > 4;
   const displayBarItems = showMore ? barItems.slice(0, 4) : barItems;
 
+  const closeMore = () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d6c72e'},body:JSON.stringify({sessionId:'d6c72e',location:'bottom-nav.tsx:closeMore',message:'closeMore called',data:{moreOpen,runId:'post-fix'},hypothesisId:'B',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    openedAtRef.current = null;
+    setMoreOpen(false);
+  };
+
   useEffect(() => {
     if (!moreOpen) return;
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMoreOpen(false);
+      if (e.key === 'Escape') closeMore();
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
+  }, [moreOpen]);
+
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d6c72e'},body:JSON.stringify({sessionId:'d6c72e',location:'bottom-nav.tsx:useEffect(moreOpen)',message:'moreOpen changed',data:{moreOpen},hypothesisId:'B_D',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    if (!moreOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [moreOpen]);
 
   if (allItems.length === 0) return null;
@@ -95,7 +134,15 @@ export function BottomNav({ barItems, allItems, allGroups, currentPathname }: Bo
         {showMore && (
           <button
             type="button"
-            onClick={() => setMoreOpen(true)}
+            onClick={(e) => {
+              e.stopPropagation();
+              const t = Date.now();
+              openedAtRef.current = t;
+              // #region agent log
+              fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d6c72e'},body:JSON.stringify({sessionId:'d6c72e',location:'bottom-nav.tsx:MoreButton',message:'More button clicked',data:{openedAt:t,runId:'post-fix'},hypothesisId:'A_B',timestamp:t})}).catch(()=>{});
+              // #endregion
+              setMoreOpen(true);
+            }}
             className={`flex shrink-0 w-12 h-10 items-center justify-center rounded-xl transition-colors mx-0.5 text-white shadow-md ${
               moreOpen
                 ? 'bg-[#1565C0] dark:bg-[#4d8bf1] ring-2 ring-white/30 dark:ring-white/20'
@@ -120,7 +167,16 @@ export function BottomNav({ barItems, allItems, allGroups, currentPathname }: Bo
         >
           <div
             className="absolute inset-0 bg-black/50"
-            onClick={() => setMoreOpen(false)}
+            onClick={() => {
+              const elapsed = Date.now() - (openedAtRef.current ?? 0);
+              const willClose = elapsed > OVERLAY_CLOSE_DELAY_MS;
+              // #region agent log
+              fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d6c72e'},body:JSON.stringify({sessionId:'d6c72e',location:'bottom-nav.tsx:overlay',message:'Overlay clicked',data:{elapsed,willClose,OVERLAY_CLOSE_DELAY_MS},hypothesisId:'A_B',timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+              if (willClose) {
+                closeMore();
+              }
+            }}
             aria-hidden
           />
           <div
@@ -131,7 +187,7 @@ export function BottomNav({ barItems, allItems, allGroups, currentPathname }: Bo
               <h2 className="text-sm font-semibold text-surface-900 dark:text-white">All options</h2>
               <button
                 type="button"
-                onClick={() => setMoreOpen(false)}
+                onClick={closeMore}
                 className="p-2 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800"
                 aria-label="Close"
               >
@@ -160,7 +216,7 @@ export function BottomNav({ barItems, allItems, allGroups, currentPathname }: Bo
                                 to={item.href}
                                 end={item.href === '/admin' || item.href === '/tpl'}
                                 prefetch="intent"
-                                onClick={() => setMoreOpen(false)}
+                                onClick={closeMore}
                                 className={`flex items-center gap-3 px-4 py-3 text-left text-sm ${
                                   active
                                     ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-medium'
@@ -186,7 +242,7 @@ export function BottomNav({ barItems, allItems, allGroups, currentPathname }: Bo
                           to={item.href}
                           end={item.href === '/admin' || item.href === '/tpl'}
                           prefetch="intent"
-                          onClick={() => setMoreOpen(false)}
+                          onClick={closeMore}
                           className={`flex items-center gap-3 px-4 py-3 text-left text-sm ${
                             active
                               ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-medium'
@@ -201,6 +257,23 @@ export function BottomNav({ barItems, allItems, allGroups, currentPathname }: Bo
                       </li>
                     );
                   })}
+              {pwaInstall?.canInstall && (
+                <li className="border-t border-surface-200 dark:border-surface-800 mt-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pwaInstall.install();
+                      closeMore();
+                    }}
+                    className="flex items-center gap-3 px-4 py-3 text-left text-sm w-full text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800"
+                  >
+                    <span className="w-8 h-8 flex items-center justify-center flex-shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 [&>svg]:w-5 [&>svg]:h-5">
+                      {InstallIcon}
+                    </span>
+                    <span className="flex-1 min-w-0">Install</span>
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
         </div>

@@ -243,9 +243,25 @@ function getBottomNavItemsForUser(user: { role: string; permissions?: string[] }
   return flat.slice(0, 5);
 }
 
+const MORE_OPEN_STORAGE_KEY = 'yannis_more_open_ts';
+const MORE_OPEN_RESTORE_MS = 2500;
+
+function readMoreOpenFromStorage(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = sessionStorage.getItem(MORE_OPEN_STORAGE_KEY);
+    if (!raw) return false;
+    const ts = parseInt(raw, 10);
+    return Number.isFinite(ts) && Date.now() - ts < MORE_OPEN_RESTORE_MS;
+  } catch {
+    return false;
+  }
+}
+
 function DashboardLayoutInner({ user, notificationsPromise, notificationsActionUrl: _notificationsActionUrl = '/admin' }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [moreNavOpen, setMoreNavOpen] = useState(readMoreOpenFromStorage);
   const [darkMode, setDarkMode] = useState(false);
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const { isConnected } = useSocket();
@@ -370,6 +386,7 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
         activePathname={isRouteLoading && navigation.location ? navigation.location.pathname : undefined}
         notificationCount={notificationCount}
         darkMode={darkMode}
+        pwaInstall={canInstall ? { canInstall, install } : undefined}
       />
       <Header
         user={user}
@@ -417,7 +434,21 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
           </div>
         </div>
       </main>
-      <BottomNav barItems={barItems} allItems={allNavItemsForModal} allGroups={allNavGroupsForModal} currentPathname={location.pathname} />
+      <BottomNav
+        barItems={barItems}
+        allItems={allNavItemsForModal}
+        allGroups={allNavGroupsForModal}
+        currentPathname={location.pathname}
+        pwaInstall={canInstall ? { canInstall, install } : undefined}
+        moreOpen={moreNavOpen}
+        onMoreOpenChange={(open) => {
+          setMoreNavOpen(open);
+          try {
+            if (open) sessionStorage.setItem(MORE_OPEN_STORAGE_KEY, Date.now().toString());
+            else sessionStorage.removeItem(MORE_OPEN_STORAGE_KEY);
+          } catch {}
+        }}
+      />
       </div>
   );
 }

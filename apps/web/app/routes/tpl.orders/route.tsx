@@ -1,14 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import * as fs from 'node:fs';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
-
-const DEBUG_LOG_PATH = '/Users/Apple/Desktop/PROJECTS/ROGUE-DEVTECH/yannis-eose/.cursor/debug-c05241.log';
-function debugLog(msg: string, data: Record<string, unknown>, hypothesisId: string) {
-  const line = JSON.stringify({ sessionId: 'c05241', location: 'tpl.orders/route.tsx', message: msg, data, timestamp: Date.now(), hypothesisId }) + '\n';
-  try { fs.appendFileSync(DEBUG_LOG_PATH, line); } catch { /* ignore */ }
-}
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type LogisticsOrderRow } from '~/features/logistics/LogisticsOrdersPage';
 import type { Location } from '~/features/logistics/types';
@@ -342,10 +335,10 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'updateDeliveryDate') {
-    // #region agent log
-    debugLog('updateDeliveryDate intent', { intent: intent ?? null }, 'entry');
-    // #endregion
-    await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
+    const user = await requirePermissionOrRoles(request, {
+      roles: ['TPL_MANAGER', 'SUPER_ADMIN'],
+      permission: 'logistics.read',
+    }) as { id: string; role: string; logisticsLocationId?: string | null };
     const orderId = formData.get('orderId')?.toString();
     const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString()?.trim();
     const resolveReceiptUrl = formData.get('resolveReceiptUrl')?.toString()?.trim();
@@ -373,77 +366,108 @@ export async function action({ request }: ActionFunctionArgs) {
       const discount = parseFloat(deliveryDiscountAmountStr);
       if (!Number.isNaN(discount) && discount >= 0) body.deliveryDiscountAmount = discount;
     }
-    const res = await apiRequest<{ result?: { data?: { status: string } } }>('/trpc/orders.update', {
-      method: 'POST',
-      cookie,
-      body,
-    });
-    if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Update failed';
-      debugLog('orders.update failed', { orderId, resStatus: res.status, error: err }, 'updateFailed');
-      return json({ success: false, error: err }, { status: safeStatus(res.status) });
+    const updateRes = await apiRequest<{
+      result?: { data?: { status: string; logisticsLocationId?: string | null; riderId?: string | null } };
+    }>('/trpc/orders.update', { method: 'POST', cookie, body });
+    if (!updateRes.ok) {
+      const err = (updateRes.data as { error?: { message?: string } })?.error?.message ?? 'Update failed';
+      return json({ success: false, error: err }, { status: safeStatus(updateRes.status) });
     }
-    // Resolve order: transition to DELIVERED then COMPLETED so the order is always marked delivered and completed.
-    // If DISPATCHED, first transition to IN_TRANSIT; if already IN_TRANSIT, go straight to DELIVERED.
-    const updatedOrder = res.data?.result?.data;
-    const status = updatedOrder?.status;
-
-    // #region agent log
-    debugLog('After orders.update', { orderId, hasResultData: !!res.data?.result?.data, status, statusType: typeof status, rawResultKeys: res.data ? Object.keys(res.data as object) : [] }, 'A');
-    // #endregion
-
-    if (status === 'DISPATCHED') {
-      const inTransitRes = await apiRequest<unknown>('/trpc/orders.transition', {
-        method: 'POST',
-        cookie,
-        body: { orderId, newStatus: 'IN_TRANSIT' },
-      });
-      // #region agent log
-      debugLog('IN_TRANSIT transition', { orderId, ok: inTransitRes.ok, status: inTransitRes.status }, 'B');
-      // #endregion
-      if (!inTransitRes.ok) {
-        const err = (inTransitRes.data as { error?: { message?: string } })?.error?.message ?? 'Mark in transit failed';
-        return json({ success: false, error: err }, { status: safeStatus(inTransitRes.status) });
-      }
+    let current = updateRes.data?.result?.data;
+    let status = current?.status;
+    const terminal = ['DELIVERED', 'COMPLETED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'];
+    if (status && terminal.includes(status)) {
+      return json({ success: true, intent: 'updateDeliveryDate' });
     }
+    const deliveryMetadata: Record<string, unknown> = { deliveryProofUrl: resolveReceiptUrl };
+    if (body.deliveryFeeAddOn != null) deliveryMetadata.deliveryFeeAddOn = body.deliveryFeeAddOn;
+    if (body.deliveryDiscountAmount != null) deliveryMetadata.deliveryDiscountAmount = body.deliveryDiscountAmount;
 
-    if (status === 'DISPATCHED' || status === 'IN_TRANSIT') {
-      const transitionRes = await apiRequest<unknown>('/trpc/orders.transition', {
-        method: 'POST',
-        cookie,
-        body: {
-          orderId,
-          newStatus: 'DELIVERED',
-          metadata: { deliveryProofUrl: resolveReceiptUrl },
-        },
-      });
-      // #region agent log
-      debugLog('DELIVERED transition', { orderId, ok: transitionRes.ok, status: transitionRes.status }, 'C');
-      // #endregion
-      if (!transitionRes.ok) {
-        const err = (transitionRes.data as { error?: { message?: string } })?.error?.message ?? 'Mark delivered failed';
-        return json({ success: false, error: err }, { status: safeStatus(transitionRes.status) });
+    type OrderSnapshot = { status?: string; logisticsLocationId?: string | null; riderId?: string | null };
+    const transitionResponse = async (res: { ok: boolean; status: number; data: unknown }) => {
+      if (!res.ok) return null;
+      const data = (res.data as { result?: { data?: OrderSnapshot } })?.result?.data;
+      return data ?? null;
+    };
+    const transitionError = (res: { data: unknown }, fallback: string) =>
+      (res.data as { error?: { message?: string } })?.error?.message ?? fallback;
+
+    while (status && status !== 'DELIVERED') {
+      if (status === 'CONFIRMED') {
+        const locationId = user.logisticsLocationId ?? current?.logisticsLocationId;
+        if (!locationId) {
+          return json(
+            { success: false, error: 'Resolve from CONFIRMED requires a TPL location. Allocate the order from the order detail page first.' },
+            { status: 400 },
+          );
+        }
+        const tr = await apiRequest<{ result?: { data?: OrderSnapshot } }>('/trpc/orders.transition', {
+          method: 'POST',
+          cookie,
+          body: { orderId, newStatus: 'ALLOCATED', metadata: { logisticsLocationId: locationId } },
+        });
+        if (!tr.ok) {
+          return json({ success: false, error: transitionError(tr, 'Allocation failed') }, { status: safeStatus(tr.status) });
+        }
+        current = await transitionResponse(tr);
+        status = current?.status;
+        continue;
       }
-      const completedRes = await apiRequest<unknown>('/trpc/orders.transition', {
-        method: 'POST',
-        cookie,
-        body: { orderId, newStatus: 'COMPLETED' },
-      });
-      // #region agent log
-      debugLog('COMPLETED transition', { orderId, ok: completedRes.ok, status: completedRes.status }, 'D');
-      // #endregion
-      if (!completedRes.ok) {
-        const err = (completedRes.data as { error?: { message?: string } })?.error?.message ?? 'Mark completed failed';
-        return json({ success: false, error: err }, { status: safeStatus(completedRes.status) });
+      if (status === 'ALLOCATED') {
+        let riderId = current?.riderId;
+        if (!riderId) {
+          const ridersRes = await apiRequest<{ result?: { data?: Array<{ id: string; logisticsLocationId: string | null }> } }>(
+            '/trpc/logistics.listRiders?input=%7B%7D',
+            { method: 'GET', cookie },
+          );
+          if (!ridersRes.ok) {
+            return json({ success: false, error: 'Could not load riders' }, { status: 502 });
+          }
+          const riders = (ridersRes.data as { result?: { data?: Array<{ id: string; logisticsLocationId: string | null }> } })?.result?.data ?? [];
+          const locationId = current?.logisticsLocationId;
+          const rider = locationId ? riders.find((r) => r.logisticsLocationId === locationId) : riders[0];
+          if (!rider) {
+            return json({ success: false, error: 'No riders at this location. Add a rider before resolving.' }, { status: 400 });
+          }
+          riderId = rider.id;
+        }
+        const tr = await apiRequest<{ result?: { data?: OrderSnapshot } }>('/trpc/orders.transition', {
+          method: 'POST',
+          cookie,
+          body: { orderId, newStatus: 'DISPATCHED', metadata: { riderId } },
+        });
+        if (!tr.ok) {
+          return json({ success: false, error: transitionError(tr, 'Dispatch failed') }, { status: safeStatus(tr.status) });
+        }
+        current = await transitionResponse(tr);
+        status = current?.status;
+        continue;
       }
-    } else {
-      // #region agent log
-      debugLog('Skipped DELIVERED block', { orderId, status }, 'E');
-      // #endregion
-      return json(
-        { success: false, error: 'Order must be dispatched or in transit to resolve as delivered. Allocate and dispatch the order first.' },
-        { status: 400 },
-      );
+      if (status === 'DISPATCHED') {
+        const tr = await apiRequest<{ result?: { data?: OrderSnapshot } }>('/trpc/orders.transition', {
+          method: 'POST',
+          cookie,
+          body: { orderId, newStatus: 'IN_TRANSIT' },
+        });
+        if (!tr.ok) {
+          return json({ success: false, error: transitionError(tr, 'Mark in transit failed') }, { status: safeStatus(tr.status) });
+        }
+        current = await transitionResponse(tr);
+        status = current?.status;
+        continue;
+      }
+      if (status === 'IN_TRANSIT') {
+        const tr = await apiRequest<{ result?: { data?: OrderSnapshot } }>('/trpc/orders.transition', {
+          method: 'POST',
+          cookie,
+          body: { orderId, newStatus: 'DELIVERED', metadata: deliveryMetadata },
+        });
+        if (!tr.ok) {
+          return json({ success: false, error: transitionError(tr, 'Mark delivered failed') }, { status: safeStatus(tr.status) });
+        }
+        return json({ success: true, intent: 'updateDeliveryDate' });
+      }
+      return json({ success: false, error: `Cannot resolve order from status: ${status}` }, { status: 400 });
     }
     return json({ success: true, intent: 'updateDeliveryDate' });
   }
