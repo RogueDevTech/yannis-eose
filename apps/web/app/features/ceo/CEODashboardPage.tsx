@@ -108,16 +108,6 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
     costBreakdown.fulfillmentCost +
     costBreakdown.operationalLoss;
 
-  const deliveryRate = orderPipeline.total > 0
-    ? (orderPipeline.delivered / orderPipeline.total) * 100
-    : 0;
-  const cancelRate = orderPipeline.total > 0
-    ? (orderPipeline.cancelled / orderPipeline.total) * 100
-    : 0;
-  const returnRate = orderPipeline.delivered > 0
-    ? (orderPipeline.returned / orderPipeline.delivered) * 100
-    : 0;
-
   return (
     <div className="space-y-6">
       {/* Page header: title and subtitle first, then filters/actions below */}
@@ -410,32 +400,6 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           </div>
         </div>
         )}
-
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
-          <KPICard label="Total Orders" value={orderPipeline.total.toString()} icon="orders" />
-          <KPICard label="Active" value={orderPipeline.active.toString()} icon="pending" highlight="warning" />
-          <KPICard
-            label="Delivered"
-            value={orderPipeline.delivered.toString()}
-            icon="orders"
-            highlight="success"
-            subtitle={pct(deliveryRate)}
-          />
-          <KPICard
-            label="Cancelled"
-            value={orderPipeline.cancelled.toString()}
-            icon="orders"
-            highlight={orderPipeline.cancelled > 0 ? 'danger' : undefined}
-            subtitle={pct(cancelRate)}
-          />
-          <KPICard
-            label="Returned"
-            value={orderPipeline.returned.toString()}
-            icon="orders"
-            highlight={orderPipeline.returned > 0 ? 'danger' : undefined}
-            subtitle={pct(returnRate)}
-          />
-        </div>
 
         <div className="card">
           <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Status Distribution</h3>

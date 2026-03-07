@@ -34,6 +34,7 @@ interface HeaderProps {
   onRemoveRealtimeNotification?: (id: string) => void;
   onPruneServerKnown?: (serverIds: Set<string>) => void;
   onClearRealtimeNotifications?: () => void;
+  pwaInstall?: { canInstall: boolean; install: () => void };
 }
 
 const NOTIFICATION_COLORS: Record<string, string> = {
@@ -78,7 +79,7 @@ function SyncNotificationReadIds({ notifications, onPruneServerKnown }: { notifi
   return null;
 }
 
-export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications }: HeaderProps) {
+export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications, pwaInstall }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
@@ -207,8 +208,20 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
         </button>
       </div>
 
-      {/* Right side: dark mode + notifications + user */}
+      {/* Right side: PWA install + dark mode + notifications + user */}
       <div className="flex items-center gap-2 lg:gap-3">
+        {pwaInstall?.canInstall && (
+          <button
+            type="button"
+            onClick={pwaInstall.install}
+            className="p-1.5 rounded-lg text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
+            title="Install App"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+          </button>
+        )}
         {/* Dark mode toggle */}
         <button
           onClick={onToggleDarkMode}

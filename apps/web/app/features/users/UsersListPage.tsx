@@ -196,7 +196,7 @@ export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = '
                   <td className="table-cell text-right">
                     <Link
                       to={`/hr/users/${user.id}`}
-                      className="text-brand-500 hover:text-brand-600 text-sm font-medium"
+                      className="btn-secondary btn-sm"
                     >
                       View
                     </Link>

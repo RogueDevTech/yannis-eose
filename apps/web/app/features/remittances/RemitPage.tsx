@@ -358,57 +358,92 @@ export function RemitPage({
         {remittances.length === 0 ? (
           <p className="text-sm text-surface-600 dark:text-surface-400">No remittances yet.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-surface-200 dark:border-surface-700">
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Product</th>
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">To</th>
-                  <th className="text-right py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Qty</th>
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Status</th>
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Sent</th>
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Receipt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {remittances.map((r) => (
-                  <tr key={r.id} className="border-b border-surface-100 dark:border-surface-800">
-                    <td className="py-2 px-3 text-surface-900 dark:text-white">{r.productName}</td>
-                    <td className="py-2 px-3 text-surface-800 dark:text-surface-200">{r.toLocationName}</td>
-                    <td className="py-2 px-3 text-right">
-                      {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : r.quantitySent}
-                    </td>
-                    <td className="py-2 px-3">
-                      <span
-                        className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                          r.status === 'RECEIVED'
-                            ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
-                            : r.status === 'DISPUTED'
-                              ? 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
-                              : 'bg-warning-100 text-warning-800 dark:bg-warning-900/30 dark:text-warning-300'
-                        }`}
-                      >
-                        {STATUS_LABEL[r.status] ?? r.status}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-surface-600 dark:text-surface-400">
-                      {new Date(r.sentAt).toLocaleDateString()}
-                    </td>
-                    <td className="py-2 px-3">
-                      <a
-                        href={r.receiptUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-brand-600 dark:text-brand-400 hover:underline"
-                      >
-                        View
-                      </a>
-                    </td>
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-surface-200 dark:border-surface-700">
+                    <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Product</th>
+                    <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">To</th>
+                    <th className="text-right py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Qty</th>
+                    <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Status</th>
+                    <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Sent</th>
+                    <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Receipt</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {remittances.map((r) => (
+                    <tr key={r.id} className="border-b border-surface-100 dark:border-surface-800">
+                      <td className="py-2 px-3 text-surface-900 dark:text-white">{r.productName}</td>
+                      <td className="py-2 px-3 text-surface-800 dark:text-surface-200">{r.toLocationName}</td>
+                      <td className="py-2 px-3 text-right">
+                        {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : r.quantitySent}
+                      </td>
+                      <td className="py-2 px-3">
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                            r.status === 'RECEIVED'
+                              ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
+                              : r.status === 'DISPUTED'
+                                ? 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
+                                : 'bg-warning-100 text-warning-800 dark:bg-warning-900/30 dark:text-warning-300'
+                          }`}
+                        >
+                          {STATUS_LABEL[r.status] ?? r.status}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-surface-600 dark:text-surface-400">
+                        {new Date(r.sentAt).toLocaleDateString()}
+                      </td>
+                      <td className="py-2 px-3">
+                        <a
+                          href={r.receiptUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-brand-600 dark:text-brand-400 hover:underline"
+                        >
+                          View
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+              {remittances.map((r) => (
+                <div key={r.id} className="p-4">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <p className="font-medium text-surface-900 dark:text-white">{r.productName}</p>
+                    <span
+                      className={`inline-flex px-2 py-0.5 rounded text-xs font-medium shrink-0 ${
+                        r.status === 'RECEIVED'
+                          ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
+                          : r.status === 'DISPUTED'
+                            ? 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
+                            : 'bg-warning-100 text-warning-800 dark:bg-warning-900/30 dark:text-warning-300'
+                      }`}
+                    >
+                      {STATUS_LABEL[r.status] ?? r.status}
+                    </span>
+                  </div>
+                  <div className="text-sm text-surface-800 dark:text-surface-200 space-y-0.5 mb-2">
+                    <div>To: {r.toLocationName}</div>
+                    <div>Qty: {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : r.quantitySent}</div>
+                    <div>Sent: {new Date(r.sentAt).toLocaleDateString()}</div>
+                  </div>
+                  <a
+                    href={r.receiptUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-ghost btn-sm inline-block"
+                  >
+                    View receipt
+                  </a>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>

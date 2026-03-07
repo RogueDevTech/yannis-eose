@@ -11,7 +11,9 @@ import {
   useLoaderData,
   useRouteError,
 } from '@remix-run/react';
+import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { ScrollToTopButton } from '~/components/ui/scroll-to-top-button';
+import { useIsMobile } from '~/hooks/useIsMobile';
 import stylesheet from '~/tailwind.css?url';
 
 declare global {
@@ -57,6 +59,7 @@ export const links: LinksFunction = () => [
 
 export default function App() {
   const { ENV } = useLoaderData<typeof loader>();
+  const isMobile = useIsMobile();
   const envScript = JSON.stringify(ENV).replace(/<\/script>/gi, '<\\/script>');
 
   return (
@@ -65,6 +68,15 @@ export default function App() {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#1565C0" />
+        <meta name="description" content="Yannis EOSE — Enterprise Operations & Sales Engine" />
+        <meta property="og:title" content="Yannis EOSE" />
+        <meta property="og:description" content="Enterprise Operations & Sales Engine" />
+        <meta property="og:image" content="/assets/yannis-logo-white-bg.png" />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content="Yannis EOSE" />
+        <meta name="twitter:description" content="Enterprise Operations & Sales Engine" />
+        <meta name="twitter:image" content="/assets/yannis-logo-white-bg.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
@@ -72,7 +84,9 @@ export default function App() {
         <Links />
       </head>
       <body className="h-full">
-        <Outlet />
+        <PullToRefresh disabled={!isMobile}>
+          <Outlet />
+        </PullToRefresh>
         <ScrollToTopButton />
         <ScrollRestoration getKey={(location) => location.pathname} />
         <script dangerouslySetInnerHTML={{ __html: `window.__ENV = ${envScript};` }} />

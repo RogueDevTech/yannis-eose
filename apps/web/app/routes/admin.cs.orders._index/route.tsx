@@ -242,13 +242,20 @@ export async function action({ request }: ActionFunctionArgs) {
     await requirePermission(request, 'orders.bulkTransition');
     const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
     const newStatus = form.get('newStatus') as string;
+    const reason = form.get('reason')?.toString() || undefined;
+
+    const body: { orderIds: string[]; newStatus: string; metadata?: Record<string, unknown> } = {
+      orderIds,
+      newStatus,
+    };
+    if (reason) body.metadata = { reason };
 
     const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; total: number; results: Array<{ orderId: string; success: boolean; error?: string }> } } }>(
       '/trpc/orders.bulkTransition',
       {
         method: 'POST',
         cookie,
-        body: { orderIds, newStatus },
+        body,
       },
     );
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Spinner } from '~/components/ui/spinner';
@@ -440,9 +441,7 @@ function UnknownActorModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-surface-900 rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+    <Modal open onClose={onClose} maxWidth="max-w-md" contentClassName="p-0 overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
           <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
             Unknown Actor
@@ -492,8 +491,7 @@ function UnknownActorModal({
             Close
           </Button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -990,9 +988,7 @@ function DetailModal({
   const actorKnown = isActorKnown(entry.changedBy, actorNames);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-surface-900 rounded-xl shadow-2xl w-full max-w-2xl max-h-[80dvh] overflow-hidden flex flex-col">
+    <Modal open onClose={onClose} maxWidth="max-w-2xl" contentClassName="p-0 max-h-[80dvh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700 shrink-0">
           <div>
@@ -1092,8 +1088,7 @@ function DetailModal({
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1500,7 +1495,8 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
 
       {/* Audit log table — rows render immediately, actor names stream in */}
       <div className="card p-0 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr>
@@ -1590,6 +1586,84 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             </tbody>
           </table>
         </div>
+
+        {/* Mobile cards */}
+        <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800">
+          {rows.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
+              No audit entries found. Try adjusting your filters.
+            </div>
+          ) : (
+            rows.map((entry, idx) => (
+              <div
+                key={`${entry.recordId}-${entry.validFrom}-${idx}`}
+                className="p-3 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs text-surface-700 dark:text-surface-300">
+                    {formatDate(entry.validFrom)}
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300">
+                    {formatTableName(entry.tableName)}
+                  </span>
+                </div>
+                <div className="text-xs text-surface-700 dark:text-surface-300 break-words min-w-0">
+                  <DeferredSection resolve={actorNames} skeleton="inline">
+                    {(resolvedActorNames) => (
+                      <AuditDescription entry={entry} actorNames={resolvedActorNames} />
+                    )}
+                  </DeferredSection>
+                </div>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <DeferredSection resolve={actorNames} skeleton="inline">
+                    {(resolvedActorNames) => {
+                      const display = getActorDisplay(entry.changedBy, resolvedActorNames);
+                      const known = isActorKnown(entry.changedBy, resolvedActorNames);
+                      const actorNode = known && entry.changedBy ? (
+                        <Link
+                          to={`/hr/users/${entry.changedBy}`}
+                          className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2 text-sm"
+                        >
+                          {display}
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
+                          className="text-surface-600 hover:text-surface-900 dark:text-surface-200 dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer text-sm"
+                        >
+                          {display}
+                        </button>
+                      );
+                      return (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {actorNode}
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
+                            entry.action === 'INSERT'
+                              ? 'bg-success-50 dark:bg-success-700/20 text-success-700 dark:text-success-500'
+                              : entry.action === 'DELETE'
+                              ? 'bg-danger-50 dark:bg-danger-700/20 text-danger-700 dark:text-danger-500'
+                              : 'bg-warning-50 dark:bg-warning-700/20 text-warning-700 dark:text-warning-500'
+                          }`}>
+                            {entry.action === 'INSERT' ? 'Created' : entry.action === 'DELETE' ? 'Deleted' : 'Updated'}
+                          </span>
+                        </div>
+                      );
+                    }}
+                  </DeferredSection>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedEntry(entry)}
+                    className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium h-auto py-0 shrink-0"
+                  >
+                    View
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {/* Pagination */}
@@ -1656,17 +1730,14 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
 
       {/* Image preview modal — for receipt_url, screenshot_url, image_url in audit detail */}
       {previewImageUrl && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setPreviewImageUrl(null)}>
-          <div className="fixed inset-0 bg-black/70" />
-          <div className="relative max-w-2xl max-h-[90dvh] w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-end mb-2">
-              <button type="button" onClick={() => setPreviewImageUrl(null)} className="text-surface-100 hover:text-white p-1 rounded">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <img src={previewImageUrl} alt="Attachment" className="w-full h-auto max-h-[85dvh] object-contain rounded-lg bg-white shadow-xl" />
+        <Modal open onClose={() => setPreviewImageUrl(null)} maxWidth="max-w-2xl" contentClassName="p-0 bg-transparent shadow-none max-h-[90dvh]">
+          <div className="flex justify-end mb-2">
+            <button type="button" onClick={() => setPreviewImageUrl(null)} className="text-surface-100 hover:text-white p-1 rounded">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
-        </div>
+          <img src={previewImageUrl} alt="Attachment" className="w-full h-auto max-h-[85dvh] object-contain rounded-lg bg-white shadow-xl" />
+        </Modal>
       )}
     </div>
   );

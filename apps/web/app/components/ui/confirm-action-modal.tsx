@@ -1,4 +1,5 @@
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 
 export type ConfirmVariant = 'danger' | 'warning' | 'archive';
 
@@ -124,17 +125,17 @@ export function ConfirmActionModal({
         : undefined;
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 min-h-0"
-      aria-modal="true"
+    <Modal
+      open
+      onClose={onClose}
+      maxWidth="max-w-lg"
       role="alertdialog"
       aria-labelledby="confirm-action-modal-title"
       aria-describedby="confirm-action-modal-desc"
+      contentClassName="p-0 flex flex-col overflow-hidden min-h-0"
     >
-      <div
-        className={`card w-full max-w-lg max-h-[90dvh] overflow-hidden flex flex-col shadow-xl bg-white dark:bg-surface-900 ${styles.border}`}
-      >
-        <div className={`flex items-center gap-3 pb-2 border-b shrink-0 ${borderBottomClass}`}>
+      <div className={`flex flex-col overflow-hidden flex-1 min-h-0 ${styles.border}`}>
+        <div className={`flex items-center gap-3 pb-2 border-b shrink-0 px-4 pt-4 sm:px-5 sm:pt-5 ${borderBottomClass}`}>
           <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${styles.iconBg}`}>
             <Icon className={`w-5 h-5 ${styles.iconColor}`} />
           </div>
@@ -142,7 +143,7 @@ export function ConfirmActionModal({
             {title}
           </h3>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-5 p-1">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-5 p-1 px-4 sm:px-5">
           <p id="confirm-action-modal-desc" className="text-sm text-surface-700 dark:text-surface-200">
             {description}
           </p>
@@ -155,7 +156,7 @@ export function ConfirmActionModal({
             </div>
           )}
         </div>
-        <div className="flex items-center justify-end gap-3 pt-2 shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center justify-end gap-3 pt-2 shrink-0 p-4 sm:p-5 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-5">
           <Button
             type="button"
             variant="secondary"
@@ -175,6 +176,6 @@ export function ConfirmActionModal({
           </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

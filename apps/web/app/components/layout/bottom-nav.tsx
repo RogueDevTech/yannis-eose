@@ -7,11 +7,18 @@ export interface BottomNavItem {
   icon: React.ReactNode;
 }
 
+export interface BottomNavGroup {
+  group: string | null;
+  items: BottomNavItem[];
+}
+
 interface BottomNavProps {
   /** First 4 items shown on the bar. */
   barItems: BottomNavItem[];
   /** All items shown in the "More" modal (can be more than 4). */
   allItems: BottomNavItem[];
+  /** Grouped items for the modal — when provided, renders group headers to disambiguate duplicate labels. */
+  allGroups?: BottomNavGroup[];
   currentPathname: string;
   darkMode?: boolean;
 }
@@ -35,7 +42,7 @@ const MoreIcon = (
  * Shows up to 4 items + "More" that opens a modal with all options.
  * Labels use two lines so full text is visible.
  */
-export function BottomNav({ barItems, allItems, currentPathname }: BottomNavProps) {
+export function BottomNav({ barItems, allItems, allGroups, currentPathname }: BottomNavProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -134,29 +141,66 @@ export function BottomNav({ barItems, allItems, currentPathname }: BottomNavProp
               </button>
             </div>
             <ul className="flex-1 min-h-0 overflow-y-auto py-2 overscroll-contain">
-              {allItems.map((item) => {
-                const active = isActive(currentPathname, item.href);
-                return (
-                  <li key={item.href}>
-                    <NavLink
-                      to={item.href}
-                      end={item.href === '/admin' || item.href === '/tpl'}
-                      prefetch="intent"
-                      onClick={() => setMoreOpen(false)}
-                      className={`flex items-center gap-3 px-4 py-3 text-left text-sm ${
-                        active
-                          ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-medium'
-                          : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800'
-                      }`}
-                    >
-                      <span className="w-8 h-8 flex items-center justify-center flex-shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 [&>svg]:w-5 [&>svg]:h-5">
-                        {item.icon}
-                      </span>
-                      <span className="flex-1 min-w-0">{item.label}</span>
-                    </NavLink>
-                  </li>
-                );
-              })}
+              {allGroups && allGroups.length > 0
+                ? allGroups.map((group, gi) => (
+                    <li key={group.group ?? `_ungrouped_${gi}`}>
+                      {group.group && (
+                        <div className="px-4 pt-4 pb-1 first:pt-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500">
+                            {group.group}
+                          </span>
+                        </div>
+                      )}
+                      <ul>
+                        {group.items.map((item) => {
+                          const active = isActive(currentPathname, item.href);
+                          return (
+                            <li key={item.href}>
+                              <NavLink
+                                to={item.href}
+                                end={item.href === '/admin' || item.href === '/tpl'}
+                                prefetch="intent"
+                                onClick={() => setMoreOpen(false)}
+                                className={`flex items-center gap-3 px-4 py-3 text-left text-sm ${
+                                  active
+                                    ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-medium'
+                                    : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800'
+                                }`}
+                              >
+                                <span className="w-8 h-8 flex items-center justify-center flex-shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 [&>svg]:w-5 [&>svg]:h-5">
+                                  {item.icon}
+                                </span>
+                                <span className="flex-1 min-w-0">{item.label}</span>
+                              </NavLink>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </li>
+                  ))
+                : allItems.map((item) => {
+                    const active = isActive(currentPathname, item.href);
+                    return (
+                      <li key={item.href}>
+                        <NavLink
+                          to={item.href}
+                          end={item.href === '/admin' || item.href === '/tpl'}
+                          prefetch="intent"
+                          onClick={() => setMoreOpen(false)}
+                          className={`flex items-center gap-3 px-4 py-3 text-left text-sm ${
+                            active
+                              ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 font-medium'
+                              : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800'
+                          }`}
+                        >
+                          <span className="w-8 h-8 flex items-center justify-center flex-shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 [&>svg]:w-5 [&>svg]:h-5">
+                            {item.icon}
+                          </span>
+                          <span className="flex-1 min-w-0">{item.label}</span>
+                        </NavLink>
+                      </li>
+                    );
+                  })}
             </ul>
           </div>
         </div>

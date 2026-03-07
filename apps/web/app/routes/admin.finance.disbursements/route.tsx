@@ -11,7 +11,7 @@ export const meta: MetaFunction = () => [
 
 function parseFunding(res: { ok: boolean; data: unknown }) {
   if (!res.ok) return null;
-  return (res.data as { result?: { data?: { records: DisbursementRecord[]; pagination: { total: number } } } })?.result?.data ?? null;
+  return (res.data as { result?: { data?: { records: DisbursementRecord[]; pagination: { total: number; page: number; limit: number; totalPages?: number } } } })?.result?.data ?? null;
 }
 
 function parseUsers(res: { ok: boolean; data: unknown }) {
@@ -23,6 +23,12 @@ function parseBalancesList(res: { ok: boolean; data: unknown }) {
   if (!res.ok) return [];
   const data = (res.data as { result?: { data?: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }> } })?.result?.data;
   return Array.isArray(data) ? data : [];
+}
+
+function parseSummary(res: { ok: boolean; data: unknown }) {
+  if (!res.ok) return { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
+  const data = (res.data as { result?: { data?: { totalSent: string; totalCompleted: string; totalDisputed: string } } })?.result?.data;
+  return data ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -41,8 +47,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const perms = user?.permissions ?? [];
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const canDisburseToHoM = isSuperAdmin || perms.includes('finance.disburse');
-  // Disbursements page is tier-1 only: Finance → HoM. HoM uses Marketing → Funding for Media Buyers.
   const canDisburseToMediaBuyers = false;
+
+  // Filters from URL
+  const statusFilter = url.searchParams.get('status') || undefined;
+  const receiverFilter = url.searchParams.get('receiver') || undefined;
+  const pageParam = parseInt(url.searchParams.get('page') || '1', 10);
+  const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
 
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
@@ -56,38 +67,55 @@ export async function loader({ request }: LoaderFunctionArgs) {
     startDate = undefined;
     endDate = undefined;
   }
-  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
-  const listFundingInput: { page: number; limit: number; startDate?: string; endDate?: string } = { page: 1, limit: 20 };
+  const filters = {
+    startDate: startDate ?? '',
+    endDate: endDate ?? '',
+    periodAllTime,
+    status: statusFilter ?? '',
+    receiver: receiverFilter ?? '',
+  };
+
+  const listFundingInput: Record<string, unknown> = { page, limit: 20 };
   if (startDate) listFundingInput.startDate = startDate;
   if (endDate) listFundingInput.endDate = endDate;
+  if (statusFilter) listFundingInput.status = statusFilter;
+  if (receiverFilter) listFundingInput.receiverId = receiverFilter;
 
-  const [fundingRes, usersRes] = await Promise.all([
+  const [fundingRes, usersRes, balancesRes, summaryRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/marketing.listFunding?input=${encodeURIComponent(JSON.stringify(listFundingInput))}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 20 }))}`,
+      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 100 }))}`,
       { method: 'GET', cookie },
     ),
+    apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie }),
   ]);
 
-  const balancesRes = await apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie });
   const allBalances = parseBalancesList(balancesRes);
   const recipientBalances = allBalances.filter((b) => b.role === 'HEAD_OF_MARKETING');
 
   const fundingData = parseFunding(fundingRes);
   const users = parseUsers(usersRes);
+  const summary = parseSummary(summaryRes);
+
+  const total = fundingData?.pagination?.total ?? 0;
+  const totalPages = Math.ceil(total / 20);
 
   return {
     funding: fundingData?.records ?? [],
-    totalFunding: fundingData?.pagination?.total ?? 0,
+    totalFunding: total,
+    totalPages,
+    page,
     users,
     canDisburseToHoM,
     canDisburseToMediaBuyers,
     preselectedReceiverId,
     filters,
     recipientBalances,
+    summary,
   } satisfies DisbursementsPageData;
 }
 

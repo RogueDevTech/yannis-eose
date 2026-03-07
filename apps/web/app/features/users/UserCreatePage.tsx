@@ -20,7 +20,6 @@ const ROLES = [
   { value: 'TPL_MANAGER', label: '3PL Manager', description: 'Manages a third-party logistics location' },
   { value: 'TPL_RIDER', label: '3PL Rider', description: 'Handles deliveries for a 3PL location' },
   { value: 'HR_MANAGER', label: 'HR Manager', description: 'Manages payroll, commissions, and staff' },
-  { value: 'SUPER_ADMIN', label: 'Super Admin', description: 'Full system access — use with caution' },
 ];
 
 // ─── Component ──────────────────────────────────────────
@@ -50,7 +49,7 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
   const showCapacity = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
   const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const is3PLRole = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
-  const showProductAssignment = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(selectedRole);
+  const showProductAssignment = selectedRole === 'MEDIA_BUYER';
   const showCompensation = !!selectedRole;
 
   const toggleProduct = (id: string) => {
@@ -274,31 +273,29 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
           <div className="card space-y-4">
             <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Compensation</h2>
 
-            {/* Mode toggle */}
-            {filteredPlans.length > 0 && (
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={compensationMode === 'inline'}
-                    onChange={() => setCompensationMode('inline')}
-                    className="text-brand-500 focus:ring-brand-500"
-                  />
-                  <span className="text-sm text-surface-700 dark:text-surface-300">Define compensation</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={compensationMode === 'existing'}
-                    onChange={() => setCompensationMode('existing')}
-                    className="text-brand-500 focus:ring-brand-500"
-                  />
-                  <span className="text-sm text-surface-700 dark:text-surface-300">Use existing plan</span>
-                </label>
-              </div>
-            )}
+            {/* Mode toggle — always show so user can choose plan vs flat */}
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={compensationMode === 'inline'}
+                  onChange={() => setCompensationMode('inline')}
+                  className="text-brand-500 focus:ring-brand-500"
+                />
+                <span className="text-sm text-surface-700 dark:text-surface-300">Define compensation (flat)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={compensationMode === 'existing'}
+                  onChange={() => setCompensationMode('existing')}
+                  className="text-brand-500 focus:ring-brand-500"
+                />
+                <span className="text-sm text-surface-700 dark:text-surface-300">Use existing plan</span>
+              </label>
+            </div>
 
-            {/* Existing plan selector */}
+            {/* Existing plan selector — dropdown when plans exist */}
             {compensationMode === 'existing' && filteredPlans.length > 0 && (
               <div>
                 <label htmlFor="commissionPlanId" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
@@ -312,6 +309,21 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                     </option>
                   ))}
                 </select>
+              </div>
+            )}
+
+            {/* No plans for this role — show Create plan action */}
+            {compensationMode === 'existing' && filteredPlans.length === 0 && (
+              <div className="rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700 px-4 py-3">
+                <p className="text-sm text-surface-700 dark:text-surface-300">
+                  No commission plans for this role yet.
+                </p>
+                <Link
+                  to="/hr/payroll?open=plan"
+                  className="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 mt-2 inline-block"
+                >
+                  Create plan →
+                </Link>
               </div>
             )}
 
@@ -370,7 +382,9 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
                 name="phone"
                 type="tel"
                 className="input"
-                placeholder="08031234567"
+                placeholder="08031234567 or +2348031234567"
+                pattern="^(0[789]\d{9}|\+234[789]\d{9})$"
+                title="Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)"
               />
               <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                 Never displayed publicly. Masked in all views.

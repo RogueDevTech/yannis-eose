@@ -4,6 +4,7 @@ import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Checkbox } from '~/components/ui/checkbox';
@@ -467,8 +468,7 @@ export function FormsPage({
 
       {/* ── Edit Form Modal ───────────────────────── */}
       {editingForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-lg w-full p-6">
+        <Modal open onClose={() => setEditingForm(null)} maxWidth="max-w-lg" contentClassName="p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Edit Form</h3>
               <button onClick={() => setEditingForm(null)} className="text-surface-700 hover:text-surface-900 dark:text-surface-400 dark:hover:text-white">
@@ -560,14 +560,12 @@ export function FormsPage({
                 </Button>
               </div>
             </fetcher.Form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ── Deployment Modal ──────────────────────────── */}
       {deploymentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-lg w-full p-6 space-y-4">
+        <Modal open onClose={() => setDeploymentModal(null)} maxWidth="max-w-lg" contentClassName="p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
                 Deployment: {deploymentModal.name}
@@ -652,8 +650,7 @@ export function FormsPage({
             <Button variant="secondary" size="sm" className="w-full" onClick={() => setDeploymentModal(null)}>
               Close
             </Button>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Deactivate / Archive confirmation */}

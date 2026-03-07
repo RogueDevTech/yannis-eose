@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { Modal } from '~/components/ui/modal';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -129,6 +130,10 @@ export function CSDashboardPage({
   /** Agent Workloads: View all modal and pagination */
   const [viewAllAgentsOpen, setViewAllAgentsOpen] = useState(false);
   const [viewAllPage, setViewAllPage] = useState(1);
+  /** Cart Abandonment: View cart detail modal */
+  const [viewCartModal, setViewCartModal] = useState<PendingCart | null>(null);
+  /** Prefill Create Offline Order modal when opening from Cart Abandonment */
+  const [createOfflinePrefill, setCreateOfflinePrefill] = useState<{ customerName: string } | null>(null);
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const liveCartsStripRef = useRef<HTMLDivElement>(null);
   const liveCartsTabStripRef = useRef<HTMLDivElement>(null);
@@ -281,8 +286,9 @@ export function CSDashboardPage({
       {canCreateOffline && (
         <CreateOfflineOrderModal
           open={createOfflineOpen}
-          onClose={() => setCreateOfflineOpen(false)}
-          onSuccess={() => setCreateOfflineOpen(false)}
+          onClose={() => { setCreateOfflineOpen(false); setCreateOfflinePrefill(null); }}
+          onSuccess={() => { setCreateOfflineOpen(false); setCreateOfflinePrefill(null); }}
+          initialCustomerName={createOfflinePrefill?.customerName}
           products={productsForOfflineOrder}
         />
       )}
@@ -754,10 +760,13 @@ export function CSDashboardPage({
             </table>
           </div>
 
-          {/* Mobile */}
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800 overflow-auto flex-1 min-h-0">
+          {/* Mobile — cards */}
+          <div className="md:hidden overflow-auto flex-1 min-h-0 p-3 space-y-3">
             {unassignedOrders.map((order: CSOrder) => (
-              <div key={order.id} className="p-4 space-y-3">
+              <div
+                key={order.id}
+                className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 shadow-sm space-y-3"
+              >
                 <div className="flex items-center justify-between">
                   <Link
                     to={`/admin/orders/${order.id}`}
@@ -769,6 +778,10 @@ export function CSDashboardPage({
                     {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                   </span>
                 </div>
+                <p className="text-xs font-mono text-surface-700 dark:text-surface-300">{order.customerPhoneDisplay}</p>
+                <p className="text-xs text-surface-600 dark:text-surface-400">
+                  {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </p>
                 <div className="flex items-center gap-2">
                   <select
                     value={assignAgent[order.id] ?? ''}
@@ -795,30 +808,27 @@ export function CSDashboardPage({
                     Assign
                   </Button>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pt-1">
                   <Link
                     to={`/admin/orders/${order.id}`}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
                   >
-                    View Order
+                    View
                   </Link>
                   <button
                     type="button"
                     onClick={() => setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName })}
                     disabled={fetcher.state === 'submitting'}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-danger-700 dark:text-danger-200 bg-danger-50 dark:bg-danger-900/40 hover:bg-danger-100 dark:hover:bg-danger-800/50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                    title="Cancel order (removes from queue; order stays in DB)"
+                    title="Cancel order"
                   >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
                     Delete
                   </button>
                 </div>
               </div>
             ))}
             {unassignedOrders.length === 0 && (
-              <div className="p-8 text-center text-surface-700 dark:text-surface-300">
+              <div className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-8 text-center text-surface-700 dark:text-surface-300">
                 No unassigned orders
               </div>
             )}
@@ -877,6 +887,17 @@ export function CSDashboardPage({
                       </td>
                       <td className="table-cell">
                         <div className="flex items-center justify-center gap-1.5">
+                          <Link
+                            to={`/admin/orders/${order.id}`}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                            title="View order"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            View
+                          </Link>
                           <button
                             type="button"
                             onClick={() => order.assignedCsId && setReassignOrder({ orderId: order.id, customerName: order.customerName, assignedCsId: order.assignedCsId })}
@@ -915,13 +936,16 @@ export function CSDashboardPage({
             </table>
           </div>
 
-          {/* Mobile */}
-          <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800 overflow-auto flex-1 min-h-0">
+          {/* Mobile — cards */}
+          <div className="md:hidden overflow-auto flex-1 min-h-0 p-3 space-y-3">
             {activeOrders.map((order: CSOrder) => {
               const agent = workloads.find((w: AgentWorkload) => w.agentId === order.assignedCsId);
               return (
-                <div key={order.id} className="p-4 space-y-3">
-                  <div className="flex items-center justify-between mb-1">
+                <div
+                  key={order.id}
+                  className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 shadow-sm space-y-3"
+                >
+                  <div className="flex items-center justify-between">
                     <span className="font-medium text-surface-900 dark:text-surface-100">{order.customerName}</span>
                     <OrderStatusBadge status={order.status} />
                   </div>
@@ -931,7 +955,16 @@ export function CSDashboardPage({
                       {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                     </span>
                   </div>
+                  <p className="text-xs text-surface-600 dark:text-surface-400">
+                    {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </p>
                   <div className="flex items-center gap-2 pt-1">
+                    <Link
+                      to={`/admin/orders/${order.id}`}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                    >
+                      View
+                    </Link>
                     <button
                       type="button"
                       onClick={() => order.assignedCsId && setReassignOrder({ orderId: order.id, customerName: order.customerName, assignedCsId: order.assignedCsId })}
@@ -951,7 +984,7 @@ export function CSDashboardPage({
               );
             })}
             {activeOrders.length === 0 && (
-              <div className="p-8 text-center text-surface-700 dark:text-surface-300">
+              <div className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-8 text-center text-surface-700 dark:text-surface-300">
                 No active orders
               </div>
             )}
@@ -1161,10 +1194,13 @@ export function CSDashboardPage({
                   </table>
                 </div>
 
-                {/* Mobile leaderboard */}
-                <div className="md:hidden divide-y divide-surface-100 dark:divide-surface-800 overflow-auto flex-1 min-h-0">
+                {/* Mobile — cards */}
+                <div className="md:hidden overflow-auto flex-1 min-h-0 p-3 space-y-3">
                   {lb.map((e: CSLeaderboardEntry, idx: number) => (
-                    <div key={e.agentId} className="p-4 space-y-2">
+                    <div
+                      key={e.agentId}
+                      className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 shadow-sm space-y-2"
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
@@ -1271,6 +1307,16 @@ export function CSDashboardPage({
                               )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
+                              <Link
+                                to={`/admin/orders/${order.id}`}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                View
+                              </Link>
                               <Link
                                 to={`/admin/orders/${order.id}`}
                                 className="btn-primary btn-sm"
@@ -1483,42 +1529,108 @@ export function CSDashboardPage({
                       </Link>
                     </div>
                   </div>
-                  <div className="flex flex-col shrink-0" style={{ height: '14rem' }}>
+                  <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                     {abandonedCarts.length > 0 ? (
-                      <table className="w-full text-sm table-fixed border-collapse">
-                        <thead>
-                          <tr className="h-10">
-                            <th className="table-header text-left">Customer</th>
-                            <th className="table-header text-left">Phone</th>
-                            <th className="table-header text-left">Product</th>
-                            <th className="table-header text-left">Campaign</th>
-                            <th className="table-header text-left">Last activity</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((c) => (
-                            <tr key={c.id} className="table-row h-10">
-                              <td className="table-cell font-medium text-surface-900 dark:text-surface-100 truncate">{c.customerName}</td>
-                              <td className="table-cell font-mono text-xs truncate">{c.customerPhoneDisplay}</td>
-                              <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
-                              <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.campaignName ?? '—'}</td>
-                              <td className="table-cell text-surface-700 dark:text-surface-300 whitespace-nowrap">
-                                {new Date(c.updatedAt).toLocaleDateString('en-NG', {
-                                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                                })}
-                              </td>
-                            </tr>
-                          ))}
-                          {rows.length < pageSize &&
-                            Array.from({ length: pageSize - rows.length }).map((_, i) => (
-                              <tr key={`empty-${i}`} className="h-10" aria-hidden="true">
-                                <td colSpan={5} className="table-cell border-b border-transparent" />
+                      <>
+                        {/* Desktop — table */}
+                        <div className="hidden md:block overflow-auto flex-1 min-h-0" style={{ minHeight: '14rem' }}>
+                          <table className="w-full text-sm table-fixed border-collapse">
+                            <thead>
+                              <tr className="h-10">
+                                <th className="table-header text-left">Customer</th>
+                                <th className="table-header text-left">Phone</th>
+                                <th className="table-header text-left">Product</th>
+                                <th className="table-header text-left">Campaign</th>
+                                <th className="table-header text-left">Last activity</th>
+                                <th className="table-header text-center w-32">Actions</th>
                               </tr>
-                            ))}
-                        </tbody>
-                      </table>
+                            </thead>
+                            <tbody>
+                              {rows.map((c) => (
+                                <tr key={c.id} className="table-row h-10">
+                                  <td className="table-cell font-medium text-surface-900 dark:text-surface-100 truncate">{c.customerName}</td>
+                                  <td className="table-cell font-mono text-xs truncate">{c.customerPhoneDisplay}</td>
+                                  <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.productName ?? c.id.slice(0, 8) + '...'}</td>
+                                  <td className="table-cell text-surface-800 dark:text-surface-200 truncate">{c.campaignName ?? '—'}</td>
+                                  <td className="table-cell text-surface-700 dark:text-surface-300 whitespace-nowrap">
+                                    {new Date(c.updatedAt).toLocaleDateString('en-NG', {
+                                      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                                    })}
+                                  </td>
+                                  <td className="table-cell text-center">
+                                    <div className="inline-flex items-center gap-1.5 flex-wrap justify-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => setViewCartModal(c)}
+                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                                        title="View cart details"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        </svg>
+                                        View
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => { setCreateOfflinePrefill({ customerName: c.customerName }); setCreateOfflineOpen(true); }}
+                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-success-700 dark:text-success-200 bg-success-50 dark:bg-success-900/40 hover:bg-success-100 dark:hover:bg-success-800/50 transition-colors"
+                                        title="Create offline order for this customer"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                                        </svg>
+                                        Create order
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                              {rows.length < pageSize &&
+                                Array.from({ length: pageSize - rows.length }).map((_, i) => (
+                                  <tr key={`empty-${i}`} className="h-10" aria-hidden="true">
+                                    <td colSpan={6} className="table-cell border-b border-transparent" />
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {/* Mobile — cards */}
+                        <div className="md:hidden overflow-auto flex-1 min-h-0 p-3 space-y-3">
+                          {rows.map((c) => (
+                            <div
+                              key={c.id}
+                              className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 shadow-sm space-y-2"
+                            >
+                              <p className="font-medium text-surface-900 dark:text-surface-100">{c.customerName}</p>
+                              <p className="text-xs font-mono text-surface-700 dark:text-surface-300">{c.customerPhoneDisplay}</p>
+                              <p className="text-xs text-surface-800 dark:text-surface-200">{c.productName ?? '—'}</p>
+                              <p className="text-xs text-surface-600 dark:text-surface-400">{c.campaignName ?? '—'}</p>
+                              <p className="text-xs text-surface-600 dark:text-surface-400">
+                                {new Date(c.updatedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                              <div className="flex items-center gap-2 pt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setViewCartModal(c)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                                >
+                                  View
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setCreateOfflinePrefill({ customerName: c.customerName }); setCreateOfflineOpen(true); }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-success-700 dark:text-success-200 bg-success-50 dark:bg-success-900/40 hover:bg-success-100 dark:hover:bg-success-800/50 transition-colors"
+                                >
+                                  Create order
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
                     ) : (
-                      <div className="flex-1 flex items-center justify-center">
+                      <div className="flex-1 flex items-center justify-center p-8">
                         <p className="text-sm text-surface-700 dark:text-surface-300">No abandoned carts in the last 24h</p>
                       </div>
                     )}
@@ -1544,10 +1656,63 @@ export function CSDashboardPage({
         </div>
       )}
 
+      {/* ── View cart (Cart Abandonment) modal ───────────────── */}
+      {viewCartModal && (
+        <Modal open onClose={() => setViewCartModal(null)} maxWidth="max-w-md" role="dialog" aria-labelledby="view-cart-title" contentClassName="p-6">
+            <h3 id="view-cart-title" className="text-lg font-semibold text-surface-900 dark:text-white mb-4">
+              Abandoned cart details
+            </h3>
+            <dl className="space-y-3 text-sm">
+              <div>
+                <dt className="text-surface-600 dark:text-surface-400 font-medium">Customer</dt>
+                <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{viewCartModal.customerName}</dd>
+              </div>
+              <div>
+                <dt className="text-surface-600 dark:text-surface-400 font-medium">Phone</dt>
+                <dd className="font-mono text-surface-900 dark:text-surface-100 mt-0.5">{viewCartModal.customerPhoneDisplay}</dd>
+              </div>
+              <div>
+                <dt className="text-surface-600 dark:text-surface-400 font-medium">Product</dt>
+                <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{viewCartModal.productName ?? '—'}</dd>
+              </div>
+              {viewCartModal.offerLabel && (
+                <div>
+                  <dt className="text-surface-600 dark:text-surface-400 font-medium">Offer</dt>
+                  <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{viewCartModal.offerLabel}</dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-surface-600 dark:text-surface-400 font-medium">Campaign</dt>
+                <dd className="text-surface-900 dark:text-surface-100 mt-0.5">{viewCartModal.campaignName ?? '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-surface-600 dark:text-surface-400 font-medium">Last activity</dt>
+                <dd className="text-surface-900 dark:text-surface-100 mt-0.5">
+                  {new Date(viewCartModal.updatedAt).toLocaleString('en-NG', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                </dd>
+              </div>
+            </dl>
+            <div className="flex flex-wrap gap-2 mt-6">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => { setViewCartModal(null); setCreateOfflinePrefill({ customerName: viewCartModal.customerName }); setCreateOfflineOpen(true); }}
+              >
+                Create order
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setViewCartModal(null)}>
+                Close
+              </Button>
+            </div>
+        </Modal>
+      )}
+
       {/* ── Reassign order modal ───────────────── */}
       {reassignOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-md w-full p-6">
+        <Modal open onClose={() => { setReassignOrder(null); setReassignToAgentId(''); }} maxWidth="max-w-md" contentClassName="p-6">
             <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">
               Reassign order
             </h3>
@@ -1595,8 +1760,7 @@ export function CSDashboardPage({
                 Reassign
               </Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Performance Quick Stats moved into top Overview card */}
@@ -1630,17 +1794,7 @@ export function CSDashboardPage({
 
       {/* View all Agent Workloads modal — 20 per page, Prev/Next */}
       {viewAllAgentsOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-          onClick={() => setViewAllAgentsOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="view-all-agents-title"
-        >
-          <div
-            className="bg-white dark:bg-surface-900 rounded-xl shadow-xl max-w-4xl w-full max-h-[90dvh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Modal open onClose={() => setViewAllAgentsOpen(false)} maxWidth="max-w-4xl" role="dialog" aria-labelledby="view-all-agents-title" contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
               <h2 id="view-all-agents-title" className="text-lg font-semibold text-surface-900 dark:text-white">
                 Agent Workloads
@@ -1710,8 +1864,7 @@ export function CSDashboardPage({
                 );
               })()}
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

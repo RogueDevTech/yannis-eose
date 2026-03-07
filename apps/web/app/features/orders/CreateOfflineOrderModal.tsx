@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { useFetcherToast } from '~/components/ui/toast';
 
@@ -15,6 +16,8 @@ interface CreateOfflineOrderModalProps {
   onClose: () => void;
   onSuccess?: (orderId: string) => void;
   products: ProductOption[];
+  /** Prefill customer name when opening from Cart Abandonment */
+  initialCustomerName?: string;
 }
 
 const defaultItem = { productId: '', quantity: 1, unitPrice: '', offerLabel: '' };
@@ -24,6 +27,7 @@ export function CreateOfflineOrderModal({
   onClose,
   onSuccess,
   products,
+  initialCustomerName,
 }: CreateOfflineOrderModalProps) {
   const fetcher = useFetcher();
   const [customerName, setCustomerName] = useState('');
@@ -51,6 +55,12 @@ export function CreateOfflineOrderModal({
       setItems([{ ...defaultItem }]);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (open && initialCustomerName?.trim()) {
+      setCustomerName(initialCustomerName.trim());
+    }
+  }, [open, initialCustomerName]);
 
   useEffect(() => {
     if (fetcher.state === 'idle' && fetcher.data) {
@@ -145,14 +155,15 @@ export function CreateOfflineOrderModal({
   const isSubmitting = fetcher.state !== 'idle';
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-      aria-modal="true"
+    <Modal
+      open
+      onClose={onClose}
+      maxWidth="max-w-2xl"
       role="dialog"
       aria-labelledby="create-offline-order-title"
+      contentClassName="p-0 flex flex-col overflow-hidden min-h-0 border border-surface-200 dark:border-surface-700"
     >
-      <div className="card w-full max-w-2xl max-h-[90dvh] overflow-hidden flex flex-col shadow-xl bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700">
-        <div className="flex items-center justify-between border-b border-surface-200 dark:border-surface-700 pb-3 shrink-0">
+        <div className="flex items-center justify-between border-b border-surface-200 dark:border-surface-700 pb-3 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
           <h2 id="create-offline-order-title" className="text-lg font-semibold text-surface-900 dark:text-white">
             Create offline order
           </h2>
@@ -384,7 +395,7 @@ export function CreateOfflineOrderModal({
           </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-surface-200 dark:border-surface-700 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-surface-200 dark:border-surface-700 shrink-0 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
@@ -393,7 +404,6 @@ export function CreateOfflineOrderModal({
             </Button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

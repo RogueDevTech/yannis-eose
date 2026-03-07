@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from '@remix-run/react';
+import { Modal } from '~/components/ui/modal';
 
 interface SearchResult {
   id: string;
@@ -165,14 +166,8 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
   if (!isOpen) return null;
 
   return (
-    <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Modal */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-        <div className="rounded-xl bg-white dark:bg-surface-800 shadow-2xl border border-surface-200 dark:border-surface-700 overflow-hidden flex flex-col w-full max-w-lg max-h-[85dvh] animate-fade-in" onClick={(e) => e.stopPropagation()}>
-          {/* Search input */}
+    <Modal open onClose={onClose} maxWidth="max-w-lg" backdropBlur contentClassName="p-0 max-h-[85dvh] flex flex-col overflow-hidden border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">
+      {/* Search input */}
           <div className="flex items-center gap-3 px-4 border-b border-surface-100 dark:border-surface-700 shrink-0">
             <svg className="w-5 h-5 text-surface-700 flex-shrink-0 dark:text-surface-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
@@ -266,9 +261,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
               Close
             </span>
           </div>
-        </div>
-      </div>
-    </>
+    </Modal>
   );
 }
 

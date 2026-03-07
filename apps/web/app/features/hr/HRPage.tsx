@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { exportToCsv } from '~/lib/csv-export';
@@ -7,6 +7,7 @@ import { AmountInput } from '~/components/ui/amount-input';
 import { formatNaira } from '~/lib/format-amount';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -43,8 +44,17 @@ const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
 
 export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, payoutSummary, users, settlementConfig, currentPeriod }: HRStreamData) {
   const fetcher = useFetcher();
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<'payouts' | 'plans' | 'adjustments' | 'settlement'>('payouts');
   const [showAddPlan, setShowAddPlan] = useState(false);
+
+  // Deep-link: ?open=plan opens Plans tab and the New Commission Plan form
+  useEffect(() => {
+    if (searchParams.get('open') === 'plan') {
+      setActiveTab('plans');
+      setShowAddPlan(true);
+    }
+  }, [searchParams]);
   const [showGenerate, setShowGenerate] = useState(false);
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
@@ -638,13 +648,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
 
       {/* Plan Detail Modal */}
       {viewPlan && (
-        <>
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setViewPlan(null)} aria-hidden />
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setViewPlan(null)}>
-            <div
-              className="bg-white dark:bg-surface-900 rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-lg max-h-[90dvh] overflow-y-auto flex flex-col gap-5 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5"
-              onClick={(e) => e.stopPropagation()}
-            >
+        <Modal open onClose={() => setViewPlan(null)} maxWidth="max-w-lg" backdropBlur contentClassName="flex flex-col gap-5 p-5">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-surface-900 dark:text-white">{viewPlan.planName}</h3>
@@ -810,9 +814,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
               <Button variant="secondary" size="sm" className="w-full" onClick={() => setViewPlan(null)}>
                 Close
               </Button>
-            </div>
-          </div>
-        </>
+        </Modal>
       )}
 
       {/* Adjustments Tab — deferred data */}

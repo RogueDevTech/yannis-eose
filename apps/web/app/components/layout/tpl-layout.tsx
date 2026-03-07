@@ -4,6 +4,7 @@ import { Button } from '~/components/ui/button';
 import { RouteLoader } from '~/components/ui/route-loader';
 import { BottomNav, type BottomNavItem } from './bottom-nav';
 import { SidebarIcons } from './sidebar';
+import { usePwaInstall } from '~/hooks/usePwaInstall';
 
 const TPL_NAV = [
   { label: 'Dashboard', href: '/tpl', icon: SidebarIcons.dashboard },
@@ -45,6 +46,7 @@ export function TplLayout({
   const [unreadCount, setUnreadCount] = useState(0);
   const [resolvedDark, setResolvedDark] = useState(darkMode);
   const menuRef = useRef<HTMLDivElement>(null);
+  const { canInstall, install } = usePwaInstall();
 
   const isNavigatingWithinTpl =
     navigation.state !== 'idle' &&
@@ -140,8 +142,20 @@ export function TplLayout({
             </NavLink>
           </div>
 
-          {/* Right: notifications, dark mode, user (same style as admin) */}
+          {/* Right: install app + notifications, dark mode, user (same style as admin) */}
           <div className="flex items-center gap-2 lg:gap-3 flex-shrink-0">
+            {canInstall && (
+              <button
+                type="button"
+                onClick={install}
+                className="p-1.5 rounded-lg text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
+                title="Install App"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+              </button>
+            )}
             <NavLink
               to="/tpl/notifications"
               prefetch="intent"

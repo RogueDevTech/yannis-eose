@@ -90,8 +90,11 @@ export const createStaffSchema = z.object({
   commissionPlanId: z.string().uuid().optional(),
   compensation: userCompensationSchema.optional(),
 
-  // Contact
-  phone: z.string().min(7).max(20).optional(),
+  // Contact — Nigerian phone: 0XXXXXXXXXX or +234XXXXXXXXXX
+  phone: z.string().regex(
+    /^(?:0[789]\d{9}|\+234[789]\d{9})$/,
+    'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)',
+  ).optional(),
 });
 
 export type CreateStaffInput = z.infer<typeof createStaffSchema>;
@@ -108,7 +111,10 @@ export const updateStaffSchema = z.object({
   capacity: z.number().int().min(1).max(100).optional(),
   logisticsLocationId: z.string().uuid().nullable().optional(),
   status: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
-  phone: z.string().min(7).max(20).nullable().optional(),
+  phone: z.string().regex(
+    /^(?:0[789]\d{9}|\+234[789]\d{9})$/,
+    'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)',
+  ).nullable().optional(),
   visibleOrderStatuses: z.array(visibleOrderStatusSchema).nullable().optional(),
   restrictProductAccess: z.boolean().optional(),
   productIds: z.array(z.string().uuid()).optional(),
