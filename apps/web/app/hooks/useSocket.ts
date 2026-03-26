@@ -211,7 +211,7 @@ export function usePageRefreshOnEvent(events: string[]): void {
 }
 
 /**
- * CS Agent — broadcasts current UI state to the server so supervisors can mirror it.
+ * CS Agent — broadcasts current UI state for Team Live View.
  * Call this in route components for CS agents. Only emits if the socket is connected.
  */
 export function useAgentStateBroadcast(state: {
@@ -226,84 +226,6 @@ export function useAgentStateBroadcast(state: {
     const socket = getSocket();
     socket.emit('agent:state_update', state);
   }, [isConnected, state.currentRoute, state.currentOrderId, state.currentPanel]);
-}
-
-/**
- * Supervisor Mirror — watch a specific CS agent's live state.
- * Returns the agent's current state as it updates in real-time.
- */
-export function useSupervisorMirror(agentId: string | null): {
-  agentState: { currentRoute: string; currentOrderId: string | null; currentPanel: string | null; lastActionAt: string } | null;
-  isWatching: boolean;
-  startWatching: () => void;
-  stopWatching: () => void;
-  isObserving: boolean; // true on agent's side when supervisor is watching
-} {
-  type AgentState = { currentRoute: string; currentOrderId: string | null; currentPanel: string | null; lastActionAt: string };
-  const [agentState, setAgentState] = useState<AgentState | null>(null);
-  const [isWatching, setIsWatching] = useState(false);
-  const { isConnected } = useSocket();
-
-  useEffect(() => {
-    if (!isWatching || !agentId || !isConnected) return;
-    const socket = getSocket();
-    const listener = (data: AgentState) => setAgentState(data);
-    socket.on('agent:state_update', listener);
-    return () => { socket.off('agent:state_update', listener); };
-  }, [isWatching, agentId, isConnected]);
-
-  const startWatching = useCallback(() => {
-    if (!agentId || !isConnected) return;
-    getSocket().emit('supervisor:watch_request', { agentId });
-    setIsWatching(true);
-  }, [agentId, isConnected]);
-
-  const stopWatching = useCallback(() => {
-    if (!agentId) return;
-    getSocket().emit('supervisor:unwatch', { agentId });
-    setIsWatching(false);
-    setAgentState(null);
-  }, [agentId]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (isWatching && agentId) {
-        getSocket().emit('supervisor:unwatch', { agentId });
-      }
-    };
-  }, []);
-
-  return { agentState, isWatching, startWatching, stopWatching, isObserving: false };
-}
-
-/**
- * CS Agent side — listens for supervisor:watching event.
- * Returns true when a supervisor is currently observing this agent.
- */
-export function useBeingObserved(): { isBeingObserved: boolean; observerName: string | null } {
-  const [isBeingObserved, setIsBeingObserved] = useState(false);
-  const [observerName, setObserverName] = useState<string | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useSocketEvent<{ supervisorName: string }>('supervisor:watching', (data) => {
-    setIsBeingObserved(true);
-    setObserverName(data.supervisorName);
-    // Auto-clear after 30s unless refreshed
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      setIsBeingObserved(false);
-      setObserverName(null);
-    }, 30000);
-  });
-
-  useSocketEvent('supervisor:stopped_watching', () => {
-    setIsBeingObserved(false);
-    setObserverName(null);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-  });
-
-  return { isBeingObserved, observerName };
 }
 
 /**

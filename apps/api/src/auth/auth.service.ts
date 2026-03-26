@@ -16,9 +16,8 @@ import { db as schema } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { SessionStoreService } from './session-store.service';
 
-const SESSION_PREFIX = 'session:';
-const USER_SESSIONS_PREFIX = 'user_sessions:';
 const RATE_LIMIT_PREFIX = 'login_rate:';
 const RESET_TOKEN_PREFIX = 'pwd_reset:';
 const SALT_ROUNDS = 12;
@@ -35,6 +34,7 @@ export class AuthService {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly notifications: NotificationsService,
+    private readonly sessionStore: SessionStoreService,
   ) {
     this.sessionTtl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10); // 24 hours
     this.maxLoginAttempts = 5;
@@ -123,15 +123,8 @@ export class AuthService {
       currentBranchId,
     };
 
-    // Store session in Redis with TTL
-    await this.redis.setex(
-      `${SESSION_PREFIX}${token}`,
-      this.sessionTtl,
-      JSON.stringify(sessionUser),
-    );
-
-    // Track token in user's session set (for session kill)
-    await this.redis.sadd(`${USER_SESSIONS_PREFIX}${user.id}`, token);
+    // Persist session in DB, then cache in Redis when available.
+    await this.sessionStore.createSession(token, sessionUser, this.sessionTtl);
 
     return { token, user: sessionUser };
   }
@@ -140,12 +133,7 @@ export class AuthService {
    * Destroy a specific session — instant revocation.
    */
   async logout(sessionToken: string): Promise<void> {
-    const sessionData = await this.redis.get(`${SESSION_PREFIX}${sessionToken}`);
-    if (sessionData) {
-      const user: SessionUser = JSON.parse(sessionData);
-      await this.redis.srem(`${USER_SESSIONS_PREFIX}${user.id}`, sessionToken);
-    }
-    await this.redis.del(`${SESSION_PREFIX}${sessionToken}`);
+    await this.sessionStore.deleteSession(sessionToken);
   }
 
   /**
@@ -153,17 +141,7 @@ export class AuthService {
    * Instant deactivation — all their active sessions become invalid.
    */
   async killUserSessions(targetUserId: string): Promise<number> {
-    const tokens = await this.redis.smembers(`${USER_SESSIONS_PREFIX}${targetUserId}`);
-    if (tokens.length === 0) return 0;
-
-    // Delete all session keys
-    const sessionKeys = tokens.map((t) => `${SESSION_PREFIX}${t}`);
-    await this.redis.del(...sessionKeys);
-
-    // Clear the user's session set
-    await this.redis.del(`${USER_SESSIONS_PREFIX}${targetUserId}`);
-
-    return tokens.length;
+    return this.sessionStore.deleteAllUserSessions(targetUserId);
   }
 
   /**
@@ -284,13 +262,12 @@ export class AuthService {
    * Updates Redis session — takes effect on next request.
    */
   async switchBranch(sessionToken: string, branchId: string): Promise<{ currentBranchId: string }> {
-    const sessionKey = `${SESSION_PREFIX}${sessionToken}`;
-    const sessionData = await this.redis.get(sessionKey);
+    const sessionData = await this.sessionStore.getSession(sessionToken);
     if (!sessionData) {
       throw new UnauthorizedException('Session not found');
     }
 
-    const user: SessionUser = JSON.parse(sessionData);
+    const user: SessionUser = sessionData;
 
     // SuperAdmin can switch to any branch; others must be a member
     if (user.role !== 'SUPER_ADMIN') {
@@ -308,9 +285,7 @@ export class AuthService {
     }
 
     const updated: SessionUser = { ...user, currentBranchId: branchId };
-    // Preserve remaining TTL
-    const ttl = await this.redis.ttl(sessionKey);
-    await this.redis.setex(sessionKey, ttl > 0 ? ttl : this.sessionTtl, JSON.stringify(updated));
+    await this.sessionStore.updateSession(sessionToken, updated, this.sessionTtl);
 
     return { currentBranchId: branchId };
   }

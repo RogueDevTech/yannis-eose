@@ -2,20 +2,16 @@ import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayConnection,
-  OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Inject } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
-import type Redis from 'ioredis';
-import { REDIS } from '../database/database.module';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-
-/** Redis key prefix for last-known agent state (for initial mirror load). */
-const AGENT_STATE_KEY = (agentId: string) => `agent_state:${agentId}`;
-const AGENT_STATE_TTL = 3600; // 1 hour
+import { SessionStoreService } from '../auth/session-store.service';
+import { RedisHealthService } from '../database/redis-health.service';
 
 interface AgentStatePayload {
   agentId: string;
@@ -55,11 +51,27 @@ function getCorsOrigins(): string | string[] {
     credentials: true,
   },
 })
-export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
   @WebSocketServer()
   server!: Server;
 
-  constructor(@Inject(REDIS) private readonly redis: Redis) {}
+  private readonly logger = new Logger(EventsGateway.name);
+
+  constructor(
+    private readonly sessionStore: SessionStoreService,
+    private readonly redisHealth: RedisHealthService,
+  ) {}
+
+  afterInit(): void {
+    this.redisHealth.onStateChange((state) => {
+      this.logger.warn(`realtime_mode_changed redis_state=${state}`);
+      this.server.emit('realtime:mode_changed', {
+        mode: state === 'healthy' ? 'clustered' : 'degraded',
+        redisState: state,
+        timestamp: new Date().toISOString(),
+      });
+    });
+  }
 
   async handleConnection(client: Socket) {
     try {
@@ -81,20 +93,9 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  handleDisconnect(client: Socket) {
-    const user = client.data.user as SessionUser | undefined;
-    if (user?.role === 'CS_AGENT') {
-      // Notify supervisors watching this agent that they disconnected
-      this.server.to(`mirror:${user.id}`).emit('agent:disconnected', {
-        agentId: user.id,
-        timestamp: new Date().toISOString(),
-      });
-    }
-  }
-
   /**
    * CS agent broadcasts their current UI state.
-   * Server re-emits to supervisor mirror room and stores in Redis for late-joiners.
+   * Server broadcasts to cs-all for Team Live View.
    */
   @SubscribeMessage('agent:state_update')
   async handleAgentStateUpdate(
@@ -112,68 +113,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       lastActionAt: new Date().toISOString(),
     };
 
-    // Store last known state in Redis (for initial mirror load)
-    await this.redis.setex(AGENT_STATE_KEY(user.id), AGENT_STATE_TTL, JSON.stringify(state));
-
-    // Re-emit to all supervisors watching this agent's mirror room
-    this.server.to(`mirror:${user.id}`).emit('agent:state_update', state);
-
-    // Also broadcast to cs-all room (for Team Live View panel)
+    // Broadcast to cs-all room (Team Live View panel)
     this.server.to('cs-all').emit('agent:state_update', state);
-  }
-
-  /**
-   * Supervisor requests to watch a CS agent's mirror.
-   * Server joins the supervisor to the agent's mirror room and notifies the agent.
-   */
-  @SubscribeMessage('supervisor:watch_request')
-  async handleWatchRequest(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { agentId: string },
-  ) {
-    const user = client.data.user as SessionUser | undefined;
-    if (!user || !['HEAD_OF_CS', 'SUPER_ADMIN'].includes(user.role)) return;
-
-    const agentId = payload.agentId;
-    const mirrorRoom = `mirror:${agentId}`;
-
-    // Join supervisor to the mirror room
-    await client.join(mirrorRoom);
-
-    // Notify the agent they are being observed
-    this.server.to(`cs-${agentId}`).emit('supervisor:watching', {
-      supervisorId: user.id,
-      supervisorName: user.name,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Send last known state to the joining supervisor (for immediate render)
-    const lastState = await this.redis.get(AGENT_STATE_KEY(agentId));
-    if (lastState) {
-      client.emit('agent:state_update', JSON.parse(lastState));
-    }
-  }
-
-  /**
-   * Supervisor stops watching a CS agent.
-   */
-  @SubscribeMessage('supervisor:unwatch')
-  async handleUnwatch(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { agentId: string },
-  ) {
-    const user = client.data.user as SessionUser | undefined;
-    if (!user) return;
-
-    await client.leave(`mirror:${payload.agentId}`);
-
-    // Notify agent the supervisor stopped watching (only if no one else is watching)
-    const room = this.server.sockets.adapter.rooms.get(`mirror:${payload.agentId}`);
-    if (!room || room.size === 0) {
-      this.server.to(`cs-${payload.agentId}`).emit('supervisor:stopped_watching', {
-        timestamp: new Date().toISOString(),
-      });
-    }
   }
 
   /**
@@ -189,10 +130,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const token = match.split('=')[1]?.trim();
     if (!token) return null;
 
-    const sessionData = await this.redis.get(`session:${token}`);
-    if (!sessionData) return null;
-
-    return JSON.parse(sessionData) as SessionUser;
+    return this.sessionStore.getSession(token);
   }
 
   /**

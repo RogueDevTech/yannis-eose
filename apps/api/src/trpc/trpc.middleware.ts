@@ -1,18 +1,17 @@
 import { Injectable, Inject, type NestMiddleware } from '@nestjs/common';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import type { Request, Response, NextFunction } from 'express';
-import type Redis from 'ioredis';
 import { appRouter } from './routers';
 import { createContext } from './context';
-import { REDIS } from '../database/database.module';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { PermissionsService } from '../permissions/permissions.service';
 import { canViewAllBranches } from '../common/authz';
+import { SessionStoreService } from '../auth/session-store.service';
 
 @Injectable()
 export class TrpcMiddleware implements NestMiddleware {
   constructor(
-    @Inject(REDIS) private readonly redis: Redis,
+    @Inject(SessionStoreService) private readonly sessionStore: SessionStoreService,
     private readonly permissionsService: PermissionsService,
   ) {}
 
@@ -89,10 +88,8 @@ export class TrpcMiddleware implements NestMiddleware {
     const token = match.split('=')[1]?.trim();
     if (!token) return null;
 
-    const sessionData = await this.redis.get(`session:${token}`);
-    if (!sessionData) return null;
-
-    const user: SessionUser = JSON.parse(sessionData);
+    const user = await this.sessionStore.getSession(token);
+    if (!user) return null;
     if (user.role !== 'SUPER_ADMIN') {
       const perms = await this.permissionsService.getEffectivePermissions(user.id, user.role);
       user.permissions = Array.from(perms);
@@ -115,7 +112,7 @@ export class TrpcMiddleware implements NestMiddleware {
 
     // Refresh session TTL (sliding expiry)
     const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
-    await this.redis.expire(`session:${token}`, ttl);
+    await this.sessionStore.touchSession(token, ttl);
 
     return {
       userId: user.id,

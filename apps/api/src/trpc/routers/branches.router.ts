@@ -4,18 +4,18 @@ import { eq, and, inArray, count } from 'drizzle-orm';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type Redis from 'ioredis';
+import type { SessionStoreService } from '../../auth/session-store.service';
 
 // Service instances injected via factory pattern
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
-let redisInstance: Redis | null = null;
+let sessionStoreInstance: SessionStoreService | null = null;
 
 export function setBranchesDb(db: PostgresJsDatabase<typeof schema>) {
   drizzleInstance = db;
 }
 
-export function setBranchesRedis(redis: Redis) {
-  redisInstance = redis;
+export function setBranchesSessionStore(sessionStore: SessionStoreService) {
+  sessionStoreInstance = sessionStore;
 }
 
 function getDb(): PostgresJsDatabase<typeof schema> {
@@ -23,12 +23,10 @@ function getDb(): PostgresJsDatabase<typeof schema> {
   return drizzleInstance;
 }
 
-function getRedis(): Redis {
-  if (!redisInstance) throw new Error('Branches Redis not initialized');
-  return redisInstance;
+function getSessionStore(): SessionStoreService {
+  if (!sessionStoreInstance) throw new Error('Branches SessionStore not initialized');
+  return sessionStoreInstance;
 }
-
-const SESSION_PREFIX = 'session:';
 
 const CS_OVERVIEW_ROLES = new Set(['CS_AGENT', 'HEAD_OF_CS']);
 const MARKETING_OVERVIEW_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
@@ -287,7 +285,7 @@ export const branchesRouter = router({
     .input(z.object({ branchId: z.string().uuid().nullable() }))
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
-      const redis = getRedis();
+      const sessionStore = getSessionStore();
 
       // null = "All Branches" — only SuperAdmin may clear branch context
       if (input.branchId === null) {
@@ -313,13 +311,14 @@ export const branchesRouter = router({
       // Update session cookie stored in Redis
       const sessionToken = ctx.sessionToken as string | undefined;
       if (sessionToken) {
-        const sessionKey = `${SESSION_PREFIX}${sessionToken}`;
-        const sessionData = await redis.get(sessionKey);
-        if (sessionData) {
-          const parsed = JSON.parse(sessionData) as Record<string, unknown>;
-          const updated = { ...parsed, currentBranchId: input.branchId ?? null };
-          const ttl = await redis.ttl(sessionKey);
-          await redis.setex(sessionKey, ttl > 0 ? ttl : 86400, JSON.stringify(updated));
+        const currentSession = await sessionStore.getSession(sessionToken);
+        if (currentSession) {
+          const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
+          await sessionStore.updateSession(
+            sessionToken,
+            { ...currentSession, currentBranchId: input.branchId ?? null },
+            ttl,
+          );
         }
       }
 
