@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type Redis from 'ioredis';
-import { REDIS } from './database.module';
+import { REDIS } from './database.tokens';
 
 export type RedisHealthState = 'healthy' | 'degraded' | 'recovering';
 type RedisHealthListener = (state: RedisHealthState) => void;

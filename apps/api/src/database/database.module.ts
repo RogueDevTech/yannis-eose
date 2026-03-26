@@ -4,10 +4,9 @@ import postgres from 'postgres';
 import Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
 import { RedisHealthService } from './redis-health.service';
+import { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
 
-export const DRIZZLE = Symbol('DRIZZLE');
-export const PG_CLIENT = Symbol('PG_CLIENT');
-export const REDIS = Symbol('REDIS');
+export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
 
 @Global()
 @Module({
