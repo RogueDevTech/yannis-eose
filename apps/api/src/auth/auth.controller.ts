@@ -18,6 +18,37 @@ import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
 
+/** When web (e.g. yannis.*) and API (e.g. api-yannis.*) differ, set e.g. `.roguedevtech.com` so Socket.io receives `Cookie`. */
+function sessionCookieOpts(maxAgeMs: number): {
+  httpOnly: true;
+  secure: boolean;
+  sameSite: 'strict' | 'lax';
+  maxAge: number;
+  path: string;
+  domain?: string;
+} {
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  const domain = process.env['SESSION_COOKIE_DOMAIN']?.trim();
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    maxAge: maxAgeMs,
+    path: '/',
+    ...(domain ? { domain } : {}),
+  };
+}
+
+function sessionClearCookieOpts(): { path: string; domain?: string; secure?: boolean; sameSite?: 'strict' | 'lax' } {
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  const domain = process.env['SESSION_COOKIE_DOMAIN']?.trim();
+  return {
+    path: '/',
+    ...(domain ? { domain } : {}),
+    ...(isProduction ? { secure: true, sameSite: 'strict' as const } : {}),
+  };
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -127,15 +158,8 @@ export class AuthController {
       clientIp,
     );
 
-    // Set HTTP-only secure cookie
-    const isProduction = process.env['NODE_ENV'] === 'production';
-    res.cookie('yannis_session', token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'strict' : 'lax',
-      maxAge: parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10) * 1000,
-      path: '/',
-    });
+    const maxAge = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10) * 1000;
+    res.cookie('yannis_session', token, sessionCookieOpts(maxAge));
 
     return {
       message: 'Login successful',
@@ -157,7 +181,7 @@ export class AuthController {
       await this.authService.logout(sessionToken);
     }
 
-    res.clearCookie('yannis_session', { path: '/' });
+    res.clearCookie('yannis_session', sessionClearCookieOpts());
     return { message: 'Logged out successfully' };
   }
 

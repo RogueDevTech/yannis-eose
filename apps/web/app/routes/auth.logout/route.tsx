@@ -8,17 +8,26 @@ import { apiRequest, getSessionCookie } from '~/lib/api.server';
  */
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
+  const headers = new Headers();
 
   if (cookie) {
-    await apiRequest('/auth/logout', { method: 'POST', cookie });
+    const res = await apiRequest('/auth/logout', { method: 'POST', cookie });
+    if (res.setCookie) {
+      headers.set('Set-Cookie', res.setCookie);
+    }
   }
 
-  // Clear the cookie on the client side and redirect to login
-  return redirect('/auth', {
-    headers: {
-      'Set-Cookie': 'yannis_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly',
-    },
-  });
+  if (!headers.has('Set-Cookie')) {
+    const domain = process.env['SESSION_COOKIE_DOMAIN']?.trim();
+    const domainPart = domain ? `; Domain=${domain}` : '';
+    const securePart = process.env['NODE_ENV'] === 'production' ? '; Secure; SameSite=Strict' : '; SameSite=Lax';
+    headers.set(
+      'Set-Cookie',
+      `yannis_session=; Path=/${domainPart}; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly${securePart}`,
+    );
+  }
+
+  return redirect('/auth', { headers });
 }
 
 /**
