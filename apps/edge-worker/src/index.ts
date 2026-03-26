@@ -147,7 +147,7 @@ function getApiTimeoutMs(apiUrl: string): number {
   }
   return CIRCUIT_BREAKER_TIMEOUT_MS;
 }
-const CAMPAIGN_CACHE_TTL = 300; // 5 min cache for campaign configs
+const CAMPAIGN_CACHE_TTL = 300; // 5 min cache for campaign configs (edge)
 
 // ── CORS Headers ───────────────────────────────────────────────
 
