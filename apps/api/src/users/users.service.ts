@@ -235,91 +235,133 @@ export class UsersService {
       }
     }
 
+    if (input.role !== 'SUPER_ADMIN') {
+      if (!input.primaryBranchId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Primary branch is required for non-SuperAdmin users',
+        });
+      }
+
+      const activeBranchRows = await this.db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(
+          and(
+            eq(schema.branches.id, input.primaryBranchId),
+            eq(schema.branches.status, 'ACTIVE'),
+          ),
+        )
+        .limit(1);
+
+      if (!activeBranchRows[0]) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Primary branch must exist and be active',
+        });
+      }
+    }
+
     // Auto-generate a secure password for the new user
     const plainPassword = this.generatePassword();
     const passwordHash = await this.authService.hashPassword(plainPassword);
 
-    // If inline compensation provided, create a commission plan first
-    let commissionPlanId = input.commissionPlanId ?? null;
-    if (input.compensation && !commissionPlanId) {
-      const comp = input.compensation;
-      const hasAnyCompensation =
-        (comp.fixedSalary && comp.fixedSalary > 0) ||
-        (comp.bonus && comp.bonus > 0) ||
-        (comp.commissionValue && comp.commissionValue > 0) ||
-        (comp.upsellCommissionValue && comp.upsellCommissionValue > 0);
+    const user = await this.db.transaction(async (tx) => {
+      // If inline compensation provided, create a commission plan first
+      let commissionPlanId = input.commissionPlanId ?? null;
+      if (input.compensation && !commissionPlanId) {
+        const comp = input.compensation;
+        const hasAnyCompensation =
+          (comp.fixedSalary && comp.fixedSalary > 0) ||
+          (comp.bonus && comp.bonus > 0) ||
+          (comp.commissionValue && comp.commissionValue > 0) ||
+          (comp.upsellCommissionValue && comp.upsellCommissionValue > 0);
 
-      if (hasAnyCompensation) {
-        const planRows = await this.db
-          .insert(schema.commissionPlans)
-          .values({
-            role: input.role,
-            planName: `${input.name} - ${input.role} Plan`,
-            rules: {
-              baseSalary: comp.fixedSalary ?? 0,
-              bonus: comp.bonus ?? 0,
-              perOrderRate: comp.commissionType === 'PERCENTAGE' ? 0 : (comp.commissionValue ?? 0),
-              perOrderPercentage: comp.commissionType === 'PERCENTAGE' ? (comp.commissionValue ?? 0) : 0,
-              commissionType: comp.commissionType ?? 'FLAT',
-              upsellCommissionType: comp.upsellCommissionType ?? 'FLAT',
-              upsellCommissionValue: comp.upsellCommissionValue ?? 0,
-              salesTargetEnabled: comp.salesTargetEnabled ?? false,
-              salesTargetPercentage: comp.salesTargetPercentage ?? 0,
-            },
-            effectiveFrom: new Date(),
-            createdBy: actor.id,
-          })
-          .returning({ id: schema.commissionPlans.id });
+        if (hasAnyCompensation) {
+          const planRows = await tx
+            .insert(schema.commissionPlans)
+            .values({
+              role: input.role,
+              planName: `${input.name} - ${input.role} Plan`,
+              rules: {
+                baseSalary: comp.fixedSalary ?? 0,
+                bonus: comp.bonus ?? 0,
+                perOrderRate: comp.commissionType === 'PERCENTAGE' ? 0 : (comp.commissionValue ?? 0),
+                perOrderPercentage: comp.commissionType === 'PERCENTAGE' ? (comp.commissionValue ?? 0) : 0,
+                commissionType: comp.commissionType ?? 'FLAT',
+                upsellCommissionType: comp.upsellCommissionType ?? 'FLAT',
+                upsellCommissionValue: comp.upsellCommissionValue ?? 0,
+                salesTargetEnabled: comp.salesTargetEnabled ?? false,
+                salesTargetPercentage: comp.salesTargetPercentage ?? 0,
+              },
+              effectiveFrom: new Date(),
+              createdBy: actor.id,
+            })
+            .returning({ id: schema.commissionPlans.id });
 
-        commissionPlanId = planRows[0]?.id ?? null;
+          commissionPlanId = planRows[0]?.id ?? null;
+        }
       }
-    }
 
-    // Insert user with all fields
-    const rows = await this.db
-      .insert(schema.users)
-      .values({
-        name: input.name,
-        email: input.email.toLowerCase(),
-        passwordHash,
-        role: input.role,
-        status: 'PENDING', // New users stay PENDING until first login (then auth sets ACTIVE)
-        capacity: input.capacity ?? 10,
-        logisticsLocationId: input.logisticsLocationId ?? null,
-        phone: input.phone ?? null,
-        visibleOrderStatuses: input.visibleOrderStatuses ?? null,
-        restrictProductAccess: input.restrictProductAccess ?? false,
-        commissionPlanId,
-      })
-      .returning({
-        id: schema.users.id,
-        name: schema.users.name,
-        email: schema.users.email,
-        role: schema.users.role,
-        status: schema.users.status,
-        capacity: schema.users.capacity,
-        logisticsLocationId: schema.users.logisticsLocationId,
-        phone: schema.users.phone,
-        createdAt: schema.users.createdAt,
-      });
+      // Insert user with all fields
+      const rows = await tx
+        .insert(schema.users)
+        .values({
+          name: input.name,
+          email: input.email.toLowerCase(),
+          passwordHash,
+          role: input.role,
+          status: 'PENDING', // New users stay PENDING until first login (then auth sets ACTIVE)
+          capacity: input.capacity ?? 10,
+          logisticsLocationId: input.logisticsLocationId ?? null,
+          primaryBranchId: input.primaryBranchId ?? null,
+          phone: input.phone ?? null,
+          visibleOrderStatuses: input.visibleOrderStatuses ?? null,
+          restrictProductAccess: input.restrictProductAccess ?? false,
+          commissionPlanId,
+        })
+        .returning({
+          id: schema.users.id,
+          name: schema.users.name,
+          email: schema.users.email,
+          role: schema.users.role,
+          status: schema.users.status,
+          capacity: schema.users.capacity,
+          logisticsLocationId: schema.users.logisticsLocationId,
+          phone: schema.users.phone,
+          createdAt: schema.users.createdAt,
+        });
 
-    const user = rows[0];
-    if (!user) {
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to create user',
-      });
-    }
+      const createdUser = rows[0];
+      if (!createdUser) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create user',
+        });
+      }
 
-    // Insert product assignments if provided
-    if (input.productIds && input.productIds.length > 0) {
-      await this.db.insert(schema.userProductAssignments).values(
-        input.productIds.map((productId) => ({
-          userId: user.id,
-          productId,
-        })),
-      );
-    }
+      if (input.primaryBranchId) {
+        await tx
+          .insert(schema.userBranches)
+          .values({
+            userId: createdUser.id,
+            branchId: input.primaryBranchId,
+            isPrimary: true,
+            roleInBranch: null,
+          });
+      }
+
+      if (input.productIds && input.productIds.length > 0) {
+        await tx.insert(schema.userProductAssignments).values(
+          input.productIds.map((productId) => ({
+            userId: createdUser.id,
+            productId,
+          })),
+        );
+      }
+
+      return createdUser;
+    });
 
     // Send invite email with login credentials (non-blocking)
     const loginUrl = process.env['APP_URL'] ?? 'http://localhost:4001';

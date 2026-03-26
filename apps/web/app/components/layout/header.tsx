@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Form, Link, useNavigate, useFetcher } from '@remix-run/react';
-import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { getNotificationLink, getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
@@ -40,7 +39,6 @@ interface HeaderProps {
   onRemoveRealtimeNotification?: (id: string) => void;
   onPruneServerKnown?: (serverIds: Set<string>) => void;
   onClearRealtimeNotifications?: () => void;
-  pwaInstall?: { canInstall: boolean; install: () => void };
   branches?: BranchInfo[];
   currentBranchId?: string | null;
 }
@@ -87,18 +85,21 @@ function SyncNotificationReadIds({ notifications, onPruneServerKnown }: { notifi
   return null;
 }
 
-export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications, pwaInstall, branches, currentBranchId }: HeaderProps) {
+export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications, branches, currentBranchId }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const notifTriggerRef = useRef<HTMLButtonElement>(null);
   const notifPanelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { displayUnreadCount, isOptimisticallyRead, markAsRead, markAllRead } = useNotificationsState();
+  const mobileBranchFetcher = useFetcher();
 
-  useSearchShortcut(() => setSearchOpen(true));
+  const canSeeAllBranches = ALL_BRANCHES_ROLES.has(user?.role ?? '');
+  const mobileCurrentBranch = branches?.find((b) => b.id === (currentBranchId ?? null)) ?? null;
+  const mobileCanSwitchBranches = !!branches && (branches.length > 1 || canSeeAllBranches);
+  const isMobileAllBranches = canSeeAllBranches && currentBranchId == null;
 
   // Close menus on outside click
   useEffect(() => {
@@ -158,6 +159,20 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
     }
   }, [markAsRead, onRemoveRealtimeNotification]);
 
+  const handleMobileBranchSwitch = useCallback((branchId: string | null) => {
+    if (!branches || mobileBranchFetcher.state !== 'idle') return;
+    if (branchId === (currentBranchId ?? null)) {
+      setUserMenuOpen(false);
+      return;
+    }
+
+    mobileBranchFetcher.submit(
+      { intent: 'switchBranch', branchId: branchId ?? '' },
+      { method: 'post', action: '/admin/branches/switch' },
+    );
+    setUserMenuOpen(false);
+  }, [branches, mobileBranchFetcher, currentBranchId]);
+
   return (
     <header
       className={`fixed top-0 right-0 z-30 h-[var(--header-height)] bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between px-4 lg:px-6 transition-all duration-300 left-0 ${
@@ -166,7 +181,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
           : 'lg:left-[var(--sidebar-width)]'
       }`}
     >
-      {/* Left: mobile menu + logo (mobile) + search */}
+      {/* Left: mobile menu + logo (mobile) */}
       <div className="flex items-center gap-3 flex-1 max-w-lg">
         {/* Mobile hamburger — before logo */}
         <button
@@ -190,30 +205,6 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
           />
         </Link>
 
-        {/* Search trigger */}
-        <button
-          type="button"
-          onClick={() => setSearchOpen(true)}
-          className="relative w-full hidden sm:flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm text-surface-800 bg-surface-50 dark:text-surface-200 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg hover:border-surface-300 dark:hover:border-surface-600 transition-colors"
-        >
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-700 dark:text-surface-200"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-            />
-          </svg>
-          <span>Search orders, products, users...</span>
-          <kbd className="ml-auto px-1.5 py-0.5 text-[10px] bg-surface-100 dark:bg-surface-700 rounded font-mono">
-            ⌘K
-          </kbd>
-        </button>
       </div>
 
       {/* Centre: Branch switcher — desktop only */}
@@ -229,35 +220,6 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
 
       {/* Right side: PWA install + dark mode + notifications + user */}
       <div className="flex items-center gap-2 lg:gap-3">
-        {pwaInstall?.canInstall && (
-          <button
-            type="button"
-            onClick={pwaInstall.install}
-            className="p-1.5 rounded-lg text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
-            title="Install App"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-            </svg>
-          </button>
-        )}
-        {/* Dark mode toggle */}
-        <button
-          onClick={onToggleDarkMode}
-          className="p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
-          title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {darkMode ? (
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-            </svg>
-          ) : (
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-            </svg>
-          )}
-        </button>
-
         {/* Notifications bell — deferred so layout loads immediately */}
         <div className="relative">
           <DeferredSection resolve={notificationsPromise} skeleton="inline">
@@ -542,7 +504,102 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                 </div>
 
                 {/* Menu items */}
+                {branches && branches.length > 0 && (
+                  <div className="md:hidden border-b border-surface-100 dark:border-surface-700 py-1">
+                    <div className="px-4 pt-2 pb-1">
+                      <p className="text-[10px] uppercase tracking-wider font-semibold text-surface-500 dark:text-surface-400">
+                        Branch
+                      </p>
+                    </div>
+
+                    {mobileCanSwitchBranches ? (
+                      <div className="pb-1">
+                        {canSeeAllBranches && (
+                          <button
+                            type="button"
+                            onClick={() => handleMobileBranchSwitch(null)}
+                            disabled={mobileBranchFetcher.state !== 'idle'}
+                            className={`w-full flex items-center justify-between gap-2 px-4 py-2 text-sm transition-colors ${
+                              isMobileAllBranches
+                                ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
+                                : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700/50'
+                            } ${mobileBranchFetcher.state !== 'idle' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          >
+                            <span>All Branches</span>
+                            {isMobileAllBranches && (
+                              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+                        )}
+
+                        {branches.map((branch) => (
+                          <button
+                            key={branch.id}
+                            type="button"
+                            onClick={() => handleMobileBranchSwitch(branch.id)}
+                            disabled={mobileBranchFetcher.state !== 'idle'}
+                            className={`w-full flex items-center justify-between gap-2 px-4 py-2 text-sm transition-colors ${
+                              branch.id === (currentBranchId ?? null)
+                                ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
+                                : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700/50'
+                            } ${mobileBranchFetcher.state !== 'idle' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          >
+                            <span className="truncate">{branch.name}</span>
+                            <span className="flex items-center gap-1.5 text-[10px]">
+                              <span className="font-mono text-surface-500 dark:text-surface-400">{branch.code}</span>
+                              {branch.id === (currentBranchId ?? null) && (
+                                <svg className="w-3.5 h-3.5 flex-shrink-0 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </span>
+                          </button>
+                        ))}
+                        {mobileBranchFetcher.state !== 'idle' && (
+                          <p className="px-4 pt-1 text-[11px] text-surface-500 dark:text-surface-400">
+                            Switching branch...
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="px-4 pb-2">
+                        <div className="flex items-center justify-between rounded-md bg-surface-50 dark:bg-surface-700/40 px-3 py-2">
+                          <span className="text-sm text-surface-700 dark:text-surface-300 truncate">
+                            {mobileCurrentBranch?.name ?? 'Branch'}
+                          </span>
+                          {mobileCurrentBranch?.code && (
+                            <span className="text-[10px] font-mono text-surface-500 dark:text-surface-400">
+                              {mobileCurrentBranch.code}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggleDarkMode();
+                      setUserMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+                  >
+                    {darkMode ? (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                      </svg>
+                    )}
+                    <span>{darkMode ? 'Switch to light mode' : 'Switch to dark mode'}</span>
+                  </button>
                   <a
                     href="/admin/settings"
                     className="flex items-center gap-2 px-4 py-2 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
@@ -576,7 +633,6 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
           </div>
         )}
       </div>
-      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   );
 }

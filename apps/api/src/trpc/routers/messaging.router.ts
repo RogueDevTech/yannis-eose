@@ -255,19 +255,48 @@ export const messagingRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Either templateId or body must be provided' });
       }
 
-      // Dispatch via provider (mock or real Twilio)
-      const result = await dispatchMessage(order.customerPhone, input.channel, renderedBody);
+      // WhatsApp is currently a manual deep-link flow (agent sends in app and confirms).
+      // Do not dispatch through provider here to avoid duplicate customer messages.
+      const result =
+        input.channel === 'WHATSAPP'
+          ? { success: true as const, error: undefined }
+          : await dispatchMessage(order.customerPhone, input.channel, renderedBody);
 
-      // Log to outbound_messages
-      await db.insert(schema.outboundMessages).values({
-        orderId: input.orderId,
-        agentId: ctx.user.id,
-        channel: input.channel,
-        templateId,
-        renderedBody,
-        status: result.success ? 'SENT' : 'FAILED',
-        errorMessage: result.error ?? null,
-        branchId: ctx.user.currentBranchId ?? null,
+      // Log to outbound_messages and order timeline together.
+      const timelineEventType = input.channel === 'WHATSAPP' ? 'WHATSAPP_SENT' : 'SMS_SENT';
+      const timelineDescription =
+        input.channel === 'WHATSAPP'
+          ? 'WhatsApp message sent to customer (agent-confirmed)'
+          : 'SMS sent to customer';
+      await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(schema.outboundMessages)
+          .values({
+            orderId: input.orderId,
+            agentId: ctx.user.id,
+            channel: input.channel,
+            templateId,
+            renderedBody,
+            status: result.success ? 'SENT' : 'FAILED',
+            errorMessage: result.error ?? null,
+            branchId: ctx.user.currentBranchId ?? null,
+          })
+          .returning({ id: schema.outboundMessages.id });
+
+        await tx.insert(schema.orderTimelineEvents).values({
+          orderId: input.orderId,
+          eventType: timelineEventType as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? null,
+          description: timelineDescription,
+          metadata: {
+            channel: input.channel,
+            outboundMessageId: inserted[0]?.id ?? null,
+            templateId,
+            status: result.success ? 'SENT' : 'FAILED',
+          },
+          branchId: ctx.user.currentBranchId ?? null,
+        });
       });
 
       if (!result.success) {

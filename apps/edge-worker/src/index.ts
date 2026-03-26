@@ -552,6 +552,13 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .offer-qty{font-size:.75rem;color:#666;white-space:nowrap}
     .yannis-form-card .offer-price{color:${accentColor};font-weight:700;font-size:.875rem;white-space:nowrap}
     .yannis-form-card .offline-badge{display:inline-flex;align-items:center;gap:.25rem;padding:.25rem .5rem;background:#fef3c7;color:#92400e;border-radius:6px;font-size:.75rem;font-weight:600;margin-bottom:.75rem}
+    .yannis-form-card .embed-success{padding:1rem .5rem;text-align:center}
+    .yannis-form-card .embed-success-icon{width:44px;height:44px;margin:0 auto .75rem;border-radius:9999px;background:#ecfdf5;color:#059669;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.125rem;border:1px solid #a7f3d0}
+    .yannis-form-card .embed-success h3{margin:0 0 .375rem;font-size:1.05rem;color:#111827}
+    .yannis-form-card .embed-success p{margin:0;color:#4b5563;font-size:.875rem;line-height:1.4}
+    .yannis-form-card .embed-success-actions{margin-top:.875rem;display:flex;justify-content:center;gap:.5rem;flex-wrap:wrap}
+    .yannis-form-card .embed-success-actions .btn{width:auto;min-width:140px;padding:.625rem .875rem}
+    .yannis-form-card .embed-success-actions .btn-secondary{background:#fff;color:#374151;border:1px solid #d1d5db}
   `;
 }
 
@@ -562,6 +569,7 @@ function getFormScript(
   campaignId: string,
   products: CampaignConfig['products'],
   mediaBuyerId?: string,
+  _formMode: 'hosted' | 'embedded' | 'iframe' | 'fallback' = 'hosted',
 ): string {
   const mediaBuyerIdJson = mediaBuyerId ? `'${mediaBuyerId}'` : 'undefined';
   return `
@@ -573,6 +581,79 @@ function getFormScript(
       var selectedProduct = null;
       var selectedOffer = null;
       var products = ${JSON.stringify(products)};
+      var card = form ? form.closest('.yannis-form-card') : null;
+      var singleProductId = form ? form.dataset.singleProduct : null;
+      var successPanel = null;
+
+      function resetForAnotherOrder() {
+        if (!form) return;
+        form.reset();
+        selectedOffer = null;
+        selectedProduct = singleProductId || null;
+        document.querySelectorAll('.product-option').forEach(function(o) { o.classList.remove('selected'); });
+        document.querySelectorAll('.offer-option').forEach(function(o) { o.classList.remove('selected'); });
+        document.querySelectorAll('.offer-group').forEach(function(g) { g.style.display = 'none'; });
+        var paymentMethodEl = form.querySelector('#paymentMethod');
+        if (paymentMethodEl) {
+          var evt = document.createEvent('HTMLEvents');
+          evt.initEvent('change', true, false);
+          paymentMethodEl.dispatchEvent(evt);
+        }
+        if (msg) {
+          msg.className = 'msg hidden';
+          msg.textContent = '';
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = form.dataset.btnText || 'Submit Order';
+        }
+      }
+
+      function showInlineSuccess(message, actionUrl) {
+        if (!card || !form) return false;
+        var safeMessage = String(message || 'Order received successfully! We will contact you shortly.');
+        if (!successPanel) {
+          successPanel = document.createElement('div');
+          successPanel.className = 'embed-success hidden';
+          successPanel.innerHTML = [
+            '<div class="embed-success-icon">✓</div>',
+            '<h3>Order received</h3>',
+            '<p class="embed-success-message"></p>',
+            '<div class="embed-success-actions">',
+            '  <a class="btn hidden" data-role="pay-link" target="_blank" rel="noopener noreferrer">Continue payment</a>',
+            '  <button type="button" class="btn btn-secondary" data-role="order-another">Order another</button>',
+            '</div>',
+          ].join('');
+          card.appendChild(successPanel);
+          var anotherBtn = successPanel.querySelector('[data-role="order-another"]');
+          if (anotherBtn) {
+            anotherBtn.addEventListener('click', function() {
+              successPanel.classList.add('hidden');
+              form.classList.remove('hidden');
+              resetForAnotherOrder();
+            });
+          }
+        }
+        var msgEl = successPanel.querySelector('.embed-success-message');
+        var payLink = successPanel.querySelector('[data-role="pay-link"]');
+        if (msgEl) msgEl.textContent = safeMessage;
+        if (payLink) {
+          if (actionUrl) {
+            payLink.href = actionUrl;
+            payLink.classList.remove('hidden');
+          } else {
+            payLink.removeAttribute('href');
+            payLink.classList.add('hidden');
+          }
+        }
+        form.classList.add('hidden');
+        if (msg) {
+          msg.className = 'msg hidden';
+          msg.textContent = '';
+        }
+        successPanel.classList.remove('hidden');
+        return true;
+      }
 
       function clearError() {
         msg.className = 'msg hidden';
@@ -583,7 +664,7 @@ function getFormScript(
       form.addEventListener('focusin', clearError);
 
       // Single-product: set product only, do not preselect offer
-      var singleProductId = form.dataset.singleProduct;
+      singleProductId = form.dataset.singleProduct;
       if (singleProductId) {
         selectedProduct = singleProductId;
       }
@@ -816,7 +897,13 @@ function getFormScript(
           if (result.ok) {
             var authUrl = result.data.authorizationUrl;
             if (authUrl) {
+              if (showInlineSuccess('Order created successfully. Continue to secure payment.', authUrl)) {
+                return;
+              }
               window.location.href = authUrl;
+              return;
+            }
+            if (showInlineSuccess(result.data.message || 'Order received successfully! We will contact you shortly.')) {
               return;
             }
             msg.className = 'msg msg-success';
@@ -849,6 +936,9 @@ function getFormScript(
                     orderData.turnstileToken = token;
                     submitOrder(orderData).then(function(r2) {
                       if (r2.ok) {
+                        if (showInlineSuccess(r2.data.message || 'Order received successfully!')) {
+                          return;
+                        }
                         msg.className = 'msg msg-success';
                         msg.textContent = r2.data.message || 'Order received successfully!';
                         form.reset(); quantity = 1; if (qtyVal) qtyVal.textContent = '1';
@@ -869,6 +959,9 @@ function getFormScript(
                   orderData.turnstileToken = token;
                   submitOrder(orderData).then(function(r2) {
                     if (r2.ok) {
+                      if (showInlineSuccess(r2.data.message || 'Order received successfully!')) {
+                        return;
+                      }
                       msg.className = 'msg msg-success';
                       msg.textContent = r2.data.message || 'Order received successfully!';
                       form.reset(); quantity = 1; if (qtyVal) qtyVal.textContent = '1';
@@ -1057,7 +1150,7 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
     </form>
   </div>
   <script>
-    ${getFormScript(workerUrl, campaignId, FALLBACK_PRODUCTS)}
+    ${getFormScript(workerUrl, campaignId, FALLBACK_PRODUCTS, undefined, 'fallback')}
   </script>
 </body>
 </html>`;
@@ -1086,7 +1179,7 @@ function renderHostedForm(config: CampaignConfig, workerUrl: string): Response {
     ${getFormInnerHTML(config)}
   </div>
   <script>
-    ${getFormScript(workerUrl, config.id, config.products, config.mediaBuyerId)}
+    ${getFormScript(workerUrl, config.id, config.products, config.mediaBuyerId, 'hosted')}
   </script>
 </body>
 </html>`;
@@ -1118,7 +1211,7 @@ function renderEmbedScript(config: CampaignConfig, workerUrl: string): Response 
   // Run form logic inside shadow DOM context
   var formScript = document.createElement('script');
   // We need to bind into shadow DOM — inline the logic
-  ${getFormScript(workerUrl, config.id, config.products, config.mediaBuyerId)}
+  ${getFormScript(workerUrl, config.id, config.products, config.mediaBuyerId, 'embedded')}
 })();`;
 
   return new Response(js, {
@@ -1152,7 +1245,7 @@ function renderIframeForm(config: CampaignConfig, workerUrl: string): Response {
     ${getFormInnerHTML(config)}
   </div>
   <script>
-    ${getFormScript(workerUrl, config.id, config.products, config.mediaBuyerId)}
+    ${getFormScript(workerUrl, config.id, config.products, config.mediaBuyerId, 'iframe')}
     // Auto-resize iframe height
     var resizeObserver = new ResizeObserver(function() {
       window.parent.postMessage({ type: 'yannis-form-resize', height: document.body.scrollHeight }, '*');

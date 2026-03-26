@@ -5,7 +5,13 @@ import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Checkbox } from '~/components/ui/checkbox';
-import type { UserCreateLoaderData, UserCreateProduct, UserCreateLocation, UserCreateCommissionPlan } from './types';
+import type {
+  UserCreateLoaderData,
+  UserCreateProduct,
+  UserCreateLocation,
+  UserCreateCommissionPlan,
+  UserCreateBranch,
+} from './types';
 
 // ─── Constants ──────────────────────────────────────────
 
@@ -24,7 +30,7 @@ const ROLES = [
 
 // ─── Component ──────────────────────────────────────────
 
-export function UserCreatePage({ products, locations, plans }: UserCreateLoaderData) {
+export function UserCreatePage({ products, locations, plans, branches }: UserCreateLoaderData) {
   const actionData = useActionData<{ error?: string; success?: boolean; requiresApproval?: boolean; message?: string }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
@@ -155,6 +161,30 @@ export function UserCreatePage({ products, locations, plans }: UserCreateLoaderD
               <input id="email" name="email" type="email" required className="input" placeholder="john@company.com" />
               <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
                 A password will be auto-generated and sent to this email.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="primaryBranchId" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                Primary Branch *
+              </label>
+              <select
+                id="primaryBranchId"
+                name="primaryBranchId"
+                required
+                className="input"
+              >
+                <option value="">Select primary branch</option>
+                {branches
+                  .filter((branch: UserCreateBranch) => branch.status === 'ACTIVE')
+                  .map((branch: UserCreateBranch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name} ({branch.code})
+                    </option>
+                  ))}
+              </select>
+              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                Determines the default branch context and data scope on first login.
               </p>
             </div>
 

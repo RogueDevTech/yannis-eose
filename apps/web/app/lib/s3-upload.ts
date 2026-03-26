@@ -1,5 +1,3 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-
 export const S3_FOLDERS = {
   SCREENSHOTS: 'screenshots',
   RECEIPTS: 'receipts',
@@ -9,22 +7,6 @@ export const S3_FOLDERS = {
 
 export type S3Folder = (typeof S3_FOLDERS)[keyof typeof S3_FOLDERS];
 
-function getS3Client(): S3Client {
-  const env = window.__ENV;
-  const config: ConstructorParameters<typeof S3Client>[0] = {
-    region: env.S3_REGION,
-    credentials: {
-      accessKeyId: env.S3_ACCESS_KEY_ID,
-      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
-    },
-  };
-  if (env.S3_ENDPOINT) {
-    config.endpoint = env.S3_ENDPOINT;
-    config.forcePathStyle = true;
-  }
-  return new S3Client(config);
-}
-
 function sanitizeFilename(name: string): string {
   return name
     .replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -32,38 +14,46 @@ function sanitizeFilename(name: string): string {
     .toLowerCase();
 }
 
+interface UploadUrlResponse {
+  uploadUrl: string;
+  fileUrl: string;
+}
+
+async function getPresignedUploadUrl(file: File, folder: S3Folder): Promise<UploadUrlResponse> {
+  const res = await fetch('/api/upload-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      folder,
+      fileName: sanitizeFilename(file.name),
+      fileType: file.type || 'application/octet-stream',
+      fileSize: file.size,
+    }),
+  });
+  const data = (await res.json().catch(() => ({}))) as Partial<UploadUrlResponse> & { error?: string };
+  if (!res.ok || !data.uploadUrl || !data.fileUrl) {
+    throw new Error(data.error ?? 'Unable to start upload');
+  }
+  return { uploadUrl: data.uploadUrl, fileUrl: data.fileUrl };
+}
+
 export async function uploadToS3(
   file: File,
   folder: S3Folder,
   onProgress?: (percent: number) => void,
 ): Promise<string> {
-  const env = window.__ENV;
-  const client = getS3Client();
-
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).slice(2, 8);
-  const sanitized = sanitizeFilename(file.name);
-  const key = `${folder}/${timestamp}-${random}-${sanitized}`;
-
-  const arrayBuffer = await file.arrayBuffer();
-
-  // Simulate progress since S3 PutObject doesn't provide it natively
   onProgress?.(10);
-
-  await client.send(
-    new PutObjectCommand({
-      Bucket: env.S3_BUCKET,
-      Key: key,
-      Body: new Uint8Array(arrayBuffer),
-      ContentType: file.type,
-    }),
-  );
+  const { uploadUrl, fileUrl } = await getPresignedUploadUrl(file, folder);
+  onProgress?.(35);
+  const uploadRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  if (!uploadRes.ok) {
+    throw new Error('Upload failed');
+  }
 
   onProgress?.(100);
-
-  // Build the public URL
-  if (env.S3_ENDPOINT) {
-    return `${env.S3_ENDPOINT}/${env.S3_BUCKET}/${key}`;
-  }
-  return `https://${env.S3_BUCKET}.s3.${env.S3_REGION}.amazonaws.com/${key}`;
+  return fileUrl;
 }

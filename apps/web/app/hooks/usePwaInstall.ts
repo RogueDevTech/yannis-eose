@@ -12,8 +12,14 @@ interface BeforeInstallPromptEvent extends Event {
 export function usePwaInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [isIosSafariLike, setIsIosSafariLike] = useState(false);
 
   useEffect(() => {
+    const ua = window.navigator.userAgent.toLowerCase();
+    const isIos = /iphone|ipad|ipod/.test(ua);
+    const isSafari = /safari/.test(ua) && !/crios|fxios|edgios/.test(ua);
+    setIsIosSafariLike(isIos && isSafari);
+
     // Check if already installed (standalone mode)
     if (window.matchMedia('(display-mode: standalone)').matches) {
       setIsInstalled(true);
@@ -49,6 +55,8 @@ export function usePwaInstall() {
   return {
     canInstall: !!deferredPrompt && !isInstalled,
     isInstalled,
+    isIosSafariLike,
+    canPromptInstall: !isInstalled && (!!deferredPrompt || isIosSafariLike),
     install,
   };
 }

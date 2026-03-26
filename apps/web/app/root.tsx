@@ -1,5 +1,6 @@
 import type { LinksFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import {
   Links,
@@ -8,9 +9,13 @@ import {
   Scripts,
   ScrollRestoration,
   isRouteErrorResponse,
+  useLocation,
   useLoaderData,
+  useNavigation,
   useRouteError,
 } from '@remix-run/react';
+import { PwaInstallPrompt } from '~/components/ui/pwa-install-prompt';
+import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { ScrollToTopButton } from '~/components/ui/scroll-to-top-button';
 import stylesheet from '~/tailwind.css?url';
 
@@ -22,8 +27,6 @@ declare global {
       EDGE_WORKER_URL: string;
       S3_BUCKET: string;
       S3_REGION: string;
-      S3_ACCESS_KEY_ID: string;
-      S3_SECRET_ACCESS_KEY: string;
       S3_ENDPOINT?: string;
       VAPID_PUBLIC_KEY?: string;
     };
@@ -37,8 +40,6 @@ export async function loader() {
       EDGE_WORKER_URL: process.env.EDGE_WORKER_URL ?? '',
       S3_BUCKET: process.env.S3_BUCKET ?? '',
       S3_REGION: process.env.S3_REGION ?? 'us-east-1',
-      S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID ?? '',
-      S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY ?? '',
       S3_ENDPOINT: process.env.S3_ENDPOINT ?? '',
       VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? '',
     },
@@ -53,11 +54,119 @@ export const links: LinksFunction = () => [
   { rel: 'icon', type: 'image/png', href: '/assets/favicon-32.png', sizes: '32x32' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   { rel: 'apple-touch-icon', href: '/assets/icon-180.png', sizes: '180x180' },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2)',
+  },
+  {
+    rel: 'apple-touch-startup-image',
+    href: '/assets/icon-512-maskable.png',
+    media: '(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2)',
+  },
 ];
 
 export default function App() {
   const { ENV } = useLoaderData<typeof loader>();
+  const location = useLocation();
+  const navigation = useNavigation();
+  const { install, canPromptInstall, isIosSafariLike } = usePwaInstall();
   const envScript = JSON.stringify(ENV).replace(/<\/script>/gi, '<\\/script>');
+  const [isBooting, setIsBooting] = useState(true);
+  const [installPromptOpen, setInstallPromptOpen] = useState(false);
+  const pendingScrollResetPathRef = useRef<string | null>(null);
+  const isAuthPage = location.pathname.startsWith('/auth');
+  const isLoggedInArea =
+    location.pathname.startsWith('/admin') ||
+    location.pathname.startsWith('/hr') ||
+    location.pathname.startsWith('/tpl') ||
+    location.pathname.startsWith('/rider');
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      setIsBooting(false);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const nextLocation = navigation.location;
+    const isRouteChange =
+      navigation.state !== 'idle' &&
+      nextLocation != null &&
+      nextLocation.pathname !== location.pathname;
+
+    if (!isRouteChange) {
+      pendingScrollResetPathRef.current = null;
+      return;
+    }
+
+    // Let hash-targeted navigation land on anchors naturally.
+    if (nextLocation.hash) return;
+
+    if (pendingScrollResetPathRef.current === nextLocation.pathname) return;
+    pendingScrollResetPathRef.current = nextLocation.pathname;
+
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [location.pathname, navigation.location, navigation.state]);
+
+  useEffect(() => {
+    if (isAuthPage || !isLoggedInArea || !canPromptInstall) {
+      setInstallPromptOpen(false);
+      return;
+    }
+    setInstallPromptOpen(true);
+  }, [canPromptInstall, isAuthPage, isLoggedInArea]);
 
   return (
     <html lang="en" className="h-full" suppressHydrationWarning>
@@ -75,18 +184,42 @@ export default function App() {
         <meta name="twitter:description" content="Enterprise Operations & Sales Engine" />
         <meta name="twitter:image" content="/assets/yannis-logo-white-bg.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="Yannis" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Meta />
         <Links />
       </head>
       <body className="h-full">
+        {isBooting ? (
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0f172a]"
+            aria-label="Loading Yannis EOSE"
+          >
+            <img
+              src="/assets/icon-192.png"
+              alt="Yannis EOSE logo"
+              className="h-20 w-20 rounded-2xl shadow-xl"
+            />
+          </div>
+        ) : null}
         <Outlet />
+        <PwaInstallPrompt
+          open={installPromptOpen}
+          isIosInstructions={isIosSafariLike}
+          onInstall={async () => {
+            const accepted = await install();
+            if (accepted) setInstallPromptOpen(false);
+          }}
+          onClose={() => setInstallPromptOpen(false)}
+        />
         <ScrollToTopButton />
         <ScrollRestoration getKey={(location) => location.pathname} />
         <script dangerouslySetInnerHTML={{ __html: `window.__ENV = ${envScript};` }} />
         <Scripts />
-        <script dangerouslySetInnerHTML={{ __html: `
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
           if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
               navigator.serviceWorker.register('/sw.js').then(function(reg) {
@@ -115,7 +248,9 @@ export default function App() {
               });
             });
           }
-        `}} />
+        `,
+          }}
+        />
       </body>
     </html>
   );
@@ -128,17 +263,13 @@ export function ErrorBoundary() {
   const is404 = status === 404;
   const is401 = status === 401;
 
-  const title = is404
-    ? 'Page Not Found'
-    : is401
-    ? 'Session Expired'
-    : 'Something Went Wrong';
+  const title = is404 ? 'Page Not Found' : is401 ? 'Session Expired' : 'Something Went Wrong';
 
   const description = is404
     ? "The page you're looking for doesn't exist or has been moved."
     : is401
-    ? 'Your session has expired. Please sign in again.'
-    : 'An unexpected error occurred. Please try refreshing the page.';
+      ? 'Your session has expired. Please sign in again.'
+      : 'An unexpected error occurred. Please try refreshing the page.';
 
   return (
     <html lang="en" className="h-full" suppressHydrationWarning>
@@ -152,20 +283,22 @@ export function ErrorBoundary() {
       </head>
       <body className="h-full flex items-center justify-center bg-surface-50 dark:bg-surface-950">
         <div className="text-center p-8 max-w-md">
-          <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">
-            {status}
-          </p>
+          <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">{status}</p>
           <h1 className="text-xl font-bold text-surface-900 dark:text-white">{title}</h1>
           <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">{description}</p>
           <div className="mt-6 flex gap-3 justify-center">
             {is401 ? (
-              <a href="/auth" className="btn-primary">Sign In</a>
+              <a href="/auth" className="btn-primary">
+                Sign In
+              </a>
             ) : (
               <>
                 <Button variant="primary" onClick={() => window.location.reload()}>
                   Refresh Page
                 </Button>
-                <a href="/admin" className="btn-secondary">Back to Dashboard</a>
+                <a href="/admin" className="btn-secondary">
+                  Back to Dashboard
+                </a>
               </>
             )}
           </div>

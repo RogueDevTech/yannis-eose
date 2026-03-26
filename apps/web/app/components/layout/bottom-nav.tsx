@@ -18,7 +18,6 @@ interface BottomNavProps {
   allGroups?: BottomNavGroup[];
   currentPathname: string;
   darkMode?: boolean;
-  pwaInstall?: { canInstall: boolean; install: () => void };
   /** When provided, modal is controlled by parent (layout renders the modal). Use for dashboard so modal survives remounts. */
   moreOpen?: boolean;
   onMoreOpenChange?: (open: boolean) => void;
@@ -40,19 +39,12 @@ const MoreIcon = (
   </svg>
 );
 
-const InstallIcon = (
-  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-  </svg>
-);
-
 export interface BottomNavMoreModalProps {
   open: boolean;
   onClose: () => void;
   allItems: BottomNavItem[];
   allGroups?: BottomNavGroup[];
   currentPathname: string;
-  pwaInstall?: { canInstall: boolean; install: () => void };
 }
 
 /**
@@ -64,7 +56,6 @@ export function BottomNavMoreModal({
   allItems,
   allGroups,
   currentPathname,
-  pwaInstall,
 }: BottomNavMoreModalProps) {
   const openedAtRef = useRef<number | null>(null);
   const [overlayCanClose, setOverlayCanClose] = useState(false);
@@ -186,23 +177,6 @@ export function BottomNavMoreModal({
                   </NavLink>
                 </li>
               ))}
-          {pwaInstall?.canInstall && (
-            <li className="border-t border-surface-200 dark:border-surface-800 mt-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  pwaInstall.install();
-                  onClose();
-                }}
-                className="flex items-center gap-3 px-4 py-3 text-left text-sm w-full text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800"
-              >
-                <span className="w-8 h-8 flex items-center justify-center flex-shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 [&>svg]:w-5 [&>svg]:h-5">
-                  {InstallIcon}
-                </span>
-                <span className="flex-1 min-w-0">Install</span>
-              </button>
-            </li>
-          )}
         </ul>
       </div>
     </div>
@@ -218,7 +192,6 @@ export function BottomNav({
   allItems,
   allGroups,
   currentPathname,
-  pwaInstall,
   moreOpen: moreOpenProp,
   onMoreOpenChange,
 }: BottomNavProps) {
@@ -311,7 +284,6 @@ export function BottomNav({
           allItems={allItems}
           allGroups={allGroups}
           currentPathname={currentPathname}
-          pwaInstall={pwaInstall}
         />
       )}
     </>

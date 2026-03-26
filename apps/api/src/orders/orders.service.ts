@@ -531,15 +531,33 @@ export class OrdersService {
       .where(eq(schema.orders.id, orderId))
       .limit(1);
 
-    const order = rows[0];
+    let order = rows[0];
     if (!order) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
+      await this.transition(
+        { orderId, newStatus: 'CS_ENGAGED' },
+        actor,
+      );
+
+      const refreshedRows = await this.db
+        .select()
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+      const refreshed = refreshedRows[0];
+      if (!refreshed) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found after engagement transition' });
+      }
+      order = refreshed;
     }
 
     if (order.status !== 'CS_ENGAGED') {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: `Cannot reveal phone: order is in ${order.status} status, must be CS_ENGAGED`,
+        message: `Cannot reveal phone: order is in ${order.status} status`,
       });
     }
 

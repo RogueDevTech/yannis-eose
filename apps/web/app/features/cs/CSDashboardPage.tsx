@@ -168,7 +168,11 @@ export function CSDashboardPage({
     return () => window.removeEventListener('keydown', onKey);
   }, [viewAllAgentsOpen]);
 
-  // Fetch cart data when user switches to Cart Abandonment tab (refetch each time for fresh data)
+  // Fetch cart data on mount and whenever user switches to the Cart Abandonment tab
+  useEffect(() => {
+    cartsFetcher.load('/admin/cs/queue/carts');
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'carts') {
       cartsFetcher.load('/admin/cs/queue/carts');

@@ -4,8 +4,9 @@
  * Phone is never revealed to the client — all sends go through the server action.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useFetcher } from '@remix-run/react';
+import { Modal } from './modal';
 
 interface MessageTemplate {
   id: string;
@@ -77,6 +78,13 @@ export function CSMessagingPanel({
   const templatesFetcher = useFetcher<{ templates: MessageTemplate[] }>();
   const outboxFetcher = useFetcher<{ messages: OutboundMessage[] }>();
   const sendFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const whatsappFetcher = useFetcher<{ success?: boolean; error?: string; phone?: string; isDialable?: boolean }>();
+  const whatsappPrepareFetcher = useFetcher<{ ready?: boolean; error?: string; phone?: string; isDialable?: boolean }>();
+  const whatsappWindowRef = useRef<Window | null>(null);
+  const [pendingWhatsappMessage, setPendingWhatsappMessage] = useState('');
+  const [confirmWhatsappModalOpen, setConfirmWhatsappModalOpen] = useState(false);
+  const [pendingWhatsappLogBody, setPendingWhatsappLogBody] = useState('');
+  const [preparedWhatsappPhone, setPreparedWhatsappPhone] = useState<string | null>(null);
 
   // Load templates for the currently selected messaging channel.
   // Important: reload when tab changes so WhatsApp does not reuse SMS-only results.
@@ -86,9 +94,15 @@ export function CSMessagingPanel({
     }
   }, [activeTab]);
 
+  useEffect(() => {
+    if (activeTab === 'whatsapp' && !preparedWhatsappPhone && whatsappPrepareFetcher.state === 'idle') {
+      whatsappPrepareFetcher.submit({ intent: 'preparePhoneForWhatsApp' }, { method: 'post' });
+    }
+  }, [activeTab, preparedWhatsappPhone, whatsappPrepareFetcher]);
+
   // Load outbox when messaging tab is active
   useEffect(() => {
-    if (activeTab === 'sms' || activeTab === 'whatsapp') {
+    if (activeTab === 'sms') {
       outboxFetcher.load(`/admin/api/messaging-outbox?orderId=${orderId}`);
     }
   }, [activeTab, orderId]);
@@ -102,12 +116,73 @@ export function CSMessagingPanel({
     }
   }, [sendFetcher.state, sendFetcher.data]);
 
+  useEffect(() => {
+    if (whatsappPrepareFetcher.state !== 'idle') return;
+    const data = whatsappPrepareFetcher.data;
+    if (!data?.ready) return;
+    if (!data.isDialable) return;
+    const phone = data.phone?.trim();
+    if (!phone) return;
+    setPreparedWhatsappPhone(phone);
+  }, [whatsappPrepareFetcher.state, whatsappPrepareFetcher.data]);
+
+  const toWhatsappUrl = (phone: string, message: string): string => {
+    const digitsOnly = phone.replace(/[^\d+]/g, '');
+    let waPhone = digitsOnly.startsWith('+') ? digitsOnly.slice(1) : digitsOnly;
+    // Local fallback normalization for Nigeria numbers entered as 0XXXXXXXXXX
+    if (waPhone.startsWith('0')) {
+      waPhone = `234${waPhone.slice(1)}`;
+    }
+    const encoded = encodeURIComponent(message);
+    return `https://wa.me/${waPhone}?text=${encoded}`;
+  };
+
+  useEffect(() => {
+    if (whatsappFetcher.state !== 'idle') return;
+    const data = whatsappFetcher.data;
+    if (!data) return;
+
+    if (data.error) {
+      if (whatsappWindowRef.current && !whatsappWindowRef.current.closed) {
+        whatsappWindowRef.current.close();
+      }
+      whatsappWindowRef.current = null;
+      return;
+    }
+
+    const phone = data.phone?.trim() ?? '';
+    const message = pendingWhatsappMessage.trim();
+    if (!data.success || !data.isDialable || !phone || !message) {
+      if (whatsappWindowRef.current && !whatsappWindowRef.current.closed) {
+        whatsappWindowRef.current.close();
+      }
+      whatsappWindowRef.current = null;
+      return;
+    }
+
+    const waUrl = toWhatsappUrl(phone, message);
+
+    if (whatsappWindowRef.current && !whatsappWindowRef.current.closed) {
+      whatsappWindowRef.current.location.href = waUrl;
+    } else {
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+    }
+
+    setPendingWhatsappLogBody(message);
+    setConfirmWhatsappModalOpen(true);
+
+    whatsappWindowRef.current = null;
+    setPendingWhatsappMessage('');
+    setMessageBody('');
+    setSelectedTemplateId('');
+  }, [whatsappFetcher.state, whatsappFetcher.data, pendingWhatsappMessage, orderId, sendFetcher]);
+
   const channelTemplates = (templatesFetcher.data?.templates ?? []).filter(
     (t) => t.channel === activeTab.toUpperCase()
   );
   const selectedTemplate = channelTemplates.find((t) => t.id === selectedTemplateId);
-  const outboxMessages = outboxFetcher.data?.messages ?? [];
-  const isSending = sendFetcher.state !== 'idle';
+  const outboxMessages = (outboxFetcher.data?.messages ?? []).filter((msg) => msg.channel === 'SMS');
+  const isSending = sendFetcher.state !== 'idle' || whatsappFetcher.state !== 'idle';
 
   const renderTemplateWithOrderData = (templateBody: string): string => {
     return templateBody
@@ -120,6 +195,31 @@ export function CSMessagingPanel({
 
   const handleSend = () => {
     if ((activeTab === 'sms' || activeTab === 'whatsapp') && !messageBody.trim() && !selectedTemplateId) return;
+
+    if (activeTab === 'whatsapp') {
+      const selected = channelTemplates.find((t) => t.id === selectedTemplateId);
+      const composedMessage = selectedTemplateId && selected
+        ? renderTemplateWithOrderData(selected.body)
+        : messageBody.trim();
+      if (!composedMessage) return;
+
+      if (preparedWhatsappPhone) {
+        window.open(toWhatsappUrl(preparedWhatsappPhone, composedMessage), '_blank', 'noopener,noreferrer');
+        setPendingWhatsappLogBody(composedMessage);
+        setConfirmWhatsappModalOpen(true);
+        setMessageBody('');
+        setSelectedTemplateId('');
+        return;
+      }
+
+      whatsappWindowRef.current = window.open('', '_blank', 'noopener,noreferrer');
+      setPendingWhatsappMessage(composedMessage);
+      whatsappFetcher.submit(
+        { intent: 'revealPhoneForWhatsApp' },
+        { method: 'post' },
+      );
+      return;
+    }
 
     sendFetcher.submit(
       {
@@ -139,6 +239,7 @@ export function CSMessagingPanel({
   ];
 
   return (
+    <>
     <div className="card">
       <h2 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Customer Communication</h2>
 
@@ -242,8 +343,14 @@ export function CSMessagingPanel({
           {sendFetcher.data?.error && (
             <p className="text-xs text-danger-600 dark:text-danger-400">{sendFetcher.data.error}</p>
           )}
+          {whatsappFetcher.data?.error && (
+            <p className="text-xs text-danger-600 dark:text-danger-400">{whatsappFetcher.data.error}</p>
+          )}
           {sendFetcher.data?.success && (
             <p className="text-xs text-success-600 dark:text-success-400">Message sent successfully.</p>
+          )}
+          {whatsappFetcher.data?.success && !whatsappFetcher.data?.error && (
+            <p className="text-xs text-success-600 dark:text-success-400">WhatsApp opened with buyer and prefilled message.</p>
           )}
 
           {/* Send button */}
@@ -270,9 +377,9 @@ export function CSMessagingPanel({
           </button>
 
           {/* Message history */}
-          {outboxMessages.length > 0 && (
+          {activeTab === 'sms' && outboxMessages.length > 0 && (
             <div className="mt-4">
-              <p className="text-xs font-medium text-surface-700 dark:text-surface-300 mb-2">Sent messages</p>
+              <p className="text-xs font-medium text-surface-700 dark:text-surface-300 mb-2">Sent SMS messages</p>
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {outboxMessages.map((msg) => (
                   <div
@@ -306,5 +413,58 @@ export function CSMessagingPanel({
         </div>
       )}
     </div>
+    <Modal
+      open={confirmWhatsappModalOpen}
+      onClose={() => {
+        setConfirmWhatsappModalOpen(false);
+        setPendingWhatsappLogBody('');
+      }}
+      maxWidth="max-w-sm"
+      role="alertdialog"
+      aria-labelledby="confirm-whatsapp-title"
+      aria-describedby="confirm-whatsapp-desc"
+      contentClassName="p-5"
+    >
+      <h3 id="confirm-whatsapp-title" className="text-base font-semibold text-surface-900 dark:text-white">
+        Did you send this WhatsApp message?
+      </h3>
+      <p id="confirm-whatsapp-desc" className="mt-2 text-sm text-surface-600 dark:text-surface-300">
+        Confirm to sync this activity into order history.
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          className="btn-secondary btn-sm"
+          onClick={() => {
+            setConfirmWhatsappModalOpen(false);
+            setPendingWhatsappLogBody('');
+          }}
+        >
+          Not yet
+        </button>
+        <button
+          type="button"
+          className="btn-primary btn-sm"
+          onClick={() => {
+            const body = pendingWhatsappLogBody.trim();
+            if (!body) return;
+            sendFetcher.submit(
+              {
+                intent: 'sendMessage',
+                orderId,
+                channel: 'WHATSAPP',
+                body,
+              },
+              { method: 'post', action: '/admin/api/send-message' },
+            );
+            setConfirmWhatsappModalOpen(false);
+            setPendingWhatsappLogBody('');
+          }}
+        >
+          Yes, sent
+        </button>
+      </div>
+    </Modal>
+    </>
   );
 }

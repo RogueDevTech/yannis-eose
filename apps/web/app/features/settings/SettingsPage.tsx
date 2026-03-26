@@ -3,6 +3,7 @@ import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Tabs } from '~/components/ui/tabs';
+import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { ROLE_LABELS } from './types';
 
 interface SettingsUser {
@@ -42,6 +43,26 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   const fetcher = useFetcher();
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'system' | 'notifications'>('profile');
   const [profileName, setProfileName] = useState(user?.name ?? '');
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { canInstall, install, canPromptInstall, isIosSafariLike } = usePwaInstall();
+
+  useEffect(() => {
+    const stored = localStorage.getItem('yannis_theme');
+    const dark = stored === 'dark';
+    setIsDarkMode(dark);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = !isDarkMode;
+    setIsDarkMode(next);
+    if (next) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('yannis_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('yannis_theme', 'light');
+    }
+  };
 
   // CS dispatch strategy: derived from settings, local state for form selection
   const csDispatchSetting = systemSettings.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
@@ -189,6 +210,46 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
               </Button>
             </div>
           </fetcher.Form>
+
+          <div className="card lg:col-span-2 hidden md:block">
+            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Appearance</h3>
+            <div className="flex items-center justify-between rounded-lg border border-surface-200 dark:border-surface-700 px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-surface-900 dark:text-white">Theme</p>
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+                  {isDarkMode ? 'Dark mode is active' : 'Light mode is active'}
+                </p>
+              </div>
+              <Button type="button" variant="secondary" size="sm" onClick={toggleTheme}>
+                {isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              </Button>
+            </div>
+            <div className="mt-3 flex items-center justify-between rounded-lg border border-surface-200 dark:border-surface-700 px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-surface-900 dark:text-white">Install App</p>
+                <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+                  {isIosSafariLike
+                    ? 'On iPhone/iPad Safari, use Share > Add to Home Screen.'
+                    : 'Install Yannis for faster launch and better offline behavior.'}
+                </p>
+              </div>
+              {isIosSafariLike ? (
+                <Button type="button" variant="secondary" size="sm" disabled>
+                  Use Safari Share
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  disabled={!canInstall && !canPromptInstall}
+                  onClick={install}
+                >
+                  Install App
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
