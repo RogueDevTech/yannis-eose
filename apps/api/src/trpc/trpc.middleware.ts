@@ -1,4 +1,4 @@
-import { Injectable, Inject, type NestMiddleware } from '@nestjs/common';
+import { Injectable, Inject, Logger, type NestMiddleware } from '@nestjs/common';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import type { Request, Response, NextFunction } from 'express';
 import { appRouter } from './routers';
@@ -10,6 +10,8 @@ import { SessionStoreService } from '../auth/session-store.service';
 
 @Injectable()
 export class TrpcMiddleware implements NestMiddleware {
+  private readonly logger = new Logger(TrpcMiddleware.name);
+
   constructor(
     @Inject(SessionStoreService) private readonly sessionStore: SessionStoreService,
     private readonly permissionsService: PermissionsService,
@@ -57,6 +59,11 @@ export class TrpcMiddleware implements NestMiddleware {
       req: fetchRequest,
       router: appRouter,
       createContext: () => createContext(req, res),
+      onError: ({ path, error }) => {
+        if (error.code === 'INTERNAL_SERVER_ERROR') {
+          this.logger.error(`trpc_error path=${path ?? 'unknown'} ${error.message}`, error.stack);
+        }
+      },
     });
 
     // Convert Fetch Response back to Express Response
