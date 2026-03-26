@@ -21,7 +21,17 @@ import type {
   DuplicatePair,
   CSLeaderboardEntry,
   PendingCart,
+  CSQueueTab,
 } from './types';
+
+function resolveInitialActiveTab(
+  initialTab: CSQueueTab | undefined,
+  isClaimMode: boolean,
+): CSQueueTab {
+  if (initialTab === 'claim' && !isClaimMode) return 'queue';
+  if (initialTab) return initialTab;
+  return 'queue';
+}
 
 // ─── Agent Workload Card (reusable for strip + modal) ───
 
@@ -106,6 +116,7 @@ export function CSDashboardPage({
   claimQueue,
   liveEvents,
   canCreateOffline = false,
+  canDeleteCart = false,
   productsForOfflineOrder = [],
   initialTab,
   initialHotSwapFrom,
@@ -115,8 +126,8 @@ export function CSDashboardPage({
   const cartsFetcher = useFetcher<{ pendingCarts?: PendingCart[]; abandonedCarts?: PendingCart[] }>();
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'queue' | 'active' | 'callbacks' | 'duplicates' | 'carts' | 'hotswap' | 'performance' | 'claim'>(
-    initialTab === 'hotswap' ? 'hotswap' : isClaimMode ? 'claim' : 'active',
+  const [activeTab, setActiveTab] = useState<CSQueueTab>(() =>
+    resolveInitialActiveTab(initialTab, isClaimMode ?? false),
   );
   // Track which order is being claimed (to show per-row loading state)
   const [claimingOrderId, setClaimingOrderId] = useState<string | null>(null);
@@ -140,6 +151,9 @@ export function CSDashboardPage({
   const [viewCartModal, setViewCartModal] = useState<PendingCart | null>(null);
   /** Prefill Create Offline Order modal when opening from Cart Abandonment */
   const [createOfflinePrefill, setCreateOfflinePrefill] = useState<{ customerName: string } | null>(null);
+  /** Delete abandoned cart confirmation modal */
+  const [deleteCartConfirm, setDeleteCartConfirm] = useState<PendingCart | null>(null);
+  const deleteCartFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const liveCartsStripRef = useRef<HTMLDivElement>(null);
   const liveCartsTabStripRef = useRef<HTMLDivElement>(null);
@@ -190,6 +204,15 @@ export function CSDashboardPage({
       : 'CS action completed';
   useFetcherToast(fetcher.data, { successMessage });
   useFetcherToast(claimFetcher.data, { successMessage: claimFetcher.data?.message ?? 'Order claimed' });
+  useFetcherToast(deleteCartFetcher.data, { successMessage: 'Cart deleted' });
+
+  // Close delete modal and refresh carts list after successful delete
+  useEffect(() => {
+    if (deleteCartFetcher.state === 'idle' && deleteCartFetcher.data?.ok) {
+      setDeleteCartConfirm(null);
+      cartsFetcher.load('/admin/cs/queue/carts');
+    }
+  }, [deleteCartFetcher.state, deleteCartFetcher.data]);
 
   // Clear claiming state after claim response
   useEffect(() => {
@@ -598,23 +621,27 @@ export function CSDashboardPage({
           value={activeTab}
           onChange={(v) => setActiveTab(v as typeof activeTab)}
           tabs={[
-            ...(isClaimMode ? [{
-              value: 'claim',
-              label: 'Claim Queue',
-              badge: claimQueue ? (
-                <DeferredSection resolve={claimQueue} skeleton="inline">
-                  {(orders: CSOrder[]) =>
-                    orders.length > 0 ? (
-                      <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 text-xs font-bold">
-                        {orders.length}
-                      </span>
-                    ) : null
-                  }
-                </DeferredSection>
-              ) : undefined,
-            }] : []),
-            { value: 'active', label: `Active Orders (${activeTotal})` },
             { value: 'queue', label: `Unassigned Queue (${unassignedTotal})` },
+            ...(isClaimMode
+              ? [
+                  {
+                    value: 'claim' as const,
+                    label: 'Claim Queue',
+                    badge: claimQueue ? (
+                      <DeferredSection resolve={claimQueue} skeleton="inline">
+                        {(orders: CSOrder[]) =>
+                          orders.length > 0 ? (
+                            <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 text-xs font-bold">
+                              {orders.length}
+                            </span>
+                          ) : null
+                        }
+                      </DeferredSection>
+                    ) : undefined,
+                  },
+                ]
+              : []),
+            { value: 'active', label: `Active Orders (${activeTotal})` },
             {
               value: 'callbacks',
               label: 'Callbacks',
@@ -1767,6 +1794,19 @@ export function CSDashboardPage({
                                         </svg>
                                         Create order
                                       </button>
+                                      {canDeleteCart && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setDeleteCartConfirm(c)}
+                                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-danger-700 dark:text-danger-300 bg-danger-50 dark:bg-danger-900/20 hover:bg-danger-100 dark:hover:bg-danger-900/30 transition-colors"
+                                          title="Delete this abandoned cart"
+                                        >
+                                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                          </svg>
+                                          Delete
+                                        </button>
+                                      )}
                                     </div>
                                   </td>
                                 </tr>
@@ -1794,7 +1834,7 @@ export function CSDashboardPage({
                               <p className="text-xs text-surface-600 dark:text-surface-400">
                                 {new Date(c.updatedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                               </p>
-                              <div className="flex items-center gap-2 pt-2">
+                              <div className="flex items-center gap-2 pt-2 flex-wrap">
                                 <button
                                   type="button"
                                   onClick={() => setViewCartModal(c)}
@@ -1809,6 +1849,15 @@ export function CSDashboardPage({
                                 >
                                   Create order
                                 </button>
+                                {canDeleteCart && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteCartConfirm(c)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-danger-700 dark:text-danger-300 bg-danger-50 dark:bg-danger-900/20 hover:bg-danger-100 dark:hover:bg-danger-900/30 transition-colors"
+                                  >
+                                    Delete
+                                  </button>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -1892,6 +1941,40 @@ export function CSDashboardPage({
                 Close
               </Button>
             </div>
+        </Modal>
+      )}
+
+      {/* ── Delete abandoned cart confirmation ─── */}
+      {deleteCartConfirm && (
+        <Modal open onClose={() => setDeleteCartConfirm(null)} maxWidth="max-w-sm" contentClassName="p-6">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-surface-900 dark:text-white">Delete abandoned cart?</h3>
+              <p className="text-sm text-surface-700 dark:text-surface-300 mt-1">
+                This will permanently remove <span className="font-medium text-surface-900 dark:text-surface-100">{deleteCartConfirm.customerName}</span>'s cart entry. This cannot be undone.
+              </p>
+            </div>
+          </div>
+          <deleteCartFetcher.Form method="post" action="/admin/cs/queue/carts" className="flex items-center justify-end gap-2">
+            <input type="hidden" name="intent" value="deleteAbandoned" />
+            <input type="hidden" name="cartId" value={deleteCartConfirm.id} />
+            <Button type="button" variant="secondary" size="sm" onClick={() => setDeleteCartConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="danger"
+              size="sm"
+              disabled={deleteCartFetcher.state !== 'idle'}
+            >
+              {deleteCartFetcher.state !== 'idle' ? 'Deleting…' : 'Delete'}
+            </Button>
+          </deleteCartFetcher.Form>
         </Modal>
       )}
 

@@ -74,9 +74,20 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
   }
 
   async handleConnection(client: Socket) {
+    // #region agent log
+    const origin = String(client.handshake.headers.origin ?? '');
+    const rawCookie = client.handshake.headers.cookie ?? '';
+    const hasCookieHeader = rawCookie.length > 0;
+    const hasYannisSessionName = rawCookie.includes('yannis_session=');
+    // #endregion
     try {
       const user = await this.authenticateSocket(client);
       if (!user) {
+        // #region agent log
+        this.logger.warn(
+          `[DEBUG-bc49f3] ws_handshake auth_fail origin=${origin} hasCookieHeader=${hasCookieHeader} hasYannisSessionName=${hasYannisSessionName}`,
+        );
+        // #endregion
         client.disconnect();
         return;
       }
@@ -88,7 +99,15 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
       this.joinRooms(client, user);
 
       client.emit('connected', { userId: user.id, role: user.role });
+      // #region agent log
+      this.logger.warn(`[DEBUG-bc49f3] ws_handshake auth_ok role=${user.role} origin=${origin}`);
+      // #endregion
     } catch {
+      // #region agent log
+      this.logger.warn(
+        `[DEBUG-bc49f3] ws_handshake exception origin=${origin} hasCookieHeader=${hasCookieHeader}`,
+      );
+      // #endregion
       client.disconnect();
     }
   }

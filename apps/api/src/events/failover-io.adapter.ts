@@ -3,8 +3,13 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import type { INestApplicationContext } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { ServerOptions } from 'socket.io';
-import Redis from 'ioredis';
+import Redis, { type RedisOptions } from 'ioredis';
 import { RedisHealthService } from '../database/redis-health.service';
+
+/** ioredis options compatible with @socket.io/redis-adapter (avoid duplicate() subscriber bugs). */
+const SOCKET_IO_REDIS_OPTIONS: RedisOptions = {
+  maxRetriesPerRequest: null,
+};
 
 export class FailoverIoAdapter extends IoAdapter {
   private readonly logger = new Logger(FailoverIoAdapter.name);
@@ -35,8 +40,10 @@ export class FailoverIoAdapter extends IoAdapter {
 
     if (!this.failoverEnabled || !this.redisUrl) return io;
 
-    this.pubClient = new Redis(this.redisUrl);
-    this.subClient = this.pubClient.duplicate();
+    // Separate connections for pub/sub. pubClient.duplicate() can trigger
+    // "Connection in subscriber mode, only subscriber commands may be used" with this adapter.
+    this.pubClient = new Redis(this.redisUrl, SOCKET_IO_REDIS_OPTIONS);
+    this.subClient = new Redis(this.redisUrl, SOCKET_IO_REDIS_OPTIONS);
 
     // Error handlers are required on all ioredis clients — without them Node.js
     // throws an unhandled 'error' event and crashes the process.

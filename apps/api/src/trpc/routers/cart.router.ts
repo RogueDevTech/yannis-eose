@@ -61,4 +61,13 @@ export const cartRouter = router({
   getStats: permissionProcedure('cart.read').query(async () => {
     return getCartService().getStats();
   }),
+
+  /**
+   * Delete an abandoned cart. Head of CS / SuperAdmin only.
+   */
+  deleteAbandoned: permissionProcedure('cart.delete')
+    .input(z.object({ cartId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getCartService().deleteAbandoned(input.cartId, ctx.user.id);
+    }),
 });

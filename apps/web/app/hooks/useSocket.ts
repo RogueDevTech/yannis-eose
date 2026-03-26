@@ -14,6 +14,26 @@ interface RealtimeNotification {
 let socketInstance: Socket | null = null;
 let connectionCount = 0;
 
+// #region agent log
+function agentDebugSocketLog(payload: {
+  hypothesisId: string;
+  location: string;
+  message: string;
+  data?: Record<string, unknown>;
+}): void {
+  fetch('http://127.0.0.1:7446/ingest/fef61901-cf82-4188-853f-f0e1d3885547', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'bc49f3' },
+    body: JSON.stringify({
+      sessionId: 'bc49f3',
+      timestamp: Date.now(),
+      runId: 'pre-fix',
+      ...payload,
+    }),
+  }).catch(() => {});
+}
+// #endregion
+
 function getSocketBaseUrl(): string {
   const raw = typeof window !== 'undefined' ? window.__ENV?.API_URL : '';
   const url = raw || 'http://localhost:4444';
@@ -53,22 +73,94 @@ export function useSocket(): { isConnected: boolean } {
     const socket = getSocket();
     connectionCount++;
 
+    const rawEnvApi = typeof window !== 'undefined' ? (window.__ENV?.API_URL ?? '') : '';
+    const resolvedUrl = getSocketBaseUrl();
+    // #region agent log
+    agentDebugSocketLog({
+      hypothesisId: 'A',
+      location: 'useSocket.ts:useSocket:mount',
+      message: 'socket_api_url_config',
+      data: {
+        pageOrigin: typeof window !== 'undefined' ? window.location.origin : '',
+        rawEnvApiUrlEmpty: !rawEnvApi.length,
+        rawEnvApiHost: rawEnvApi ? new URL(resolvedUrl).host : 'fallback',
+        resolvedSocketUrlHost: (() => {
+          try {
+            return new URL(resolvedUrl).host;
+          } catch {
+            return 'parse_error';
+          }
+        })(),
+        httpsPageUsesHttpsSocket:
+          typeof window !== 'undefined'
+            ? window.location.protocol === 'https:' && resolvedUrl.startsWith('https:')
+            : true,
+      },
+    });
+    // #endregion
+
     if (!socket.connected) {
       socket.connect();
     }
 
-    const onConnect = () => setIsConnected(true);
+    const onConnect = () => {
+      // #region agent log
+      agentDebugSocketLog({
+        hypothesisId: 'B',
+        location: 'useSocket.ts:connect',
+        message: 'socket_io_transport_connected',
+        data: {
+          socketId: socket.id ?? null,
+          /* httpOnly cookie not visible in document.cookie; false is normal */
+          documentCookieLen: typeof document !== 'undefined' ? document.cookie.length : 0,
+        },
+      });
+      // #endregion
+      setIsConnected(true);
+    };
     const onDisconnect = () => setIsConnected(false);
+
+    const onServerConnected = (payload: { userId?: string; role?: string }) => {
+      // #region agent log
+      agentDebugSocketLog({
+        hypothesisId: 'C',
+        location: 'useSocket.ts:server_connected_event',
+        message: 'auth_session_accepted',
+        data: {
+          hasUserId: Boolean(payload?.userId),
+          role: payload?.role ?? null,
+        },
+      });
+      // #endregion
+    };
+
+    const onConnectError = (err: Error) => {
+      // #region agent log
+      agentDebugSocketLog({
+        hypothesisId: 'D',
+        location: 'useSocket.ts:connect_error',
+        message: 'socket_connect_error',
+        data: { errorMessage: err?.message ?? String(err) },
+      });
+      // #endregion
+    };
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
+    socket.on('connected', onServerConnected);
+    socket.on('connect_error', onConnectError);
 
     // Set initial state
     setIsConnected(socket.connected);
+    if (socket.connected) {
+      onConnect();
+    }
 
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
+      socket.off('connected', onServerConnected);
+      socket.off('connect_error', onConnectError);
       connectionCount--;
       if (connectionCount <= 0) {
         socket.disconnect();
