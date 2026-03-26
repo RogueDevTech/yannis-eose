@@ -24,13 +24,17 @@ export class SessionStoreService {
   async createSession(token: string, user: SessionUser, ttlSeconds: number): Promise<void> {
     const now = Date.now();
     const expiresAt = new Date(now + ttlSeconds * 1000);
-    await this.db.insert(schema.authSessions).values({
-      token,
-      userId: user.id,
-      sessionData: user as unknown as Record<string, unknown>,
-      expiresAt,
-      revokedAt: null,
-    });
+    try {
+      await this.db.insert(schema.authSessions).values({
+        token,
+        userId: user.id,
+        sessionData: user as unknown as Record<string, unknown>,
+        expiresAt,
+        revokedAt: null,
+      });
+    } catch (error) {
+      this.logger.warn(`session_db_create_failed token=${token} reason=${(error as Error).message}`);
+    }
     await this.tryRedisSet(token, user, ttlSeconds);
   }
 
@@ -39,67 +43,84 @@ export class SessionStoreService {
     if (redisSession) return redisSession;
     if (!this.sessionDbFallbackEnabled) return null;
 
-    const [row] = await this.db
-      .select({
-        sessionData: schema.authSessions.sessionData,
-        expiresAt: schema.authSessions.expiresAt,
-      })
-      .from(schema.authSessions)
-      .where(
-        and(
-          eq(schema.authSessions.token, token),
-          isNull(schema.authSessions.revokedAt),
-          gt(schema.authSessions.expiresAt, new Date()),
-        ),
-      )
-      .limit(1);
+    try {
+      const [row] = await this.db
+        .select({
+          sessionData: schema.authSessions.sessionData,
+          expiresAt: schema.authSessions.expiresAt,
+        })
+        .from(schema.authSessions)
+        .where(
+          and(
+            eq(schema.authSessions.token, token),
+            isNull(schema.authSessions.revokedAt),
+            gt(schema.authSessions.expiresAt, new Date()),
+          ),
+        )
+        .limit(1);
 
-    if (!row) return null;
+      if (!row) return null;
 
-    const session = row.sessionData as unknown as SessionUser;
-    const ttlSeconds = Math.max(1, Math.floor((row.expiresAt.getTime() - Date.now()) / 1000));
-    await this.tryRedisSet(token, session, ttlSeconds);
-    return session;
+      const session = row.sessionData as unknown as SessionUser;
+      const ttlSeconds = Math.max(1, Math.floor((row.expiresAt.getTime() - Date.now()) / 1000));
+      await this.tryRedisSet(token, session, ttlSeconds);
+      return session;
+    } catch (error) {
+      this.logger.warn(`session_db_fallback_failed token=${token} reason=${(error as Error).message}`);
+      return null;
+    }
   }
 
   async touchSession(token: string, ttlSeconds: number): Promise<void> {
     await this.tryRedisExpire(token, ttlSeconds);
-    await this.db
-      .update(schema.authSessions)
-      .set({
-        expiresAt: new Date(Date.now() + ttlSeconds * 1000),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(schema.authSessions.token, token),
-          isNull(schema.authSessions.revokedAt),
-        ),
-      );
+    try {
+      await this.db
+        .update(schema.authSessions)
+        .set({
+          expiresAt: new Date(Date.now() + ttlSeconds * 1000),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.authSessions.token, token),
+            isNull(schema.authSessions.revokedAt),
+          ),
+        );
+    } catch (error) {
+      this.logger.warn(`session_db_touch_failed token=${token} reason=${(error as Error).message}`);
+    }
   }
 
   async updateSession(token: string, user: SessionUser, ttlSeconds: number): Promise<void> {
-    await this.db
-      .update(schema.authSessions)
-      .set({
-        sessionData: user as unknown as Record<string, unknown>,
-        expiresAt: new Date(Date.now() + ttlSeconds * 1000),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(schema.authSessions.token, token),
-          isNull(schema.authSessions.revokedAt),
-        ),
-      );
+    try {
+      await this.db
+        .update(schema.authSessions)
+        .set({
+          sessionData: user as unknown as Record<string, unknown>,
+          expiresAt: new Date(Date.now() + ttlSeconds * 1000),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.authSessions.token, token),
+            isNull(schema.authSessions.revokedAt),
+          ),
+        );
+    } catch (error) {
+      this.logger.warn(`session_db_update_failed token=${token} reason=${(error as Error).message}`);
+    }
     await this.tryRedisSet(token, user, ttlSeconds);
   }
 
   async deleteSession(token: string): Promise<void> {
-    await this.db
-      .update(schema.authSessions)
-      .set({ revokedAt: new Date(), updatedAt: new Date() })
-      .where(eq(schema.authSessions.token, token));
+    try {
+      await this.db
+        .update(schema.authSessions)
+        .set({ revokedAt: new Date(), updatedAt: new Date() })
+        .where(eq(schema.authSessions.token, token));
+    } catch (error) {
+      this.logger.warn(`session_db_delete_failed token=${token} reason=${(error as Error).message}`);
+    }
     await this.tryRedisDel(token);
   }
 

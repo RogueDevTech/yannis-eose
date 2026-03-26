@@ -38,6 +38,11 @@ export class FailoverIoAdapter extends IoAdapter {
     this.pubClient = new Redis(this.redisUrl);
     this.subClient = this.pubClient.duplicate();
 
+    // Error handlers are required on all ioredis clients — without them Node.js
+    // throws an unhandled 'error' event and crashes the process.
+    this.pubClient.on('error', (err) => this.logger.error(`socket_pub_redis_error ${err.message}`));
+    this.subClient.on('error', (err) => this.logger.error(`socket_sub_redis_error ${err.message}`));
+
     this.redisHealth.onStateChange((state) => {
       if (state === 'healthy' && this.mode !== 'clustered') {
         io.adapter(createAdapter(this.pubClient!, this.subClient!));
