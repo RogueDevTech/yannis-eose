@@ -12,6 +12,14 @@ import { EventsGateway } from './events.gateway';
 export class EventsService {
   constructor(private readonly gateway: EventsGateway) {}
 
+  private safeEmit(room: string, event: string, payload: Record<string, unknown>) {
+    try {
+      this.gateway.server.to(room).emit(event, payload);
+    } catch {
+      // Real-time delivery is best effort. Mutations must remain DB-authoritative.
+    }
+  }
+
   /**
    * Order status changed — notify relevant dashboards.
    */
@@ -28,29 +36,29 @@ export class EventsService {
     const payload = { ...data, timestamp: new Date().toISOString() };
 
     // Notify admin dashboard
-    this.gateway.server.to('admin').emit(event, payload);
+    this.safeEmit('admin', event, payload);
 
     // Notify CS
-    this.gateway.server.to('cs-all').emit(event, payload);
+    this.safeEmit('cs-all', event, payload);
     if (data.assignedCsId) {
-      this.gateway.server.to(`cs-${data.assignedCsId}`).emit(event, payload);
+      this.safeEmit(`cs-${data.assignedCsId}`, event, payload);
     }
 
     // Notify logistics
-    this.gateway.server.to('logistics').emit(event, payload);
+    this.safeEmit('logistics', event, payload);
     if (data.logisticsLocationId) {
-      this.gateway.server.to(`3pl-${data.logisticsLocationId}`).emit(event, payload);
+      this.safeEmit(`3pl-${data.logisticsLocationId}`, event, payload);
     }
 
     // Notify rider
     if (data.riderId) {
-      this.gateway.server.to(`rider-${data.riderId}`).emit(event, payload);
+      this.safeEmit(`rider-${data.riderId}`, event, payload);
     }
 
     // Notify marketing
-    this.gateway.server.to('marketing-all').emit(event, payload);
+    this.safeEmit('marketing-all', event, payload);
     if (data.mediaBuyerId) {
-      this.gateway.server.to(`marketing-${data.mediaBuyerId}`).emit(event, payload);
+      this.safeEmit(`marketing-${data.mediaBuyerId}`, event, payload);
     }
   }
 
@@ -60,9 +68,9 @@ export class EventsService {
   emitNewOrder(data: { orderId: string; productName: string }) {
     const event = 'order:new';
     const payload = { ...data, timestamp: new Date().toISOString() };
-    this.gateway.server.to('admin').emit(event, payload);
-    this.gateway.server.to('cs-all').emit(event, payload);
-    this.gateway.server.to('marketing-all').emit(event, payload);
+    this.safeEmit('admin', event, payload);
+    this.safeEmit('cs-all', event, payload);
+    this.safeEmit('marketing-all', event, payload);
   }
 
   /**
@@ -71,8 +79,8 @@ export class EventsService {
   emitFinanceApproval(data: { type: string; referenceId: string; amount: string; requestedBy: string }) {
     const event = 'finance:approval_required';
     const payload = { ...data, timestamp: new Date().toISOString() };
-    this.gateway.server.to('finance').emit(event, payload);
-    this.gateway.server.to('admin').emit(event, payload);
+    this.safeEmit('finance', event, payload);
+    this.safeEmit('admin', event, payload);
   }
 
   /**
@@ -81,16 +89,16 @@ export class EventsService {
   emitStockAlert(data: { productId: string; locationId: string; alertType: string; message: string }) {
     const event = 'stock:alert';
     const payload = { ...data, timestamp: new Date().toISOString() };
-    this.gateway.server.to('logistics').emit(event, payload);
-    this.gateway.server.to('admin').emit(event, payload);
-    this.gateway.server.to(`3pl-${data.locationId}`).emit(event, payload);
+    this.safeEmit('logistics', event, payload);
+    this.safeEmit('admin', event, payload);
+    this.safeEmit(`3pl-${data.locationId}`, event, payload);
   }
 
   /**
    * Generic notification to a specific user.
    */
   emitToUser(userId: string, event: string, data: Record<string, unknown>) {
-    this.gateway.server.to(`user-${userId}`).emit(event, {
+    this.safeEmit(`user-${userId}`, event, {
       ...data,
       timestamp: new Date().toISOString(),
     });
@@ -100,7 +108,7 @@ export class EventsService {
    * Generic notification to a named room.
    */
   emitToRoom(room: string, event: string, data: Record<string, unknown>) {
-    this.gateway.server.to(room).emit(event, {
+    this.safeEmit(room, event, {
       ...data,
       timestamp: new Date().toISOString(),
     });
@@ -117,7 +125,6 @@ export class EventsService {
     currentPanel?: string | null;
   }) {
     const payload = { ...data, lastActionAt: new Date().toISOString() };
-    this.gateway.server.to(`mirror:${data.agentId}`).emit('agent:state_update', payload);
-    this.gateway.server.to('cs-all').emit('agent:state_update', payload);
+    this.safeEmit('cs-all', 'agent:state_update', payload);
   }
 }

@@ -47,12 +47,13 @@ import { PermissionsModule } from '../permissions/permissions.module';
 import { PermissionRequestsModule } from '../permission-requests/permission-requests.module';
 import { PermissionRequestsService } from '../permission-requests/permission-requests.service';
 import { setPermissionRequestsService } from './routers/permission-requests.router';
-import { setBranchesDb, setBranchesRedis } from './routers/branches.router';
+import { setBranchesDb, setBranchesSessionStore } from './routers/branches.router';
 import { setMessagingDb } from './routers/messaging.router';
-import { DRIZZLE, REDIS, DatabaseModule } from '../database/database.module';
+import { DRIZZLE, DatabaseModule } from '../database/database.module';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type Redis from 'ioredis';
 import type { db as schema } from '@yannis/shared';
+import { SessionStoreService } from '../auth/session-store.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import type { db as schema } from '@yannis/shared';
     LogisticsModule, MarketingModule, FinanceModule, HrModule,
     NotificationsModule, AuditModule, VoipModule, SettingsModule, CartModule,
     PermissionsModule, PermissionRequestsModule,
+    AuthModule,
   ],
   providers: [TrpcMiddleware],
 })
@@ -81,8 +83,8 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly voipService: VoipService,
     private readonly settingsService: SettingsService,
     private readonly cartService: CartService,
+    private readonly sessionStore: SessionStoreService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
   onModuleInit() {
@@ -104,7 +106,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setSettingsService(this.settingsService);
     setCartService(this.cartService);
     setBranchesDb(this.db as Parameters<typeof setBranchesDb>[0]);
-    setBranchesRedis(this.redis);
+    setBranchesSessionStore(this.sessionStore);
     setMessagingDb(this.db as Parameters<typeof setMessagingDb>[0]);
     setDashboardServices({
       orders: this.ordersService,

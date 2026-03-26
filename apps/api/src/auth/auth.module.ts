@@ -4,11 +4,12 @@ import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PermissionsModule } from '../permissions/permissions.module';
+import { SessionStoreService } from './session-store.service';
 
 @Module({
   imports: [forwardRef(() => UsersModule), NotificationsModule, PermissionsModule],
   controllers: [AuthController],
-  providers: [AuthService],
-  exports: [AuthService],
+  providers: [AuthService, SessionStoreService],
+  exports: [AuthService, SessionStoreService],
 })
 export class AuthModule {}

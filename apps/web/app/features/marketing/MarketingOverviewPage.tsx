@@ -127,6 +127,9 @@ export function MarketingOverviewPage({
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [liveOrdersPage, setLiveOrdersPage] = useState(1);
   const pageSize = 5;
+  const prevLiveOrdersRef = useRef<Map<string, string>>(new Map());
+  const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mediaBuyerScrollRef = useRef<HTMLDivElement>(null);
   const [viewAllMediaBuyersOpen, setViewAllMediaBuyersOpen] = useState(false);
   const [viewAllMediaBuyerPage, setViewAllMediaBuyerPage] = useState(1);
@@ -145,6 +148,39 @@ export function MarketingOverviewPage({
     }
     prevOrdersLengthRef.current = recentOrders.length;
   }, [recentOrders.length]);
+  useEffect(() => {
+    const prev = prevLiveOrdersRef.current;
+    const newIds = new Set<string>();
+    const isFirstLoad = prev.size === 0;
+
+    if (!isFirstLoad) {
+      for (const order of recentOrders) {
+        const prevStatus = prev.get(order.id);
+        if (!prevStatus || prevStatus !== order.status) {
+          newIds.add(order.id);
+        }
+      }
+    }
+
+    prevLiveOrdersRef.current = new Map(recentOrders.map((o) => [o.id, o.status]));
+
+    if (newIds.size > 0) {
+      setHighlightedIds((h) => new Set([...h, ...newIds]));
+      if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedIds((h) => {
+          const next = new Set(h);
+          newIds.forEach((id) => next.delete(id));
+          return next;
+        });
+        highlightTimeoutRef.current = null;
+      }, 3000);
+    }
+
+    return () => {
+      if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    };
+  }, [recentOrders]);
   useEffect(() => {
     if (viewAllMediaBuyersOpen) setViewAllMediaBuyerPage(1);
   }, [viewAllMediaBuyersOpen]);
@@ -321,7 +357,10 @@ export function MarketingOverviewPage({
                         </thead>
                         <tbody>
                           {rows.map((order) => (
-                            <tr key={order.id} className="table-row h-10">
+                            <tr
+                              key={order.id}
+                              className={`table-row h-10 ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}
+                            >
                               <td className="table-cell">
                                 <Link
                                   to={`/admin/orders/${order.id}`}
@@ -405,7 +444,10 @@ export function MarketingOverviewPage({
                   <div className="md:hidden flex flex-col flex-1 min-h-0">
                     <div className="flex-1 min-h-0 overflow-auto space-y-3 px-1 py-1">
                       {rows.map((order) => (
-                        <div key={order.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                        <div
+                          key={order.id}
+                          className={`rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3 ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}
+                        >
                           <div className="flex items-center justify-between">
                             <Link
                               to={`/admin/orders/${order.id}`}

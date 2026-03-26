@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
+import { RedisHealthService } from './redis-health.service';
 
 export const DRIZZLE = Symbol('DRIZZLE');
 export const PG_CLIENT = Symbol('PG_CLIENT');
@@ -67,7 +68,8 @@ export const REDIS = Symbol('REDIS');
         return new Redis(redisUrl);
       },
     },
+    RedisHealthService,
   ],
-  exports: [DRIZZLE, PG_CLIENT, REDIS],
+  exports: [DRIZZLE, PG_CLIENT, REDIS, RedisHealthService],
 })
 export class DatabaseModule {}

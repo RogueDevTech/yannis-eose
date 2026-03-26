@@ -9,9 +9,13 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { getTrpcOpenApiPaths, getTrpcTags } from './trpc/trpc-openapi-docs';
+import { RedisHealthService } from './database/redis-health.service';
+import { FailoverIoAdapter } from './events/failover-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const redisHealth = app.get(RedisHealthService);
+  app.useWebSocketAdapter(new FailoverIoAdapter(app, redisHealth));
 
   // Security headers — helmet adds X-Content-Type-Options, X-Frame-Options,
   // Strict-Transport-Security, X-XSS-Protection, etc.

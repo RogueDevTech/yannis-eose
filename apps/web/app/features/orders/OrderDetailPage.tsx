@@ -717,7 +717,7 @@ export function OrderDetailPage({
   const adjustItemsFetcher = useFetcher();
   const revalidator = useRevalidator();
 
-  // Supervisor Mirror View — broadcast agent state to supervisor and detect when being observed
+  // Team Live View — broadcast CS agent state to cs-all room.
   const isCSAgent = userRole === 'CS_AGENT';
   useAgentStateBroadcast(
     isCSAgent
