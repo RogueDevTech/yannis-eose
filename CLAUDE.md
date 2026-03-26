@@ -52,22 +52,44 @@ The frontend (Remix) and backend (NestJS) are **separate applications** in a sin
 ```
 yannis-eose/
 ├── apps/
-│   ├── web/                  # Remix PWA (all dashboards + 3PL rider views)
-│   │   └── app/routes/
-│   │       ├── admin/        # SuperAdmin module
-│   │       ├── auth/         # Login/auth
-│   │       ├── cs/           # Customer Service module
-│   │       ├── finance/      # Finance module
-│   │       ├── hr/           # HR & Payroll module
-│   │       ├── logistics/    # Logistics module
-│   │       ├── marketing/    # Marketing module
-│   │       └── rider/        # 3PL Rider views (mobile-optimized PWA routes)
-│   ├── api/                  # NestJS backend (business logic, tRPC routers)
+│   ├── web/                  # Remix PWA (65+ routes, 29 feature modules)
+│   │   └── app/
+│   │       ├── routes/
+│   │       │   ├── admin.*       # All admin modules (CS, Finance, Marketing, Logistics, Inventory, Products, etc.)
+│   │       │   ├── auth.*        # Login/auth/forgot-password/reset-password
+│   │       │   ├── hr.*          # HR & Payroll module
+│   │       │   ├── rider.*       # 3PL Rider views (mobile-optimized PWA)
+│   │       │   ├── tpl.*         # 3PL Partner dashboard (inventory, orders, remittances)
+│   │       │   └── payment.*     # Payment pages (Paystack integration)
+│   │       ├── features/         # Feature page components (by module)
+│   │       ├── components/       # Layout + UI components (32+)
+│   │       ├── hooks/            # React hooks (socket, VOIP, PWA, mobile, online status)
+│   │       └── lib/              # Utilities (API client, S3 upload, CSV, PDF, offline sync)
+│   ├── api/                  # NestJS backend (21 modules, 18 tRPC routers)
+│   │   └── src/
+│   │       ├── auth/         # Authentication + session management
+│   │       ├── orders/       # Order service + state machine
+│   │       ├── finance/      # Finance service + materialized views
+│   │       ├── hr/           # HR + payroll + commission engine
+│   │       ├── inventory/    # Inventory FIFO + stock management
+│   │       ├── logistics/    # 3PL + transfers + escalation
+│   │       ├── marketing/    # Campaigns + funding + metrics
+│   │       ├── products/     # Product + category CRUD
+│   │       ├── voip/         # VOIP integration (Twilio 3-tier)
+│   │       ├── payments/     # Payment processing (Paystack)
+│   │       ├── cart/         # Shopping cart
+│   │       ├── settings/     # System settings (feature flags)
+│   │       ├── notifications/ # Notification service
+│   │       ├── events/       # Socket.io gateway + service
+│   │       ├── trpc/         # tRPC routers + middleware + OpenAPI
+│   │       └── common/       # Guards, decorators, interceptors
 │   └── edge-worker/          # Cloudflare Worker (form submission + circuit breaker)
 ├── packages/
-│   ├── shared/               # Drizzle schema, Zod validators, tRPC types, enums
+│   ├── shared/               # Drizzle schema (18 files), Zod validators (14 files), tRPC types, enums
 │   ├── ui/                   # Shared Tailwind components
 │   └── config/               # ESLint, TypeScript, Tailwind configs
+├── docs/                     # Developer Guide, Runbook, ADRs
+├── .github/workflows/        # CI/CD pipeline
 └── turbo.json
 ```
 
@@ -175,10 +197,37 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 ### When Building the CS Module
 - Phone numbers in API responses must be masked: 0803****1234. The full number is NEVER sent to the frontend
 - The Call button sends a call_token to the VOIP provider, which connects the two parties. The frontend never receives the raw number
-- Implement weighted dispatch: new orders go to the CS agent with the lowest active_pending_count, not round-robin by total history
+- Three dispatch modes configurable by HoCS via system_settings (`dispatch_mode`): `load_balanced` (default), `performance`, `claim`
+  - `load_balanced` / `performance`: algorithm auto-pushes orders to agents
+  - `claim`: orders sit in an open pool; reps race to claim them via `claimOrder()` with atomic Redis/Postgres lock
+  - Claim cap (`claim_cap` system setting, default 2): rep blocked from claiming if they have ≥ cap unconfirmed orders — enforced server-side
 - The Confirm and No Answer buttons must be DISABLED in the UI until the system receives a VOIP webhook confirming call_duration > 15 seconds for that specific order
+- **Order reassignment is a management action only.** CS agents CANNOT transfer orders between themselves. Only HoCS and SuperAdmin can reassign via Hot Swap. The `order_transfer_requests` table and all agent-initiated transfer UI/procedures are REMOVED.
 - Head of CS can Hot Swap — select orders from one agent and mass-reassign to another
 - When CS updates an order (address change, quantity change, upsell), the system creates a VERSION SNAPSHOT, not an in-place edit. The original data is preserved in the temporal table. The order history timeline shows every change with the agent's name and timestamp
+
+**CS Communication Panel (order detail page):**
+- Three channels in one unified panel: Call (existing VOIP), SMS, WhatsApp
+- SMS: rep types/selects message, platform sends via messaging bridge (Twilio SMS). Raw phone NEVER exposed.
+- WhatsApp: one-click template messages only. Templates have placeholders (`{{customer_name}}`, `{{product_name}}`, `{{order_id}}`, `{{delivery_address}}`, `{{estimated_date}}`). Auto-filled from order data. Rep selects template → previews rendered message → sends. No custom freeform WhatsApp messages.
+- All sends go through the platform bridge. Rep never sees the raw phone number.
+- Every send is written to `outbound_messages` table AND triggers an `order_timeline_events` entry in the same transaction.
+- Template management: HoCS/SuperAdmin create/edit/archive `message_templates` (branch-scoped). New NestJS module: `messaging/`. New tRPC router: `messaging.router.ts`.
+
+**Supervisor Mirror View:**
+- HoCS can open a read-only live view of any CS rep's current screen state
+- CS rep broadcasts `agent:state_update` event via Socket.io on every route/panel change: `{ agentId, currentRoute, currentOrderId, currentPanel, lastActionAt }`
+- Server stores last known agent state in Redis; relays to supervisor's room
+- `supervisor:watching` event sent back to rep when mirror is opened — rep must see an "Being Observed" indicator in the UI (transparency requirement)
+- Mirror View is strictly read-only. Supervisor cannot take actions through it.
+- New Socket.io events: `agent:state_update`, `supervisor:watching`, `supervisor:stopped_watching`
+
+**Order Lifecycle Timeline (shared across ALL order detail pages):**
+- Every state transition service method MUST write an `order_timeline_events` row in the same transaction — never separately, never optionally
+- Use the `writeTimelineEvent(tx, { orderId, eventType, actorId, actorName, description, metadata })` helper (to be built in `orders.service.ts`)
+- `actor_name` is denormalized at write time (snapshot of name at moment of event) — do NOT join on users at query time
+- The `OrderTimeline` component (`~/components/ui/order-timeline.tsx`) is shared across all role-specific order detail pages: CS, Logistics, Finance, 3PL, SuperAdmin
+- Role filtering of visible event types is applied in the tRPC procedure (`orders.getTimeline`), not in the frontend component
 
 ### When Building the Inventory Module
 - Inventory is tracked by LOCATION (Main Warehouse, 3PL Location A, 3PL Location B, etc.)
@@ -223,7 +272,8 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 
 | Role | Dashboard Scope | Can See COGS? | Can See Full Phone? | Can Approve Finance? | Can Edit Commission Rules? |
 |---|---|---|---|---|---|
-| SuperAdmin | Everything | Yes | Via audit log only | Yes | Yes |
+| SuperAdmin | Everything (all branches) | Yes | Via audit log only | Yes | Yes |
+| Branch Admin | Own branch — users, settings, reports | No | No | Branch only | No |
 | Head of Marketing | Marketing + Media Buyer performance | No | No | No | No |
 | Media Buyer | Own campaigns, own orders, own payouts | No | No | No | No |
 | Head of CS | CS team performance, all CS orders | No | No | No | No |
@@ -263,12 +313,40 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 
 ---
 
+## Multi-Branch Architecture
+
+### Branch Context in Every Write
+Every write operation now sets TWO session variables before any mutation:
+```sql
+SET LOCAL yannis.current_user_id = '<user_uuid>';
+SET LOCAL yannis.current_branch_id = '<branch_uuid>';
+```
+NestJS services must pass `branchId` alongside `actorId` in every write context. RLS policies on branch-scoped tables filter by `current_setting('yannis.current_branch_id', true)`.
+
+### Branch-Scoped Tables
+These tables carry `branch_id` and are filtered by RLS: `orders`, `campaigns`, `marketing_funding`, `ad_spend_logs`, `inventory_levels`, `commission_plans`, `payout_records`, `logistics_locations`, `message_templates`, `outbound_messages`, `order_timeline_events`.
+
+**Products and `stock_batches` are NOT branch-scoped** — global catalog. Stock is tracked per branch via `inventory_levels.branch_id`.
+
+### SuperAdmin / Global Finance Bypass
+SuperAdmin and global Finance bypass branch RLS entirely. Their session `current_branch_id` is set to `NULL` and RLS policies treat NULL as "show all branches".
+
+### Branch Switcher Session
+If a user belongs to multiple branches, the active branch is stored in their Redis session as `currentBranchId`. The sidebar shows a branch selector. Switching branch calls `auth.switchBranch(branchId)` which updates the Redis session.
+
+### New Module: `branches/`
+- NestJS: `apps/api/src/branches/` — service, controller, module
+- tRPC: `apps/api/src/trpc/routers/branches.router.ts`
+- Schema: `packages/shared/src/db/schema/branches.ts`
+
+---
+
 ## What NOT To Do
 
 - Do NOT use localStorage or sessionStorage for anything security-sensitive. Sessions live in Redis
 - Do NOT expose raw phone numbers in any API response, log, or error message — ever
 - Do NOT use auto-incrementing IDs — use UUIDv7
-- Do NOT skip the actor injection (SET LOCAL yannis.current_user_id) on any write operation
+- Do NOT skip the actor injection (`SET LOCAL yannis.current_user_id` AND `SET LOCAL yannis.current_branch_id`) on any write operation
 - Do NOT allow state skipping in the order lifecycle — enforce the state machine
 - Do NOT use TypeORM — use Drizzle. TypeORM reflection-based types are unreliable for this level of data integrity
 - Do NOT hardcode commission rules — they must be dynamic JSONB configs editable by HR
@@ -277,6 +355,11 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 - Do NOT implement the audit trail at the application level — it must be at the PostgreSQL trigger level using temporal tables
 - Do NOT use `String()` or `.toFixed(2)` for Drizzle inserts into `numeric` columns — use `sql\`${value}::numeric\`` to avoid trigger type errors
 - Do NOT alter a main table without syncing its `*_history` table in the same migration (ADD/DROP columns)
+- Do NOT create a new business-data table without a `branch_id` column (exception: products, stock_batches — global catalog)
+- Do NOT allow CS agents to initiate order transfers between themselves — only HoCS and SuperAdmin can reassign orders
+- Do NOT send raw phone numbers via SMS or WhatsApp — always route through the platform bridge
+- Do NOT write `order_timeline_events` rows outside of the same database transaction as the triggering mutation — timeline events must be atomic with their state change
+- Do NOT render the Mirror View with any interactive action buttons — it is read-only, always
 
 ---
 
@@ -291,6 +374,42 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 | Profit/Loss Report Generation | < 3 seconds for 100k records (use Materialized Views) |
 | Order State Transition (API) | < 500ms |
 | Offline Sync (Rider PWA) | Auto-sync within 30 seconds of network recovery |
+
+---
+
+## Current Implementation Status (March 2026)
+
+The system is **97%+ complete**. All 7 core modules are fully built with backend services, tRPC routers, and frontend dashboards.
+
+### What Is Built
+- **21 NestJS modules** (auth, orders, finance, hr, inventory, logistics, marketing, products, voip, payments, cart, settings, notifications, events, audit, users, permission-requests, permissions, database, common, trpc)
+- **18 tRPC routers** (audit, cart, dashboard, finance, health, hr, inventory, logistics, marketing, notifications, orders, permission-requests, product-categories, products, settings, users, voip + root index)
+- **65+ Remix routes** across admin, auth, hr, rider, tpl, payment route groups
+- **29 feature modules** in `apps/web/app/features/`
+- **18 schema files** and **14 validator files** in `packages/shared`
+- **40+ SQL migrations** including temporal triggers, RLS, history tables
+- **7 Playwright E2E specs** covering all critical user flows
+- **CI/CD pipeline** (.github/workflows/ci.yml + deploy-dev.yml)
+- **3 documentation guides** (Developer Guide, Runbook, ADRs)
+
+### What Remains (Infrastructure + Feature Batch 2)
+- Task 6.1: Multi-CDN DNS Failover (requires DNS provider setup)
+- Task 6.3: Load Testing (requires production-scale data)
+- Edge Worker KV namespace provisioning (Cloudflare account setup)
+- Twilio credential configuration (works in mock mode without)
+- **Task 8.x: Order Lifecycle Timeline** — `order_timeline_events` table, event writer, tRPC procedure, `OrderTimeline` UI component
+- **Task 9.x: Multi-Branch Architecture** — `branches` + `user_branches` schema, RLS updates, branch session context, branch switcher UI, cross-branch reporting
+- **Task 10.1: Remove Agent Order Transfer** — drop `order_transfer_requests` table + procedures + UI
+- **Task 11.x: CS Communication Panel** — `message_templates` + `outbound_messages` schema, `messaging.service.ts`, template management UI, comms panel UI
+- **Task 12.x: Supervisor Mirror View** — agent state Socket.io broadcasting, mirror view backend/UI, Team Live View
+- **Task 13.x: Claim-Based Dispatch Mode** — claim mode logic, `claimOrder()` with atomic lock, Claim Queue UI, dispatch mode config
+
+### Additional Modules Beyond Original PRD
+- **Payments module** (`apps/api/src/payments/`) — Paystack integration for online payments
+- **Cart module** (`apps/api/src/cart/`) — Shopping cart for edge form orders
+- **TPL dashboard** (`apps/web/app/routes/tpl.*`) — Dedicated 3PL partner portal with inventory, orders, remittances, notifications, settings
+- **Delivery remittances** — 3PL delivery fee tracking and settlement
+- **Delivery confirmation requests** — OTP/GPS verification system
 
 ---
 

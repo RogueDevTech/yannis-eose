@@ -9,6 +9,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { formatActivityDescription } from '~/lib/format-activity';
 import { formatNaira } from '~/lib/format-amount';
 import type {
@@ -335,6 +336,7 @@ export function UserDetailPage({
                 Capacity: {user.capacity}
               </span>
             )}
+            <UserBranchBadges branches={user.branchMemberships} />
           </div>
 
           {/* Role description */}

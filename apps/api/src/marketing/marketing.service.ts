@@ -721,6 +721,7 @@ export class MarketingService {
     period: 'this_month' | 'all_time' = 'this_month',
     startDate?: string,
     endDate?: string,
+    branchId?: string | null,
   ) {
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
@@ -740,12 +741,14 @@ export class MarketingService {
 
     const orderConditions: Parameters<typeof and>[0][] = [];
     if (mediaBuyerId) orderConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+    if (branchId) orderConditions.push(eq(schema.orders.branchId, branchId));
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) orderConditions.push(lte(schema.orders.createdAt, periodEnd));
     const orderWhere = orderConditions.length > 0 ? and(...orderConditions) : (mediaBuyerId ? eq(schema.orders.mediaBuyerId, mediaBuyerId) : undefined);
 
     const deliveredConditions: Parameters<typeof and>[0][] = [eq(schema.orders.status, 'DELIVERED')];
     if (mediaBuyerId) deliveredConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+    if (branchId) deliveredConditions.push(eq(schema.orders.branchId, branchId));
     if (periodStart) deliveredConditions.push(gte(schema.orders.deliveredAt, periodStart));
     if (periodEnd) deliveredConditions.push(lte(schema.orders.deliveredAt, periodEnd));
     const deliveredWhere = and(...deliveredConditions);
@@ -765,6 +768,7 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [inArray(schema.orders.status, [...confirmedStatuses])];
     if (mediaBuyerId) confirmedConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+    if (branchId) confirmedConditions.push(eq(schema.orders.branchId, branchId));
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) confirmedConditions.push(lte(schema.orders.createdAt, periodEnd));
     const confirmedWhere = and(...confirmedConditions);

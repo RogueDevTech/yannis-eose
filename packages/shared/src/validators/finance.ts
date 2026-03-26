@@ -88,5 +88,6 @@ export const profitReportSchema = z.object({
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   groupBy: z.enum(['product', 'campaign', 'mediaBuyer', 'day', 'week', 'month']).default('product'),
+  branchId: z.string().uuid().nullish(),
 });
 export type ProfitReportInput = z.infer<typeof profitReportSchema>;

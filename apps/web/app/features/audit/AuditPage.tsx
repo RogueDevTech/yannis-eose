@@ -23,7 +23,7 @@ const AUDITABLE_TABLES = [
   'offer_templates', 'campaigns',
   'orders', 'order_items', 'stock_transfers', 'stock_movements',
   'marketing_funding', 'marketing_funding_requests', 'ad_spend_logs',
-  'call_logs', 'order_transfer_requests',
+  'call_logs',
   'invoices', 'approval_requests', 'budgets', 'settlement_configs',
   'delivery_confirmation_requests',
   'commission_plans', 'payout_records', 'earnings_adjustments',
@@ -52,7 +52,6 @@ const TABLE_LABELS: Record<string, string> = {
   marketing_funding_requests: 'Marketing Funding Requests',
   ad_spend_logs: 'Ad Spend Logs',
   call_logs: 'Call Logs',
-  order_transfer_requests: 'Order Transfer Requests',
   invoices: 'Invoices',
   approval_requests: 'Approval Requests',
   delivery_confirmation_requests: 'Delivery Confirmation Requests',
@@ -175,7 +174,6 @@ const FIELD_LABELS: Record<string, string> = {
   price: 'Price',
   funding_request_status: 'Funding Request Status',
   ad_spend_status: 'Ad Spend Status',
-  order_transfer_request_status: 'Transfer Request Status',
   reconciliation_status: 'Reconciliation Status',
   call_status: 'Call Status',
   spend_amount: 'Spend Amount',
@@ -693,12 +691,6 @@ function getDescriptionParts(
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const duration = data.duration_seconds != null ? ` (${data.duration_seconds}s)` : '';
     return { prefix: `${actor} call log — ${statusLabel}${duration}`, entityLabel: null, suffix: '' };
-  }
-
-  if (table === 'order_transfer_requests') {
-    const status = (data.order_transfer_request_status ?? data.status) as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    return { prefix: `${actor} updated order transfer request — ${statusLabel}`, entityLabel: null, suffix: '' };
   }
 
   if (table === 'stock_reconciliations') {

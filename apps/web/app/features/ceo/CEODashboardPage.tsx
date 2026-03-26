@@ -38,13 +38,23 @@ function pct(n: number): string {
   return `${n.toFixed(1)}%`;
 }
 
+interface BranchBreakdownRow {
+  branchId: string;
+  branchName: string;
+  branchCode: string;
+  totalOrders: number;
+  deliveredOrders: number;
+  activeOrders: number;
+}
+
 export interface CEODashboardPageProps {
   data: CEODashboardData;
   filters?: CEODashboardFilters;
   showBackToDashboard?: boolean;
+  branchBreakdown?: BranchBreakdownRow[];
 }
 
-export function CEODashboardPage({ data, filters = { startDate: '', endDate: '', periodAllTime: false }, showBackToDashboard = true }: CEODashboardPageProps) {
+export function CEODashboardPage({ data, filters = { startDate: '', endDate: '', periodAllTime: false }, showBackToDashboard = true, branchBreakdown }: CEODashboardPageProps) {
   const [showChartView, setShowChartView] = useState(false);
   const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -844,6 +854,63 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         </div>
         )}
       </>
+      )}
+
+      {/* Branch Breakdown — only shown when system has multiple branches */}
+      {branchBreakdown && branchBreakdown.length > 1 && (
+        <div className="card overflow-hidden p-0">
+          <div className="px-4 py-3 border-b border-surface-200 dark:border-surface-700 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Branch Breakdown</h2>
+            <span className="text-xs text-surface-500 dark:text-surface-400">All branches</span>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50">
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Branch</th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Total Orders</th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Active</th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Delivered</th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Delivery Rate</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
+              {branchBreakdown.map((branch) => {
+                const deliveryRate = branch.totalOrders > 0
+                  ? Math.round((branch.deliveredOrders / branch.totalOrders) * 100)
+                  : 0;
+                return (
+                  <tr key={branch.branchId} className="hover:bg-surface-50 dark:hover:bg-surface-800/30 transition-colors duration-100">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 text-[10px] font-bold flex-shrink-0">
+                          {branch.branchCode.slice(0, 2)}
+                        </span>
+                        <div>
+                          <p className="font-medium text-surface-900 dark:text-white">{branch.branchName}</p>
+                          <p className="text-[10px] text-surface-500 dark:text-surface-400">{branch.branchCode}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-surface-900 dark:text-white">{branch.totalOrders.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-surface-700 dark:text-surface-300">{branch.activeOrders.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-success-700 dark:text-success-300 font-medium">{branch.deliveredOrders.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${
+                        deliveryRate >= 70
+                          ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                          : deliveryRate >= 40
+                            ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-300'
+                            : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
+                      }`}>
+                        {deliveryRate}%
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
     </div>

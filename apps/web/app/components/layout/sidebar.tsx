@@ -84,6 +84,7 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
           />
         </div>
 
+
         {/* Navigation — overflow-x-visible when collapsed so icon tooltips can show to the right */}
         <nav className={`flex-1 overflow-y-auto py-3 px-3 ${isExpanded ? 'overflow-x-visible' : ''}`}>
           {groups.map((group, gi) => {

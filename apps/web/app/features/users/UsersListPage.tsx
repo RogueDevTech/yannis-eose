@@ -4,24 +4,36 @@ import { Link, useSearchParams, useNavigation } from '@remix-run/react';
 import type { User } from './types';
 import { ROLE_COLORS, USER_STATUS_COLORS, ROLE_OPTIONS, formatRole } from './types';
 import { Spinner } from '~/components/ui/spinner';
+import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 
 interface UsersListPageProps {
   users: User[];
   total: number;
+  page: number;
+  totalPages: number;
   statusParam?: string;
   roleParam?: string;
 }
 
-export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = 'ALL' }: UsersListPageProps) {
+export function UsersListPage({
+  users,
+  total,
+  page,
+  totalPages,
+  statusParam = 'ALL',
+  roleParam = 'ALL',
+}: UsersListPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
+  const safeTotalPages = Math.max(1, totalPages);
 
   const handleStatusChange = (value: string) => {
     const next = new URLSearchParams(searchParams);
     if (value === 'ALL') next.delete('status');
     else next.set('status', value);
+    next.set('page', '1');
     setSearchParams(next, { replace: true });
   };
 
@@ -29,6 +41,14 @@ export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = '
     const next = new URLSearchParams(searchParams);
     if (value === 'ALL') next.delete('role');
     else next.set('role', value);
+    next.set('page', '1');
+    setSearchParams(next, { replace: true });
+  };
+
+  const goToPage = (nextPage: number) => {
+    const clamped = Math.min(Math.max(1, nextPage), safeTotalPages);
+    const next = new URLSearchParams(searchParams);
+    next.set('page', String(clamped));
     setSearchParams(next, { replace: true });
   };
 
@@ -155,6 +175,7 @@ export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = '
                 <th className="table-header">Name</th>
                 <th className="table-header">Email</th>
                 <th className="table-header">Role</th>
+                <th className="table-header">Branches</th>
                 <th className="table-header">Status</th>
                 <th className="table-header text-center">Capacity</th>
                 <th className="table-header">Joined</th>
@@ -181,6 +202,9 @@ export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = '
                     </span>
                   </td>
                   <td className="table-cell">
+                    <UserBranchBadges branches={user.branchMemberships} compact />
+                  </td>
+                  <td className="table-cell">
                     <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>
                       {user.status}
                     </span>
@@ -205,7 +229,7 @@ export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = '
               ))}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
+                  <td colSpan={8} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
                     {users.length === 0 ? 'No users yet. Add your first team member.' : 'No matching users found'}
                   </td>
                 </tr>
@@ -246,6 +270,9 @@ export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = '
                   })}
                 </span>
               </div>
+              <div className="mt-2">
+                <UserBranchBadges branches={user.branchMemberships} compact />
+              </div>
             </Link>
           ))}
           {filteredUsers.length === 0 && (
@@ -262,11 +289,11 @@ export function UsersListPage({ users, total, statusParam = 'ALL', roleParam = '
           Showing {filteredUsers.length} of {total} users
         </p>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" disabled>
+          <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
             Previous
           </Button>
-          <span className="text-sm text-surface-800 dark:text-surface-200 px-2">Page 1 of 1</span>
-          <Button variant="secondary" size="sm" disabled>
+          <span className="text-sm text-surface-800 dark:text-surface-200 px-2">Page {page} of {safeTotalPages}</span>
+          <Button variant="secondary" size="sm" disabled={page >= safeTotalPages} onClick={() => goToPage(page + 1)}>
             Next
           </Button>
         </div>

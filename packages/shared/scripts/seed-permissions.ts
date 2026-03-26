@@ -19,7 +19,6 @@ const PERMISSIONS: Array<{ code: string; resource: string; action: string; descr
   { code: 'ceo.overview', resource: 'ceo', action: 'overview', description: 'View CEO dashboard' },
   { code: 'orders.read', resource: 'orders', action: 'read', description: 'View orders' },
   { code: 'orders.reassign', resource: 'orders', action: 'reassign', description: 'Reassign CS orders' },
-  { code: 'orders.requestTransfer', resource: 'orders', action: 'requestTransfer', description: 'Request order transfer to another CS agent' },
   { code: 'orders.bulkTransition', resource: 'orders', action: 'bulkTransition', description: 'Bulk order status transitions' },
   { code: 'orders.bulkAssign', resource: 'orders', action: 'bulkAssign', description: 'Bulk assign orders to CS' },
   { code: 'orders.csWorkloads', resource: 'orders', action: 'csWorkloads', description: 'View CS workloads' },
@@ -80,6 +79,8 @@ const PERMISSIONS: Array<{ code: string; resource: string; action: string; descr
   { code: 'settings.write', resource: 'settings', action: 'write', description: 'Update system settings' },
   { code: 'rider.dashboard', resource: 'rider', action: 'dashboard', description: 'Rider dashboard' },
   { code: 'cart.read', resource: 'cart', action: 'read', description: 'View cart abandonment data (CS dashboard)' },
+  { code: 'branches.manage', resource: 'branches', action: 'manage', description: 'Create, update, and assign users to branches (SuperAdmin only)' },
+  { code: 'branches.view_all', resource: 'branches', action: 'view_all', description: 'View data across all branches (global visibility bypass) — grant sparingly' },
 ];
 
 // role -> permission codes
@@ -87,8 +88,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: [], // bypasses all checks - no need to store
   HEAD_OF_MARKETING: ['marketing.read', 'marketing.funding', 'marketing.fundingSummary', 'marketing.leaderboard', 'marketing.checkHighCpa', 'marketing.offerTemplate', 'marketing.campaigns', 'marketing.teamOverview', 'marketing.orders', 'products.read', 'users.read'],
   MEDIA_BUYER: ['marketing.read', 'marketing.adSpend', 'marketing.leaderboard', 'marketing.campaigns', 'marketing.orders', 'products.read'],
-  HEAD_OF_CS: ['orders.read', 'orders.reassign', 'orders.requestTransfer', 'orders.bulkTransition', 'orders.bulkAssign', 'orders.csWorkloads', 'orders.releaseLocks', 'orders.inactiveAgents', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.mergeDuplicate', 'orders.dismissDuplicate', 'cs.teamOverview', 'cs.leaderboard', 'cart.read', 'users.read'],
-  CS_AGENT: ['orders.read', 'orders.requestTransfer', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.dismissDuplicate', 'cs.leaderboard', 'cart.read'],
+  HEAD_OF_CS: ['orders.read', 'orders.reassign', 'orders.bulkTransition', 'orders.bulkAssign', 'orders.csWorkloads', 'orders.releaseLocks', 'orders.inactiveAgents', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.mergeDuplicate', 'orders.dismissDuplicate', 'cs.teamOverview', 'cs.leaderboard', 'cart.read', 'users.read'],
+  CS_AGENT: ['orders.read', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.dismissDuplicate', 'cs.leaderboard', 'cart.read'],
   FINANCE_OFFICER: ['finance.read', 'finance.costView', 'finance.approve', 'finance.disburse', 'marketing.read', 'marketing.fundingSummary', 'orders.read', 'audit.read', 'users.read'],
   HEAD_OF_LOGISTICS: ['orders.read', 'orders.bulkTransition', 'logistics.read', 'logistics.write', 'inventory.read', 'inventory.lowStockAlerts'],
   WAREHOUSE_MANAGER: ['inventory.read', 'inventory.intake', 'inventory.transfer', 'inventory.adjust', 'inventory.lowStockAlerts', 'inventory.createReconciliation', 'inventory.resolveReconciliation', 'inventory.reconciliations', 'transfers.read', 'returns.read', 'products.read', 'products.create', 'categories.read', 'categories.write'],

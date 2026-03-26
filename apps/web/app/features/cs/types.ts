@@ -47,11 +47,20 @@ export interface CSLeaderboardEntry {
   avgCallDurationSeconds: number;
 }
 
+export interface CSUserBranchMembership {
+  branchId: string;
+  branchName: string;
+  branchCode: string;
+  isPrimary: boolean;
+  roleInBranch: string | null;
+}
+
 /** Team member with optional workload, leaderboard, and idle state for CS Team overview page. */
 export interface CSTeamMemberOverview {
   id: string;
   name: string;
   role: string;
+  branchMemberships?: CSUserBranchMembership[];
   workload?: AgentWorkload;
   leaderboardEntry?: CSLeaderboardEntry;
   isIdle: boolean;
@@ -99,6 +108,10 @@ export interface CSDashboardStreamData {
   activeOrders: CSOrder[];
   activeTotal: number;
   statusCounts: Record<string, number>;
+  /** True when CS_DISPATCH_STRATEGY = 'claim' (no auto-assignment). */
+  isClaimMode?: boolean;
+  /** Max orders a CS agent can hold in claim mode before Claim button is disabled. */
+  claimCap?: number;
   // Deferred (streaming promises)
   inactiveAgents: Promise<InactiveAgent[]>;
   callbackOrders: Promise<CSOrder[]>;
@@ -106,6 +119,8 @@ export interface CSDashboardStreamData {
   leaderboard: Promise<CSLeaderboardEntry[]>;
   leaderboardPeriod: 'this_month' | 'all_time';
   cartStats?: Promise<{ pending: number; abandonedLast24h: number }>;
+  /** Deferred claim queue — only populated when isClaimMode is true. */
+  claimQueue?: Promise<CSOrder[]>;
   pendingCarts?: Promise<PendingCart[]>;
   abandonedCarts?: Promise<PendingCart[]>;
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */

@@ -6,7 +6,7 @@ import { defer, json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
-import type { CallLogEntry, OrderDetail, OrderDetailStreamData, HistoryEntry } from '~/features/orders/types';
+import type { CallLogEntry, OrderDetail, OrderDetailStreamData, TimelineEvent } from '~/features/orders/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Order Detail — Yannis EOSE' },
@@ -51,22 +51,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       })
       .catch(() => null);
 
-    const history: Promise<HistoryEntry[]> = apiRequest<unknown>(
-      `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 20 }))}`,
+    const timeline: Promise<TimelineEvent[]> = apiRequest<unknown>(
+      `/trpc/orders.getTimeline?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
       { method: 'GET', cookie },
     )
-      .then((historyRes) => {
-        if (!historyRes.ok) return [];
-        const historyData = historyRes.data as { result?: { data?: { rows: HistoryEntry[] } } };
-        return historyData?.result?.data?.rows ?? [];
+      .then((tlRes) => {
+        if (!tlRes.ok) return [];
+        const tlData = tlRes.data as { result?: { data?: TimelineEvent[] } };
+        return tlData?.result?.data ?? [];
       })
-      .catch(() => [] as HistoryEntry[]);
+      .catch(() => [] as TimelineEvent[]);
 
-    return { order, latestCall, history, voipEnabled };
+    return { order, latestCall, timeline, voipEnabled };
   })();
 
   let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
-  if (user.permissions?.includes('orders.reassign') || user.permissions?.includes('orders.requestTransfer')) {
+  if (user.permissions?.includes('orders.reassign')) {
     const agentsRes = await apiRequest<unknown>('/trpc/orders.listCSAgents', { method: 'GET', cookie });
     if (agentsRes.ok) {
       const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
@@ -118,24 +118,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
-  if (intent === 'requestTransfer') {
-    await requirePermission(request, 'orders.requestTransfer');
-    const toCsAgentId = formData.get('toCsAgentId')?.toString();
-    if (!toCsAgentId) {
-      return json({ error: 'Agent required' }, { status: 400 });
-    }
-    const reason = formData.get('reason')?.toString() || undefined;
-    const res = await apiRequest<unknown>('/trpc/orders.requestTransfer', {
-      method: 'POST',
-      cookie,
-      body: { orderId, toCsAgentId, reason },
-    });
-    if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Transfer request failed';
-      return json({ error: err }, { status: safeStatus(res.status) });
-    }
-    return json({ success: true });
-  }
 
   if (intent === 'initiateCall') {
     const res = await apiRequest<unknown>('/trpc/orders.initiateCall', {
@@ -340,7 +322,7 @@ export default function OrderDetailRoute() {
           <OrderDetailPage
             order={(data as OrderDetailStreamData).order}
             latestCall={(data as OrderDetailStreamData).latestCall}
-            history={(data as OrderDetailStreamData).history}
+            timeline={(data as OrderDetailStreamData).timeline}
             voipEnabled={(data as OrderDetailStreamData).voipEnabled}
             canEditOrder={canEditOrder}
             userRole={userRole}

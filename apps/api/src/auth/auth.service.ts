@@ -6,7 +6,8 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { canViewAllBranches } from '../common/authz';
+import { eq, sql, desc } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -93,12 +94,33 @@ export class AuthService {
     // Generate session token
     const token = randomBytes(32).toString('hex');
 
+    // Resolve primary branch for multi-branch context.
+    // Non-global users MUST have at least one user_branches row — no membership = login denied.
+    let currentBranchId: string | null = null;
+    if (!canViewAllBranches(user)) {
+      const memberships = await this.db
+        .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
+        .from(schema.userBranches)
+        .where(eq(schema.userBranches.userId, user.id))
+        .orderBy(desc(schema.userBranches.isPrimary)) // isPrimary=true sorts first
+        .limit(10);
+
+      if (memberships.length === 0) {
+        throw new UnauthorizedException(
+          'Your account has not been assigned to a branch. Contact your administrator.',
+        );
+      }
+
+      currentBranchId = memberships[0]!.branchId as string;
+    }
+
     const sessionUser: SessionUser = {
       id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
       logisticsLocationId: user.logisticsLocationId,
+      currentBranchId,
     };
 
     // Store session in Redis with TTL
@@ -254,6 +276,43 @@ export class AuthService {
     await this.killUserSessions(userId);
 
     this.logger.log(`Password reset completed for user ${userId}`);
+  }
+
+  /**
+   * Switch the active branch in the current session.
+   * User must be a member of the target branch (or SuperAdmin).
+   * Updates Redis session — takes effect on next request.
+   */
+  async switchBranch(sessionToken: string, branchId: string): Promise<{ currentBranchId: string }> {
+    const sessionKey = `${SESSION_PREFIX}${sessionToken}`;
+    const sessionData = await this.redis.get(sessionKey);
+    if (!sessionData) {
+      throw new UnauthorizedException('Session not found');
+    }
+
+    const user: SessionUser = JSON.parse(sessionData);
+
+    // SuperAdmin can switch to any branch; others must be a member
+    if (user.role !== 'SUPER_ADMIN') {
+      const membership = await this.db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(
+          eq(schema.userBranches.userId, user.id),
+        )
+        .limit(100);
+      const isMember = membership.some((m) => m.branchId === branchId);
+      if (!isMember) {
+        throw new ForbiddenException('You are not a member of this branch');
+      }
+    }
+
+    const updated: SessionUser = { ...user, currentBranchId: branchId };
+    // Preserve remaining TTL
+    const ttl = await this.redis.ttl(sessionKey);
+    await this.redis.setex(sessionKey, ttl > 0 ? ttl : this.sessionTtl, JSON.stringify(updated));
+
+    return { currentBranchId: branchId };
   }
 
   /**

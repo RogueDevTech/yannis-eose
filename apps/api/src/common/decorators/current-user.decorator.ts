@@ -8,6 +8,8 @@ export interface SessionUser {
   role: string;
   logisticsLocationId: string | null;
   permissions?: string[];
+  /** Active branch for multi-branch context. NULL = cross-branch (SuperAdmin). */
+  currentBranchId?: string | null;
 }
 
 /**

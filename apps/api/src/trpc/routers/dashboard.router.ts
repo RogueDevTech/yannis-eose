@@ -39,13 +39,14 @@ export const dashboardRouter = router({
         endDate: z.string().date().optional(),
       }).optional(),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       if (!ordersService || !financeService || !marketingService || !hrService || !inventoryService) {
         throw new Error('Dashboard services not initialized');
       }
 
       const startDate = input?.startDate;
       const endDate = input?.endDate;
+      const branchId = ctx.currentBranchId;
 
       // Fetch all data in parallel for performance. Use fast path (MVs) for profit; fallback to getProfitReport if MVs missing.
       const logErr = (label: string) => (err: unknown) => {
@@ -63,11 +64,11 @@ export const dashboardRouter = router({
         csWorkloads,
       ] = await Promise.all([
         financeService.getFastProfitReport(startDate, endDate).catch(() => null),
-        hasDateRange ? ordersService.getStatusCounts(undefined, startDate, endDate).catch(logErr('statusCounts')) : Promise.resolve(undefined),
+        hasDateRange ? ordersService.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId).catch(logErr('statusCounts')) : Promise.resolve(undefined),
         financeService.getInvoiceSummary().catch(logErr('invoiceSummary')),
-        marketingService.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate).catch(logErr('marketingMetrics')),
+        marketingService.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId).catch(logErr('marketingMetrics')),
         hrService.getPayoutSummary().catch(logErr('payoutSummary')),
-        ordersService.getCSAgentWorkloads().catch(logErr('csWorkloads')),
+        ordersService.getCSAgentWorkloads(branchId).catch(logErr('csWorkloads')),
       ]);
 
       let profitReport: {
@@ -96,7 +97,7 @@ export const dashboardRouter = router({
           margin: fastProfitResult.margin,
         };
       } else {
-        const fullReport = await financeService.getProfitReport({ groupBy: 'product', startDate, endDate }).catch(logErr('profitReport'));
+        const fullReport = await financeService.getProfitReport({ groupBy: 'product', startDate, endDate, branchId }).catch(logErr('profitReport'));
         profitReport = fullReport ?? {
           revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0,
           commission: 0, fulfillmentCost: 0, operationalLoss: 0,
@@ -106,14 +107,15 @@ export const dashboardRouter = router({
 
       const safeProfitReport = profitReport;
 
-      // Status counts: when date range use getStatusCounts result; when all-time use fast path statusCounts or fallback to getStatusCounts(undefined)
+      // Status counts: when date range or branch-scoped use explicit query; when all-time global use fast path MVs
       let statusCounts: Record<string, number>;
       if (hasDateRange) {
         statusCounts = (statusCountsWhenDated ?? {}) as Record<string, number>;
-      } else if (fastProfitResult?.statusCounts && Object.keys(fastProfitResult.statusCounts).length > 0) {
+      } else if (!branchId && fastProfitResult?.statusCounts && Object.keys(fastProfitResult.statusCounts).length > 0) {
+        // MV-based counts are only valid for global (no branch filter)
         statusCounts = fastProfitResult.statusCounts as Record<string, number>;
       } else {
-        const allTimeCounts = await ordersService.getStatusCounts(undefined).catch(logErr('statusCounts'));
+        const allTimeCounts = await ordersService.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId).catch(logErr('statusCounts'));
         statusCounts = (allTimeCounts ?? {}) as Record<string, number>;
       }
       const safeMarketingMetrics = marketingMetrics ?? {
@@ -220,16 +222,17 @@ export const dashboardRouter = router({
         endDate: z.string().date().optional(),
       }).optional(),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       if (!ordersService) {
         throw new Error('Dashboard services not initialized');
       }
       const startDate = input?.startDate;
       const endDate = input?.endDate;
+      const branchId = ctx.currentBranchId;
 
       const [deliveredBuckets, createdBuckets] = await Promise.all([
-        ordersService.getDeliveredOrdersTimeSeries(startDate, endDate),
-        ordersService.getOrdersTimeSeriesByCreated(startDate, endDate),
+        ordersService.getDeliveredOrdersTimeSeries(startDate, endDate, branchId),
+        ordersService.getOrdersTimeSeriesByCreated(startDate, endDate, branchId),
       ]);
 
       // Merge by date: union of all dates, each bucket has revenue, orderCount (delivered), createdCount
@@ -263,6 +266,21 @@ export const dashboardRouter = router({
     }),
 
   /**
+   * CEO Branch Breakdown — per-branch order counts and revenue for SuperAdmin cross-branch view.
+   */
+  ceoBranchBreakdown: permissionProcedure('ceo.overview')
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }).optional(),
+    )
+    .query(async ({ input }) => {
+      if (!ordersService) throw new Error('Dashboard services not initialized');
+      return ordersService.getBranchBreakdown(input?.startDate, input?.endDate);
+    }),
+
+  /**
    * Order pipeline chart — Volume, CS Engaged, Confirmed, Logistics distributed, Delivered.
    * For the CEO Executive Overview order funnel/bar chart. SuperAdmin only.
    */
@@ -273,10 +291,10 @@ export const dashboardRouter = router({
         endDate: z.string().date().optional(),
       }).optional(),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       if (!ordersService) {
         throw new Error('Dashboard services not initialized');
       }
-      return ordersService.getOrderPipelineChart(input?.startDate, input?.endDate);
+      return ordersService.getOrderPipelineChart(input?.startDate, input?.endDate, ctx.currentBranchId);
     }),
 });

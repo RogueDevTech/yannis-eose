@@ -26,6 +26,8 @@ export const users = pgTable('users', {
   // Last time this agent took any action (CS_ENGAGED, CONFIRMED, etc.)
   // Used for dispatch tiebreaker and inactivity detection.
   lastActionAt: timestamp('last_action_at', { withTimezone: true }),
+  /** Default branch for this user. NULL for SuperAdmin (bypasses branch RLS). */
+  primaryBranchId: text('primary_branch_id'),
   ...temporalColumns,
   ...timestampColumns,
 });

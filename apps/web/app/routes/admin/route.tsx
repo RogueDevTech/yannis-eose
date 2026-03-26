@@ -48,7 +48,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     .catch(() => ({ notifications: [] as Notification[], unreadCount: 0 }));
 
-  return defer({ user, notifications: notificationsPromise });
+  // Fetch user's branches for the branch switcher (non-blocking)
+  const branchesPromise = apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie })
+    .then((res) => {
+      if (!res.ok) return [] as Array<{ id: string; name: string; code: string }>;
+      const data = (res.data as { result?: { data?: Array<{ id: string; name: string; code: string }> } })?.result?.data;
+      return data ?? [];
+    })
+    .catch(() => [] as Array<{ id: string; name: string; code: string }>);
+
+  const [branches] = await Promise.all([branchesPromise]);
+
+  return defer({ user, notifications: notificationsPromise, branches });
 }
 
 /**
@@ -93,11 +104,12 @@ export async function action({ request }: ActionFunctionArgs) {
  * Child routes render inside the <Outlet /> within DashboardLayout.
  */
 export default function AdminLayout() {
-  const { user, notifications } = useLoaderData<typeof loader>();
+  const { user, notifications, branches } = useLoaderData<typeof loader>();
 
   return (
     <DashboardLayout
       user={user}
+      branches={branches}
       notificationsPromise={notifications}
       notificationsActionUrl="/admin"
     />

@@ -95,12 +95,15 @@ export function CSDashboardPage({
   activeOrders,
   activeTotal,
   statusCounts,
+  isClaimMode = false,
+  claimCap = 2,
   inactiveAgents,
   callbackOrders,
   flaggedDuplicates,
   leaderboard,
   leaderboardPeriod = 'this_month',
   cartStats,
+  claimQueue,
   liveEvents,
   canCreateOffline = false,
   productsForOfflineOrder = [],
@@ -108,12 +111,15 @@ export function CSDashboardPage({
   initialHotSwapFrom,
 }: CSDashboardStreamData) {
   const fetcher = useFetcher();
+  const claimFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const cartsFetcher = useFetcher<{ pendingCarts?: PendingCart[]; abandonedCarts?: PendingCart[] }>();
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'queue' | 'active' | 'callbacks' | 'duplicates' | 'carts' | 'hotswap' | 'performance'>(
-    initialTab === 'hotswap' ? 'hotswap' : 'active',
+  const [activeTab, setActiveTab] = useState<'queue' | 'active' | 'callbacks' | 'duplicates' | 'carts' | 'hotswap' | 'performance' | 'claim'>(
+    initialTab === 'hotswap' ? 'hotswap' : isClaimMode ? 'claim' : 'active',
   );
+  // Track which order is being claimed (to show per-row loading state)
+  const [claimingOrderId, setClaimingOrderId] = useState<string | null>(null);
   const [assignAgent, setAssignAgent] = useState<Record<string, string>>({});
   const [hotSwapFrom, setHotSwapFrom] = useState(initialHotSwapFrom ?? '');
   const [hotSwapTo, setHotSwapTo] = useState('');
@@ -179,6 +185,14 @@ export function CSDashboardPage({
         : `${distributeResult.distributed} order(s) distributed to agents`
       : 'CS action completed';
   useFetcherToast(fetcher.data, { successMessage });
+  useFetcherToast(claimFetcher.data, { successMessage: claimFetcher.data?.message ?? 'Order claimed' });
+
+  // Clear claiming state after claim response
+  useEffect(() => {
+    if (claimFetcher.state === 'idle' && claimingOrderId) {
+      setClaimingOrderId(null);
+    }
+  }, [claimFetcher.state]);
 
   useEffect(() => {
     if (actionError) setDismissedError(false);
@@ -580,6 +594,21 @@ export function CSDashboardPage({
           value={activeTab}
           onChange={(v) => setActiveTab(v as typeof activeTab)}
           tabs={[
+            ...(isClaimMode ? [{
+              value: 'claim',
+              label: 'Claim Queue',
+              badge: claimQueue ? (
+                <DeferredSection resolve={claimQueue} skeleton="inline">
+                  {(orders: CSOrder[]) =>
+                    orders.length > 0 ? (
+                      <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 text-xs font-bold">
+                        {orders.length}
+                      </span>
+                    ) : null
+                  }
+                </DeferredSection>
+              ) : undefined,
+            }] : []),
             { value: 'active', label: `Active Orders (${activeTotal})` },
             { value: 'queue', label: `Unassigned Queue (${unassignedTotal})` },
             {
@@ -1110,6 +1139,158 @@ export function CSDashboardPage({
           )}
           </div>
         </div>
+      )}
+
+      {/* ── Claim Queue Tab ──────────────────────────── */}
+      {activeTab === 'claim' && claimQueue && (
+        <DeferredSection resolve={claimQueue} skeleton="table">
+          {(orders: CSOrder[]) => (
+            <div className="space-y-4">
+              <div className="card">
+                <div className="flex items-start justify-between gap-4 mb-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Claim Queue</h2>
+                    <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+                      Unassigned orders available to claim. First agent to click Claim takes the order.
+                      Cap: <strong>{claimCap}</strong> unconfirmed orders per agent.
+                    </p>
+                  </div>
+                  <span className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-success-600 dark:text-success-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-success-500 inline-block animate-pulse" />
+                    Live
+                  </span>
+                </div>
+
+                {orders.length === 0 ? (
+                  <div className="text-center py-12 text-surface-700 dark:text-surface-300">
+                    No orders in the claim queue right now.
+                  </div>
+                ) : (
+                  <>
+                    {/* Desktop table */}
+                    <div className="hidden md:block overflow-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr>
+                            <th className="table-header">Order</th>
+                            <th className="table-header">Customer</th>
+                            <th className="table-header">Phone</th>
+                            <th className="table-header text-right">Amount</th>
+                            <th className="table-header">Received</th>
+                            <th className="table-header" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {orders.map((order: CSOrder) => {
+                            const isClaiming = claimingOrderId === order.id && claimFetcher.state === 'submitting';
+                            // Count how many unconfirmed orders the current user has
+                            // We cap check is enforced server-side; disable button while submitting
+                            return (
+                              <tr key={order.id} className="table-row">
+                                <td className="table-cell">
+                                  <Link
+                                    to={`/admin/orders/${order.id}`}
+                                    className="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
+                                  >
+                                    {order.id.slice(0, 8).toUpperCase()}
+                                  </Link>
+                                </td>
+                                <td className="table-cell">
+                                  <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{order.customerName}</p>
+                                </td>
+                                <td className="table-cell">
+                                  <span className="text-xs font-mono text-surface-700 dark:text-surface-300">{order.customerPhoneDisplay}</span>
+                                </td>
+                                <td className="table-cell text-right text-sm">
+                                  {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
+                                </td>
+                                <td className="table-cell text-xs text-surface-700 dark:text-surface-300">
+                                  {new Date(order.createdAt).toLocaleString('en-NG', {
+                                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                                  })}
+                                </td>
+                                <td className="table-cell text-right">
+                                  <Button
+                                    type="button"
+                                    variant="primary"
+                                    size="sm"
+                                    loading={isClaiming}
+                                    loadingText="Claiming..."
+                                    disabled={claimFetcher.state === 'submitting'}
+                                    onClick={() => {
+                                      setClaimingOrderId(order.id);
+                                      claimFetcher.submit(
+                                        { intent: 'claimOrder', orderId: order.id },
+                                        { method: 'post' },
+                                      );
+                                    }}
+                                  >
+                                    Claim
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile cards */}
+                    <div className="md:hidden space-y-3">
+                      {orders.map((order: CSOrder) => {
+                        const isClaiming = claimingOrderId === order.id && claimFetcher.state === 'submitting';
+                        return (
+                          <div
+                            key={order.id}
+                            className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <Link
+                                  to={`/admin/orders/${order.id}`}
+                                  className="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
+                                >
+                                  {order.id.slice(0, 8).toUpperCase()}
+                                </Link>
+                                <p className="text-sm font-medium text-surface-900 dark:text-surface-100 mt-0.5">{order.customerName}</p>
+                                <p className="text-xs font-mono text-surface-700 dark:text-surface-300">{order.customerPhoneDisplay}</p>
+                                {order.totalAmount && (
+                                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">₦{Number(order.totalAmount).toLocaleString()}</p>
+                                )}
+                                <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">
+                                  {new Date(order.createdAt).toLocaleString('en-NG', {
+                                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                                  })}
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="primary"
+                                size="sm"
+                                loading={isClaiming}
+                                loadingText="Claiming..."
+                                disabled={claimFetcher.state === 'submitting'}
+                                onClick={() => {
+                                  setClaimingOrderId(order.id);
+                                  claimFetcher.submit(
+                                    { intent: 'claimOrder', orderId: order.id },
+                                    { method: 'post' },
+                                  );
+                                }}
+                              >
+                                Claim
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </DeferredSection>
       )}
 
       {/* ── Performance Tab ─────────────────────────── */}

@@ -90,7 +90,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : null;
 
   let csAgentsForFilter: Array<{ agentId: string; agentName: string }> = [];
-  let csAgentsForTransfer: Array<{ agentId: string; agentName: string }> = [];
   if (showCSAgentColumn) {
     const workloadsRes = await apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
       '/trpc/orders.csWorkloads?input=%7B%7D',
@@ -98,29 +97,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
     if (workloadsRes.ok && Array.isArray(workloadsRes.data?.result?.data)) {
       csAgentsForFilter = workloadsRes.data.result.data.map((w) => ({ agentId: w.agentId, agentName: w.agentName }));
-      csAgentsForTransfer = csAgentsForFilter;
-    }
-  } else if (isCSAgent) {
-    const agentsRes = await apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
-      '/trpc/orders.listCSAgents?input=%7B%7D',
-      { method: 'GET', cookie },
-    );
-    if (agentsRes.ok && Array.isArray(agentsRes.data?.result?.data)) {
-      csAgentsForTransfer = agentsRes.data.result.data;
     }
   }
 
-  let pendingTransferRequests: Array<{
-    id: string;
-    orderId: string;
-    fromCsId: string;
-    fromCsName: string | null;
-    toCsId: string;
-    status: string;
-    requestedAt: string;
-    reason: string | null;
-    order: { id: string; customerName: string; status: string } | null;
-  }> = [];
   let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
   if (canCreateOffline) {
     const productsRes = await apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
@@ -129,23 +108,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
     if (productsRes.ok && productsRes.data?.result?.data?.products) {
       productsForOfflineOrder = productsRes.data.result.data.products;
-    }
-  }
-
-  if (isCSAgent || showCSAgentColumn) {
-    const trRes = await apiRequest<{ result?: { data?: Array<{
-      id: string;
-      orderId: string;
-      fromCsId: string;
-      fromCsName: string | null;
-      toCsId: string;
-      status: string;
-      requestedAt: string;
-      reason: string | null;
-      order: { id: string; customerName: string; status: string } | null;
-    }> } }>('/trpc/orders.listTransferRequestsForMe?input=%7B%7D', { method: 'GET', cookie });
-    if (trRes.ok && Array.isArray(trRes.data?.result?.data)) {
-      pendingTransferRequests = trRes.data.result.data;
     }
   }
 
@@ -164,8 +126,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     currentUserId: user.id,
     myWorkload,
     csAgentsForFilter,
-    csAgentsForTransfer,
-    pendingTransferRequests,
     canCreateOffline,
     productsForOfflineOrder,
     filters: {
@@ -297,70 +257,6 @@ export async function action({ request }: ActionFunctionArgs) {
       failed: data?.failed ?? 0,
       results: data?.results ?? [],
     });
-  }
-
-  if (intent === 'transfer') {
-    const user = await requirePermission(request, 'orders.requestTransfer');
-    const orderId = form.get('orderId') as string;
-    const toCsAgentId = form.get('toCsAgentId') as string;
-    const direct = form.get('direct') === 'true'; // HoS/SuperAdmin direct assign — no approval
-
-    if (direct) {
-      // Only HoS/SuperAdmin may direct-assign; CS agents must use request transfer (assignee approval).
-      if (user.role !== 'HEAD_OF_CS' && user.role !== 'SUPER_ADMIN') {
-        return json({ success: false, error: 'Only Head of CS can assign orders directly. Use request transfer for approval.' }, { status: 403 });
-      }
-      const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
-        method: 'POST',
-        cookie,
-        body: { orderId, csAgentId: toCsAgentId },
-      });
-      if (!res.ok) {
-        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Assign failed';
-        return json({ success: false, error: err });
-      }
-      return json({ success: true, direct: true });
-    }
-    const res = await apiRequest<unknown>('/trpc/orders.requestTransfer', {
-      method: 'POST',
-      cookie,
-      body: { orderId, toCsAgentId, reason: (form.get('reason') as string) || undefined },
-    });
-    if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Transfer request failed';
-      return json({ success: false, error: err });
-    }
-    return json({ success: true, direct: false });
-  }
-
-  if (intent === 'acceptTransfer') {
-    await requirePermission(request, 'orders.read');
-    const requestId = form.get('requestId') as string;
-    const res = await apiRequest<unknown>('/trpc/orders.acceptTransfer', {
-      method: 'POST',
-      cookie,
-      body: { requestId },
-    });
-    if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Accept failed';
-      return json({ success: false, error: err });
-    }
-    return json({ success: true });
-  }
-
-  if (intent === 'rejectTransfer') {
-    await requirePermission(request, 'orders.read');
-    const requestId = form.get('requestId') as string;
-    const res = await apiRequest<unknown>('/trpc/orders.rejectTransfer', {
-      method: 'POST',
-      cookie,
-      body: { requestId },
-    });
-    if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Reject failed';
-      return json({ success: false, error: err });
-    }
-    return json({ success: true });
   }
 
   return json({ success: false, error: 'Unknown intent' });

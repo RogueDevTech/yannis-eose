@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Form, Link, useNavigate } from '@remix-run/react';
+import { Form, Link, useNavigate, useFetcher } from '@remix-run/react';
 import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -15,6 +15,12 @@ interface Notification {
   read: boolean;
   createdAt: string;
   data?: Record<string, unknown> | null;
+}
+
+interface BranchInfo {
+  id: string;
+  name: string;
+  code: string;
 }
 
 interface HeaderProps {
@@ -35,6 +41,8 @@ interface HeaderProps {
   onPruneServerKnown?: (serverIds: Set<string>) => void;
   onClearRealtimeNotifications?: () => void;
   pwaInstall?: { canInstall: boolean; install: () => void };
+  branches?: BranchInfo[];
+  currentBranchId?: string | null;
 }
 
 const NOTIFICATION_COLORS: Record<string, string> = {
@@ -79,7 +87,7 @@ function SyncNotificationReadIds({ notifications, onPruneServerKnown }: { notifi
   return null;
 }
 
-export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications, pwaInstall }: HeaderProps) {
+export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications, pwaInstall, branches, currentBranchId }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
@@ -207,6 +215,17 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
           </kbd>
         </button>
       </div>
+
+      {/* Centre: Branch switcher — desktop only */}
+      {branches && branches.length > 0 && (
+        <div className="hidden lg:flex items-center">
+          <HeaderBranchSwitcher
+            branches={branches}
+            currentBranchId={currentBranchId ?? null}
+            userRole={user?.role ?? ''}
+          />
+        </div>
+      )}
 
       {/* Right side: PWA install + dark mode + notifications + user */}
       <div className="flex items-center gap-2 lg:gap-3">
@@ -559,6 +578,186 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
       </div>
       <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
+  );
+}
+
+/* ── Header Branch Switcher ───────────────────────────────────────────── */
+
+const ALL_BRANCHES_ROLES = new Set(['SUPER_ADMIN']);
+
+function HeaderBranchSwitcher({
+  branches,
+  currentBranchId,
+  userRole,
+}: {
+  branches: BranchInfo[];
+  currentBranchId: string | null;
+  userRole: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const fetcher = useFetcher();
+
+  const canSeeAllBranches = ALL_BRANCHES_ROLES.has(userRole);
+  const currentBranch = branches.find((b) => b.id === currentBranchId) ?? null;
+  // "All Branches" is active when currentBranchId is null (and user can see all)
+  const isAllBranches = canSeeAllBranches && currentBranchId === null;
+  const canSwitch = branches.length > 1 || canSeeAllBranches;
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  // null branchId = "All Branches"; empty string submitted to action = null on backend
+  const handleSwitch = (branchId: string | null) => {
+    if (branchId === currentBranchId) { setOpen(false); return; }
+    fetcher.submit(
+      { intent: 'switchBranch', branchId: branchId ?? '' },
+      { method: 'post', action: '/admin/branches/switch' },
+    );
+    setOpen(false);
+  };
+
+  // Single-branch user with no "All Branches" option — static pill
+  if (!canSwitch) {
+    const display = currentBranch ?? branches[0];
+    if (!display) return null;
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-100 dark:bg-surface-800 border border-surface-200 dark:border-surface-700">
+        <svg className="w-3.5 h-3.5 text-surface-500 dark:text-surface-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+        </svg>
+        <span className="text-xs font-semibold text-surface-900 dark:text-surface-100">{display.name}</span>
+        <span className="text-[10px] text-surface-500 dark:text-surface-400 font-mono bg-surface-200 dark:bg-surface-700 px-1 rounded">
+          {display.code}
+        </span>
+      </div>
+    );
+  }
+
+  // Trigger label
+  const triggerLabel = isAllBranches ? 'All Branches' : (currentBranch?.name ?? 'Select Branch');
+  const triggerCode = isAllBranches ? null : (currentBranch?.code ?? null);
+
+  // Multi-branch / SuperAdmin — dropdown
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-100 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors duration-150 text-left"
+        disabled={fetcher.state !== 'idle'}
+      >
+        {isAllBranches ? (
+          <svg className="w-3.5 h-3.5 text-brand-500 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5 text-surface-500 dark:text-surface-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+          </svg>
+        )}
+        <span className={`text-xs font-semibold truncate max-w-[140px] ${isAllBranches ? 'text-brand-600 dark:text-brand-400' : 'text-surface-900 dark:text-surface-100'}`}>
+          {triggerLabel}
+        </span>
+        {triggerCode && (
+          <span className="text-[10px] text-surface-500 dark:text-surface-400 font-mono bg-surface-200 dark:bg-surface-700 px-1 rounded">
+            {triggerCode}
+          </span>
+        )}
+        {fetcher.state !== 'idle' ? (
+          <svg
+            className="w-3 h-3 ml-0.5 flex-shrink-0 animate-spin text-brand-500 dark:text-brand-400"
+            fill="none" viewBox="0 0 24 24"
+          >
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        ) : (
+          <svg
+            className={`w-3 h-3 text-surface-400 dark:text-surface-500 ml-0.5 flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 mt-1.5 min-w-[220px] bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg shadow-lg z-50 py-1 overflow-hidden animate-fade-in">
+          <p className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500">
+            Switch Branch
+          </p>
+
+          {/* All Branches option — SuperAdmin only */}
+          {canSeeAllBranches && (
+            <button
+              type="button"
+              onClick={() => handleSwitch(null)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-50 dark:hover:bg-surface-700/50 transition-colors duration-100 ${
+                isAllBranches ? 'bg-brand-50 dark:bg-brand-900/20' : ''
+              }`}
+            >
+              <span className={`inline-flex items-center justify-center w-5 h-5 rounded flex-shrink-0 ${
+                isAllBranches ? 'bg-brand-600 text-white' : 'bg-surface-200 dark:bg-surface-600 text-surface-500 dark:text-surface-400'
+              }`}>
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                </svg>
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-surface-900 dark:text-white">All Branches</p>
+                <p className="text-[10px] text-surface-500 dark:text-surface-400">Global view — no branch filter</p>
+              </div>
+              {isAllBranches && (
+                <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </button>
+          )}
+
+          {canSeeAllBranches && branches.length > 0 && (
+            <div className="my-1 border-t border-surface-100 dark:border-surface-700" />
+          )}
+
+          {branches.map((branch) => (
+            <button
+              key={branch.id}
+              type="button"
+              onClick={() => handleSwitch(branch.id)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-50 dark:hover:bg-surface-700/50 transition-colors duration-100 ${
+                branch.id === currentBranchId ? 'bg-brand-50 dark:bg-brand-900/20' : ''
+              }`}
+            >
+              <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold flex-shrink-0 ${
+                branch.id === currentBranchId
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-surface-200 dark:bg-surface-600 text-surface-600 dark:text-surface-300'
+              }`}>
+                {branch.code.slice(0, 2)}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-surface-900 dark:text-white truncate">{branch.name}</p>
+                <p className="text-[10px] text-surface-500 dark:text-surface-400">{branch.code}</p>
+              </div>
+              {branch.id === currentBranchId && (
+                <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
