@@ -12,8 +12,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (cookie) {
     const res = await apiRequest('/auth/logout', { method: 'POST', cookie });
-    if (res.setCookie) {
-      headers.set('Set-Cookie', res.setCookie);
+    for (const c of res.setCookies) {
+      headers.append('Set-Cookie', c);
     }
   }
 

@@ -57,6 +57,14 @@ async function bootstrap() {
   await app.listen(port);
   console.warn(`[Yannis API] Running on http://localhost:${port}`);
   console.warn(`[Yannis API] Swagger docs at http://localhost:${port}/api/docs`);
+  if (
+    process.env['NODE_ENV'] === 'production' &&
+    !process.env['SESSION_COOKIE_DOMAIN']?.trim()
+  ) {
+    console.warn(
+      '[Yannis API] SESSION_COOKIE_DOMAIN is unset — browsers will not send yannis_session to a different API host (e.g. WebSocket on api-*). Set SESSION_COOKIE_DOMAIN to your parent domain (e.g. .roguedevtech.com).',
+    );
+  }
 }
 
 void bootstrap();
