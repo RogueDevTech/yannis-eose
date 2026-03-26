@@ -454,7 +454,8 @@ function DashboardLayoutInner({
 }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [moreNavOpen, setMoreNavOpen] = useState(readMoreOpenFromStorage);
+  // Must match SSR (no sessionStorage): hydrate first, then read storage in useEffect.
+  const [moreNavOpen, setMoreNavOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const { isConnected } = useSocket();
@@ -468,6 +469,10 @@ function DashboardLayoutInner({
   const { displayUnreadCount } = useNotificationsState();
   const navigation = useNavigation();
   const location = useLocation();
+
+  useEffect(() => {
+    setMoreNavOpen(readMoreOpenFromStorage());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

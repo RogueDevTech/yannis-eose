@@ -42,7 +42,18 @@ interface ApiResponse<T> {
   ok: boolean;
   status: number;
   data: T;
-  setCookie?: string;
+  /** `Set-Cookie` header(s) from the API — use `getSetCookie()` because `headers.get('set-cookie')` is often null in Node fetch. */
+  setCookies: string[];
+}
+
+/** Collect Set-Cookie lines from a fetch Response (Node undici). */
+function getSetCookieValues(headers: Headers): string[] {
+  const extended = headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof extended.getSetCookie === 'function') {
+    return extended.getSetCookie();
+  }
+  const single = headers.get('set-cookie');
+  return single ? [single] : [];
 }
 
 /**
@@ -89,7 +100,7 @@ export async function apiRequest<T = unknown>(
       ok: false,
       status: isTimeout ? 504 : 503,
       data: { error: isTimeout ? 'API request timed out' : 'API unreachable' } as T,
-      setCookie: undefined,
+      setCookies: [],
     };
   } finally {
     clearTimeout(timeoutId);
@@ -101,7 +112,7 @@ export async function apiRequest<T = unknown>(
     ok: response.ok,
     status: response.status,
     data,
-    setCookie: response.headers.get('set-cookie') ?? undefined,
+    setCookies: getSetCookieValues(response.headers),
   };
 }
 

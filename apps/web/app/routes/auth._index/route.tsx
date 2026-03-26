@@ -102,8 +102,8 @@ async function handleLogin(request: Request, formData: FormData) {
   }
 
   const headers = new Headers();
-  if (res.setCookie) {
-    headers.set('Set-Cookie', res.setCookie);
+  for (const c of res.setCookies) {
+    headers.append('Set-Cookie', c);
   }
 
   const url = new URL(request.url);
@@ -152,9 +152,11 @@ async function handleSetup(request: Request, formData: FormData) {
     body: { email, password },
   });
 
-  if (loginRes.ok && loginRes.setCookie) {
+  if (loginRes.ok && loginRes.setCookies.length > 0) {
     const headers = new Headers();
-    headers.set('Set-Cookie', loginRes.setCookie);
+    for (const c of loginRes.setCookies) {
+      headers.append('Set-Cookie', c);
+    }
     const url = new URL(request.url);
     const redirectTo = url.searchParams.get('redirectTo');
     const target = redirectTo && isAllowedRedirectPath(redirectTo) ? decodeURIComponent(redirectTo) : '/admin';
