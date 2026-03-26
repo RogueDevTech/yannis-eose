@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from '@remix-run/react';
+import { Link, useSearchParams } from '@remix-run/react';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { Button } from '~/components/ui/button';
 import type { Product } from './types';
 import { PRODUCT_STATUS_COLORS } from './types';
 import { ProductViewModal } from './ProductViewModal';
@@ -8,6 +9,8 @@ import { ProductViewModal } from './ProductViewModal';
 interface ProductsListPageProps {
   products: Product[];
   total: number;
+  page: number;
+  totalPages: number;
   canEditProduct?: boolean;
 }
 
@@ -65,10 +68,18 @@ const ViewIcon = (
   </svg>
 );
 
-export function ProductsListPage({ products, total, canEditProduct = false }: ProductsListPageProps) {
+export function ProductsListPage({
+  products,
+  total,
+  page,
+  totalPages,
+  canEditProduct = false,
+}: ProductsListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const safeTotalPages = Math.max(1, totalPages);
 
   useEffect(() => {
     if (!viewProduct) return;
@@ -88,6 +99,13 @@ export function ProductsListPage({ products, total, canEditProduct = false }: Pr
       return false;
     return true;
   });
+
+  const goToPage = (nextPage: number) => {
+    const clamped = Math.min(Math.max(1, nextPage), safeTotalPages);
+    const next = new URLSearchParams(searchParams);
+    next.set('page', String(clamped));
+    setSearchParams(next, { replace: true });
+  };
 
   return (
     <div className="space-y-4">
@@ -248,6 +266,15 @@ export function ProductsListPage({ products, total, canEditProduct = false }: Pr
         <p className="text-sm text-surface-800 dark:text-surface-200">
           Showing {filteredProducts.length} of {total} products
         </p>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
+            Previous
+          </Button>
+          <span className="text-sm text-surface-800 dark:text-surface-200 px-2">Page {page} of {safeTotalPages}</span>
+          <Button variant="secondary" size="sm" disabled={page >= safeTotalPages} onClick={() => goToPage(page + 1)}>
+            Next
+          </Button>
+        </div>
       </div>
 
       {/* View product modal */}

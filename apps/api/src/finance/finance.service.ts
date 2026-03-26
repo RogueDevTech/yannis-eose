@@ -157,6 +157,9 @@ export class FinanceService {
     if (input.endDate) {
       orderConditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate)));
     }
+    if (input.branchId) {
+      orderConditions.push(eq(schema.orders.branchId, input.branchId));
+    }
     orderConditions.push(eq(schema.orders.status, 'DELIVERED'));
     const orderWhere = and(...orderConditions);
 

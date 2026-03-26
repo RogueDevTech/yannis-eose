@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { randomBytes } from 'crypto';
-import { eq, and, desc, asc, ilike, or, count, ne } from 'drizzle-orm';
+import { eq, and, desc, asc, ilike, or, count, ne, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -47,6 +47,50 @@ export class UsersService {
     if (!phone) return null;
     if (phone.length < 8) return '****';
     return phone.substring(0, 4) + '****' + phone.substring(phone.length - 4);
+  }
+
+  private async getUserBranchMemberships(userIds: string[]): Promise<Map<string, Array<{
+    branchId: string;
+    branchName: string;
+    branchCode: string;
+    isPrimary: boolean;
+    roleInBranch: string | null;
+  }>>> {
+    if (userIds.length === 0) return new Map();
+
+    const rows = await this.db
+      .select({
+        userId: schema.userBranches.userId,
+        branchId: schema.userBranches.branchId,
+        branchName: schema.branches.name,
+        branchCode: schema.branches.code,
+        isPrimary: schema.userBranches.isPrimary,
+        roleInBranch: schema.userBranches.roleInBranch,
+      })
+      .from(schema.userBranches)
+      .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
+      .where(inArray(schema.userBranches.userId, userIds))
+      .orderBy(desc(schema.userBranches.isPrimary), asc(schema.branches.name));
+
+    const membershipsByUser = new Map<string, Array<{
+      branchId: string;
+      branchName: string;
+      branchCode: string;
+      isPrimary: boolean;
+      roleInBranch: string | null;
+    }>>();
+    for (const row of rows) {
+      const existing = membershipsByUser.get(row.userId) ?? [];
+      existing.push({
+        branchId: row.branchId,
+        branchName: row.branchName,
+        branchCode: row.branchCode,
+        isPrimary: row.isPrimary,
+        roleInBranch: row.roleInBranch ?? null,
+      });
+      membershipsByUser.set(row.userId, existing);
+    }
+    return membershipsByUser;
   }
 
   /**
@@ -334,9 +378,13 @@ export class UsersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
     }
 
+    const membershipsByUser = await this.getUserBranchMemberships([user.id]);
+    const branchMemberships = membershipsByUser.get(user.id) ?? [];
+
     return {
       ...user,
       phone: this.maskPhone(user.phone),
+      branchMemberships,
     };
   }
 
@@ -404,9 +452,14 @@ export class UsersService {
     ]);
 
     const total = totalRows[0]?.count ?? 0;
+    const membershipsByUser = await this.getUserBranchMemberships(users.map((u) => u.id));
 
     return {
-      users: users.map((u) => ({ ...u, phone: this.maskPhone(u.phone) })),
+      users: users.map((u) => ({
+        ...u,
+        phone: this.maskPhone(u.phone),
+        branchMemberships: membershipsByUser.get(u.id) ?? [],
+      })),
       pagination: {
         page: input.page,
         limit: input.limit,
@@ -420,7 +473,18 @@ export class UsersService {
    * List CS team members (HEAD_OF_CS + CS_AGENT) for Team page.
    * Gated by cs.teamOverview; does not require users.read.
    */
-  async listCSTeam(): Promise<Array<{ id: string; name: string; role: string }>> {
+  async listCSTeam(): Promise<Array<{
+    id: string;
+    name: string;
+    role: string;
+    branchMemberships: Array<{
+      branchId: string;
+      branchName: string;
+      branchCode: string;
+      isPrimary: boolean;
+      roleInBranch: string | null;
+    }>;
+  }>> {
     const rows = await this.db
       .select({
         id: schema.users.id,
@@ -436,7 +500,13 @@ export class UsersService {
       )
       .orderBy(asc(schema.users.name));
 
-    return rows.map((r) => ({ id: r.id, name: r.name, role: r.role }));
+    const membershipsByUser = await this.getUserBranchMemberships(rows.map((r) => r.id));
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      role: r.role,
+      branchMemberships: membershipsByUser.get(r.id) ?? [],
+    }));
   }
 
   /**

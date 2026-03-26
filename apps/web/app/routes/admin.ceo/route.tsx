@@ -5,6 +5,15 @@ import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
 import type { CEODashboardData } from '~/features/ceo/types';
 
+interface BranchBreakdownRow {
+  branchId: string;
+  branchName: string;
+  branchCode: string;
+  totalOrders: number;
+  deliveredOrders: number;
+  activeOrders: number;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'ceo.overview');
   const cookie = getSessionCookie(request);
@@ -27,10 +36,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
 
   const input = JSON.stringify({ startDate, endDate });
-  const res = await apiRequest<{ result?: { data?: CEODashboardData } }>(
-    `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(input)}`,
-    { method: 'GET', cookie },
-  );
+  const [res, branchBreakdownRes] = await Promise.all([
+    apiRequest<{ result?: { data?: CEODashboardData } }>(
+      `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(input)}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<{ result?: { data?: BranchBreakdownRow[] } }>(
+      `/trpc/dashboard.ceoBranchBreakdown?input=${encodeURIComponent(input)}`,
+      { method: 'GET', cookie },
+    ),
+  ]);
 
   const data: CEODashboardData = res.ok && res.data?.result?.data
     ? res.data.result.data
@@ -46,17 +61,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
         invoiceSummary: {},
       };
 
-  return { data, filters };
+  const branchBreakdown: BranchBreakdownRow[] = branchBreakdownRes.ok
+    ? (branchBreakdownRes.data?.result?.data ?? [])
+    : [];
+
+  return { data, filters, branchBreakdown };
 }
 
 export default function CEODashboardRoute() {
-  const { data, filters } = useLoaderData<typeof loader>();
+  const { data, filters, branchBreakdown } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
   return (
     <CEODashboardPage
       data={data as CEODashboardData}
       filters={filters}
+      branchBreakdown={branchBreakdown as BranchBreakdownRow[]}
       showBackToDashboard
     />
   );

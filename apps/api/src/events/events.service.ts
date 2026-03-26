@@ -105,4 +105,19 @@ export class EventsService {
       timestamp: new Date().toISOString(),
     });
   }
+
+  /**
+   * Emit agent state update (from REST/tRPC path if needed, not socket path).
+   * Socket path handled directly in EventsGateway.
+   */
+  emitAgentStateUpdate(data: {
+    agentId: string;
+    currentRoute: string;
+    currentOrderId?: string | null;
+    currentPanel?: string | null;
+  }) {
+    const payload = { ...data, lastActionAt: new Date().toISOString() };
+    this.gateway.server.to(`mirror:${data.agentId}`).emit('agent:state_update', payload);
+    this.gateway.server.to('cs-all').emit('agent:state_update', payload);
+  }
 }

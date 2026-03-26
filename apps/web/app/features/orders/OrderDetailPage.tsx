@@ -10,8 +10,11 @@ import { Tabs } from '~/components/ui/tabs';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useVoipDevice } from '~/hooks/useVoipDevice';
+import { useAgentStateBroadcast } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
-import type { CallLogEntry, HistoryEntry, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps } from './types';
+import { OrderTimeline } from '~/components/ui/order-timeline';
+import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
+import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
 
@@ -29,44 +32,6 @@ const CALL_STATUS_COLORS: Record<string, { bg: string; text: string; icon: strin
   NO_ANSWER: { bg: 'bg-danger-50 dark:bg-danger-700/20', text: 'text-danger-600 dark:text-danger-400', icon: 'text-danger-500' },
   BUSY: { bg: 'bg-warning-50 dark:bg-warning-700/20', text: 'text-warning-600 dark:text-warning-400', icon: 'text-warning-500' },
 };
-
-// ── History helpers ─────────────────────────────────────────────
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString('en-NG', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
-function computeDiff(
-  older: Record<string, unknown>,
-  newer: Record<string, unknown>,
-): Array<{ field: string; oldValue: unknown; newValue: unknown }> {
-  const skip = new Set(['valid_from', 'valid_to', 'valid_period', 'changed_by', '_table_name', '_row_data']);
-  const allKeys = new Set([...Object.keys(older), ...Object.keys(newer)]);
-  const diffs: Array<{ field: string; oldValue: unknown; newValue: unknown }> = [];
-
-  for (const key of allKeys) {
-    if (skip.has(key)) continue;
-    const oldVal = older[key];
-    const newVal = newer[key];
-    if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
-      diffs.push({ field: key, oldValue: oldVal, newValue: newVal });
-    }
-  }
-  return diffs;
-}
-
-function formatValue(val: unknown): string {
-  if (val === null || val === undefined) return '(null)';
-  if (typeof val === 'object') return JSON.stringify(val);
-  return String(val);
-}
 
 // ── Twilio error formatting (call modal + event log) ──
 
@@ -398,139 +363,6 @@ function CallStatusIndicator({ call }: { call: CallLogEntry }) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-// ── History Timeline Component ──────────────────────────────────
-
-function OrderHistoryTimeline({ history }: { history: HistoryEntry[] }) {
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
-
-  if (history.length === 0) {
-    return (
-      <div className="card">
-        <p className="text-sm text-surface-800 dark:text-surface-200 text-center py-8">
-          No audit history available. This may require SuperAdmin access.
-        </p>
-      </div>
-    );
-  }
-
-  // History is ordered newest first. Reverse to compute diffs (compare each to its predecessor).
-  const chronological = [...history].reverse();
-
-  return (
-    <div className="space-y-3">
-      {history.map((entry, idx) => {
-        // Find the chronological index for diff computation
-        const chronIdx = chronological.findIndex(
-          (e) => e.validFrom === entry.validFrom,
-        );
-        const prevEntry = chronIdx > 0 ? chronological[chronIdx - 1] : null;
-        const diffs = prevEntry ? computeDiff(prevEntry.data, entry.data) : [];
-        const isFirst = chronIdx === 0;
-        const isExpanded = expandedIdx === idx;
-
-        return (
-          <div key={`${entry.validFrom}-${idx}`} className="relative">
-            {/* Timeline connector */}
-            {idx < history.length - 1 && (
-              <div className="absolute left-4 top-10 bottom-0 w-0.5 bg-surface-200 dark:bg-surface-700" />
-            )}
-
-            <div className="flex gap-3">
-              {/* Timeline dot */}
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface-100 dark:bg-surface-800 border-2 border-surface-300 dark:border-surface-600 flex items-center justify-center mt-1">
-                {isFirst ? (
-                  <svg className="w-3.5 h-3.5 text-success-500" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                  </svg>
-                ) : (
-                  <svg className="w-3.5 h-3.5 text-brand-500" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H4.598a.75.75 0 00-.75.75v3.634a.75.75 0 001.5 0v-2.134l.228.228a7 7 0 1011.549-3.078.75.75 0 10-1.313.725zM4.688 8.576a5.5 5.5 0 019.201-2.466l.312.311H11.77a.75.75 0 000 1.5h3.634a.75.75 0 00.75-.75V3.537a.75.75 0 00-1.5 0V5.67l-.228-.228A7 7 0 002.875 8.576a.75.75 0 101.313-.725v-.275z" clipRule="evenodd" />
-                  </svg>
-                )}
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <button
-                  onClick={() => setExpandedIdx(isExpanded ? null : idx)}
-                  className="w-full text-left card hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-surface-900 dark:text-white">
-                        {isFirst ? 'Record Created' : `${diffs.length} field${diffs.length !== 1 ? 's' : ''} changed`}
-                      </p>
-                      <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
-                        {formatDate(entry.validFrom)}
-                        {entry.changedBy && (
-                          <span className="ml-2">
-                            by {entry.changedBy === EDGE_FORM_ACTOR_ID ? 'Edge Form' : `${entry.changedBy.slice(0, 8)}...`}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                    <svg
-                      className={`w-4 h-4 text-surface-700 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                    </svg>
-                  </div>
-
-                  {/* Expanded diff view */}
-                  {isExpanded && (
-                    <div className="mt-3 pt-3 border-t border-surface-200 dark:border-surface-700" onClick={(e) => e.stopPropagation()}>
-                      {isFirst ? (
-                        <div className="space-y-1.5">
-                          {Object.entries(entry.data)
-                            .filter(([key]) => !['valid_from', 'valid_to', 'valid_period', 'changed_by', '_table_name', '_row_data'].includes(key))
-                            .map(([key, value]) => (
-                              <div key={key} className="flex gap-2 text-xs flex-wrap">
-                                <span className="font-medium text-surface-800 dark:text-surface-200 min-w-[100px] sm:min-w-[120px]">{key}:</span>
-                                <span className="font-mono text-surface-900 dark:text-surface-100 break-all">{formatValue(value)}</span>
-                              </div>
-                            ))}
-                        </div>
-                      ) : diffs.length > 0 ? (
-                        <div className="overflow-x-auto -mx-1 px-1">
-                          <table className="w-full text-xs min-w-[280px]">
-                            <thead>
-                              <tr>
-                                <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">Field</th>
-                                <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">Old Value</th>
-                                <th className="text-left py-1 px-2 font-medium text-surface-800 dark:text-surface-200">New Value</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {diffs.map((d) => (
-                                <tr key={d.field} className="border-t border-surface-100 dark:border-surface-800">
-                                  <td className="py-1.5 px-2 font-medium text-surface-700 dark:text-surface-300 align-top">{d.field}</td>
-                                  <td className="py-1.5 px-2 font-mono text-danger-600 dark:text-danger-400 break-all align-top max-w-[120px] sm:max-w-none">
-                                    {formatValue(d.oldValue)}
-                                  </td>
-                                  <td className="py-1.5 px-2 font-mono text-success-600 dark:text-success-400 break-all align-top max-w-[120px] sm:max-w-none">
-                                    {formatValue(d.newValue)}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-surface-800 dark:text-surface-200">No field changes detected.</p>
-                      )}
-                    </div>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -870,7 +702,7 @@ function VoipCallPanelWithPolling({
 export function OrderDetailPage({
   order,
   latestCall,
-  history,
+  timeline,
   voipEnabled,
   canEditOrder = true,
   userRole,
@@ -884,12 +716,18 @@ export function OrderDetailPage({
   const scheduleFetcher = useFetcher();
   const adjustItemsFetcher = useFetcher();
   const revalidator = useRevalidator();
-  const [activeTab, setActiveTab] = useState<'details' | 'history'>('details');
+
+  // Supervisor Mirror View — broadcast agent state to supervisor and detect when being observed
+  const isCSAgent = userRole === 'CS_AGENT';
+  useAgentStateBroadcast(
+    isCSAgent
+      ? { currentRoute: `/admin/orders/${order.id}`, currentOrderId: order.id, currentPanel: activeTab }
+      : { currentRoute: '' }
+  );
+
+  const [activeTab, setActiveTab] = useState<'details' | 'timeline'>('details');
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [transferModalOpen, setTransferModalOpen] = useState(false);
-  const [transferToId, setTransferToId] = useState('');
-  const [transferReason, setTransferReason] = useState('');
   const [assignToId, setAssignToId] = useState('');
   const [callCustomerModalOpen, setCallCustomerModalOpen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
@@ -964,9 +802,6 @@ export function OrderDetailPage({
     isElevated ||
     (userRole === 'CS_AGENT' && (isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId)));
   const canAssignToCS = permissions.includes('orders.reassign');
-  const canRequestTransfer =
-    permissions.includes('orders.requestTransfer') &&
-    (userRole !== 'CS_AGENT' || isAssignedToMe);
 
   function canTransitionTo(newStatus: string): boolean {
     const allowed = order.allowedTransitions ?? [];
@@ -1058,14 +893,9 @@ export function OrderDetailPage({
         setCancelModalOpen(false);
         setCancelReason('');
       }
-      if (transferModalOpen) {
-        setTransferModalOpen(false);
-        setTransferToId('');
-        setTransferReason('');
-      }
     }
     prevFetcherState.current = fetcher.state;
-  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen, transferModalOpen]);
+  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen]);
 
   // Close confirm modal and revalidate when schedule callback succeeds
   const scheduleData = scheduleFetcher.data as { success?: boolean; scheduled?: boolean; error?: string } | undefined;
@@ -1140,10 +970,10 @@ export function OrderDetailPage({
 
       <Tabs
         value={activeTab}
-        onChange={(v) => setActiveTab(v as 'details' | 'history')}
+        onChange={(v) => setActiveTab(v as 'details' | 'timeline')}
         tabs={[
           { value: 'details', label: 'Details' },
-          { value: 'history', label: 'History' },
+          { value: 'timeline', label: 'Activity' },
         ]}
       />
 
@@ -1155,15 +985,15 @@ export function OrderDetailPage({
             {/* Status Timeline */}
             <div className="card overflow-hidden">
               <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Progress</h2>
-              <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain">
-                <div className="flex items-center flex-nowrap gap-0 min-w-max">
+              <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain lg:overflow-x-visible lg:mx-0 lg:px-0 lg:pb-0">
+                <div className="flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:grid-cols-5 lg:gap-x-3 lg:gap-y-4">
                 {STATUS_FLOW.map((status, idx) => {
                   const isPast = idx < currentStatusIndex;
                   const isCurrent = idx === currentStatusIndex;
 
                   return (
-                    <div key={status} className="flex items-center flex-shrink-0">
-                      <div className="flex flex-col items-center">
+                    <div key={status} className="flex items-center flex-shrink-0 lg:justify-center">
+                      <div className="flex flex-col items-center lg:w-full">
                         <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
                           isCurrent
                             ? 'bg-brand-500 text-white ring-4 ring-brand-100 dark:ring-brand-900'
@@ -1179,14 +1009,14 @@ export function OrderDetailPage({
                             idx + 1
                           )}
                         </div>
-                        <span className={`text-2xs mt-1 whitespace-nowrap ${
+                        <span className={`text-2xs mt-1 whitespace-nowrap lg:whitespace-normal lg:text-center lg:leading-tight ${
                           isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-surface-700 dark:text-surface-300'
                         }`}>
                           {status.replace(/_/g, ' ')}
                         </span>
                       </div>
                       {idx < STATUS_FLOW.length - 1 && (
-                        <div className={`h-0.5 w-8 lg:w-12 mx-1 flex-shrink-0 ${isPast ? 'bg-success-500' : 'bg-surface-200 dark:bg-surface-700'}`} />
+                        <div className={`h-0.5 w-8 mx-1 flex-shrink-0 lg:hidden ${isPast ? 'bg-success-500' : 'bg-surface-200 dark:bg-surface-700'}`} />
                       )}
                     </div>
                   );
@@ -1370,19 +1200,6 @@ export function OrderDetailPage({
                     Delete order
                   </Button>
 
-                  {/* Request transfer — CS_ENGAGED only */}
-                  {order.status === 'CS_ENGAGED' && canRequestTransfer && csAgentsForAssign && csAgentsForAssign.length > 0 && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="w-full"
-                      onClick={() => setTransferModalOpen(true)}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Request transfer
-                    </Button>
-                  )}
-
                   {/* Assign to agent — CS_ENGAGED only */}
                   {order.status === 'CS_ENGAGED' && canAssignToCS && csAgentsForAssign && csAgentsForAssign.length > 0 && (
                     <div className="flex gap-2">
@@ -1416,20 +1233,36 @@ export function OrderDetailPage({
               </div>
             )}
 
-            {/* Call Panel — CS only; VOIP; show for CS_ENGAGED or for UNPROCESSED/CS_ASSIGNED when user can engage */}
-            {canEditOrder && voipEnabled && canPerformCSActionsOnOrder && (order.status === 'CS_ENGAGED' || ((order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && canTransitionTo('CS_ENGAGED'))) && (
-              <DeferredSection resolve={latestCall} skeleton="card">
-                {(resolvedCall) => (
-                  <VoipCallPanelWithPolling
-                    order={order}
-                    resolvedCall={resolvedCall}
-                    canConfirm={canConfirm}
-                    fetcher={fetcher}
-                    revalidate={revalidate}
-                    onOpenCallModal={() => setCallCustomerModalOpen(true)}
-                  />
-                )}
-              </DeferredSection>
+            {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS agents */}
+            {canEditOrder && canPerformCSActionsOnOrder && (
+              <CSMessagingPanel
+                orderId={order.id}
+                customerName={order.customerName}
+                deliveryAddress={order.deliveryAddress}
+                productName={order.orderItems[0]?.productName ?? null}
+                estimatedDate={order.preferredDeliveryDate ?? null}
+                showCallTab={voipEnabled}
+                callContent={
+                  voipEnabled && (order.status === 'CS_ENGAGED' || ((order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && canTransitionTo('CS_ENGAGED'))) ? (
+                    <DeferredSection resolve={latestCall} skeleton="card">
+                      {(resolvedCall) => (
+                        <VoipCallPanelWithPolling
+                          order={order}
+                          resolvedCall={resolvedCall}
+                          canConfirm={canConfirm}
+                          fetcher={fetcher}
+                          revalidate={revalidate}
+                          onOpenCallModal={() => setCallCustomerModalOpen(true)}
+                        />
+                      )}
+                    </DeferredSection>
+                  ) : (
+                    <p className="text-sm text-surface-500 dark:text-surface-400">
+                      VOIP calling is available once the order is in CS Engaged status.
+                    </p>
+                  )
+                }
+              />
             )}
 
             {/* Order Info — dynamic fields: show when value present or alwaysShow */}
@@ -1466,17 +1299,23 @@ export function OrderDetailPage({
           </div>
         </div>
       ) : (
-        /* History Tab — streamed via DeferredSection */
+        /* Timeline Tab — order lifecycle events */
         <div>
           <div className="mb-4">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Change History</h2>
+            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Order Activity</h2>
             <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-              Every change to this order is permanently recorded in the audit trail.
+              Every step taken on this order, with who did it and when.
             </p>
           </div>
-          <DeferredSection resolve={history} skeleton="table">
-            {(resolvedHistory) => <OrderHistoryTimeline history={resolvedHistory} />}
-          </DeferredSection>
+          <div className="card">
+            {timeline ? (
+              <DeferredSection resolve={timeline} skeleton="table">
+                {(resolvedTimeline) => <OrderTimeline events={resolvedTimeline as TimelineEvent[]} />}
+              </DeferredSection>
+            ) : (
+              <p className="text-sm text-surface-600 dark:text-surface-400 py-4 text-center">No timeline data.</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -1647,71 +1486,6 @@ export function OrderDetailPage({
                   loadingText="Deleting..."
                 >
                   Delete order
-                </Button>
-              </fetcher.Form>
-            </div>
-        </Modal>
-      )}
-
-      {/* Request transfer modal */}
-      {transferModalOpen && (
-        <Modal open onClose={() => { setTransferModalOpen(false); setTransferToId(''); setTransferReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Request transfer</h3>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
-              Transfer this order to another CS agent. They will need to accept the transfer.
-            </p>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">To agent</label>
-                <select
-                  value={transferToId}
-                  onChange={(e) => setTransferToId(e.target.value)}
-                  className="input w-full"
-                  aria-label="Transfer to agent"
-                >
-                  <option value="">Select agent...</option>
-                  {csAgentsForAssign?.filter((a) => a.id !== userId).map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Reason (optional)</label>
-                <textarea
-                  value={transferReason}
-                  onChange={(e) => setTransferReason(e.target.value)}
-                  placeholder="Reason for transfer..."
-                  className="input w-full min-h-[60px]"
-                  rows={2}
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4 justify-end">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setTransferModalOpen(false);
-                  setTransferToId('');
-                  setTransferReason('');
-                }}
-              >
-                Back
-              </Button>
-              <fetcher.Form
-                method="post"
-              >
-                <input type="hidden" name="intent" value="requestTransfer" />
-                <input type="hidden" name="toCsAgentId" value={transferToId} />
-                <input type="hidden" name="reason" value={transferReason} />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={!transferToId || fetcher.state === 'submitting'}
-                  loading={fetcher.state === 'submitting'}
-                  loadingText="Sending..."
-                >
-                  Request transfer
                 </Button>
               </fetcher.Form>
             </div>

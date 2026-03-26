@@ -16,7 +16,7 @@ const AUDITABLE_TABLES = [
   'offer_templates', 'campaigns',
   'orders', 'order_items', 'stock_transfers', 'stock_movements',
   'marketing_funding', 'marketing_funding_requests', 'ad_spend_logs',
-  'call_logs', 'order_transfer_requests',
+  'call_logs',
   'invoices', 'approval_requests', 'budgets', 'settlement_configs',
   'commission_plans', 'payout_records', 'earnings_adjustments',
   'stock_reconciliations',

@@ -107,10 +107,20 @@ export interface HistoryEntry {
   data: Record<string, unknown>;
 }
 
+export interface TimelineEvent {
+  id: string;
+  orderId: string;
+  eventType: string;
+  actorId: string | null;
+  actorName: string | null;
+  description: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 export interface OrderDetailPageProps {
   order: OrderDetail;
   latestCall: CallLogEntry | null;
-  history: HistoryEntry[];
 }
 
 /** What the loader returns — mix of resolved data + streaming promises */
@@ -119,7 +129,7 @@ export interface OrderDetailStreamData {
   order: OrderDetail;
   // Deferred (streaming promises)
   latestCall: Promise<CallLogEntry | null>;
-  history: Promise<HistoryEntry[]>;
+  timeline: Promise<TimelineEvent[]>;
   // VOIP feature flag
   voipEnabled: boolean;
 }

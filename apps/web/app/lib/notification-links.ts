@@ -39,9 +39,6 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
     if (data.link && typeof data.link === 'string') return { link: data.link, label: 'View in dashboard' };
   }
   const type = notif.type;
-  if (type === 'order:transfer_requested' || type === 'order:transfer_accepted' || type === 'order:transfer_rejected') {
-    return data?.orderId ? { link: '/admin/cs/orders', label: 'View CS orders' } : { link: '/admin/cs/orders', label: 'View CS orders' };
-  }
   if (type?.startsWith('order:')) return { link: '/admin/orders', label: 'View orders' };
   if (type?.startsWith('funding:') || type === 'marketing:high_cpa') return { link: '/admin/marketing/funding', label: 'View funding' };
   if (type?.startsWith('transfer:') || type?.startsWith('logistics:') || type?.startsWith('stock:')) return { link: '/admin/inventory', label: 'View inventory' };

@@ -15,12 +15,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const statusParam = url.searchParams.get('status') || undefined;
   const roleParam = url.searchParams.get('role') || undefined;
-  const input: Record<string, unknown> = { page: 1, limit: 20, sortBy: 'createdAt', sortOrder: 'desc' };
+  const pageParam = Number(url.searchParams.get('page') ?? '1');
+  const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
+  const input: Record<string, unknown> = { page, limit: 20, sortBy: 'createdAt', sortOrder: 'desc' };
   if (statusParam && statusParam !== 'ALL') input.status = statusParam;
   if (roleParam && roleParam !== 'ALL') input.role = roleParam;
 
   const inputEnc = encodeURIComponent(JSON.stringify(input));
-  const res = await apiRequest<{ users: User[]; pagination: { total: number; page: number; totalPages: number } }>(
+  const res = await apiRequest<{ users: User[]; pagination: { total: number; page: number; limit: number; totalPages: number } }>(
     `/trpc/users.list?input=${inputEnc}`,
     {
       method: 'GET',
@@ -29,15 +31,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   if (!res.ok) {
-    return { users: [] as User[], total: 0, statusParam: statusParam ?? 'ALL', roleParam: roleParam ?? 'ALL' };
+    return {
+      users: [] as User[],
+      total: 0,
+      page,
+      limit: 20,
+      totalPages: 0,
+      statusParam: statusParam ?? 'ALL',
+      roleParam: roleParam ?? 'ALL',
+    };
   }
 
-  const trpcData = res.data as unknown as { result?: { data?: { users: User[]; pagination: { total: number } } } };
+  const trpcData = res.data as unknown as {
+    result?: { data?: { users: User[]; pagination: { total: number; page: number; limit: number; totalPages: number } } };
+  };
   const data = trpcData?.result?.data;
+  const pagination = data?.pagination;
 
   return {
     users: data?.users ?? [],
-    total: data?.pagination?.total ?? 0,
+    total: pagination?.total ?? 0,
+    page: pagination?.page ?? page,
+    limit: pagination?.limit ?? 20,
+    totalPages: pagination?.totalPages ?? 0,
     statusParam: statusParam ?? 'ALL',
     roleParam: roleParam ?? 'ALL',
   };

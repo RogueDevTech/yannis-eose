@@ -125,8 +125,9 @@ export const ordersRouter = router({
   list: authedProcedure
     .input(listOrdersSchema)
     .query(async ({ input, ctx }) => {
+      const branchId = ctx.currentBranchId;
       if (ctx.user.role === 'SUPER_ADMIN') {
-        return getOrdersService().list(input);
+        return getOrdersService().list(input, branchId);
       }
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
@@ -144,7 +145,7 @@ export const ordersRouter = router({
       if (hasOrdersRead && ctx.user.role === 'CS_AGENT') {
         effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
-      return getOrdersService().list(effectiveInput);
+      return getOrdersService().list(effectiveInput, branchId);
     }),
 
   /**
@@ -218,43 +219,9 @@ export const ordersRouter = router({
   }),
 
   /**
-   * CS_AGENT can request for their assigned orders; HoS/SuperAdmin can request for any.
+   * List CS agents (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
    */
-  requestTransfer: permissionProcedure('orders.requestTransfer')
-    .input(z.object({ orderId: z.string().uuid(), toCsAgentId: z.string().uuid(), reason: z.string().max(500).optional() }))
-    .mutation(async ({ input, ctx }) => {
-      return getOrdersService().requestTransfer(input.orderId, input.toCsAgentId, ctx.user, input.reason);
-    }),
-
-  /**
-   * Accept a transfer request (target agent or HoS/SuperAdmin).
-   */
-  acceptTransfer: authedProcedure
-    .input(z.object({ requestId: z.string().uuid() }))
-    .mutation(async ({ input, ctx }) => {
-      return getOrdersService().acceptTransfer(input.requestId, ctx.user);
-    }),
-
-  /**
-   * Reject a transfer request (target agent or HoS/SuperAdmin).
-   */
-  rejectTransfer: authedProcedure
-    .input(z.object({ requestId: z.string().uuid() }))
-    .mutation(async ({ input, ctx }) => {
-      return getOrdersService().rejectTransfer(input.requestId, ctx.user);
-    }),
-
-  /**
-   * List PENDING transfer requests where the current user is the target.
-   */
-  listTransferRequestsForMe: authedProcedure.query(async ({ ctx }) => {
-    return getOrdersService().listTransferRequestsForMe(ctx.user);
-  }),
-
-  /**
-   * List CS agents (id + name) for transfer dropdown. Requires orders.requestTransfer.
-   */
-  listCSAgents: permissionProcedure('orders.requestTransfer').query(async () => {
+  listCSAgents: permissionProcedure('orders.reassign').query(async () => {
     return getOrdersService().listCSAgents();
   }),
 
@@ -276,13 +243,14 @@ export const ordersRouter = router({
         })
         .optional(),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       return getOrdersService().getStatusCounts(
         input?.mediaBuyerId,
         input?.startDate,
         input?.endDate,
         input?.assignedCsId,
         input?.logisticsLocationId,
+        ctx.currentBranchId,
       );
     }),
 
@@ -290,8 +258,8 @@ export const ordersRouter = router({
    * Get CS agent workloads — for dispatch dashboard.
    * Restricted to Head of CS and SuperAdmin.
    */
-  csWorkloads: permissionProcedure('orders.csWorkloads').query(async () => {
-    return getOrdersService().getCSAgentWorkloads();
+  csWorkloads: permissionProcedure('orders.csWorkloads').query(async ({ ctx }) => {
+    return getOrdersService().getCSAgentWorkloads(ctx.currentBranchId);
   }),
 
   /**
@@ -497,5 +465,38 @@ export const ordersRouter = router({
         input.csAgentId,
         ctx.user,
       );
+    }),
+
+  // ── Order Timeline ─────────────────────────────────────
+
+  /**
+   * Get the timeline of events for a specific order.
+   * Role-filtered: CS agents only see CS-relevant events; Logistics only see logistics events; etc.
+   * Requires orders.read or marketing.orders permission.
+   */
+  getTimeline: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      return getOrdersService().getOrderTimeline(input.orderId, ctx.user);
+    }),
+
+  // ── Claim Mode ────────────────────────────────────────
+
+  /**
+   * Get the claim queue — UNPROCESSED orders available for CS agents to claim.
+   * Only relevant when CS_DISPATCH_STRATEGY = 'claim'.
+   */
+  claimQueue: permissionProcedure('orders.read')
+    .query(async () => {
+      return getOrdersService().getClaimQueue();
+    }),
+
+  /**
+   * Claim an order from the claim queue. Atomic — only one agent can claim at a time.
+   */
+  claimOrder: permissionProcedure('orders.read')
+    .input(z.object({ orderId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getOrdersService().claimOrder(input.orderId, ctx.user);
     }),
 });

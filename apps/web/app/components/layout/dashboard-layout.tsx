@@ -30,10 +30,13 @@ interface DashboardLayoutProps {
     role: string;
     email: string;
     permissions?: string[];
+    currentBranchId?: string | null;
   } | null;
   notificationsPromise: NotificationsPromise;
   /** Route action URL for notification mark-read (e.g. /admin or /hr). */
   notificationsActionUrl?: string;
+  /** Available branches for the branch switcher. Only shown when length > 1. */
+  branches?: Array<{ id: string; name: string; code: string }>;
 }
 
 interface NavItemDef {
@@ -77,6 +80,7 @@ const navStructure: NavGroupDef[] = [
       { label: 'Team', href: '/admin/cs/team', icon: SidebarIcons.cs, permission: 'cs.teamOverview', roles: ['SUPER_ADMIN', 'HEAD_OF_CS'] },
       { label: 'CS Orders', href: '/admin/cs/orders', icon: SidebarIcons.orders, permission: 'orders.read' },
       { label: 'CS Leaderboard', href: '/admin/cs/leaderboard', icon: SidebarIcons.leaderboards, permission: 'cs.leaderboard' },
+      { label: 'Message Templates', href: '/admin/cs/message-templates', icon: SidebarIcons.notifications, permission: 'cs.teamOverview' },
     ],
   },
   {
@@ -123,6 +127,7 @@ const navStructure: NavGroupDef[] = [
     items: [
       { label: 'Notifications', href: '/admin/notifications', icon: SidebarIcons.notifications },
       { label: 'Settings', href: '/admin/settings', icon: SidebarIcons.settings },
+      { label: 'Branches', href: '/admin/branches', icon: SidebarIcons.settings, permission: 'branches.manage' },
       { label: 'Permission Requests', href: '/admin/permission-requests', icon: SidebarIcons.audit },
     ],
   },
@@ -258,7 +263,7 @@ function readMoreOpenFromStorage(): boolean {
   }
 }
 
-function DashboardLayoutInner({ user, notificationsPromise, notificationsActionUrl: _notificationsActionUrl = '/admin' }: DashboardLayoutProps) {
+function DashboardLayoutInner({ user, notificationsPromise, notificationsActionUrl: _notificationsActionUrl = '/admin', branches }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [moreNavOpen, setMoreNavOpen] = useState(readMoreOpenFromStorage);
@@ -402,6 +407,8 @@ function DashboardLayoutInner({ user, notificationsPromise, notificationsActionU
         onPruneServerKnown={pruneServerKnown}
         onClearRealtimeNotifications={clearRealtimeNotifications}
         pwaInstall={canInstall ? { canInstall, install } : undefined}
+        branches={branches}
+        currentBranchId={user?.currentBranchId}
       />
 
       {/* Main content area */}

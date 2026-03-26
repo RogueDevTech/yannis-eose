@@ -3,6 +3,7 @@ import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, record
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
+import { branches } from './branches';
 
 // Table 7: offer_templates — pre-configured sale offers
 export const offerTemplates = pgTable('offer_templates', {
@@ -33,6 +34,8 @@ export const campaigns = pgTable('campaigns', {
   formConfig: jsonb('form_config'),
   deploymentType: deploymentTypeEnum('deployment_type').default('HOSTED').notNull(),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
+  /** Branch this campaign belongs to; aligns with orders and RLS. */
+  branchId: text('branch_id').references(() => branches.id),
   ...temporalColumns,
   ...timestampColumns,
 });

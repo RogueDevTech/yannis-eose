@@ -13,20 +13,30 @@ export const meta: MetaFunction = () => [
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'products.read');
   const cookie = getSessionCookie(request);
+  const url = new URL(request.url);
+  const pageParam = Number(url.searchParams.get('page') ?? '1');
+  const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
 
   const canEditProduct =
     user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.update');
 
-  const input = { page: 1, limit: 20, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
+  const input = { page, limit: 20, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
   const productsPromise = apiRequest<unknown>(
     `/trpc/products.list?input=${encodeURIComponent(JSON.stringify(input))}`,
     { method: 'GET', cookie },
   ).then((res) => {
-    if (!res.ok) return { products: [] as Product[], total: 0 };
-    const trpcData = res.data as { result?: { data?: { products: Product[]; pagination: { total: number } } } };
+    if (!res.ok) return { products: [] as Product[], total: 0, page, totalPages: 0 };
+    const trpcData = res.data as {
+      result?: { data?: { products: Product[]; pagination: { total: number; page: number; totalPages: number } } };
+    };
     const data = trpcData?.result?.data;
-    return { products: data?.products ?? [], total: data?.pagination?.total ?? 0 };
-  }).catch(() => ({ products: [] as Product[], total: 0 }));
+    return {
+      products: data?.products ?? [],
+      total: data?.pagination?.total ?? 0,
+      page: data?.pagination?.page ?? page,
+      totalPages: data?.pagination?.totalPages ?? 0,
+    };
+  }).catch(() => ({ products: [] as Product[], total: 0, page, totalPages: 0 }));
 
   return defer({ products: productsPromise, canEditProduct });
 }
@@ -39,6 +49,8 @@ export default function ProductsRoute() {
         <ProductsListPage
           products={data.products}
           total={data.total}
+          page={data.page}
+          totalPages={data.totalPages}
           canEditProduct={canEditProduct}
         />
       )}

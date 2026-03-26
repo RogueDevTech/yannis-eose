@@ -1,3 +1,11 @@
+export interface UserBranchMembership {
+  branchId: string;
+  branchName: string;
+  branchCode: string;
+  isPrimary: boolean;
+  roleInBranch: string | null;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -6,6 +14,7 @@ export interface User {
   status: string;
   capacity: number;
   createdAt: string;
+  branchMemberships?: UserBranchMembership[];
 }
 
 export const ROLE_COLORS: Record<string, string> = {
@@ -95,6 +104,7 @@ export interface UserDetail {
   commissionPlanId: string | null;
   createdAt: string;
   updatedAt: string;
+  branchMemberships?: UserBranchMembership[];
 }
 
 export interface UserOrderSummary {

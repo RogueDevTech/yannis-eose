@@ -1,5 +1,5 @@
 import { pgTable, text, integer, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
-import { orderStatusEnum, callStatusEnum, orderTransferRequestStatusEnum } from './enums';
+import { orderStatusEnum, callStatusEnum, timelineEventTypeEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
@@ -59,6 +59,8 @@ export const orders = pgTable('orders', {
   lockedBy: text('locked_by').references(() => users.id),
   /** Order source for reporting: 'edge-form' (sales form) or 'offline' (CS manual entry) */
   orderSource: text('order_source'),
+  /** Branch this order belongs to. Set on creation, enforced by RLS. */
+  branchId: text('branch_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),
@@ -103,22 +105,23 @@ export const callLogs = pgTable('call_logs', {
   ...temporalColumns,
 });
 
-// Table: order_transfer_requests — CS agent requests to transfer order to another agent (pending accept/reject)
-export const orderTransferRequests = pgTable('order_transfer_requests', {
+// Table: order_timeline_events — human-readable per-order lifecycle narrative.
+// Append-only. Written atomically with every state transition. Never modified after insert.
+export const orderTimelineEvents = pgTable('order_timeline_events', {
   id: uuidv7Pk(),
   orderId: text('order_id')
     .notNull()
     .references(() => orders.id),
-  fromCsId: text('from_cs_id')
-    .notNull()
-    .references(() => users.id),
-  toCsId: text('to_cs_id')
-    .notNull()
-    .references(() => users.id),
-  status: orderTransferRequestStatusEnum('status').default('PENDING').notNull(),
-  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
-  respondedAt: timestamp('responded_at', { withTimezone: true }),
-  respondedById: text('responded_by_id').references(() => users.id),
-  reason: text('reason'),
-  ...temporalColumns,
+  eventType: timelineEventTypeEnum('event_type').notNull(),
+  /** UUID of the user who triggered this event. Null for system/edge events. */
+  actorId: text('actor_id').references(() => users.id),
+  /** Denormalized name snapshot at event time — survives user renames without joins. */
+  actorName: text('actor_name'),
+  /** Human-readable sentence describing what happened. */
+  description: text('description').notNull(),
+  /** Extra contextual data: old/new values, durations, quantities, GPS, template names, etc. */
+  metadata: jsonb('metadata'),
+  /** Branch context — scopes the event to a branch for RLS filtering. */
+  branchId: text('branch_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

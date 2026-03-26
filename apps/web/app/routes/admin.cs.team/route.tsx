@@ -10,11 +10,37 @@ export const meta: MetaFunction = () => [
   { title: 'Team — Yannis EOSE' },
 ];
 
-function parseCSTeamList(res: { ok: boolean; status: number; data: unknown }): Array<{ id: string; name: string; role: string }> {
+function parseCSTeamList(res: { ok: boolean; status: number; data: unknown }): Array<{
+  id: string;
+  name: string;
+  role: string;
+  branchMemberships?: Array<{
+    branchId: string;
+    branchName: string;
+    branchCode: string;
+    isPrimary: boolean;
+    roleInBranch: string | null;
+  }>;
+}> {
   if (!res.ok) return [];
   const raw = res.data as Record<string, unknown> | undefined;
   if (raw && typeof raw === 'object' && 'error' in raw) return [];
-  const data = (res.data as { result?: { data?: Array<{ id: string; name: string; role: string }> } })?.result?.data;
+  const data = (res.data as {
+    result?: {
+      data?: Array<{
+        id: string;
+        name: string;
+        role: string;
+        branchMemberships?: Array<{
+          branchId: string;
+          branchName: string;
+          branchCode: string;
+          isPrimary: boolean;
+          roleInBranch: string | null;
+        }>;
+      }>;
+    };
+  })?.result?.data;
   return Array.isArray(data) ? data : [];
 }
 
@@ -59,6 +85,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     id: m.id,
     name: m.name,
     role: m.role,
+    branchMemberships: m.branchMemberships ?? [],
     workload: workloadById.get(m.id),
     leaderboardEntry: leaderboardById.get(m.id),
     isIdle: inactiveAgentIds.has(m.id),

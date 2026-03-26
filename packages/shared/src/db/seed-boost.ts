@@ -15,7 +15,7 @@
  *   - invoices (PAID)
  *   - ad spend entries (low, profitable)
  *
- * Run AFTER the base seed (pnpm db:seed).
+ * Run AFTER your data/bootstrap setup that includes users, products, campaigns, and stock.
  */
 
 import { config } from 'dotenv';
@@ -62,7 +62,7 @@ async function boostSeed() {
   const hrManager = users.find((u: Record<string, unknown>) => u.role === 'HR_MANAGER');
 
   if (!superAdmin || csAgents.length === 0 || mediaBuyers.length === 0 || riders.length === 0) {
-    console.error('Base seed data not found. Run pnpm db:seed first.');
+    console.error('Required base data not found (users/roles). Prepare your base data, then run db:seed:boost.');
     await sql.end();
     process.exit(1);
   }
@@ -70,13 +70,31 @@ async function boostSeed() {
   // Set actor for audit triggers
   await sql`SELECT set_config('yannis.current_user_id', ${superAdmin.id as string}, true)`;
 
+  // Ensure every non-SA user has a branch membership (idempotent backfill).
+  // Without this, the login guard added in auth.service.ts would block these users.
+  const defaultBranch = await sql`SELECT id FROM branches WHERE status = 'ACTIVE' ORDER BY created_at LIMIT 1`;
+  if (defaultBranch.length > 0) {
+    const defaultBranchId = defaultBranch[0]!.id as string;
+    await sql`
+      INSERT INTO user_branches (user_id, branch_id, is_primary)
+      SELECT u.id, ${defaultBranchId}, true
+      FROM users u
+      WHERE u.role != 'SUPER_ADMIN'
+        AND NOT EXISTS (
+          SELECT 1 FROM user_branches ub WHERE ub.user_id = u.id
+        )
+      ON CONFLICT DO NOTHING
+    `;
+    console.log('  User branch memberships ensured.');
+  }
+
   const products = await sql`SELECT id, name, base_sale_price, cost_price FROM products WHERE status = 'ACTIVE'`;
   const locations = await sql`SELECT id, name, provider_id FROM logistics_locations WHERE status = 'ACTIVE'`;
   const campaigns = await sql`SELECT id, media_buyer_id, product_ids FROM campaigns WHERE status = 'ACTIVE'`;
   const batches = await sql`SELECT id, product_id, total_landed_cost FROM stock_batches ORDER BY created_at`;
 
   if (products.length === 0 || locations.length === 0 || campaigns.length === 0) {
-    console.error('No products/locations/campaigns found. Run pnpm db:seed first.');
+    console.error('No products/locations/campaigns found. Prepare base catalog/logistics/campaigns, then run db:seed:boost.');
     await sql.end();
     process.exit(1);
   }
@@ -216,6 +234,7 @@ async function boostSeed() {
 
     // Customer
     const customerName = faker.person.fullName();
+    const customerPhone = '0' + faker.helpers.arrayElement(['7', '8', '9']) + faker.string.numeric(9);
     const phoneHash = 'hash_boost_' + faker.string.alphanumeric(10);
 
     const deliveryOtp = faker.string.numeric(4);
@@ -228,13 +247,13 @@ async function boostSeed() {
     await sql`
       INSERT INTO orders (
         id, campaign_id, media_buyer_id, assigned_cs_id, logistics_provider_id, logistics_location_id,
-        rider_id, status, customer_name, customer_phone_hash, customer_address, delivery_address,
+        rider_id, status, customer_name, customer_phone_hash, customer_phone, customer_address, delivery_address,
         total_amount, landed_cost, delivery_fee, delivery_otp, delivery_gps_lat, delivery_gps_lng,
         items, created_at, delivered_at, preferred_delivery_date
       ) VALUES (
         ${orderId}, ${campaignId}, ${mediaBuyerId}, ${csAgentId},
         ${providerId}, ${locationId}, ${riderId}, ${status},
-        ${customerName}, ${phoneHash}, ${address}, ${address},
+        ${customerName}, ${phoneHash}, ${customerPhone}, ${address}, ${address},
         ${String(totalAmount)}, ${String(totalLandedCost)}, ${String(deliveryFee)},
         ${deliveryOtp}, ${gpsLat}, ${gpsLng},
         ${items}::jsonb, ${createdAt}, ${deliveredAt}, ${prefDeliveryDate}

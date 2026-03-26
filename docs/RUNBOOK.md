@@ -215,7 +215,58 @@ When a media buyer marks funding as "Not Received":
 
 ---
 
-## 8. System Monitoring
+## 8. VOIP Operations
+
+### Toggle VOIP Feature Flag
+
+VOIP has a 3-tier behavior controlled by a feature flag:
+- **Disabled**: Agents use manual call logging (MANUAL_CALL status)
+- **Enabled + No Twilio creds**: Mock simulation mode (for development)
+- **Enabled + Twilio configured**: Real Twilio Voice API calls
+
+To toggle:
+1. Navigate to `/admin/settings` → System tab
+2. Toggle "VOIP Enabled" (SuperAdmin only)
+3. Note: enabling validates Twilio env vars are present
+
+Or via tRPC:
+```bash
+curl -X POST http://localhost:4444/trpc/voip.setEnabled \
+  -H "Content-Type: application/json" \
+  -H "Cookie: yannis_session=<admin_session>" \
+  -d '{"enabled": true}'
+```
+
+### Check VOIP Status
+
+```bash
+curl http://localhost:4444/trpc/voip.isEnabled \
+  -H "Cookie: yannis_session=<any_session>"
+```
+
+### Release Expired Order Locks
+
+Orders are locked for 15 minutes when a call is initiated. If locks get stuck:
+```bash
+curl -X POST http://localhost:4444/trpc/voip.releaseExpiredLocks \
+  -H "Cookie: yannis_session=<admin_session>"
+```
+
+### Required Twilio Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `TWILIO_ACCOUNT_SID` | Twilio account SID |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token |
+| `TWILIO_PHONE_NUMBER` | Verified business phone number |
+| `TWILIO_TWIML_APP_SID` | TwiML application SID |
+| `TWILIO_API_KEY_SID` | API key for access tokens |
+| `TWILIO_API_KEY_SECRET` | API key secret |
+| `VOIP_WEBHOOK_BASE_URL` | Public URL for Twilio status callbacks |
+
+---
+
+## 9. System Monitoring
 
 ### Check API Health
 
@@ -245,7 +296,7 @@ Navigate to `/admin/audit` to see all system activity:
 
 ---
 
-## 9. Edge Worker Operations
+## 10. Edge Worker Operations
 
 ### Check Edge Worker Status
 
@@ -270,7 +321,7 @@ If orders are being buffered (API downtime):
 
 ---
 
-## 10. PWA & Offline
+## 11. PWA & Offline
 
 ### Force Service Worker Update
 
@@ -289,7 +340,7 @@ Rider pending deliveries are stored in IndexedDB. If sync fails:
 
 ---
 
-## 11. Database Maintenance
+## 12. Database Maintenance
 
 ### Run Migrations
 

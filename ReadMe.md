@@ -2,6 +2,8 @@
 
 **Enterprise Operations & Sales Engine** — A high-integrity ERP and sales platform for performance marketing companies.
 
+**Status:** 97%+ complete. All 7 core modules built. Only infrastructure tasks (Multi-CDN, Load Testing) remain.
+
 ## Quick Start
 
 Use pnpm 9.15.4 (e.g. `corepack enable && corepack prepare pnpm@9.15.4 --activate` or install via npm).
@@ -11,6 +13,7 @@ pnpm install
 cp apps/api/.env.example apps/api/.env    # Configure database + Redis
 cp apps/web/.env.example apps/web/.env    # Configure API URL
 cd packages/shared && pnpm db:migrate    # Run database migrations
+cd packages/shared && pnpm db:seed       # Seed test data (optional)
 cd ../.. && pnpm turbo dev               # Start all apps
 ```
 
@@ -20,34 +23,68 @@ cd ../.. && pnpm turbo dev               # Start all apps
 - Swagger: http://localhost:4444/api/docs
 - Edge Worker: http://localhost:8787
 
+### Test Accounts (after seeding)
+
+| Email | Role | Password |
+|-------|------|----------|
+| `admin@yannis.test` | SuperAdmin | `Test@12345` |
+| `cs.agent@yannis.test` | CS Agent | `Test@12345` |
+| `media.buyer@yannis.test` | Media Buyer | `Test@12345` |
+| `finance@yannis.test` | Finance Officer | `Test@12345` |
+| `hr@yannis.test` | HR Manager | `Test@12345` |
+| `hom@yannis.test` | Head of Marketing | `Test@12345` |
+| `rider@yannis.test` | 3PL Rider | `Test@12345` |
+
+## Core Modules
+
+| Module | Description | Status |
+|--------|-------------|--------|
+| Edge Sales & Intake | Order capture, dedup, circuit breaker, inventory cap | Done |
+| CS Command & Privacy | VOIP bridge, weighted dispatch, phone masking, callbacks | Done |
+| Inventory Management | FIFO batch costing, location tracking, virtual buffer, reconciliation | Done |
+| 3PL Logistics | Dual-entry transfers, rider delivery, returns, offline sync | Done |
+| Marketing Governance | Funding ledger, ad spend logging, CPA/ROAS metrics | Done |
+| Financial Core | True profit (6 cost layers), approvals, budgets, invoicing (PDF) | Done |
+| HR & Payroll | Commission engine (JSONB rules), settlement, clawback, add-ons | Done |
+| Temporal Audit Trail | PostgreSQL system-versioned tables, time-travel queries | Done |
+
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Remix (React) + Tailwind CSS |
-| Backend | NestJS + TypeScript |
-| Type Contract | tRPC (internal) + Swagger (external) |
+| Frontend | Remix (React 19) + Tailwind CSS |
+| Backend | NestJS 11 + TypeScript 5.7 |
+| Type Contract | tRPC 11 (internal) + Swagger (external) |
 | Database | PostgreSQL 18 (temporal tables, RLS) |
-| ORM | Drizzle |
-| Cache/Sessions | Redis |
-| Real-time | Socket.io |
+| ORM | Drizzle 0.38 |
+| Cache/Sessions | Redis (ioredis) |
+| Real-time | Socket.io 4.8 |
 | Edge | Cloudflare Workers |
+| VOIP | Twilio Voice API + WebRTC |
 | PWA | Service Workers + Web Push |
+| File Storage | AWS S3 / Cloudflare R2 |
+| Testing | Playwright (7 E2E specs) |
+| CI/CD | GitHub Actions |
 
 ## Documentation
 
-- [Developer Onboarding Guide](docs/DEVELOPER_GUIDE.md)
-- [Operational Runbook](docs/RUNBOOK.md)
-- [Architecture Decision Records](docs/ADR.md)
-- [CLAUDE.md](CLAUDE.md) — Full system specification
+- [Developer Onboarding Guide](docs/DEVELOPER_GUIDE.md) — Setup, architecture, conventions
+- [Operational Runbook](docs/RUNBOOK.md) — Common operations and troubleshooting
+- [Architecture Decision Records](docs/ADR.md) — 9 ADRs covering key technical choices
+- [CLAUDE.md](CLAUDE.md) — Full system specification and agent directives
+- [PRD.md](prd.md) — Complete product requirements document
+- [TASK.md](task.md) — Development task tracker with completion status
 
 ## Project Structure
 
 ```
-apps/api/          NestJS backend (tRPC routers, services, auth)
-apps/web/          Remix PWA frontend (all dashboards + rider views)
+apps/api/          NestJS backend (21 modules, 18 tRPC routers)
+apps/web/          Remix PWA frontend (65+ routes, 29 feature modules)
 apps/edge-worker/  Cloudflare Worker (form submission + circuit breaker)
-packages/shared/   Drizzle schema, Zod validators, shared types
+packages/shared/   Drizzle schema (18 files), Zod validators (14 files), types
+packages/ui/       Shared Tailwind components
+packages/config/   ESLint, TypeScript, Tailwind configs
+docs/              Developer Guide, Runbook, ADRs
 ```
 
 ## Key Commands
@@ -58,8 +95,112 @@ pnpm turbo build                        # Build all apps
 pnpm turbo build --filter=@yannis/api   # Build API only
 pnpm turbo build --filter=@yannis/web   # Build web only
 cd packages/shared && pnpm db:migrate   # Run migrations
+cd packages/shared && pnpm db:seed      # Seed test data
 cd apps/web && pnpm exec playwright test # Run E2E tests
 ```
 
-> **Note:** AWS/EC2 and other deployment secrets belong in environment variables or a secrets manager, not in this repo. Use `.env` (gitignored) or your deployment platform's secret storage.
+## The 4 Pillars
 
+Every feature serves at least one of these pillars:
+
+1. **Revenue Insurance** — Edge-first order capture, circuit breaker, PWA offline sync. Zero lost sales.
+2. **Lead Fortress** — Phone numbers masked by default. VOIP bridges for calls. No raw PII in browser.
+3. **Financial Truth** — FIFO batch costing. 6-layer True Profit formula. Real net cash profit, not estimates.
+4. **Absolute Accountability** — PostgreSQL temporal tables. Immutable audit trail. Time-travel queries.
+
+> **Note:** Secrets belong in `.env` files (gitignored) or your deployment platform's secret storage — never in the repo.
+
+[[kv_namespaces]]
+
+binding = "DEDUP_CACHE"
+id = "dd6aa2365f7a44c5b0d3b4825bdb8749"
+binding = "DEDUP_CACHE"
+preview_id = "e73dc2a62c124f05b1029332b7596ac0"
+
+binding = "RATE_LIMIT_CACHE"
+id = "b68391c82d004c40a9f3dfd61fd49866"
+binding = "RATE_LIMIT_CACHE"
+preview_id = "47b3b79e86e0452eb202d54d883f41aa"
+
+binding = "INVENTORY_CACHE"
+id = "7ef0945b3f044e0280db399fdcc2cdb7"
+binding = "INVENTORY_CACHE"
+preview_id = "4a79f1f5fe2541369c5d6c95a581f591"
+
+binding = "CAMPAIGN_CACHE"
+id = "7a4c4ff13803430fa1173674e88ff5b0"
+preview_id = "36f748275dec4c669b6fe26dca9cf8db"
+
+
+EDGE_API_KEY = "fa281444318a48163471c0469b8f23fa1a4ab5e2923bc492ea469ff50449c116"
+
+
+site key=0x4AAAAAACwS5uc-71js3fAy
+secret key=0x4AAAAAACwS5ss9tTk4mAVWT0jI_Nm-1Hw
+
+QSTASH_URL = ""
+QSTASH_TOKEN = ""
+EDGE_API_KEY = "fa281444318a48163471c0469b8f23fa1a4ab5e2923bc492ea469ff50449c116"
+TURNSTILE_SECRET_KEY = "0x4AAAAAACwS5ss9tTk4mAVWT0jI_Nm-1Hw"
+
+[
+  {
+    "id": "7a4c4ff13803430fa1173674e88ff5b0",
+    "title": "CAMPAIGN_CACHE",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "36f748275dec4c669b6fe26dca9cf8db",
+    "title": "CAMPAIGN_CACHE_preview",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "d727ced193824b3db128d422163239eb",
+    "title": "yannis-edge-worker-CAMPAIGN_CACHE",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "fddd3a355ff8438db230a5932bd1f31b",
+    "title": "yannis-edge-worker-CAMPAIGN_CACHE_preview",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "dd6aa2365f7a44c5b0d3b4825bdb8749",
+    "title": "yannis-edge-worker-DEDUP_CACHE",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "e73dc2a62c124f05b1029332b7596ac0",
+    "title": "yannis-edge-worker-DEDUP_CACHE_preview",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "7ef0945b3f044e0280db399fdcc2cdb7",
+    "title": "yannis-edge-worker-INVENTORY_CACHE",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "4a79f1f5fe2541369c5d6c95a581f591",
+    "title": "yannis-edge-worker-INVENTORY_CACHE_preview",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "b68391c82d004c40a9f3dfd61fd49866",
+    "title": "yannis-edge-worker-RATE_LIMIT_CACHE",
+    "supports_url_encoding": true
+  },
+  {
+    "id": "47b3b79e86e0452eb202d54d883f41aa",
+    "title": "yannis-edge-worker-RATE_LIMIT_CACHE_preview",
+    "supports_url_encoding": true
+  }
+]
+
+
+
+[
+  {
+    "name": "QSTASH_URL",
+    "type": "secret_text"
+  }
+]

@@ -107,8 +107,13 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'updateSystemSettings') {
     const voipEnabled = formData.get('voipEnabled')?.toString() === 'true';
     const csDispatchStrategy = formData.get('csDispatchStrategy')?.toString() ?? 'load_balanced';
-    if (csDispatchStrategy !== 'load_balanced' && csDispatchStrategy !== 'performance') {
+    if (csDispatchStrategy !== 'load_balanced' && csDispatchStrategy !== 'performance' && csDispatchStrategy !== 'claim') {
       return json({ error: 'Invalid CS dispatch strategy' }, { status: 400 });
+    }
+    const claimCapRaw = formData.get('claimCap')?.toString();
+    const claimCap = claimCapRaw ? parseInt(claimCapRaw, 10) : 2;
+    if (isNaN(claimCap) || claimCap < 1 || claimCap > 20) {
+      return json({ error: 'Claim cap must be between 1 and 20' }, { status: 400 });
     }
 
     // 1. VOIP (dedicated procedure)
@@ -131,6 +136,17 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!csRes.ok) {
       const errorData = csRes.data as { error?: { message?: string } };
       return json({ error: errorData?.error?.message ?? 'Failed to update CS order distribution' }, { status: safeStatus(csRes.status) });
+    }
+
+    // 3. Claim cap (saved regardless of mode — used when claim mode is active)
+    const capRes = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
+      method: 'POST',
+      cookie,
+      body: { key: 'CS_CLAIM_CAP', value: { cap: claimCap } },
+    });
+    if (!capRes.ok) {
+      const errorData = capRes.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to update claim cap' }, { status: safeStatus(capRes.status) });
     }
 
     return json({ success: true, message: 'System settings saved' });

@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 const MAX_WIDTH_CLASSES: Record<string, string> = {
   'max-w-sm': 'md:max-w-sm',
@@ -30,6 +31,8 @@ export interface ModalProps {
 /**
  * Responsive modal: on mobile/tablet (< md), slides up from bottom (full width, rounded top);
  * on md+ (desktop) centered with max width and fade-in. Slide-up is mobile-only.
+ *
+ * Portaled to document.body with z-[90] so the overlay covers fixed header/shell (z-50 and below).
  */
 export function Modal({
   open,
@@ -42,6 +45,12 @@ export function Modal({
   role = 'dialog',
   backdropBlur = false,
 }: ModalProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -53,17 +62,20 @@ export function Modal({
 
   if (!open) return null;
 
+  /** Avoid SSR/hydration mismatch — portals only run in the browser. */
+  if (!mounted || typeof document === 'undefined') return null;
+
   const maxWidthClass = MAX_WIDTH_CLASSES[maxWidth] ?? 'md:max-w-lg';
 
-  return (
-    <>
+  return createPortal(
+    <div className="fixed inset-0 z-[90] min-h-dvh w-full">
       <div
-        className={`fixed inset-0 z-50 ${backdropBlur ? 'backdrop-blur-sm ' : ''}bg-black/50`}
+        className={`absolute inset-0 min-h-dvh w-full ${backdropBlur ? 'backdrop-blur-sm ' : ''}bg-black/50`}
         onClick={onClose}
         aria-hidden
       />
       <div
-        className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4"
+        className="relative z-[1] flex min-h-dvh w-full items-end md:items-center justify-center p-0 md:p-4"
         onClick={onClose}
         aria-modal="true"
         role={role}
@@ -85,6 +97,7 @@ export function Modal({
           {children}
         </div>
       </div>
-    </>
+    </div>,
+    document.body,
   );
 }

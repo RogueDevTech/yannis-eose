@@ -45,9 +45,15 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
 
   // CS dispatch strategy: derived from settings, local state for form selection
   const csDispatchSetting = systemSettings.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
-  const dispatchStrategyFromSettings =
-    csDispatchSetting?.value?.strategy === 'performance' ? 'performance' : 'load_balanced';
-  const [selectedDispatchStrategy, setSelectedDispatchStrategy] = useState<'load_balanced' | 'performance'>(dispatchStrategyFromSettings);
+  const rawStrategy = csDispatchSetting?.value?.strategy;
+  const dispatchStrategyFromSettings: 'load_balanced' | 'performance' | 'claim' =
+    rawStrategy === 'performance' ? 'performance' : rawStrategy === 'claim' ? 'claim' : 'load_balanced';
+  const [selectedDispatchStrategy, setSelectedDispatchStrategy] = useState<'load_balanced' | 'performance' | 'claim'>(dispatchStrategyFromSettings);
+
+  // Claim cap setting
+  const claimCapSetting = systemSettings.find((s) => s.key === 'CS_CLAIM_CAP');
+  const claimCapFromSettings = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
+  const [localClaimCap, setLocalClaimCap] = useState<number>(claimCapFromSettings);
 
   // Local state for notification email toggles (configurable types only)
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>({});
@@ -81,10 +87,14 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   useEffect(() => {
     setSelectedDispatchStrategy(dispatchStrategyFromSettings);
   }, [dispatchStrategyFromSettings]);
+  useEffect(() => {
+    setLocalClaimCap(claimCapFromSettings);
+  }, [claimCapFromSettings]);
 
   const hasSystemChanges =
     localVoipEnabled !== isVoipEnabled ||
-    selectedDispatchStrategy !== dispatchStrategyFromSettings;
+    selectedDispatchStrategy !== dispatchStrategyFromSettings ||
+    localClaimCap !== claimCapFromSettings;
 
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
@@ -224,6 +234,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
               <input type="hidden" name="intent" value="updateSystemSettings" />
               <input type="hidden" name="voipEnabled" value={localVoipEnabled ? 'true' : 'false'} />
               <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
+              <input type="hidden" name="claimCap" value={String(localClaimCap)} />
 
               {/* VOIP Integration */}
               <div className="card lg:col-span-2">
@@ -327,9 +338,50 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                         </p>
                       </div>
                     </label>
+                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-surface-200 dark:border-surface-700 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
+                      <input
+                        type="radio"
+                        name="strategy"
+                        value="claim"
+                        checked={selectedDispatchStrategy === 'claim'}
+                        onChange={() => setSelectedDispatchStrategy('claim')}
+                        className="mt-1 text-brand-600 border-surface-300 focus:ring-brand-500"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-surface-900 dark:text-white">Claim mode</p>
+                        <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
+                          Orders are not auto-assigned. They appear in a shared Claim Queue visible to all available agents. First agent to click "Claim" takes the order. Atomic lock prevents double-claiming.
+                        </p>
+                      </div>
+                    </label>
                   </div>
+
+                  {/* Claim cap — only shown when claim mode is selected */}
+                  {selectedDispatchStrategy === 'claim' && (
+                    <div className="mt-4 p-4 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700">
+                      <label htmlFor="claim-cap-input" className="text-xs font-medium text-surface-700 dark:text-surface-300 uppercase tracking-wider">
+                        Claim cap (max orders per agent)
+                      </label>
+                      <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5 mb-2">
+                        An agent cannot claim new orders if they already have this many unconfirmed orders. Enforced server-side.
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <input
+                          id="claim-cap-input"
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={localClaimCap}
+                          onChange={(e) => setLocalClaimCap(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 2)))}
+                          className="input w-24"
+                        />
+                        <span className="text-xs text-surface-500 dark:text-surface-400">orders (1–20)</span>
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-xs text-surface-600 dark:text-surface-400 mt-3">
-                    Saved: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : 'Load balanced'}</strong>
+                    Saved: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : dispatchStrategyFromSettings === 'claim' ? `Claim (cap: ${claimCapFromSettings})` : 'Load balanced'}</strong>
                     {hasSystemChanges && ' — you have unsaved changes'}
                   </p>
                 </div>
@@ -394,7 +446,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                 </div>
                 <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
                   <p className="text-sm text-surface-800 dark:text-surface-200">
-                    Only Super Admin can configure CS order distribution. Current: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : 'Load balanced'}</strong>.
+                    Only Super Admin can configure CS order distribution. Current: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : dispatchStrategyFromSettings === 'claim' ? `Claim (cap: ${claimCapFromSettings})` : 'Load balanced'}</strong>.
                   </p>
                 </div>
               </div>

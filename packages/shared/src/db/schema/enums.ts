@@ -2,6 +2,7 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 
 export const userRoleEnum = pgEnum('user_role', [
   'SUPER_ADMIN',
+  'BRANCH_ADMIN',
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
   'HEAD_OF_CS',
@@ -173,13 +174,6 @@ export const adSpendStatusEnum = pgEnum('ad_spend_status', [
   'APPROVED',
 ]);
 
-/** Status of a CS order transfer request (agent-to-agent). */
-export const orderTransferRequestStatusEnum = pgEnum('order_transfer_request_status', [
-  'PENDING',
-  'ACCEPTED',
-  'REJECTED',
-]);
-
 /** Status of a 3PL→warehouse transfer remittance (receipt upload, HoL marks received). */
 export const remittanceStatusEnum = pgEnum('remittance_status', [
   'SENT',
@@ -192,4 +186,67 @@ export const deliveryConfirmationRequestStatusEnum = pgEnum('delivery_confirmati
   'PENDING',
   'APPROVED',
   'REJECTED',
+]);
+
+/** Status of a branch. */
+export const branchStatusEnum = pgEnum('branch_status', [
+  'ACTIVE',
+  'INACTIVE',
+]);
+
+/** Channel for outbound CS messages to customers. */
+export const messageChannelEnum = pgEnum('message_channel', [
+  'SMS',
+  'WHATSAPP',
+]);
+
+/** Status of an outbound CS message. */
+export const outboundMessageStatusEnum = pgEnum('outbound_message_status', [
+  'SENT',
+  'FAILED',
+]);
+
+/** Status of a message template. */
+export const templateStatusEnum = pgEnum('template_status', [
+  'ACTIVE',
+  'ARCHIVED',
+]);
+
+/** Dispatch mode for CS order assignment. */
+export const dispatchModeEnum = pgEnum('dispatch_mode', [
+  'LOAD_BALANCED',
+  'PERFORMANCE',
+  'CLAIM',
+]);
+
+/** Human-readable order lifecycle timeline event types. */
+export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
+  'ORDER_RECEIVED',
+  'ORDER_AUTO_ASSIGNED',
+  'ORDER_MANUALLY_ASSIGNED',
+  'ORDER_REASSIGNED',
+  'ORDER_CLAIMED',
+  'ORDER_VIEWED',
+  'CALL_INITIATED',
+  'CALL_COMPLETED',
+  'CALL_NO_ANSWER',
+  'CALL_FAILED',
+  'MANUAL_CALL_LOGGED',
+  'SMS_SENT',
+  'WHATSAPP_SENT',
+  'ORDER_CONFIRMED',
+  'ORDER_CANCELLED',
+  'ADDRESS_UPDATED',
+  'QUANTITY_UPDATED',
+  'CALLBACK_SCHEDULED',
+  'ORDER_ALLOCATED',
+  'ORDER_DISPATCHED',
+  'ORDER_IN_TRANSIT',
+  'ORDER_DELIVERED',
+  'ORDER_PARTIALLY_DELIVERED',
+  'ORDER_RETURNED',
+  'ORDER_RESTOCKED',
+  'ORDER_WRITTEN_OFF',
+  'SUPERVISOR_WATCHING',
+  'PAYMENT_RECEIVED',
 ]);

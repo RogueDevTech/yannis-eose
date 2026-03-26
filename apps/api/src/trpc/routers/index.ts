@@ -16,6 +16,8 @@ import { settingsRouter } from './settings.router';
 import { voipRouter } from './voip.router';
 import { cartRouter } from './cart.router';
 import { permissionRequestsRouter } from './permission-requests.router';
+import { branchesRouter } from './branches.router';
+import { messagingRouter } from './messaging.router';
 
 /**
  * Root tRPC router — merges all module routers.
@@ -39,6 +41,8 @@ export const appRouter = router({
   voip: voipRouter,
   cart: cartRouter,
   permissionRequests: permissionRequestsRouter,
+  branches: branchesRouter,
+  messaging: messagingRouter,
 });
 
 export type AppRouter = typeof appRouter;

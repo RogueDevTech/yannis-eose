@@ -2,24 +2,27 @@ import { Injectable, Inject, type NestMiddleware } from '@nestjs/common';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import type { Request, Response, NextFunction } from 'express';
 import type Redis from 'ioredis';
-import type postgres from 'postgres';
 import { appRouter } from './routers';
 import { createContext } from './context';
-import { REDIS, PG_CLIENT } from '../database/database.module';
+import { REDIS } from '../database/database.module';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { PermissionsService } from '../permissions/permissions.service';
+import { canViewAllBranches } from '../common/authz';
 
 @Injectable()
 export class TrpcMiddleware implements NestMiddleware {
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
-    @Inject(PG_CLIENT) private readonly sql: ReturnType<typeof postgres>,
     private readonly permissionsService: PermissionsService,
   ) {}
 
   async use(req: Request, res: Response, _next: NextFunction) {
-    // Resolve session from cookie (same logic as AuthGuard)
-    await this.resolveSession(req);
+    // Resolve session from cookie — attaches user to req and validates branch context.
+    // Also captures the session vars (userId, role, branchId) needed for RLS.
+    await this.resolveSession(req, res);
+
+    // If resolveSession short-circuited (e.g. no-branch 401), the response was already sent.
+    if (res.headersSent) return;
 
     // NestJS strips the mount prefix from req.url, but tRPC's fetchRequestHandler
     // expects the full path including the endpoint prefix so it can strip it itself.
@@ -68,21 +71,26 @@ export class TrpcMiddleware implements NestMiddleware {
   }
 
   /**
-   * Resolves the session from the cookie and attaches user to request.
-   * Also sets Postgres session variables for RLS and audit trail.
+   * Resolves the session from the cookie, attaches user to request.
+   * Returns the session vars { userId, role, branchId } to be set on the
+   * reserved connection — or null if no session (unauthenticated request).
+   * Sends a 401 response directly and returns null if branch context is missing.
    */
-  private async resolveSession(req: Request): Promise<void> {
+  private async resolveSession(
+    req: Request,
+    res: Response,
+  ): Promise<{ userId: string; role: string; branchId: string } | null> {
     const cookies = req.headers.cookie;
-    if (!cookies) return;
+    if (!cookies) return null;
 
     const match = cookies.split(';').find((c) => c.trim().startsWith('yannis_session='));
-    if (!match) return;
+    if (!match) return null;
 
     const token = match.split('=')[1]?.trim();
-    if (!token) return;
+    if (!token) return null;
 
     const sessionData = await this.redis.get(`session:${token}`);
-    if (!sessionData) return;
+    if (!sessionData) return null;
 
     const user: SessionUser = JSON.parse(sessionData);
     if (user.role !== 'SUPER_ADMIN') {
@@ -93,15 +101,26 @@ export class TrpcMiddleware implements NestMiddleware {
     }
     (req as Request & { user: SessionUser }).user = user;
 
-    // Set Postgres session variables for RLS policies and audit triggers
-    await this.sql`
-      SELECT
-        set_config('yannis.current_user_id', ${user.id}, true),
-        set_config('yannis.current_user_role', ${user.role}, true)
-    `;
+    // Guard: non-global users must always have a branch in their session.
+    const branchId = user.currentBranchId ?? null;
+    if (!canViewAllBranches(user) && !branchId) {
+      res.status(401).json({
+        error: { message: 'Session has no branch context. Please log in again.' },
+      });
+      return null;
+    }
+
+    // Store session token on request for tRPC procedures that mutate the session (e.g. switchBranch)
+    (req as Request & { sessionToken: string }).sessionToken = token;
 
     // Refresh session TTL (sliding expiry)
     const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
     await this.redis.expire(`session:${token}`, ttl);
+
+    return {
+      userId: user.id,
+      role: user.role,
+      branchId: branchId ?? '',
+    };
   }
 }

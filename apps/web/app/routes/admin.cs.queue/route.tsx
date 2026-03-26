@@ -22,6 +22,7 @@ const CS_QUEUE_LIVE_EVENTS = [
   'order:callback_due',
   'cs:duplicates_changed',
   'cart:updated',
+  'order:claim_available',
 ] as const;
 
 export const meta: MetaFunction = () => [
@@ -45,6 +46,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const leaderboardPeriod = url.searchParams.get('period') === 'all_time' ? 'all_time' : 'this_month';
+
+  // Fetch dispatch mode to know if claim mode is active
+  const dispatchSettingRes = await apiRequest<unknown>(
+    `/trpc/settings.getSystemSettings`,
+    { method: 'GET', cookie },
+  );
+  const settingsData = (dispatchSettingRes.data as { result?: { data?: Array<{ key: string; value: Record<string, unknown> }> } })?.result?.data ?? [];
+  const dispatchSetting = settingsData.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
+  const isClaimMode = dispatchSetting?.value?.strategy === 'claim';
+  const claimCapSetting = settingsData.find((s) => s.key === 'CS_CLAIM_CAP');
+  const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
 
   // ── Critical data: await these so the page always has core content ──
   const [workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes] = await Promise.all([
@@ -80,6 +92,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     activeOrders: activeData?.orders ?? [],
     activeTotal: activeData?.pagination?.total ?? 0,
     statusCounts,
+    isClaimMode,
+    claimCap,
   };
 
   // ── Non-critical: deferred (stream to client) ──────────────
@@ -113,6 +127,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     res.ok ? (res.data as { result?: { data?: CSLeaderboardEntry[] } })?.result?.data ?? [] : [],
   ).catch(() => []);
 
+  // Claim queue — deferred, only relevant in claim mode
+  const claimQueue: Promise<CSOrder[]> = isClaimMode
+    ? apiRequest<unknown>('/trpc/orders.claimQueue', { method: 'GET', cookie })
+        .then((res) =>
+          res.ok ? (res.data as { result?: { data?: CSOrder[] } })?.result?.data ?? [] : [],
+        )
+        .catch(() => [])
+    : Promise.resolve([]);
+
   const cartStats: Promise<{ pending: number; abandonedLast24h: number }> = apiRequest<unknown>(
     '/trpc/cart.getStats?input=%7B%7D',
     { method: 'GET', cookie },
@@ -135,6 +158,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboard,
     leaderboardPeriod,
     cartStats,
+    claimQueue,
     canCreateOffline,
     productsForOfflineOrder,
     initialTab,
@@ -332,6 +356,28 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, orderId });
   }
 
+  if (intent === 'claimOrder') {
+    const orderId = formData.get('orderId')?.toString() ?? '';
+    if (!orderId) {
+      return json({ error: 'Order ID required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.claimOrder', {
+      method: 'POST',
+      cookie,
+      body: { orderId },
+    });
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to claim order' }, { status: safeStatus(res.status) });
+    }
+    const data = res.data as { result?: { data?: { success: boolean; message?: string } } };
+    const result = data?.result?.data;
+    if (!result?.success) {
+      return json({ error: result?.message ?? 'Order already claimed' }, { status: 409 });
+    }
+    return json({ success: true, message: 'Order claimed' });
+  }
+
   if (intent === 'transition') {
     const orderId = formData.get('orderId')?.toString() ?? '';
     const newStatus = formData.get('newStatus')?.toString() ?? '';
@@ -376,6 +422,7 @@ export default function CSQueueRoute() {
       leaderboard={data.leaderboard}
       leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
       cartStats={data.cartStats}
+      claimQueue={data.claimQueue}
       canCreateOffline={data.canCreateOffline}
       productsForOfflineOrder={data.productsForOfflineOrder}
       initialTab={data.initialTab}

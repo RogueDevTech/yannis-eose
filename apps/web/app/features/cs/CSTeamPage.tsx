@@ -4,6 +4,7 @@ import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Button } from '~/components/ui/button';
 import { useToast } from '~/components/ui/toast';
 import type { CSTeamMemberOverview } from './types';
+import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 
 export interface CSTeamPageProps {
   teamMembers: CSTeamMemberOverview[];
@@ -56,6 +57,9 @@ function CSTeamMemberCard({
           <p className="text-xs text-surface-800 dark:text-surface-200 truncate">
             {member.role.replace(/_/g, ' ')}
           </p>
+          <div className="mt-1">
+            <UserBranchBadges branches={member.branchMemberships} compact />
+          </div>
         </div>
         {isAgent && member.isIdle && (
           <span className="shrink-0 text-xs font-medium text-warning-600 dark:text-warning-400">Idle</span>

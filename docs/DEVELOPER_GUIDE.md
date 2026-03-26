@@ -103,10 +103,11 @@ pnpm turbo dev --filter=@yannis/web     # Web on port 4000
 ```
 yannis-eose/
 ├── apps/
-│   ├── api/                    # NestJS backend
+│   ├── api/                    # NestJS backend (21 modules, 18 tRPC routers)
 │   │   ├── src/
 │   │   │   ├── auth/           # Authentication + session management
 │   │   │   ├── audit/          # Audit trail service
+│   │   │   ├── cart/           # Shopping cart service
 │   │   │   ├── common/         # Guards, decorators, interceptors
 │   │   │   ├── database/       # Drizzle + Postgres + Redis providers
 │   │   │   ├── events/         # Socket.io gateway + service
@@ -117,33 +118,43 @@ yannis-eose/
 │   │   │   ├── marketing/      # Campaigns + funding + metrics
 │   │   │   ├── notifications/  # Notification service
 │   │   │   ├── orders/         # Order service + state machine
+│   │   │   ├── payments/       # Payment processing (Paystack)
+│   │   │   ├── permission-requests/ # Approval workflow
+│   │   │   ├── permissions/    # RBAC + permission management
 │   │   │   ├── products/       # Product + category CRUD
-│   │   │   ├── trpc/           # tRPC routers + middleware
+│   │   │   ├── settings/       # System settings (feature flags, Redis-cached)
+│   │   │   ├── trpc/           # tRPC routers + middleware + OpenAPI docs
 │   │   │   ├── users/          # User management
-│   │   │   └── voip/           # VOIP integration (Twilio)
+│   │   │   └── voip/           # VOIP integration (Twilio 3-tier)
 │   │   └── webpack.config.js   # Custom webpack for workspace bundling
 │   │
-│   ├── web/                    # Remix PWA frontend
+│   ├── web/                    # Remix PWA frontend (65+ routes)
 │   │   ├── app/
-│   │   │   ├── components/     # Layout, UI components
-│   │   │   ├── features/       # Feature page components (by module)
-│   │   │   ├── hooks/          # React hooks (socket, PWA, online status)
-│   │   │   ├── lib/            # API client, S3 upload, CSV export, PDF
-│   │   │   └── routes/         # Remix file-based routing
-│   │   ├── e2e/                # Playwright E2E tests
+│   │   │   ├── components/     # Layout + UI components (32+)
+│   │   │   ├── features/       # Feature page components (29 modules)
+│   │   │   ├── hooks/          # React hooks (socket, VOIP, PWA, mobile, online)
+│   │   │   ├── lib/            # API client, S3 upload, CSV export, PDF, offline sync
+│   │   │   └── routes/         # Remix file-based routing (admin, auth, hr, rider, tpl, payment)
+│   │   ├── e2e/                # Playwright E2E tests (7 specs)
 │   │   └── public/             # SW, manifest, static assets
 │   │
-│   └── edge-worker/            # Cloudflare Worker (form submission)
+│   └── edge-worker/            # Cloudflare Worker (form submission + circuit breaker)
 │
 ├── packages/
-│   └── shared/                 # Drizzle schema, Zod validators, types
-│       ├── src/db/schema/      # Database schema definitions
-│       ├── src/validators/     # Zod input schemas
-│       └── src/enums/          # TypeScript enums
+│   ├── shared/                 # Drizzle schema, Zod validators, types
+│   │   ├── src/db/schema/      # 18 schema files (orders, products, finance, hr, etc.)
+│   │   ├── src/validators/     # 14 Zod validator files
+│   │   ├── src/enums/          # TypeScript enums
+│   │   └── drizzle/            # 40+ SQL migrations
+│   ├── ui/                     # Shared Tailwind components
+│   └── config/                 # ESLint, TypeScript, Tailwind configs
 │
-├── .github/workflows/ci.yml   # CI/CD pipeline
+├── docs/                       # Developer Guide, Runbook, ADRs
+├── .github/workflows/          # CI/CD pipeline (ci.yml, deploy-dev.yml)
 ├── turbo.json                  # TurboRepo configuration
-└── CLAUDE.md                   # AI agent instructions
+├── CLAUDE.md                   # AI agent instructions
+├── prd.md                      # Product Requirements Document
+└── task.md                     # Development task tracker
 ```
 
 ---
@@ -174,11 +185,14 @@ setOrdersService(this.ordersService);
 ### Frontend (Remix)
 
 **Routing**: Flat file routing with `.` separators (Remix v2 convention):
-- `admin._index.tsx` → `/admin`
+- `admin._index.tsx` → `/admin` (role-specific dashboard)
 - `admin.cs.orders._index.tsx` → `/admin/cs/orders` (CS Orders list)
 - `admin.marketing.orders._index.tsx` → `/admin/marketing/orders` (Marketing Orders list)
 - `admin.orders._index.tsx` → redirects to `/admin/cs/orders`
 - `admin.orders.$id.tsx` → `/admin/orders/:id` (shared order detail)
+- `rider._index.tsx` → `/rider` (3PL rider mobile dashboard)
+- `tpl._index.tsx` → `/tpl` (3PL partner dashboard)
+- `hr.payroll.tsx` → `/hr/payroll` (HR payroll management)
 
 **Feature extraction**: Large page components are in `app/features/{module}/`:
 - `FinancePage.tsx`, `OrdersListPage.tsx`, `CEODashboardPage.tsx`, etc.
@@ -260,6 +274,10 @@ pnpm wrangler deploy
 6. **Dark mode** — all components must support `dark:` Tailwind classes
 7. **Inter font** — base 14px, compact scale
 8. **State machine** — orders must follow the strict lifecycle (no state skipping)
+9. **Loaders return plain objects** — no `json()` wrapper (v3_singleFetch streaming)
+10. **Actions still use `json()`** — only loader returns are unwrapped
+11. **Feature extraction** — large page components go in `app/features/{module}/`
+12. **Numeric columns** — use `sql\`${value}::numeric\`` for Drizzle inserts, not `String()` or `.toFixed(2)`
 
 ---
 

@@ -40,9 +40,9 @@ interface OrdersListPageProps {
   showCSAgentColumn?: boolean;
   /** For "Filter by CS Agent" dropdown (HoS/SuperAdmin). */
   csAgentsForFilter?: Array<{ agentId: string; agentName: string }>;
-  /** HoS/SuperAdmin can assign directly; CS_AGENT requests transfer. */
+  /** HoS/SuperAdmin can assign directly. */
   canAssignDirectly?: boolean;
-  /** Current user id (for "my order" transfer check). */
+  /** Current user id. */
   currentUserId?: string;
   /** Workload snapshot for current CS agent (My Orders). */
   myWorkload?: {
@@ -52,20 +52,6 @@ interface OrdersListPageProps {
     pendingCount: number;
     lastActionAt: string | null;
   } | null;
-  /** CS agents list for Transfer modal (from csWorkloads or listCSAgents). */
-  csAgentsForTransfer?: Array<{ agentId: string; agentName: string }>;
-  /** Pending transfer requests where current user is target. */
-  pendingTransferRequests?: Array<{
-    id: string;
-    orderId: string;
-    fromCsId: string;
-    fromCsName: string | null;
-    toCsId: string;
-    status: string;
-    requestedAt: string;
-    reason: string | null;
-    order: { id: string; customerName: string; status: string } | null;
-  }>;
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
   /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */
@@ -91,8 +77,6 @@ export function OrdersListPage({
   canAssignDirectly = false,
   currentUserId = '',
   myWorkload = null,
-  csAgentsForTransfer = [],
-  pendingTransferRequests = [],
   liveEvents,
   canCreateOffline = false,
   productsForOfflineOrder = [],
@@ -158,31 +142,6 @@ export function OrdersListPage({
   const [bulkAction, setBulkAction] = useState<string | null>(null);
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; errors: string[] } | null>(null);
   const fetcher = useFetcher();
-  const transferFetcher = useFetcher();
-
-  const [transferModalOrder, setTransferModalOrder] = useState<Order | null>(null);
-  const [transferToAgentId, setTransferToAgentId] = useState<string>('');
-  const [transferReason, setTransferReason] = useState<string>('');
-
-  const NON_TRANSFERABLE_STATUSES = new Set([
-    'CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT',
-    'DELIVERED', 'COMPLETED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED',
-  ]);
-
-  const canTransferOrder = (order: Order) => {
-    if (!csAgentsForTransfer.length) return false;
-    if (NON_TRANSFERABLE_STATUSES.has(order.status)) return false;
-    if (canAssignDirectly) return true;
-    return isCSAgent && currentUserId && order.assignedCsId === currentUserId;
-  };
-
-  useEffect(() => {
-    if (transferFetcher.state === 'idle' && transferFetcher.data && (transferFetcher.data as { success?: boolean }).success) {
-      setTransferModalOrder(null);
-      setTransferToAgentId('');
-      setTransferReason('');
-    }
-  }, [transferFetcher.state, transferFetcher.data]);
 
   // Server-side filtering via URL params; orders are already filtered by loader
   const filteredOrders = orders;
@@ -469,64 +428,6 @@ export function OrdersListPage({
         </div>
       </div>
 
-      {/* Pending transfer requests (target agent can Accept/Reject) */}
-      {pendingTransferRequests.length > 0 && (
-        <div className="card bg-warning-50 dark:bg-warning-900/20 border-warning-200 dark:border-warning-700/50">
-          <h3 className="text-sm font-semibold text-warning-800 dark:text-warning-200 mb-2">Transfer requests for you</h3>
-          <ul className="space-y-2">
-            {pendingTransferRequests.map((req) => (
-              <li
-                key={req.id}
-                className="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-warning-200/50 dark:border-warning-700/50 last:border-0"
-              >
-                <div className="text-sm text-surface-800 dark:text-surface-200">
-                  <span className="font-medium">{req.fromCsName ?? 'Unknown'}</span>
-                  {' requested to transfer '}
-                  {req.order ? (
-                    <Link to={`/admin/orders/${req.order.id}`} className="text-brand-600 dark:text-brand-400 hover:underline">
-                      {req.order.customerName}
-                    </Link>
-                  ) : (
-                    <span>order {req.orderId.slice(0, 8)}...</span>
-                  )}
-                  {' to you.'}
-                  {req.reason && (
-                    <p className="mt-1 text-surface-600 dark:text-surface-400 italic">Reason: {req.reason}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <transferFetcher.Form method="post" className="inline">
-                    <input type="hidden" name="intent" value="acceptTransfer" />
-                    <input type="hidden" name="requestId" value={req.id} />
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      size="sm"
-                      disabled={transferFetcher.state !== 'idle'}
-                      loading={transferFetcher.state !== 'idle'}
-                      loadingText="..."
-                    >
-                      Accept
-                    </Button>
-                  </transferFetcher.Form>
-                  <transferFetcher.Form method="post" className="inline">
-                    <input type="hidden" name="intent" value="rejectTransfer" />
-                    <input type="hidden" name="requestId" value={req.id} />
-                    <Button
-                      type="submit"
-                      variant="secondary"
-                      size="sm"
-                      disabled={transferFetcher.state !== 'idle'}
-                    >
-                      Reject
-                    </Button>
-                  </transferFetcher.Form>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {/* Bulk Action Toolbar */}
       {selectedIds.size > 0 && canBulkAction && (
@@ -761,19 +662,7 @@ export function OrdersListPage({
                     {order.customerPhoneDisplay}
                   </td>
                   <td className="table-cell">
-                    <div className="flex flex-col gap-1">
-                      <OrderStatusBadge status={order.status} />
-                      {pendingTransferRequests.some(
-                        (req) =>
-                          req.orderId === order.id &&
-                          req.status === 'PENDING' &&
-                          req.toCsId === currentUserId,
-                      ) && (
-                        <span className="inline-flex items-center rounded-full bg-warning-50 dark:bg-warning-900/20 px-2 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300">
-                          Transfer request pending
-                        </span>
-                      )}
-                    </div>
+                    <OrderStatusBadge status={order.status} />
                   </td>
                   <td className="table-cell text-right font-medium">
                     {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
@@ -794,59 +683,6 @@ export function OrdersListPage({
                       >
                         View
                       </Link>
-                      {pendingTransferRequests
-                        .filter(
-                          (req) =>
-                            req.orderId === order.id &&
-                            req.status === 'PENDING' &&
-                            req.toCsId === currentUserId,
-                        )
-                        .map((req) => (
-                          <span key={req.id} className="inline-flex items-center gap-1">
-                            <Button
-                              type="button"
-                              variant="success"
-                              size="sm"
-                              disabled={transferFetcher.state !== 'idle'}
-                              onClick={() =>
-                                transferFetcher.submit(
-                                  { intent: 'acceptTransfer', requestId: req.id },
-                                  { method: 'post' },
-                                )
-                              }
-                            >
-                              Accept
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="danger"
-                              size="sm"
-                              disabled={transferFetcher.state !== 'idle'}
-                              onClick={() =>
-                                transferFetcher.submit(
-                                  { intent: 'rejectTransfer', requestId: req.id },
-                                  { method: 'post' },
-                                )
-                              }
-                            >
-                              Reject
-                            </Button>
-                          </span>
-                        ))}
-                      {canTransferOrder(order) && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => {
-                            setTransferModalOrder(order);
-                            setTransferToAgentId('');
-                            setTransferReason('');
-                          }}
-                        >
-                          Transfer
-                        </Button>
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -883,19 +719,7 @@ export function OrdersListPage({
                     <span className="font-medium text-surface-900 dark:text-surface-100">
                       {order.customerName}
                     </span>
-                    <div className="flex flex-col items-end gap-1">
-                      <OrderStatusBadge status={order.status} />
-                      {pendingTransferRequests.some(
-                        (req) =>
-                          req.orderId === order.id &&
-                          req.status === 'PENDING' &&
-                          req.toCsId === currentUserId,
-                      ) && (
-                        <span className="inline-flex items-center rounded-full bg-warning-50 dark:bg-warning-900/20 px-2 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300">
-                          Transfer request pending
-                        </span>
-                      )}
-                    </div>
+                    <OrderStatusBadge status={order.status} />
                   </div>
                   {showCSAgentColumn && (order.assignedCsName || order.assignedCsId) && (
                     <div className="text-sm mb-0.5 text-surface-600 dark:text-surface-400">
@@ -939,71 +763,6 @@ export function OrdersListPage({
                   >
                     View
                   </Link>
-                  {canTransferOrder(order) && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setTransferModalOrder(order);
-                        setTransferToAgentId('');
-                        setTransferReason('');
-                      }}
-                    >
-                      Transfer to agent...
-                    </Button>
-                  )}
-                  {pendingTransferRequests.some(
-                    (req) =>
-                      req.orderId === order.id &&
-                      req.status === 'PENDING' &&
-                      req.toCsId === currentUserId,
-                  ) && (
-                    <>
-                      <Button
-                        type="button"
-                        variant="success"
-                        size="sm"
-                        disabled={transferFetcher.state !== 'idle'}
-                        onClick={() => {
-                          const req = pendingTransferRequests.find(
-                            (r) =>
-                              r.orderId === order.id &&
-                              r.status === 'PENDING' &&
-                              r.toCsId === currentUserId,
-                          );
-                          if (!req) return;
-                          transferFetcher.submit(
-                            { intent: 'acceptTransfer', requestId: req.id },
-                            { method: 'post' },
-                          );
-                        }}
-                      >
-                        Accept
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        disabled={transferFetcher.state !== 'idle'}
-                        onClick={() => {
-                          const req = pendingTransferRequests.find(
-                            (r) =>
-                              r.orderId === order.id &&
-                              r.status === 'PENDING' &&
-                              r.toCsId === currentUserId,
-                          );
-                          if (!req) return;
-                          transferFetcher.submit(
-                            { intent: 'rejectTransfer', requestId: req.id },
-                            { method: 'post' },
-                          );
-                        }}
-                      >
-                        Reject
-                      </Button>
-                    </>
-                  )}
                 </div>
               </div>
             </div>
@@ -1046,89 +805,6 @@ export function OrdersListPage({
         </div>
       </div>
 
-      {/* Transfer modal */}
-      {transferModalOrder && (
-        <Modal open onClose={() => { setTransferModalOrder(null); setTransferToAgentId(''); setTransferReason(''); }} maxWidth="max-w-md" role="dialog" contentClassName="p-6">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
-              {canAssignDirectly ? 'Assign order' : 'Request transfer'}
-            </h3>
-            <p className="text-sm text-surface-700 dark:text-surface-300 mt-1">
-              {transferModalOrder.customerName} — {transferModalOrder.id.slice(0, 8)}...
-            </p>
-            {canAssignDirectly ? (
-              <p className="text-xs text-surface-600 dark:text-surface-400 mt-1">
-                The order will be assigned immediately. No approval needed.
-              </p>
-            ) : (
-              <p className="text-xs text-surface-600 dark:text-surface-400 mt-1">
-                The selected agent must accept the transfer before the order is reassigned.
-              </p>
-            )}
-            <transferFetcher.Form method="post" className="mt-4 space-y-4">
-              <input type="hidden" name="intent" value="transfer" />
-              <input type="hidden" name="orderId" value={transferModalOrder.id} />
-              <input type="hidden" name="direct" value={canAssignDirectly ? 'true' : 'false'} />
-              <div>
-                <label htmlFor="transfer-to-agent" className="block text-sm font-medium text-surface-800 dark:text-surface-200 mb-1">
-                  Transfer to
-                </label>
-                <select
-                  id="transfer-to-agent"
-                  name="toCsAgentId"
-                  required
-                  value={transferToAgentId}
-                  onChange={(e) => setTransferToAgentId(e.target.value)}
-                  className="input w-full"
-                >
-                  <option value="">Select agent...</option>
-                  {csAgentsForTransfer
-                    .filter((a) => !isCSAgent || a.agentId !== currentUserId)
-                    .map((a) => (
-                      <option key={a.agentId} value={a.agentId}>
-                        {a.agentName}
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="transfer-reason" className="block text-sm font-medium text-surface-800 dark:text-surface-200 mb-1">
-                  Reason for transfer (optional)
-                </label>
-                <textarea
-                  id="transfer-reason"
-                  name="reason"
-                  rows={2}
-                  maxLength={500}
-                  placeholder="e.g. Workload rebalance, specialist follow-up..."
-                  value={transferReason}
-                  onChange={(e) => setTransferReason(e.target.value)}
-                  className="input w-full resize-none"
-                />
-              </div>
-              {(transferFetcher.data as { error?: string } | undefined)?.error && (
-                <p className="text-sm text-danger-600 dark:text-danger-400">{(transferFetcher.data as { error: string }).error}</p>
-              )}
-              <div className="flex gap-2 justify-end">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => { setTransferModalOrder(null); setTransferToAgentId(''); setTransferReason(''); }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={!transferToAgentId || transferFetcher.state !== 'idle'}
-                  loading={transferFetcher.state !== 'idle'}
-                  loadingText="Sending..."
-                >
-                  {canAssignDirectly ? 'Assign' : 'Request transfer'}
-                </Button>
-              </div>
-            </transferFetcher.Form>
-        </Modal>
-      )}
 
       {/* Bulk cancel confirmation modal */}
       {cancelModalOpen && (
