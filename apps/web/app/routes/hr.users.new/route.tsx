@@ -7,6 +7,7 @@ import type {
   UserCreateProduct,
   UserCreateLocation,
   UserCreateCommissionPlan,
+  UserCreateBranch,
   UserCreateLoaderData,
 } from '~/features/users/types';
 
@@ -24,10 +25,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
-  const [productsRes, locationsRes, plansRes] = await Promise.all([
+  const [productsRes, locationsRes, plansRes, branchesRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/products.list?input=${productsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
   ]);
 
   const extractData = (res: { ok: boolean; data: unknown }, key: string) => {
@@ -42,6 +44,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     products: extractData(productsRes, 'products') as UserCreateProduct[],
     locations: extractData(locationsRes, 'locations') as UserCreateLocation[],
     plans: extractData(plansRes, 'plans') as UserCreateCommissionPlan[],
+    branches: ((branchesRes.ok
+      ? (branchesRes.data as { result?: { data?: unknown[] } })?.result?.data
+      : []) ?? []) as UserCreateBranch[],
   };
 }
 
@@ -55,6 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const email = formData.get('email')?.toString() ?? '';
   const role = formData.get('role')?.toString() ?? '';
   const status = formData.get('status')?.toString() ?? 'ACTIVE';
+  const primaryBranchId = formData.get('primaryBranchId')?.toString() || undefined;
 
   if (!name || !email || !role) {
     return json({ error: 'Name, email, and role are required' }, { status: 400 });
@@ -85,6 +91,7 @@ export async function action({ request }: ActionFunctionArgs) {
     name, email, role, status,
     phone,
     restrictProductAccess,
+    primaryBranchId,
   };
 
   if (capacityStr) body.capacity = parseInt(capacityStr, 10) || 10;

@@ -73,8 +73,8 @@ async function boostSeed() {
   // Ensure every non-SA user has a branch membership (idempotent backfill).
   // Without this, the login guard added in auth.service.ts would block these users.
   const defaultBranch = await sql`SELECT id FROM branches WHERE status = 'ACTIVE' ORDER BY created_at LIMIT 1`;
-  if (defaultBranch.length > 0) {
-    const defaultBranchId = defaultBranch[0]!.id as string;
+  const defaultBranchId: string = defaultBranch[0]?.id as string ?? null;
+  if (defaultBranchId) {
     await sql`
       INSERT INTO user_branches (user_id, branch_id, is_primary)
       SELECT u.id, ${defaultBranchId}, true
@@ -246,12 +246,12 @@ async function boostSeed() {
     // Insert order
     await sql`
       INSERT INTO orders (
-        id, campaign_id, media_buyer_id, assigned_cs_id, logistics_provider_id, logistics_location_id,
+        id, branch_id, campaign_id, media_buyer_id, assigned_cs_id, logistics_provider_id, logistics_location_id,
         rider_id, status, customer_name, customer_phone_hash, customer_phone, customer_address, delivery_address,
         total_amount, landed_cost, delivery_fee, delivery_otp, delivery_gps_lat, delivery_gps_lng,
         items, created_at, delivered_at, preferred_delivery_date
       ) VALUES (
-        ${orderId}, ${campaignId}, ${mediaBuyerId}, ${csAgentId},
+        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csAgentId},
         ${providerId}, ${locationId}, ${riderId}, ${status},
         ${customerName}, ${phoneHash}, ${customerPhone}, ${address}, ${address},
         ${String(totalAmount)}, ${String(totalLandedCost)}, ${String(deliveryFee)},

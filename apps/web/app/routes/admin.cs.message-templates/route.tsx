@@ -318,57 +318,101 @@ export default function MessageTemplatesRoute() {
 
       {/* Templates table */}
       <div className="card overflow-hidden p-0">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-surface-200 dark:border-surface-700">
-              <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Name</th>
-              <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Channel</th>
-              <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Preview</th>
-              <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Status</th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-surface-500 dark:text-surface-400">
-                  No templates yet. Create one to enable SMS/WhatsApp messaging.
-                </td>
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-surface-200 dark:border-surface-700">
+                <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Name</th>
+                <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Channel</th>
+                <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Preview</th>
+                <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Status</th>
+                <th className="px-4 py-3" />
               </tr>
-            )}
-            {filtered.map((tpl) => (
-              <tr key={tpl.id} className="hover:bg-surface-50 dark:hover:bg-surface-800/50">
-                <td className="px-4 py-3 font-medium text-surface-900 dark:text-surface-100">{tpl.name}</td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+            </thead>
+            <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-surface-500 dark:text-surface-400">
+                    No templates yet. Create one to enable SMS/WhatsApp messaging.
+                  </td>
+                </tr>
+              )}
+              {filtered.map((tpl) => (
+                <tr key={tpl.id} className="hover:bg-surface-50 dark:hover:bg-surface-800/50">
+                  <td className="px-4 py-3 font-medium text-surface-900 dark:text-surface-100">{tpl.name}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      tpl.channel === 'WHATSAPP'
+                        ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                        : 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                    }`}>
+                      {tpl.channel}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-surface-600 dark:text-surface-400 text-xs max-w-xs truncate">
+                    {toUiBody(tpl.body)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      tpl.status === 'ACTIVE'
+                        ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                        : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
+                    }`}>
+                      {tpl.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button variant="secondary" size="sm" onClick={() => setEditTemplate(tpl)}>
+                      Edit
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="md:hidden space-y-3 p-3">
+          {filtered.length === 0 && (
+            <div className="rounded-lg border border-dashed border-surface-300 dark:border-surface-700 p-8 text-center text-surface-500 dark:text-surface-400">
+              No templates yet. Create one to enable SMS/WhatsApp messaging.
+            </div>
+          )}
+          {filtered.map((tpl) => (
+            <div
+              key={tpl.id}
+              className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-surface-900 dark:text-surface-100 truncate">{tpl.name}</p>
+                  <span className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                     tpl.channel === 'WHATSAPP'
                       ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
                       : 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
                   }`}>
                     {tpl.channel}
                   </span>
-                </td>
-                <td className="px-4 py-3 text-surface-600 dark:text-surface-400 text-xs max-w-xs truncate">
-                  {toUiBody(tpl.body)}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    tpl.status === 'ACTIVE'
-                      ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                      : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
-                  }`}>
-                    {tpl.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Button variant="secondary" size="sm" onClick={() => setEditTemplate(tpl)}>
-                    Edit
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                  tpl.status === 'ACTIVE'
+                    ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                    : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
+                }`}>
+                  {tpl.status}
+                </span>
+              </div>
+              <p className="mt-3 text-xs text-surface-600 dark:text-surface-400 line-clamp-3 break-words">
+                {toUiBody(tpl.body)}
+              </p>
+              <div className="mt-3">
+                <Button variant="secondary" size="sm" className="w-full" onClick={() => setEditTemplate(tpl)}>
+                  Edit
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Create Modal */}

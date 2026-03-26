@@ -82,10 +82,18 @@ export interface UserCreateCommissionPlan {
   role: string;
 }
 
+export interface UserCreateBranch {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+}
+
 export interface UserCreateLoaderData {
   products: UserCreateProduct[];
   locations: UserCreateLocation[];
   plans: UserCreateCommissionPlan[];
+  branches: UserCreateBranch[];
 }
 
 // ─── User Detail Page Types ──────────────────────────────

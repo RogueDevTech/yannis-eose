@@ -58,7 +58,9 @@ export const REDIS = Symbol('REDIS');
     {
       provide: REDIS,
       useFactory: () => {
-        const redisUrl = process.env['REDIS_URL'];
+        const envRedisUrl = process.env['REDIS_URL'];
+        const redisUrl =
+          envRedisUrl ?? (process.env['NODE_ENV'] === 'development' ? 'redis://127.0.0.1:6379' : undefined);
         if (!redisUrl) {
           throw new Error('REDIS_URL environment variable is required');
         }

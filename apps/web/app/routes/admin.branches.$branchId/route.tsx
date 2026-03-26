@@ -6,6 +6,83 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
 
+// ── Remove confirmation modal ─────────────────────────────────────────────────
+
+function RemoveModal({
+  member,
+  branchId,
+  onClose,
+}: {
+  member: OverviewMember;
+  branchId: string;
+  onClose: () => void;
+}) {
+  const removeFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(removeFetcher.data, { successMessage: 'Member removed' });
+  const isSubmitting = removeFetcher.state !== 'idle';
+
+  useEffect(() => {
+    if (removeFetcher.state === 'idle' && removeFetcher.data?.success) {
+      onClose();
+    }
+  }, [removeFetcher.state, removeFetcher.data, onClose]);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      maxWidth="max-w-sm"
+      role="dialog"
+      aria-labelledby="remove-member-title"
+      contentClassName="p-0 flex flex-col overflow-hidden"
+    >
+      <div className="px-5 pt-5 pb-4">
+        <div className="flex items-start gap-3">
+          <div className="shrink-0 w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center">
+            <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+          </div>
+          <div>
+            <h3 id="remove-member-title" className="text-base font-semibold text-surface-900 dark:text-white">
+              Remove from branch?
+            </h3>
+            <p className="text-sm text-surface-600 dark:text-surface-400 mt-1">
+              <span className="font-medium text-surface-800 dark:text-surface-200">{member.name}</span> will lose access to this branch. Their global account will not be affected.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {removeFetcher.data?.error && (
+        <div className="mx-5 mb-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 px-3 py-2">
+          <p className="text-sm text-danger-700 dark:text-danger-400">{removeFetcher.data.error}</p>
+        </div>
+      )}
+
+      <div className="border-t border-surface-200 dark:border-surface-700 px-5 py-3 flex items-center justify-end gap-2">
+        <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={isSubmitting}>
+          Cancel
+        </Button>
+        <removeFetcher.Form method="post">
+          <input type="hidden" name="intent" value="removeUser" />
+          <input type="hidden" name="userId" value={member.userId} />
+          <Button
+            type="submit"
+            variant="danger"
+            size="sm"
+            disabled={isSubmitting}
+            loading={isSubmitting}
+            loadingText="Removing…"
+          >
+            Remove
+          </Button>
+        </removeFetcher.Form>
+      </div>
+    </Modal>
+  );
+}
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const name = data?.overview?.branch?.name ?? 'Branch';
   return [{ title: `${name} — Branch — Yannis EOSE` }];
@@ -59,7 +136,7 @@ const ROLE_OPTIONS = [
   { value: 'BRANCH_ADMIN', label: 'Branch Admin' },
 ];
 
-// ── Loader ──────────────────────────────────────────────────────────────────
+// ── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermission(request, 'branches.manage');
@@ -98,7 +175,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return { overview, allUsers };
 }
 
-// ── Action ──────────────────────────────────────────────────────────────────
+// ── Action ───────────────────────────────────────────────────────────────────
 
 export async function action({ request, params }: ActionFunctionArgs) {
   await requirePermission(request, 'branches.manage');
@@ -166,6 +243,39 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return Response.json({ error: 'Unknown intent' }, { status: 400 });
 }
 
+// ── Stat card ────────────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: number | string;
+  sub?: string;
+  accent?: 'green' | 'blue' | 'yellow';
+}) {
+  const valueClass =
+    accent === 'green'
+      ? 'text-success-600 dark:text-success-400'
+      : accent === 'blue'
+      ? 'text-primary-600 dark:text-primary-400'
+      : accent === 'yellow'
+      ? 'text-warning-600 dark:text-warning-400'
+      : 'text-surface-900 dark:text-white';
+
+  return (
+    <div className="card p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-surface-500 dark:text-surface-400">
+        {label}
+      </p>
+      <p className={`text-2xl font-semibold mt-1 ${valueClass}`}>{value}</p>
+      {sub && <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">{sub}</p>}
+    </div>
+  );
+}
+
 // ── Member table ─────────────────────────────────────────────────────────────
 
 function MemberTable({
@@ -177,132 +287,91 @@ function MemberTable({
   members: OverviewMember[];
   branchId: string;
 }) {
-  const removeFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(removeFetcher.data, { successMessage: 'Member removed' });
-
-  const [confirmUserId, setConfirmUserId] = useState<string | null>(null);
-
-  const removingUserId =
-    removeFetcher.state !== 'idle'
-      ? (removeFetcher.formData?.get('userId') as string | null)
-      : null;
+  const [removeTarget, setRemoveTarget] = useState<OverviewMember | null>(null);
 
   if (members.length === 0) {
     return (
       <div className="card p-4">
-        <h2 className="text-sm font-semibold text-surface-900 dark:text-white mb-1">{title}</h2>
-        <p className="text-sm text-surface-500 dark:text-surface-400">
-          No members in this branch with matching roles yet.
-        </p>
+        <p className="text-sm font-semibold text-surface-900 dark:text-white mb-1">{title}</p>
+        <p className="text-sm text-surface-500 dark:text-surface-400">No members yet.</p>
       </div>
     );
   }
 
   return (
-    <div className="card overflow-hidden p-0">
-      <div className="px-4 py-3 border-b border-surface-200 dark:border-surface-700">
-        <h2 className="text-sm font-semibold text-surface-900 dark:text-white">{title}</h2>
-        <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
-          {members.length} in branch
-        </p>
-      </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-surface-200 dark:border-surface-700">
-            <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">
-              Name
-            </th>
-            <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">
-              Role
-            </th>
-            <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">
-              Primary
-            </th>
-            <th className="px-4 py-2 text-right font-medium text-surface-600 dark:text-surface-400" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
-          {members.map((m) => {
-            const isRemoving = removingUserId === m.userId;
-            const isConfirming = confirmUserId === m.userId;
-            return (
+    <>
+      <div className="card overflow-hidden p-0">
+        <div className="px-4 py-3 border-b border-surface-200 dark:border-surface-700">
+          <p className="text-sm font-semibold text-surface-900 dark:text-white">{title}</p>
+          <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
+            {members.length} {members.length === 1 ? 'person' : 'people'}
+          </p>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-surface-200 dark:border-surface-700">
+              <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">Name</th>
+              <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">Role</th>
+              <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">Primary</th>
+              <th className="px-4 py-2 text-right font-medium text-surface-600 dark:text-surface-400" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
+            {members.map((m) => (
               <tr key={m.userId} className="hover:bg-surface-50 dark:hover:bg-surface-800/50">
                 <td className="px-4 py-2 font-medium text-surface-900 dark:text-surface-100">
                   {m.name}
                 </td>
                 <td className="px-4 py-2 font-mono text-xs text-surface-700 dark:text-surface-300">
-                  {m.effectiveRole}
+                  {m.effectiveRole.replace(/_/g, ' ')}
                 </td>
-                <td className="px-4 py-2 text-surface-600 dark:text-surface-400 text-xs">
+                <td className="px-4 py-2 text-xs text-surface-600 dark:text-surface-400">
                   {m.isPrimary ? (
                     <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 font-medium">
                       <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                       </svg>
                       Yes
                     </span>
-                  ) : (
-                    '—'
-                  )}
+                  ) : '—'}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
-                  <div className="inline-flex items-center gap-2 justify-end">
+                  <div className="inline-flex items-center gap-3 justify-end">
                     <Link
                       to={`/hr/users/${m.userId}`}
                       className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
                     >
                       Profile
                     </Link>
-                    {isConfirming ? (
-                      <div className="inline-flex items-center gap-1.5">
-                        <span className="text-xs text-surface-600 dark:text-surface-400">
-                          Remove?
-                        </span>
-                        <removeFetcher.Form method="post">
-                          <input type="hidden" name="intent" value="removeUser" />
-                          <input type="hidden" name="userId" value={m.userId} />
-                          <button
-                            type="submit"
-                            disabled={isRemoving}
-                            className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400 dark:hover:text-danger-300 disabled:opacity-50"
-                          >
-                            {isRemoving ? 'Removing…' : 'Yes'}
-                          </button>
-                        </removeFetcher.Form>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmUserId(null)}
-                          className="text-xs text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-200"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmUserId(m.userId)}
-                        disabled={isRemoving}
-                        className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400 dark:hover:text-danger-300 disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setRemoveTarget(m)}
+                      className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400"
+                    >
+                      Remove
+                    </button>
                   </div>
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {removeTarget && (
+        <RemoveModal
+          member={removeTarget}
+          branchId={branchId}
+          onClose={() => setRemoveTarget(null)}
+        />
+      )}
+    </>
   );
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
+
+type ActiveTab = 'overview' | 'team';
 
 export default function BranchOverviewRoute() {
   const { overview, allUsers } = useLoaderData<typeof loader>();
@@ -311,6 +380,7 @@ export default function BranchOverviewRoute() {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(fetcher.data, { successMessage: 'Saved' });
 
+  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [editOpen, setEditOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
@@ -333,159 +403,257 @@ export default function BranchOverviewRoute() {
 
   const isSubmitting = fetcher.state !== 'idle';
 
-  // All current member user IDs (for filtering the add-member picker)
   const existingMemberIds = new Set([
     ...overview.csTeam.map((m) => m.userId),
     ...overview.marketingTeam.map((m) => m.userId),
     ...overview.otherMembers.map((m) => m.userId),
   ]);
-
   const availableUsers = allUsers.filter((u) => !existingMemberIds.has(u.id));
+
+  const deliveryRate =
+    counts.totalOrders > 0
+      ? Math.round((counts.deliveredOrders / counts.totalOrders) * 100)
+      : null;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+
+      {/* ── Header ── */}
       <div>
         <Link
           to="/admin/branches"
-          className="text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+          className="inline-flex items-center gap-1 text-sm font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
         >
-          ← All branches
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          All branches
         </Link>
+
         <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-surface-900 dark:text-white">{branch.name}</h1>
-            <p className="text-sm text-surface-600 dark:text-surface-400 mt-0.5">
-              Code <span className="font-mono">{branch.code}</span>
-              <span className="mx-2 text-surface-300 dark:text-surface-600">·</span>
-              Created{' '}
-              {new Date(branch.createdAt).toLocaleDateString('en-NG', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </p>
+          <div className="flex items-center gap-3">
+            {/* Branch avatar */}
+            <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center shrink-0">
+              <span className="text-sm font-bold text-primary-700 dark:text-primary-300">
+                {branch.code.slice(0, 2)}
+              </span>
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-surface-900 dark:text-white">{branch.name}</h1>
+              <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5 font-mono">
+                {branch.code}
+                <span className="mx-2 not-italic font-sans text-surface-300 dark:text-surface-600">·</span>
+                <span className="not-italic font-sans">
+                  Since {new Date(branch.createdAt).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' })}
+                </span>
+              </p>
+            </div>
           </div>
+
           <div className="flex items-center gap-2 flex-wrap">
-            <span
-              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                branch.status === 'ACTIVE'
-                  ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                  : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
-              }`}
-            >
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+              branch.status === 'ACTIVE'
+                ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
+            }`}>
               {branch.status}
             </span>
             <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
-              Edit branch
+              Edit
             </Button>
           </div>
         </div>
-        <p className="text-sm text-surface-600 dark:text-surface-400 mt-3 max-w-2xl">
-          Snapshot of people and workload scoped to this branch: customer support assignments,
-          marketing campaigns, and orders tagged with this{' '}
-          <code className="text-xs bg-surface-100 dark:bg-surface-800 px-1 rounded">
-            branch_id
-          </code>
-          .
-        </p>
       </div>
 
-      {/* Metrics — orders */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="card p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-surface-500 dark:text-surface-400">
-            Orders
-          </p>
-          <p className="text-2xl font-semibold text-surface-900 dark:text-white mt-1">
-            {counts.totalOrders}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">All statuses</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-surface-500 dark:text-surface-400">
-            Active pipeline
-          </p>
-          <p className="text-2xl font-semibold text-surface-900 dark:text-white mt-1">
-            {counts.activeOrders}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">Through in-transit</p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-surface-500 dark:text-surface-400">
-            Delivered
-          </p>
-          <p className="text-2xl font-semibold text-surface-900 dark:text-white mt-1">
-            {counts.deliveredOrders}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">
-            Completed deliveries
-          </p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-surface-500 dark:text-surface-400">
-            Members
-          </p>
-          <p className="text-2xl font-semibold text-surface-900 dark:text-white mt-1">
-            {counts.totalMembers}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">Assigned to branch</p>
-        </div>
-      </div>
-
-      {/* Metrics — campaigns + templates */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="card p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-surface-500 dark:text-surface-400">
-            Marketing
-          </p>
-          <p className="text-2xl font-semibold text-surface-900 dark:text-white mt-1">
-            {counts.campaigns}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">
-            Campaigns with this branch
-          </p>
-        </div>
-        <div className="card p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-surface-500 dark:text-surface-400">
-            CS templates
-          </p>
-          <p className="text-2xl font-semibold text-surface-900 dark:text-white mt-1">
-            {counts.messageTemplates}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">
-            SMS / WhatsApp templates
-          </p>
-        </div>
-      </div>
-
-      {/* Member tables */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Team members</h2>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => setAddMemberOpen(true)}
-          disabled={availableUsers.length === 0}
-        >
-          + Add member
-        </Button>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <MemberTable title="Customer support" members={overview.csTeam} branchId={branch.id} />
-        <MemberTable title="Marketing" members={overview.marketingTeam} branchId={branch.id} />
-      </div>
-
-      {overview.otherMembers.length > 0 && (
-        <MemberTable
-          title="Other roles in this branch"
-          members={overview.otherMembers}
-          branchId={branch.id}
+      {/* ── KPI strip ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <StatCard label="Total Orders" value={counts.totalOrders} sub="All statuses" />
+        <StatCard label="Active" value={counts.activeOrders} sub="In pipeline" accent="blue" />
+        <StatCard label="Delivered" value={counts.deliveredOrders} sub="Completed" accent="green" />
+        <StatCard
+          label="Delivery Rate"
+          value={deliveryRate !== null ? `${deliveryRate}%` : '—'}
+          sub="Delivered / total"
+          accent={deliveryRate !== null && deliveryRate >= 70 ? 'green' : deliveryRate !== null && deliveryRate >= 40 ? 'yellow' : undefined}
         />
+        <StatCard label="Campaigns" value={counts.campaigns} sub="Marketing" />
+        <StatCard label="CS Templates" value={counts.messageTemplates} sub="SMS / WhatsApp" />
+      </div>
+
+      {/* ── Tab bar ── */}
+      <div className="border-b border-surface-200 dark:border-surface-700">
+        <div className="flex items-center gap-1">
+          {(['overview', 'team'] as ActiveTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                activeTab === tab
+                  ? 'border-primary-600 text-primary-700 dark:text-primary-400'
+                  : 'border-transparent text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-white'
+              }`}
+            >
+              {tab === 'overview' ? 'Overview' : `Team (${counts.totalMembers})`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Overview tab ── */}
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+
+          {/* Health summary */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+
+            {/* Order health */}
+            <div className="card p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-surface-500 dark:text-surface-400">
+                Order Health
+              </p>
+              <div className="space-y-2">
+                {[
+                  { label: 'Active pipeline', value: counts.activeOrders },
+                  { label: 'Delivered', value: counts.deliveredOrders },
+                  { label: 'Total', value: counts.totalOrders },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex items-center justify-between text-sm">
+                    <span className="text-surface-600 dark:text-surface-400">{label}</span>
+                    <span className="font-semibold text-surface-900 dark:text-white tabular-nums">{value}</span>
+                  </div>
+                ))}
+                {deliveryRate !== null && (
+                  <div className="pt-2 border-t border-surface-100 dark:border-surface-800">
+                    <div className="flex items-center justify-between text-sm mb-1.5">
+                      <span className="text-surface-600 dark:text-surface-400">Delivery rate</span>
+                      <span className={`font-semibold tabular-nums ${
+                        deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' :
+                        deliveryRate >= 40 ? 'text-warning-600 dark:text-warning-400' :
+                        'text-danger-600 dark:text-danger-400'
+                      }`}>{deliveryRate}%</span>
+                    </div>
+                    <div className="w-full bg-surface-100 dark:bg-surface-800 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full transition-all ${
+                          deliveryRate >= 70 ? 'bg-success-500' :
+                          deliveryRate >= 40 ? 'bg-warning-500' : 'bg-danger-500'
+                        }`}
+                        style={{ width: `${deliveryRate}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Team composition */}
+            <div className="card p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-surface-500 dark:text-surface-400">
+                Team Composition
+              </p>
+              <div className="space-y-2">
+                {[
+                  { label: 'CS agents', value: overview.csTeam.length },
+                  { label: 'Marketing', value: overview.marketingTeam.length },
+                  { label: 'Other roles', value: overview.otherMembers.length },
+                  { label: 'Total members', value: counts.totalMembers },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex items-center justify-between text-sm">
+                    <span className="text-surface-600 dark:text-surface-400">{label}</span>
+                    <span className="font-semibold text-surface-900 dark:text-white tabular-nums">{value}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('team')}
+                className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+              >
+                Manage team →
+              </button>
+            </div>
+
+            {/* Marketing & comms */}
+            <div className="card p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-surface-500 dark:text-surface-400">
+                Marketing & Comms
+              </p>
+              <div className="space-y-2">
+                {[
+                  { label: 'Campaigns', value: counts.campaigns },
+                  { label: 'Message templates', value: counts.messageTemplates },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex items-center justify-between text-sm">
+                    <span className="text-surface-600 dark:text-surface-400">{label}</span>
+                    <span className="font-semibold text-surface-900 dark:text-white tabular-nums">{value}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="pt-2 border-t border-surface-100 dark:border-surface-800 flex flex-col gap-1.5">
+                <Link
+                  to={`/admin/cs/message-templates?branchId=${branch.id}`}
+                  className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                >
+                  View CS templates →
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Empty state nudge */}
+          {counts.totalMembers === 0 && counts.totalOrders === 0 && (
+            <div className="rounded-xl border border-warning-300/70 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-warning-900 dark:text-warning-200">
+                    This branch has no data yet.
+                  </p>
+                  <p className="text-sm text-warning-800 dark:text-warning-300 mt-0.5">
+                    Add members to activate this branch.
+                  </p>
+                </div>
+                <Button variant="primary" size="sm" onClick={() => { setActiveTab('team'); setAddMemberOpen(true); }}>
+                  Add first member
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Edit branch modal */}
+      {/* ── Team tab ── */}
+      {activeTab === 'team' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-surface-600 dark:text-surface-400">
+              {counts.totalMembers} member{counts.totalMembers !== 1 ? 's' : ''} assigned to this branch.
+            </p>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setAddMemberOpen(true)}
+            >
+              + Add member
+            </Button>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <MemberTable title="Customer Support" members={overview.csTeam} branchId={branch.id} />
+            <MemberTable title="Marketing" members={overview.marketingTeam} branchId={branch.id} />
+          </div>
+
+          {overview.otherMembers.length > 0 && (
+            <MemberTable
+              title="Other Roles"
+              members={overview.otherMembers}
+              branchId={branch.id}
+            />
+          )}
+        </div>
+      )}
+
+      {/* ── Edit branch modal ── */}
       {editOpen && (
         <Modal
           open
@@ -497,15 +665,11 @@ export default function BranchOverviewRoute() {
         >
           <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
             <div>
-              <h3
-                id="branch-edit-title"
-                className="text-lg font-semibold text-surface-900 dark:text-white"
-              >
+              <h3 id="branch-edit-title" className="text-lg font-semibold text-surface-900 dark:text-white">
                 Edit branch
               </h3>
               <p className="text-sm text-surface-500 dark:text-surface-400 mt-0.5">
-                Update name and status ·{' '}
-                <span className="font-mono text-xs">{branch.code}</span>
+                <span className="font-mono text-xs">{branch.code}</span> · {branch.name}
               </p>
             </div>
             <button
@@ -526,34 +690,16 @@ export default function BranchOverviewRoute() {
           >
             <input type="hidden" name="intent" value="update" />
             <div>
-              <label
-                className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1"
-                htmlFor="edit-branch-name"
-              >
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1" htmlFor="edit-branch-name">
                 Name
               </label>
-              <input
-                id="edit-branch-name"
-                name="name"
-                type="text"
-                required
-                defaultValue={branch.name}
-                className="input w-full"
-              />
+              <input id="edit-branch-name" name="name" type="text" required defaultValue={branch.name} className="input w-full" />
             </div>
             <div>
-              <label
-                className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1"
-                htmlFor="edit-branch-status"
-              >
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1" htmlFor="edit-branch-status">
                 Status
               </label>
-              <select
-                id="edit-branch-status"
-                name="status"
-                defaultValue={branch.status}
-                className="input w-full"
-              >
+              <select id="edit-branch-status" name="status" defaultValue={branch.status} className="input w-full">
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
               </select>
@@ -564,23 +710,10 @@ export default function BranchOverviewRoute() {
               </div>
             )}
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface-200 dark:border-surface-700">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setEditOpen(false)}
-                disabled={isSubmitting}
-              >
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditOpen(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                size="sm"
-                disabled={isSubmitting}
-                loading={isSubmitting}
-                loadingText="Saving..."
-              >
+              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting} loadingText="Saving...">
                 Save
               </Button>
             </div>
@@ -588,7 +721,7 @@ export default function BranchOverviewRoute() {
         </Modal>
       )}
 
-      {/* Add member modal */}
+      {/* ── Add member modal ── */}
       {addMemberOpen && (
         <Modal
           open
@@ -600,14 +733,11 @@ export default function BranchOverviewRoute() {
         >
           <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
             <div>
-              <h3
-                id="add-member-title"
-                className="text-lg font-semibold text-surface-900 dark:text-white"
-              >
+              <h3 id="add-member-title" className="text-lg font-semibold text-surface-900 dark:text-white">
                 Add member
               </h3>
               <p className="text-sm text-surface-500 dark:text-surface-400 mt-0.5">
-                Assign a staff member to <span className="font-medium">{branch.name}</span>
+                Assign staff to <span className="font-medium">{branch.name}</span>
               </p>
             </div>
             <button
@@ -629,23 +759,13 @@ export default function BranchOverviewRoute() {
             <input type="hidden" name="intent" value="assignUser" />
             <input type="hidden" name="isPrimary" value={String(isPrimary)} />
             <div>
-              <label
-                className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1"
-                htmlFor="add-member-user"
-              >
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1" htmlFor="add-member-user">
                 Staff member
               </label>
               {availableUsers.length === 0 ? (
-                <p className="text-sm text-surface-500 dark:text-surface-400">
-                  All active staff are already in this branch.
-                </p>
+                <p className="text-sm text-surface-500 dark:text-surface-400">All active staff are already in this branch.</p>
               ) : (
-                <select
-                  id="add-member-user"
-                  name="userId"
-                  required
-                  className="input w-full"
-                >
+                <select id="add-member-user" name="userId" required className="input w-full">
                   <option value="">Select a staff member…</option>
                   {availableUsers.map((u) => (
                     <option key={u.id} value={u.id}>
@@ -656,21 +776,14 @@ export default function BranchOverviewRoute() {
               )}
             </div>
             <div>
-              <label
-                className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1"
-                htmlFor="add-member-role"
-              >
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1" htmlFor="add-member-role">
                 Role override{' '}
-                <span className="text-xs font-normal text-surface-500 dark:text-surface-400">
-                  (optional — leave blank to use global role)
-                </span>
+                <span className="text-xs font-normal text-surface-500 dark:text-surface-400">(optional)</span>
               </label>
               <select id="add-member-role" name="roleInBranch" className="input w-full">
                 <option value="">Use global role</option>
                 {ROLE_OPTIONS.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
+                  <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
               </select>
             </div>
@@ -682,10 +795,7 @@ export default function BranchOverviewRoute() {
                 onChange={(e) => setIsPrimary(e.target.checked)}
                 className="rounded border-surface-300 dark:border-surface-600 text-brand-600"
               />
-              <label
-                htmlFor="add-member-primary"
-                className="text-sm text-surface-700 dark:text-surface-300 cursor-pointer"
-              >
+              <label htmlFor="add-member-primary" className="text-sm text-surface-700 dark:text-surface-300 cursor-pointer">
                 Set as primary branch for this user
               </label>
             </div>
@@ -695,13 +805,7 @@ export default function BranchOverviewRoute() {
               </div>
             )}
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface-200 dark:border-surface-700">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setAddMemberOpen(false)}
-                disabled={isSubmitting}
-              >
+              <Button type="button" variant="secondary" size="sm" onClick={() => setAddMemberOpen(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
               <Button

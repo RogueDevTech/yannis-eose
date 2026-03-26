@@ -33,6 +33,36 @@ redis-cli SMEMBERS "yannis:user_sessions:<userId>"  # Sessions for specific user
 
 ---
 
+## Redis Environment Split (Dev)
+
+- Local laptop development:
+  - `apps/api/.env` should point to local Redis (for example `redis://127.0.0.1:6379`).
+- Deployed dev on VM:
+  - Redis runs as a Docker service in `docker-compose.prod.yml`.
+  - API connects to internal compose Redis via `REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379`.
+  - `/opt/yannis-eose/.env` is refreshed from AWS Secrets Manager by `refresh-env.sh` and should include `REDIS_PASSWORD`.
+
+### Redis Sanity Check (Local)
+
+```bash
+redis-cli -u "$REDIS_URL" ping
+# Expected: PONG
+```
+
+### Redis Sanity Check (VM)
+
+```bash
+cd /opt/yannis-eose
+grep '^REDIS_PASSWORD=' .env
+docker compose -f docker-compose.prod.yml ps redis
+docker compose -f docker-compose.prod.yml logs --tail=80 redis
+docker compose -f docker-compose.prod.yml logs --tail=80 api | grep -i redis
+```
+
+If the API logs show repeated Redis DNS/connection errors, Socket.io auth may fail and real-time notifications will lag.
+
+---
+
 ## 2. Order Operations
 
 ### Force Transition an Order (Emergency)

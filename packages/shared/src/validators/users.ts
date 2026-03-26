@@ -90,11 +90,23 @@ export const createStaffSchema = z.object({
   commissionPlanId: z.string().uuid().optional(),
   compensation: userCompensationSchema.optional(),
 
+  // Branch assignment
+  primaryBranchId: z.string().uuid().optional(),
+
   // Contact — Nigerian phone: 0XXXXXXXXXX or +234XXXXXXXXXX
   phone: z.string().regex(
     /^(?:0[789]\d{9}|\+234[789]\d{9})$/,
     'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)',
   ).optional(),
+}).superRefine((data, ctx) => {
+  // Every non-SuperAdmin user must have a primary branch at creation time.
+  if (data.role !== 'SUPER_ADMIN' && !data.primaryBranchId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['primaryBranchId'],
+      message: 'Primary branch is required for non-SuperAdmin users',
+    });
+  }
 });
 
 export type CreateStaffInput = z.infer<typeof createStaffSchema>;

@@ -4,13 +4,30 @@
 # ==============================================================================
 
 services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-devredis}"]
+    restart: always
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-devredis}', 'ping']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   api:
     image: ${ECR_REGISTRY}/yannis-eose-api:${IMAGE_TAG}
     env_file: .env
     environment:
       - NODE_ENV=production
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-devredis}@redis:6379
     ports:
       - '4444:4444'
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: always
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '-', 'http://localhost:4444/health']
@@ -55,3 +72,6 @@ services:
       web:
         condition: service_started
     restart: always
+
+volumes:
+  redis_data:

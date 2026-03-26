@@ -38,7 +38,7 @@ cp apps/edge-worker/.env.example apps/edge-worker/.env
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `DATABASE_URL` | Postgres connection string | `postgres://user:pass@host:5432/yannis` |
-| `REDIS_URL` | Redis connection string | `rediss://default:pass@host:6379` |
+| `REDIS_URL` | Redis connection string | `redis://127.0.0.1:6379` (local) |
 | `PORT` | API port | `4444` |
 | `CORS_ORIGIN` | Frontend URL | `http://localhost:4000` |
 | `SESSION_TTL_SECONDS` | Session lifetime | `86400` |
@@ -49,6 +49,14 @@ cp apps/edge-worker/.env.example apps/edge-worker/.env
 |----------|-------------|---------|
 | `API_URL` | Backend API URL | `http://localhost:4444` |
 | `VITE_API_URL` | Client-side API URL | `http://localhost:4444` |
+
+### Redis Environment Split (Local vs Deployed Dev)
+
+- Local laptop runtime uses `apps/api/.env`:
+  - `REDIS_URL=redis://127.0.0.1:6379` (or your SSH tunnel endpoint)
+- Deployed dev on VM uses Redis from Docker Compose (`redis` service in `infrastructure/deploy/docker-compose.prod.yml`).
+- API container is pinned to compose-internal Redis URL (`redis://:${REDIS_PASSWORD}@redis:6379`) at deploy time.
+- Provide `REDIS_PASSWORD` in VM runtime `.env` (from `refresh-env.sh` / Secrets Manager). If absent, deploy uses a dev fallback password.
 
 ### 3. Run Database Migrations
 

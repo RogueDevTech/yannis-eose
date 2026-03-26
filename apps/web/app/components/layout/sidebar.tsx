@@ -19,8 +19,6 @@ interface SidebarProps {
   notificationCount?: number;
   /** Current theme: false = light, true = dark. Used for logo area and logo asset. */
   darkMode?: boolean;
-  /** When set and canInstall, show an "Install" menu row that triggers PWA install. Hidden when already installed. */
-  pwaInstall?: { canInstall: boolean; install: () => void };
 }
 
 const STORAGE_KEY = 'yannis_sidebar_groups_v2';
@@ -39,7 +37,7 @@ function saveGroupState(state: Record<string, boolean>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose, activePathname, notificationCount, darkMode = false, pwaInstall }: SidebarProps) {
+export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose, activePathname, notificationCount, darkMode = false }: SidebarProps) {
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -179,16 +177,6 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
             );
           })}
 
-          {/* PWA Install — only when installable and not already installed */}
-          {pwaInstall?.canInstall && (
-            <div className="mt-3 pt-3 border-t border-surface-200 dark:border-surface-700/50">
-              <SidebarInstallButton
-                isExpanded={isExpanded}
-                onInstall={pwaInstall.install}
-                onMobileClose={onMobileClose}
-              />
-            </div>
-          )}
         </nav>
 
         {/* Collapse toggle — desktop only; show tooltip when collapsed */}
@@ -224,83 +212,6 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
         </div>
       </aside>
     </>
-  );
-}
-
-/* ── PWA Install button (menu row) ──────────────────────────────────── */
-
-function SidebarInstallButton({
-  isExpanded,
-  onInstall,
-  onMobileClose,
-}: {
-  isExpanded: boolean;
-  onInstall: () => void;
-  onMobileClose: () => void;
-}) {
-  const anchorRef = useRef<HTMLDivElement>(null);
-  const [tooltipVisible, setTooltipVisible] = useState(false);
-  const [tooltipPos, setTooltipPos] = useState({ left: 0, top: 0 });
-
-  const updateTooltipPosition = useCallback(() => {
-    if (!anchorRef.current) return;
-    const rect = anchorRef.current.getBoundingClientRect();
-    setTooltipPos({
-      left: rect.right + 8,
-      top: rect.top + rect.height / 2,
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (tooltipVisible && isExpanded) updateTooltipPosition();
-  }, [tooltipVisible, isExpanded, updateTooltipPosition]);
-
-  useEffect(() => {
-    if (!tooltipVisible || !isExpanded) return;
-    window.addEventListener('scroll', updateTooltipPosition, true);
-    window.addEventListener('resize', updateTooltipPosition);
-    return () => {
-      window.removeEventListener('scroll', updateTooltipPosition, true);
-      window.removeEventListener('resize', updateTooltipPosition);
-    };
-  }, [tooltipVisible, isExpanded, updateTooltipPosition]);
-
-  return (
-    <div
-      ref={isExpanded ? anchorRef : undefined}
-      className={isExpanded ? 'relative' : undefined}
-      onMouseEnter={() => isExpanded && setTooltipVisible(true)}
-      onMouseLeave={() => isExpanded && setTooltipVisible(false)}
-    >
-      <button
-        type="button"
-        onClick={() => {
-          onInstall();
-          onMobileClose();
-        }}
-        className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 text-surface-600 dark:text-surface-300 hover:bg-surface-100 hover:text-surface-900 dark:hover:bg-surface-800 dark:hover:text-white w-full ${isExpanded ? 'justify-center' : ''}`}
-      >
-        <span className="w-5 h-5 flex-shrink-0">{SidebarIcons.install}</span>
-        {!isExpanded && <span className="truncate">Install</span>}
-      </button>
-      {isExpanded &&
-        tooltipVisible &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            className="fixed z-[9999] px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-surface-800 dark:bg-surface-700 text-white shadow-lg border border-surface-700 dark:border-surface-600 pointer-events-none"
-            style={{
-              left: tooltipPos.left,
-              top: tooltipPos.top,
-              transform: 'translateY(-50%)',
-            }}
-            role="tooltip"
-          >
-            Install
-          </div>,
-          document.body
-        )}
-    </div>
   );
 }
 
