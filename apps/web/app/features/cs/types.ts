@@ -99,6 +99,30 @@ export interface CSActivityItem {
   meta?: Record<string, unknown>;
 }
 
+/** Tab keys for Live Activities (/admin/cs/queue). */
+export const CS_QUEUE_TAB_VALUES = [
+  'queue',
+  'active',
+  'callbacks',
+  'duplicates',
+  'carts',
+  'hotswap',
+  'performance',
+  'claim',
+] as const;
+export type CSQueueTab = (typeof CS_QUEUE_TAB_VALUES)[number];
+
+/** Parse `?tab=` for deep links; `claim` only valid when claim dispatch mode is on. */
+export function parseCSQueueTabFromSearchParam(
+  tabParam: string | null,
+  isClaimMode: boolean,
+): CSQueueTab | undefined {
+  if (!tabParam) return undefined;
+  if (!CS_QUEUE_TAB_VALUES.includes(tabParam as CSQueueTab)) return undefined;
+  if (tabParam === 'claim' && !isClaimMode) return undefined;
+  return tabParam as CSQueueTab;
+}
+
 /** What the loader returns — mix of resolved data + streaming promises */
 export interface CSDashboardStreamData {
   // Critical (resolved immediately)
@@ -127,10 +151,12 @@ export interface CSDashboardStreamData {
   liveEvents?: string[];
   /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */
   canCreateOffline?: boolean;
+  /** When true, show Delete button on abandoned carts (HEAD_OF_CS / SuperAdmin). */
+  canDeleteCart?: boolean;
   /** Products list for offline order form (when canCreateOffline). */
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
-  /** Deep-link: open this tab (e.g. 'hotswap') on load. */
-  initialTab?: string;
+  /** Deep-link: open this tab on load (from `?tab=`). */
+  initialTab?: CSQueueTab;
   /** Deep-link: pre-select this agent ID as "From" in Hot Swap (requires initialTab === 'hotswap'). */
   initialHotSwapFrom?: string;
 }

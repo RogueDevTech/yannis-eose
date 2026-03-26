@@ -4,12 +4,13 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
-import type {
-  AgentWorkload,
-  InactiveAgent,
-  CSOrder,
-  DuplicatePair,
-  CSLeaderboardEntry,
+import {
+  parseCSQueueTabFromSearchParam,
+  type AgentWorkload,
+  type InactiveAgent,
+  type CSOrder,
+  type DuplicatePair,
+  type CSLeaderboardEntry,
 } from '~/features/cs/types';
 
 const CS_QUEUE_LIVE_EVENTS = [
@@ -33,6 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'cs.teamOverview');
   const cookie = getSessionCookie(request);
   const canCreateOffline = true;
+  const canDeleteCart = user.role === 'SUPER_ADMIN' || user.role === 'HEAD_OF_CS';
   let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
   {
     const productsRes = await apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
@@ -147,8 +149,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const tabParam = url.searchParams.get('tab');
   const fromParam = url.searchParams.get('from');
-  const initialTab = tabParam === 'hotswap' ? 'hotswap' : undefined;
-  const initialHotSwapFrom = initialTab && fromParam?.trim() ? fromParam.trim() : undefined;
+  const initialTab = parseCSQueueTabFromSearchParam(tabParam, isClaimMode);
+  const initialHotSwapFrom =
+    initialTab === 'hotswap' && fromParam?.trim() ? fromParam.trim() : undefined;
 
   return {
     criticalData,
@@ -160,6 +163,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cartStats,
     claimQueue,
     canCreateOffline,
+    canDeleteCart,
     productsForOfflineOrder,
     initialTab,
     initialHotSwapFrom,
@@ -424,6 +428,7 @@ export default function CSQueueRoute() {
       cartStats={data.cartStats}
       claimQueue={data.claimQueue}
       canCreateOffline={data.canCreateOffline}
+      canDeleteCart={data.canDeleteCart}
       productsForOfflineOrder={data.productsForOfflineOrder}
       initialTab={data.initialTab}
       initialHotSwapFrom={data.initialHotSwapFrom}

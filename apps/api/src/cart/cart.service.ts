@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { eq, and, lt, desc, count, gte, inArray } from 'drizzle-orm';
+import { eq, and, lt, desc, count, gte, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -282,6 +282,26 @@ export class CartService {
       offerLabel: r.offerLabel ?? null,
       updatedAt: r.updatedAt ?? new Date(),
     }));
+  }
+
+  /**
+   * Delete an abandoned cart by ID. Head of CS / SuperAdmin only.
+   * Only ABANDONED carts can be deleted (not PENDING or CONVERTED).
+   */
+  async deleteAbandoned(cartId: string, actorId: string): Promise<{ deleted: boolean }> {
+    const result = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actorId}`);
+      return tx
+        .delete(schema.cartAbandonments)
+        .where(
+          and(
+            eq(schema.cartAbandonments.id, cartId),
+            eq(schema.cartAbandonments.status, 'ABANDONED'),
+          ),
+        )
+        .returning({ id: schema.cartAbandonments.id });
+    });
+    return { deleted: result.length > 0 };
   }
 
   /**
