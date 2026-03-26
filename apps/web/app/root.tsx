@@ -36,7 +36,9 @@ declare global {
 export async function loader() {
   return json({
     ENV: {
-      API_URL: process.env.API_URL ?? 'http://localhost:4444',
+      // PUBLIC_API_URL is the browser-reachable API URL (e.g. https://api-yannis.roguedevtech.com).
+      // Falls back to API_URL for local dev where both are the same.
+      API_URL: process.env.PUBLIC_API_URL ?? process.env.API_URL ?? 'http://localhost:4444',
       EDGE_WORKER_URL: process.env.EDGE_WORKER_URL ?? '',
       S3_BUCKET: process.env.S3_BUCKET ?? '',
       S3_REGION: process.env.S3_REGION ?? 'us-east-1',
