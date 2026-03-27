@@ -78,9 +78,16 @@ export function CSMessagingPanel({
   const templatesFetcher = useFetcher<{ templates: MessageTemplate[] }>();
   const outboxFetcher = useFetcher<{ messages: OutboundMessage[] }>();
   const sendFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const smsFetcher = useFetcher<{ success?: boolean; error?: string; phone?: string; isDialable?: boolean }>();
+  const smsPrepareFetcher = useFetcher<{ ready?: boolean; error?: string; phone?: string; isDialable?: boolean }>();
   const whatsappFetcher = useFetcher<{ success?: boolean; error?: string; phone?: string; isDialable?: boolean }>();
   const whatsappPrepareFetcher = useFetcher<{ ready?: boolean; error?: string; phone?: string; isDialable?: boolean }>();
+  const smsWindowRef = useRef<Window | null>(null);
   const whatsappWindowRef = useRef<Window | null>(null);
+  const [pendingSmsMessage, setPendingSmsMessage] = useState('');
+  const [confirmSmsModalOpen, setConfirmSmsModalOpen] = useState(false);
+  const [pendingSmsLogBody, setPendingSmsLogBody] = useState('');
+  const [preparedSmsPhone, setPreparedSmsPhone] = useState<string | null>(null);
   const [pendingWhatsappMessage, setPendingWhatsappMessage] = useState('');
   const [confirmWhatsappModalOpen, setConfirmWhatsappModalOpen] = useState(false);
   const [pendingWhatsappLogBody, setPendingWhatsappLogBody] = useState('');
@@ -93,6 +100,12 @@ export function CSMessagingPanel({
       templatesFetcher.load(`/admin/api/messaging-templates?channel=${activeTab.toUpperCase()}`);
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'sms' && !preparedSmsPhone && smsPrepareFetcher.state === 'idle') {
+      smsPrepareFetcher.submit({ intent: 'preparePhoneForSms' }, { method: 'post' });
+    }
+  }, [activeTab, preparedSmsPhone, smsPrepareFetcher]);
 
   useEffect(() => {
     if (activeTab === 'whatsapp' && !preparedWhatsappPhone && whatsappPrepareFetcher.state === 'idle') {
@@ -117,6 +130,16 @@ export function CSMessagingPanel({
   }, [sendFetcher.state, sendFetcher.data]);
 
   useEffect(() => {
+    if (smsPrepareFetcher.state !== 'idle') return;
+    const data = smsPrepareFetcher.data;
+    if (!data?.ready) return;
+    if (!data.isDialable) return;
+    const phone = data.phone?.trim();
+    if (!phone) return;
+    setPreparedSmsPhone(phone);
+  }, [smsPrepareFetcher.state, smsPrepareFetcher.data]);
+
+  useEffect(() => {
     if (whatsappPrepareFetcher.state !== 'idle') return;
     const data = whatsappPrepareFetcher.data;
     if (!data?.ready) return;
@@ -125,6 +148,12 @@ export function CSMessagingPanel({
     if (!phone) return;
     setPreparedWhatsappPhone(phone);
   }, [whatsappPrepareFetcher.state, whatsappPrepareFetcher.data]);
+
+  const toSmsUrl = (phone: string, message: string): string => {
+    const digitsOnly = phone.replace(/[^\d+]/g, '');
+    const encoded = encodeURIComponent(message);
+    return `sms:${digitsOnly}?body=${encoded}`;
+  };
 
   const toWhatsappUrl = (phone: string, message: string): string => {
     const digitsOnly = phone.replace(/[^\d+]/g, '');
@@ -136,6 +165,44 @@ export function CSMessagingPanel({
     const encoded = encodeURIComponent(message);
     return `https://wa.me/${waPhone}?text=${encoded}`;
   };
+
+  useEffect(() => {
+    if (smsFetcher.state !== 'idle') return;
+    const data = smsFetcher.data;
+    if (!data) return;
+
+    if (data.error) {
+      if (smsWindowRef.current && !smsWindowRef.current.closed) {
+        smsWindowRef.current.close();
+      }
+      smsWindowRef.current = null;
+      return;
+    }
+
+    const phone = data.phone?.trim() ?? '';
+    const message = pendingSmsMessage.trim();
+    if (!data.success || !data.isDialable || !phone || !message) {
+      if (smsWindowRef.current && !smsWindowRef.current.closed) {
+        smsWindowRef.current.close();
+      }
+      smsWindowRef.current = null;
+      return;
+    }
+
+    const smsUrl = toSmsUrl(phone, message);
+    if (smsWindowRef.current && !smsWindowRef.current.closed) {
+      smsWindowRef.current.location.href = smsUrl;
+    } else {
+      window.open(smsUrl, '_blank', 'noopener,noreferrer');
+    }
+
+    setPendingSmsLogBody(message);
+    setConfirmSmsModalOpen(true);
+    smsWindowRef.current = null;
+    setPendingSmsMessage('');
+    setMessageBody('');
+    setSelectedTemplateId('');
+  }, [smsFetcher.state, smsFetcher.data, pendingSmsMessage]);
 
   useEffect(() => {
     if (whatsappFetcher.state !== 'idle') return;
@@ -182,7 +249,7 @@ export function CSMessagingPanel({
   );
   const selectedTemplate = channelTemplates.find((t) => t.id === selectedTemplateId);
   const outboxMessages = (outboxFetcher.data?.messages ?? []).filter((msg) => msg.channel === 'SMS');
-  const isSending = sendFetcher.state !== 'idle' || whatsappFetcher.state !== 'idle';
+  const isSending = sendFetcher.state !== 'idle' || smsFetcher.state !== 'idle' || whatsappFetcher.state !== 'idle';
 
   const renderTemplateWithOrderData = (templateBody: string): string => {
     return templateBody
@@ -195,6 +262,31 @@ export function CSMessagingPanel({
 
   const handleSend = () => {
     if ((activeTab === 'sms' || activeTab === 'whatsapp') && !messageBody.trim() && !selectedTemplateId) return;
+
+    if (activeTab === 'sms') {
+      const selected = channelTemplates.find((t) => t.id === selectedTemplateId);
+      const composedMessage = selectedTemplateId && selected
+        ? renderTemplateWithOrderData(selected.body)
+        : messageBody.trim();
+      if (!composedMessage) return;
+
+      if (preparedSmsPhone) {
+        window.open(toSmsUrl(preparedSmsPhone, composedMessage), '_blank', 'noopener,noreferrer');
+        setPendingSmsLogBody(composedMessage);
+        setConfirmSmsModalOpen(true);
+        setMessageBody('');
+        setSelectedTemplateId('');
+        return;
+      }
+
+      smsWindowRef.current = window.open('', '_blank', 'noopener,noreferrer');
+      setPendingSmsMessage(composedMessage);
+      smsFetcher.submit(
+        { intent: 'revealPhoneForSms' },
+        { method: 'post' },
+      );
+      return;
+    }
 
     if (activeTab === 'whatsapp') {
       const selected = channelTemplates.find((t) => t.id === selectedTemplateId);
@@ -343,6 +435,9 @@ export function CSMessagingPanel({
           {sendFetcher.data?.error && (
             <p className="text-xs text-danger-600 dark:text-danger-400">{sendFetcher.data.error}</p>
           )}
+          {smsFetcher.data?.error && (
+            <p className="text-xs text-danger-600 dark:text-danger-400">{smsFetcher.data.error}</p>
+          )}
           {whatsappFetcher.data?.error && (
             <p className="text-xs text-danger-600 dark:text-danger-400">{whatsappFetcher.data.error}</p>
           )}
@@ -351,6 +446,9 @@ export function CSMessagingPanel({
           )}
           {whatsappFetcher.data?.success && !whatsappFetcher.data?.error && (
             <p className="text-xs text-success-600 dark:text-success-400">WhatsApp opened with buyer and prefilled message.</p>
+          )}
+          {smsFetcher.data?.success && !smsFetcher.data?.error && (
+            <p className="text-xs text-success-600 dark:text-success-400">SMS app opened with prefilled message.</p>
           )}
 
           {/* Send button */}
@@ -413,6 +511,58 @@ export function CSMessagingPanel({
         </div>
       )}
     </div>
+    <Modal
+      open={confirmSmsModalOpen}
+      onClose={() => {
+        setConfirmSmsModalOpen(false);
+        setPendingSmsLogBody('');
+      }}
+      maxWidth="max-w-sm"
+      role="alertdialog"
+      aria-labelledby="confirm-sms-title"
+      aria-describedby="confirm-sms-desc"
+      contentClassName="p-5"
+    >
+      <h3 id="confirm-sms-title" className="text-base font-semibold text-surface-900 dark:text-white">
+        Did you send this SMS message?
+      </h3>
+      <p id="confirm-sms-desc" className="mt-2 text-sm text-surface-600 dark:text-surface-300">
+        Confirm to sync this activity into order history.
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          className="btn-secondary btn-sm"
+          onClick={() => {
+            setConfirmSmsModalOpen(false);
+            setPendingSmsLogBody('');
+          }}
+        >
+          Not yet
+        </button>
+        <button
+          type="button"
+          className="btn-primary btn-sm"
+          onClick={() => {
+            const body = pendingSmsLogBody.trim();
+            if (!body) return;
+            sendFetcher.submit(
+              {
+                intent: 'sendMessage',
+                orderId,
+                channel: 'SMS',
+                body,
+              },
+              { method: 'post', action: '/admin/api/send-message' },
+            );
+            setConfirmSmsModalOpen(false);
+            setPendingSmsLogBody('');
+          }}
+        >
+          Yes, sent
+        </button>
+      </div>
+    </Modal>
     <Modal
       open={confirmWhatsappModalOpen}
       onClose={() => {

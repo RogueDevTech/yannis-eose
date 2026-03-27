@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Form, Link, useNavigate, useFetcher } from '@remix-run/react';
+import { Form, Link, useNavigate, useFetcher, useSubmit, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { Modal } from '~/components/ui/modal';
 import { getNotificationLink, getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
 import { useNotificationsState } from '~/contexts/notifications-state';
 
@@ -87,14 +88,18 @@ function SyncNotificationReadIds({ notifications, onPruneServerKnown }: { notifi
 
 export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications, branches, currentBranchId }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [mobileUserMenuOpen, setMobileUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const notifTriggerRef = useRef<HTMLButtonElement>(null);
   const notifPanelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const submit = useSubmit();
+  const navigation = useNavigation();
   const { displayUnreadCount, isOptimisticallyRead, markAsRead, markAllRead } = useNotificationsState();
-  const mobileBranchFetcher = useFetcher();
+  const isMobileBranchSwitching =
+    navigation.state !== 'idle' && navigation.formAction?.includes('/admin/branches/switch');
 
   const canSeeAllBranches = ALL_BRANCHES_ROLES.has(user?.role ?? '');
   const mobileCurrentBranch = branches?.find((b) => b.id === (currentBranchId ?? null)) ?? null;
@@ -160,18 +165,18 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
   }, [markAsRead, onRemoveRealtimeNotification]);
 
   const handleMobileBranchSwitch = useCallback((branchId: string | null) => {
-    if (!branches || mobileBranchFetcher.state !== 'idle') return;
+    if (!branches || isMobileBranchSwitching) return;
     if (branchId === (currentBranchId ?? null)) {
-      setUserMenuOpen(false);
+      setMobileUserMenuOpen(false);
       return;
     }
 
-    mobileBranchFetcher.submit(
+    submit(
       { intent: 'switchBranch', branchId: branchId ?? '' },
       { method: 'post', action: '/admin/branches/switch' },
     );
-    setUserMenuOpen(false);
-  }, [branches, mobileBranchFetcher, currentBranchId]);
+    setMobileUserMenuOpen(false);
+  }, [branches, isMobileBranchSwitching, currentBranchId, submit]);
 
   return (
     <header
@@ -453,8 +458,21 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
         {user && (
           <div className="relative" ref={menuRef}>
             <button
+              type="button"
+              onClick={() => setMobileUserMenuOpen(true)}
+              className="md:hidden flex items-center gap-2 pl-2 border-l border-surface-200 dark:border-surface-700 hover:opacity-80 transition-opacity"
+            >
+              <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center">
+                <span className="text-xs font-semibold text-white">
+                  {user.name.charAt(0).toUpperCase()}
+                </span>
+              </div>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="flex items-center gap-2 pl-2 lg:pl-3 border-l border-surface-200 dark:border-surface-700 hover:opacity-80 transition-opacity"
+              className="hidden md:flex items-center gap-2 pl-3 border-l border-surface-200 dark:border-surface-700 hover:opacity-80 transition-opacity"
             >
               <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center">
                 <span className="text-xs font-semibold text-white">
@@ -480,105 +498,14 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
               </svg>
             </button>
 
-            {/* Dropdown menu */}
+            {/* Dropdown menu (desktop) */}
             {userMenuOpen && (
-              <div className="absolute right-0 mt-2 w-56 rounded-lg bg-white dark:bg-surface-800 shadow-lg border border-surface-200 dark:border-surface-700 py-1 animate-fade-in z-50">
-                {/* User info (mobile) */}
-                <div className="md:hidden px-4 py-3 border-b border-surface-100 dark:border-surface-700">
-                  <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
-                    {user.name}
-                  </p>
-                  <p className="text-xs text-surface-500 dark:text-surface-200">
-                    {user.email}
-                  </p>
-                  <p className="text-2xs text-surface-700 dark:text-surface-300 mt-0.5">
-                    {formatRole(user.role)}
-                  </p>
-                </div>
-
-                {/* Email on desktop */}
-                <div className="hidden md:block px-4 py-2 border-b border-surface-100 dark:border-surface-700">
+              <div className="absolute right-0 mt-2 w-56 rounded-lg bg-white dark:bg-surface-800 shadow-lg border border-surface-200 dark:border-surface-700 py-1 animate-fade-in z-50 hidden md:block">
+                <div className="px-4 py-2 border-b border-surface-100 dark:border-surface-700">
                   <p className="text-xs text-surface-800 dark:text-surface-200 truncate">
                     {user.email}
                   </p>
                 </div>
-
-                {/* Menu items */}
-                {branches && branches.length > 0 && (
-                  <div className="md:hidden border-b border-surface-100 dark:border-surface-700 py-1">
-                    <div className="px-4 pt-2 pb-1">
-                      <p className="text-[10px] uppercase tracking-wider font-semibold text-surface-500 dark:text-surface-400">
-                        Branch
-                      </p>
-                    </div>
-
-                    {mobileCanSwitchBranches ? (
-                      <div className="pb-1">
-                        {canSeeAllBranches && (
-                          <button
-                            type="button"
-                            onClick={() => handleMobileBranchSwitch(null)}
-                            disabled={mobileBranchFetcher.state !== 'idle'}
-                            className={`w-full flex items-center justify-between gap-2 px-4 py-2 text-sm transition-colors ${
-                              isMobileAllBranches
-                                ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
-                                : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700/50'
-                            } ${mobileBranchFetcher.state !== 'idle' ? 'opacity-60 cursor-not-allowed' : ''}`}
-                          >
-                            <span>All Branches</span>
-                            {isMobileAllBranches && (
-                              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </button>
-                        )}
-
-                        {branches.map((branch) => (
-                          <button
-                            key={branch.id}
-                            type="button"
-                            onClick={() => handleMobileBranchSwitch(branch.id)}
-                            disabled={mobileBranchFetcher.state !== 'idle'}
-                            className={`w-full flex items-center justify-between gap-2 px-4 py-2 text-sm transition-colors ${
-                              branch.id === (currentBranchId ?? null)
-                                ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
-                                : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700/50'
-                            } ${mobileBranchFetcher.state !== 'idle' ? 'opacity-60 cursor-not-allowed' : ''}`}
-                          >
-                            <span className="truncate">{branch.name}</span>
-                            <span className="flex items-center gap-1.5 text-[10px]">
-                              <span className="font-mono text-surface-500 dark:text-surface-400">{branch.code}</span>
-                              {branch.id === (currentBranchId ?? null) && (
-                                <svg className="w-3.5 h-3.5 flex-shrink-0 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                            </span>
-                          </button>
-                        ))}
-                        {mobileBranchFetcher.state !== 'idle' && (
-                          <p className="px-4 pt-1 text-[11px] text-surface-500 dark:text-surface-400">
-                            Switching branch...
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="px-4 pb-2">
-                        <div className="flex items-center justify-between rounded-md bg-surface-50 dark:bg-surface-700/40 px-3 py-2">
-                          <span className="text-sm text-surface-700 dark:text-surface-300 truncate">
-                            {mobileCurrentBranch?.name ?? 'Branch'}
-                          </span>
-                          {mobileCurrentBranch?.code && (
-                            <span className="text-[10px] font-mono text-surface-500 dark:text-surface-400">
-                              {mobileCurrentBranch.code}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 <div className="py-1">
                   <button
@@ -630,6 +557,149 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                 </div>
               </div>
             )}
+
+            {/* Mobile user sheet */}
+            <Modal
+              open={mobileUserMenuOpen}
+              onClose={() => setMobileUserMenuOpen(false)}
+              aria-labelledby="mobile-user-menu-title"
+              maxWidth="max-w-md"
+              contentClassName="border border-surface-200 dark:border-surface-700"
+            >
+              <div className="px-5 py-4 border-b border-surface-100 dark:border-surface-700">
+                <p id="mobile-user-menu-title" className="text-base font-semibold text-surface-900 dark:text-surface-100">
+                  Account
+                </p>
+                <p className="text-sm font-medium text-surface-900 dark:text-surface-100 mt-2">{user.name}</p>
+                <p className="text-xs text-surface-500 dark:text-surface-300">{user.email}</p>
+                <p className="text-2xs text-surface-700 dark:text-surface-300 mt-0.5">{formatRole(user.role)}</p>
+              </div>
+
+              {branches && branches.length > 0 && (
+                <div className="border-b border-surface-100 dark:border-surface-700 py-2">
+                  <div className="px-5 pt-1 pb-1">
+                    <p className="text-[10px] uppercase tracking-wider font-semibold text-surface-500 dark:text-surface-400">
+                      Branch
+                    </p>
+                  </div>
+
+                  {mobileCanSwitchBranches ? (
+                    <div className="pb-1">
+                      {canSeeAllBranches && (
+                        <button
+                          type="button"
+                          onClick={() => handleMobileBranchSwitch(null)}
+                          disabled={isMobileBranchSwitching}
+                          className={`w-full flex items-center justify-between gap-2 px-5 py-2.5 text-sm transition-colors ${
+                            isMobileAllBranches
+                              ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
+                              : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700/50'
+                          } ${isMobileBranchSwitching ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                          <span>All Branches</span>
+                          {isMobileAllBranches && (
+                            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      )}
+
+                      {branches.map((branch) => (
+                        <button
+                          key={branch.id}
+                          type="button"
+                          onClick={() => handleMobileBranchSwitch(branch.id)}
+                          disabled={isMobileBranchSwitching}
+                          className={`w-full flex items-center justify-between gap-2 px-5 py-2.5 text-sm transition-colors ${
+                            branch.id === (currentBranchId ?? null)
+                              ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
+                              : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700/50'
+                          } ${isMobileBranchSwitching ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                          <span className="truncate">{branch.name}</span>
+                          <span className="flex items-center gap-1.5 text-[10px]">
+                            <span className="font-mono text-surface-500 dark:text-surface-400">{branch.code}</span>
+                            {branch.id === (currentBranchId ?? null) && (
+                              <svg className="w-3.5 h-3.5 flex-shrink-0 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                      {isMobileBranchSwitching && (
+                        <p className="px-5 pt-1 text-[11px] text-surface-500 dark:text-surface-400">
+                          Switching branch...
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="px-5 pb-2">
+                      <div className="flex items-center justify-between rounded-md bg-surface-50 dark:bg-surface-700/40 px-3 py-2">
+                        <span className="text-sm text-surface-700 dark:text-surface-300 truncate">
+                          {mobileCurrentBranch?.name ?? 'Branch'}
+                        </span>
+                        {mobileCurrentBranch?.code && (
+                          <span className="text-[10px] font-mono text-surface-500 dark:text-surface-400">
+                            {mobileCurrentBranch.code}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="py-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onToggleDarkMode();
+                    setMobileUserMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-5 py-2.5 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+                >
+                  {darkMode ? (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                    </svg>
+                  )}
+                  <span>{darkMode ? 'Switch to light mode' : 'Switch to dark mode'}</span>
+                </button>
+
+                <a
+                  href="/admin/settings"
+                  className="flex items-center gap-2 px-5 py-2.5 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+                  onClick={() => setMobileUserMenuOpen(false)}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  Settings
+                </a>
+              </div>
+
+              <div className="border-t border-surface-100 dark:border-surface-700 py-2">
+                <Form method="post" action="/auth/logout">
+                  <Button
+                    type="submit"
+                    variant="ghost"
+                    className="flex items-center gap-2 w-full justify-start text-danger-600 dark:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-700/20 transition-colors h-auto py-2.5 px-5 font-normal"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+                    </svg>
+                    Sign out
+                  </Button>
+                </Form>
+              </div>
+            </Modal>
           </div>
         )}
       </div>

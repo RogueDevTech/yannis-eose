@@ -118,6 +118,7 @@ export class OrdersService {
     this.events.emitNewOrder({
       orderId: order.id,
       productName: 'Order created',
+      branchId: order.branchId ?? null,
     });
 
     // Notify Admin, Head of CS, Head of Marketing, and all CS agents (every new order)
@@ -278,9 +279,13 @@ export class OrdersService {
       })),
     );
 
-    this.events.emitNewOrder({ orderId: order.id, productName: 'Offline order created' });
+    this.events.emitNewOrder({
+      orderId: order.id,
+      productName: 'Offline order created',
+      branchId: order.branchId ?? null,
+    });
     this.events.emitToUser(actorId, 'order:assigned', { orderId: order.id });
-    this.events.emitToRoom('cs-all', 'order:new', { orderId: order.id });
+    this.events.emitToRoom('cs-all', 'order:new', { orderId: order.id }, order.branchId ?? null);
 
     this.notifications
       .create({
@@ -935,6 +940,7 @@ export class OrdersService {
       mediaBuyerId: updated.mediaBuyerId,
       logisticsLocationId: updated.logisticsLocationId,
       riderId: updated.riderId,
+      branchId: updated.branchId ?? null,
     });
 
     // Persistent notifications for logistics flow
@@ -1195,7 +1201,11 @@ export class OrdersService {
 
       await this.redis.del(pendingKey);
 
-      this.events.emitNewOrder({ orderId: order.id, productName: 'Order created' });
+      this.events.emitNewOrder({
+        orderId: order.id,
+        productName: 'Order created',
+        branchId: order.branchId ?? null,
+      });
       this.notifications.createForRole('SUPER_ADMIN', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
       this.notifications.createForRole('HEAD_OF_CS', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
       this.notifications.createForRole('HEAD_OF_MARKETING', { type: 'order:new', title: 'New order received', body: 'A new order has been created.', data: { orderId: order.id } }).catch(() => {});
@@ -1309,7 +1319,7 @@ export class OrdersService {
     this.events.emitToRoom('cs-all', 'order:assigned', {
       orderId,
       customerName: updated.customerName,
-    });
+    }, updated.branchId ?? null);
     this.notifications
       .create({
         userId: csAgentId,
@@ -1398,12 +1408,12 @@ export class OrdersService {
       count: updated.length,
       fromAgentId,
       toAgentId,
-    });
+    }, actor.currentBranchId ?? null);
     this.events.emitToRoom('cs-all', 'order:assigned_bulk', {
       count: updated.length,
       fromAgentId,
       toAgentId,
-    });
+    }, actor.currentBranchId ?? null);
     const toNameRow = await this.db
       .select({ name: schema.users.name })
       .from(schema.users)
@@ -1516,7 +1526,7 @@ export class OrdersService {
     }
 
     if (redistributed > 0) {
-      this.events.emitToRoom('cs-all', 'order:assignments_changed', { redistributed });
+      this.events.emitToRoom('cs-all', 'order:assignments_changed', { redistributed }, actor.currentBranchId ?? null);
     }
     return { redistributed };
   }
@@ -1644,7 +1654,7 @@ export class OrdersService {
           })
           .catch(() => {});
       }
-      this.events.emitToRoom('cs-all', 'order:assignments_changed', { redistributed });
+      this.events.emitToRoom('cs-all', 'order:assignments_changed', { redistributed }, actor.currentBranchId ?? null);
     }
 
     return { redistributed };
@@ -2140,6 +2150,12 @@ export class OrdersService {
    * Returns true if the order was assigned, false if no capacity.
    */
   private async assignOrderToBestAvailableAgent(orderId: string): Promise<boolean> {
+    const [orderRow] = await this.db
+      .select({ branchId: schema.orders.branchId })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+
     const workloads = await this.getCSAgentWorkloads();
     const available = workloads.filter((w) => w.pendingCount < w.capacity);
     if (available.length === 0) return false;
@@ -2180,7 +2196,7 @@ export class OrdersService {
       .where(eq(schema.orders.id, orderId));
 
     this.events.emitToUser(targetAgent.agentId, 'order:assigned', { orderId });
-    this.events.emitToRoom('cs-all', 'order:assigned', { orderId });
+    this.events.emitToRoom('cs-all', 'order:assigned', { orderId }, orderRow?.branchId ?? null);
     this.notifications
       .create({
         userId: targetAgent.agentId,
@@ -2219,7 +2235,12 @@ export class OrdersService {
 
     if (strategy === 'claim') {
       // Claim mode: leave order in UNPROCESSED, broadcast to claim queue
-      this.events.emitToRoom('cs-all', 'order:claim_available', { orderId });
+      const [orderRow] = await this.db
+        .select({ branchId: schema.orders.branchId })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+      this.events.emitToRoom('cs-all', 'order:claim_available', { orderId }, orderRow?.branchId ?? null);
       return;
     }
 
@@ -2287,7 +2308,7 @@ export class OrdersService {
       oldStatus: 'UNPROCESSED',
       newStatus: 'CS_ASSIGNED',
       assignedCsId: actor.id,
-    });
+    }, actor.currentBranchId ?? null);
 
     this.writeTimelineEvent({
       orderId,
@@ -2360,7 +2381,7 @@ export class OrdersService {
     }
 
     if (distributed > 0) {
-      this.events.emitToRoom('cs-all', 'order:assignments_changed', { distributed });
+      this.events.emitToRoom('cs-all', 'order:assignments_changed', { distributed }, actor.currentBranchId ?? null);
     }
     return { distributed };
   }
@@ -2817,6 +2838,7 @@ export class OrdersService {
         mediaBuyerId: order.mediaBuyerId,
         logisticsLocationId: order.logisticsLocationId,
         riderId: order.riderId,
+        branchId: order.branchId ?? null,
       });
 
       // Notify Head of CS about max-retry cancellation
@@ -2824,7 +2846,7 @@ export class OrdersService {
         orderId,
         customerName: order.customerName,
         attempts: currentAttempts,
-      });
+      }, order.branchId ?? null);
       this.writeTimelineEvent({
         orderId,
         eventType: 'ORDER_CANCELLED',
@@ -2860,6 +2882,7 @@ export class OrdersService {
       mediaBuyerId: order.mediaBuyerId,
       logisticsLocationId: order.logisticsLocationId,
       riderId: order.riderId,
+      branchId: order.branchId ?? null,
     });
 
     // Notify assigned agent about the scheduled callback
@@ -2975,7 +2998,7 @@ export class OrdersService {
         }).catch(() => {});
 
         // Also push to the CS room so the queue tab refreshes
-        this.events.emitToRoom('cs-all', 'order:callback_due', { orderId: order.id });
+        this.events.emitToRoom('cs-all', 'order:callback_due', { orderId: order.id }, order.branchId ?? null);
       }
     } catch {
       // Cron failure is non-fatal — will retry in 2 minutes
@@ -3109,7 +3132,7 @@ export class OrdersService {
       })
       .where(eq(schema.orders.id, duplicateId));
 
-    this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {});
+    this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {}, actor.currentBranchId ?? null);
     return { merged: true, originalId, duplicateId };
   }
 
@@ -3128,7 +3151,7 @@ export class OrdersService {
       })
       .where(eq(schema.orders.id, orderId));
 
-    this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {});
+    this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {}, actor.currentBranchId ?? null);
     return { dismissed: true };
   }
 

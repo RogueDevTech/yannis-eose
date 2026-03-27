@@ -89,6 +89,24 @@ export interface PendingCart {
   updatedAt: string;
 }
 
+/** A single item in the Live Activity feed — a cart that may have progressed to an order. */
+export interface LiveActivityItem {
+  id: string;
+  customerName: string;
+  customerPhoneDisplay: string;
+  productName: string | null;
+  offerLabel: string | null;
+  /** Status of the cart_abandonments row — null for direct orders with no cart */
+  cartStatus: 'PENDING' | 'ABANDONED' | 'CONVERTED' | null;
+  /** Current order status when cart was converted — null if still a cart */
+  orderStatus: string | null;
+  /** Order ID when converted */
+  linkedOrderId: string | null;
+  /** Order total amount — null for carts that haven't converted yet */
+  totalAmount: string | null;
+  updatedAt: string;
+}
+
 /** Single item in the live activities feed (from socket events). */
 export interface CSActivityItem {
   id: string;
@@ -104,8 +122,6 @@ export const CS_QUEUE_TAB_VALUES = [
   'queue',
   'active',
   'callbacks',
-  'duplicates',
-  'carts',
   'hotswap',
   'performance',
   'claim',
@@ -136,6 +152,12 @@ export interface CSDashboardStreamData {
   isClaimMode?: boolean;
   /** Max orders a CS agent can hold in claim mode before Claim button is disabled. */
   claimCap?: number;
+  /** Initial cart activity payload rendered on first paint before fetcher refreshes. */
+  initialCartActivity?: {
+    activityItems: LiveActivityItem[];
+    pendingCarts: PendingCart[];
+    abandonedCarts: PendingCart[];
+  };
   // Deferred (streaming promises)
   inactiveAgents: Promise<InactiveAgent[]>;
   callbackOrders: Promise<CSOrder[]>;
@@ -147,6 +169,7 @@ export interface CSDashboardStreamData {
   claimQueue?: Promise<CSOrder[]>;
   pendingCarts?: Promise<PendingCart[]>;
   abandonedCarts?: Promise<PendingCart[]>;
+  activityItems?: Promise<LiveActivityItem[]>;
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
   /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { Spinner } from '~/components/ui/spinner';
 import { getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
 import { useNotificationsState } from '~/contexts/notifications-state';
@@ -152,61 +153,55 @@ export function NotificationsPage({
 
       {/* Detail modal — full message, action button only when notification requires one */}
       {detailNotification && (
-        <>
-          <div
-            className="fixed inset-0 z-[200] bg-black/50 dark:bg-black/60"
-            aria-hidden
-            onClick={() => setDetailNotification(null)}
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="notification-detail-title"
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[201] w-full max-w-md max-h-[90dvh] flex flex-col bg-white dark:bg-surface-800 rounded-xl shadow-xl border border-surface-200 dark:border-surface-700 animate-fade-in mx-4"
-          >
-            <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3 flex-shrink-0">
-              <h2 id="notification-detail-title" className="text-lg font-semibold text-surface-900 dark:text-white flex-1 min-w-0">
-                {detailNotification.title}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setDetailNotification(null)}
-                className="p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-700 transition-colors shrink-0"
-                aria-label="Close"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3">
-              {detailNotification.body ? (
-                <p className="text-sm text-surface-700 dark:text-surface-200 whitespace-pre-wrap">
-                  {detailNotification.body}
-                </p>
-              ) : (
-                <p className="text-sm text-surface-500 dark:text-surface-400 italic">No additional message.</p>
-              )}
-              <p className="text-xs text-surface-500 dark:text-surface-400 mt-4">
-                {formatNotificationDate(detailNotification.createdAt)}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
-              {action && (
-                <Link
-                  to={action.link}
-                  onClick={() => setDetailNotification(null)}
-                  className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-500 transition-colors"
-                >
-                  {action.label}
-                </Link>
-              )}
-              <Button variant="secondary" size="sm" onClick={() => setDetailNotification(null)}>
-                Close
-              </Button>
-            </div>
+        <Modal
+          open={Boolean(detailNotification)}
+          onClose={() => setDetailNotification(null)}
+          aria-labelledby="notification-detail-title"
+          maxWidth="max-w-md"
+          contentClassName="border border-surface-200 dark:border-surface-700 flex flex-col"
+        >
+          <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3 flex-shrink-0">
+            <h2 id="notification-detail-title" className="text-lg font-semibold text-surface-900 dark:text-white flex-1 min-w-0">
+              {detailNotification.title}
+            </h2>
+            <button
+              type="button"
+              onClick={() => setDetailNotification(null)}
+              className="p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-700 transition-colors shrink-0"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-        </>
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3">
+            {detailNotification.body ? (
+              <p className="text-sm text-surface-700 dark:text-surface-200 whitespace-pre-wrap">
+                {detailNotification.body}
+              </p>
+            ) : (
+              <p className="text-sm text-surface-500 dark:text-surface-400 italic">No additional message.</p>
+            )}
+            <p className="text-xs text-surface-500 dark:text-surface-400 mt-4">
+              {formatNotificationDate(detailNotification.createdAt)}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
+            {action && (
+              <Link
+                to={action.link}
+                onClick={() => setDetailNotification(null)}
+                className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-500 transition-colors"
+              >
+                {action.label}
+              </Link>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => setDetailNotification(null)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   );

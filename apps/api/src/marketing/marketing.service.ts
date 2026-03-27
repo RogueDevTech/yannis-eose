@@ -30,6 +30,24 @@ export class MarketingService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  private async getBranchUserIds(branchId?: string | null): Promise<string[] | null> {
+    if (!branchId) return null;
+    const rows = await this.db
+      .select({ userId: schema.userBranches.userId })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.branchId, branchId));
+    return rows.map((row) => row.userId);
+  }
+
+  private async getBranchCampaignIds(branchId?: string | null): Promise<string[] | null> {
+    if (!branchId) return null;
+    const rows = await this.db
+      .select({ id: schema.campaigns.id })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.branchId, branchId));
+    return rows.map((row) => row.id);
+  }
+
   // ============================================
   // Marketing Funding
   // ============================================
@@ -156,7 +174,7 @@ export class MarketingService {
     return updated[0];
   }
 
-  async listFunding(input: ListFundingInput) {
+  async listFunding(input: ListFundingInput, branchId?: string | null) {
     const conditions = [];
     if (input.status) {
       conditions.push(eq(schema.marketingFunding.status, input.status));
@@ -172,6 +190,16 @@ export class MarketingService {
     }
     if (input.endDate) {
       conditions.push(lte(schema.marketingFunding.sentAt, new Date(input.endDate)));
+    }
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds && branchUserIds.length === 0) {
+      return {
+        records: [],
+        pagination: { page: input.page, limit: input.limit, total: 0 },
+      };
+    }
+    if (branchUserIds) {
+      conditions.push(inArray(schema.marketingFunding.receiverId, branchUserIds));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -208,21 +236,33 @@ export class MarketingService {
     };
   }
 
-  async getFundingSummary() {
+  async getFundingSummary(branchId?: string | null) {
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds && branchUserIds.length === 0) {
+      return {
+        totalSent: '0',
+        totalCompleted: '0',
+        totalDisputed: '0',
+      };
+    }
+    const branchScope = branchUserIds
+      ? inArray(schema.marketingFunding.receiverId, branchUserIds)
+      : undefined;
+
     const totalSent = await this.db
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
-      .where(eq(schema.marketingFunding.status, 'SENT'));
+      .where(and(eq(schema.marketingFunding.status, 'SENT'), branchScope));
 
     const totalCompleted = await this.db
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
-      .where(eq(schema.marketingFunding.status, 'COMPLETED'));
+      .where(and(eq(schema.marketingFunding.status, 'COMPLETED'), branchScope));
 
     const totalDisputed = await this.db
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
-      .where(eq(schema.marketingFunding.status, 'DISPUTED'));
+      .where(and(eq(schema.marketingFunding.status, 'DISPUTED'), branchScope));
 
     return {
       totalSent: totalSent[0]?.total ?? '0',
@@ -235,7 +275,15 @@ export class MarketingService {
    * Funding balance for one user: COMPLETED funding received minus APPROVED ad spend.
    * Used for Media Buyers and Head of Marketing (HoM has no ad spend).
    */
-  async getFundingBalance(userId: string): Promise<{ totalReceived: string; totalSpend: string; balance: string }> {
+  async getFundingBalance(
+    userId: string,
+    branchId?: string | null,
+  ): Promise<{ totalReceived: string; totalSpend: string; balance: string }> {
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      return { totalReceived: '0', totalSpend: '0', balance: '0' };
+    }
+
     const [receivedRow] = await this.db
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
@@ -253,6 +301,7 @@ export class MarketingService {
         and(
           eq(schema.adSpendLogs.mediaBuyerId, userId),
           eq(schema.adSpendLogs.status, 'APPROVED'),
+          branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
         ),
       );
 
@@ -270,7 +319,7 @@ export class MarketingService {
    * - HEAD_OF_MARKETING: self + all Media Buyers
    * - SUPER_ADMIN / FINANCE_OFFICER: all Head of Marketing + all Media Buyers
    */
-  async listFundingBalances(caller: { id: string; role: string }): Promise<
+  async listFundingBalances(caller: { id: string; role: string }, branchId?: string | null): Promise<
     Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>
   > {
     const isHoM = caller.role === 'HEAD_OF_MARKETING';
@@ -293,9 +342,19 @@ export class MarketingService {
       recipientUserIds.push(...recipients.map((r) => r.id));
     }
 
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds) {
+      const allowed = new Set(branchUserIds);
+      const filtered = recipientUserIds.filter((id) => allowed.has(id));
+      recipientUserIds.length = 0;
+      recipientUserIds.push(...filtered);
+    }
+
     if (recipientUserIds.length === 0) {
       return [];
     }
+
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
 
     const [fundingByReceiver, spendByMediaBuyer, userRows] = await Promise.all([
       this.db
@@ -321,6 +380,7 @@ export class MarketingService {
           and(
             inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
             eq(schema.adSpendLogs.status, 'APPROVED'),
+            branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
           ),
         )
         .groupBy(schema.adSpendLogs.mediaBuyerId),
@@ -364,6 +424,7 @@ export class MarketingService {
   async getFundingBalanceWithAuth(
     userId: string,
     caller: { id: string; role: string; permissions?: string[] },
+    branchId?: string | null,
   ): Promise<{ totalReceived: string; totalSpend: string; balance: string }> {
     const [target] = await this.db
       .select({ role: schema.users.role })
@@ -385,17 +446,17 @@ export class MarketingService {
     }
 
     if (caller.id === userId) {
-      return this.getFundingBalance(userId);
+      return this.getFundingBalance(userId, branchId);
     }
     if (caller.role === 'SUPER_ADMIN' || caller.role === 'FINANCE_OFFICER') {
-      return this.getFundingBalance(userId);
+      return this.getFundingBalance(userId, branchId);
     }
     if (caller.role === 'HEAD_OF_MARKETING' && targetRole === 'MEDIA_BUYER') {
-      return this.getFundingBalance(userId);
+      return this.getFundingBalance(userId, branchId);
     }
     const perms = caller.permissions ?? [];
     if (perms.includes('users.read')) {
-      return this.getFundingBalance(userId);
+      return this.getFundingBalance(userId, branchId);
     }
 
     throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to view this user\'s funding balance' });
@@ -410,7 +471,13 @@ export class MarketingService {
     reason: string,
     requesterId: string,
     requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
+    branchId?: string | null,
   ) {
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds && !branchUserIds.includes(requesterId)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Requester is not in the active branch' });
+    }
+
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${requesterId}, true)`;
 
     const rows = await this.db
@@ -473,10 +540,31 @@ export class MarketingService {
   /**
    * List funding requests. Media Buyer: only their own. HoM/Admin: can filter by requesterId or get all.
    */
-  async listFundingRequests(input: { requesterId?: string; page: number; limit: number }) {
+  async listFundingRequests(
+    input: { requesterId?: string; startDate?: string; endDate?: string; page: number; limit: number },
+    branchId?: string | null,
+  ) {
     const conditions = [];
     if (input.requesterId) {
       conditions.push(eq(schema.marketingFundingRequests.requesterId, input.requesterId));
+    }
+    if (input.startDate) {
+      conditions.push(gte(schema.marketingFundingRequests.createdAt, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.marketingFundingRequests.createdAt, end));
+    }
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds && branchUserIds.length === 0) {
+      return {
+        records: [],
+        pagination: { page: input.page, limit: input.limit, total: 0 },
+      };
+    }
+    if (branchUserIds) {
+      conditions.push(inArray(schema.marketingFundingRequests.requesterId, branchUserIds));
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
@@ -623,8 +711,23 @@ export class MarketingService {
   // Ad Spend Logs
   // ============================================
 
-  async createAdSpend(input: CreateAdSpendInput, mediaBuyerId: string) {
+  async createAdSpend(
+    input: CreateAdSpendInput,
+    mediaBuyerId: string,
+    branchId?: string | null,
+  ) {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${mediaBuyerId}, true)`;
+
+    if (branchId) {
+      const [campaign] = await this.db
+        .select({ id: schema.campaigns.id })
+        .from(schema.campaigns)
+        .where(and(eq(schema.campaigns.id, input.campaignId ?? ''), eq(schema.campaigns.branchId, branchId)))
+        .limit(1);
+      if (!campaign) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+      }
+    }
 
     // Screenshot is mandatory — enforced by Zod schema. status defaults to PENDING in DB.
     const rows = await this.db
@@ -679,7 +782,7 @@ export class MarketingService {
     return updated;
   }
 
-  async listAdSpend(input: ListAdSpendInput) {
+  async listAdSpend(input: ListAdSpendInput, branchId?: string | null) {
     const conditions = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
@@ -695,6 +798,17 @@ export class MarketingService {
     }
     if (input.endDate) {
       conditions.push(lte(schema.adSpendLogs.spendDate, new Date(input.endDate)));
+    }
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      return {
+        records: [],
+        totalSpend: '0',
+        pagination: { page: input.page, limit: input.limit, total: 0 },
+      };
+    }
+    if (branchCampaignIds) {
+      conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -734,7 +848,22 @@ export class MarketingService {
     }
 
     const spendConditions: Parameters<typeof and>[0][] = [eq(schema.adSpendLogs.status, 'APPROVED')];
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      return {
+        totalSpend: 0,
+        totalOrders: 0,
+        deliveredOrders: 0,
+        deliveredRevenue: 0,
+        confirmedOrders: 0,
+        confirmationRate: 0,
+        cpa: 0,
+        trueRoas: 0,
+        deliveryRate: 0,
+      };
+    }
     if (mediaBuyerId) spendConditions.push(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
+    if (branchCampaignIds) spendConditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
     if (periodStart) spendConditions.push(gte(schema.adSpendLogs.spendDate, periodStart));
     if (periodEnd) spendConditions.push(lte(schema.adSpendLogs.spendDate, periodEnd));
     const spendWhere = and(...spendConditions);
@@ -826,7 +955,12 @@ export class MarketingService {
   // Media Buyer Leaderboard & CPA Alerts
   // ============================================
 
-  async getMediaBuyerLeaderboard(period: 'this_month' | 'all_time' = 'this_month', startDate?: string, endDate?: string) {
+  async getMediaBuyerLeaderboard(
+    period: 'this_month' | 'all_time' = 'this_month',
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+  ) {
     // Include ALL active media buyers so the leaderboard is always populated,
     // not just those who have approved ad spend in the period.
     const allBuyers = await this.db
@@ -839,9 +973,20 @@ export class MarketingService {
         ),
       );
 
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    const eligibleBuyers = branchUserIds
+      ? allBuyers.filter((buyer) => branchUserIds.includes(buyer.id))
+      : allBuyers;
+
     const leaderboard = await Promise.all(
-      allBuyers.map(async (buyer) => {
-        const metrics = await this.getPerformanceMetrics(buyer.id, period, startDate, endDate);
+      eligibleBuyers.map(async (buyer) => {
+        const metrics = await this.getPerformanceMetrics(
+          buyer.id,
+          period,
+          startDate,
+          endDate,
+          branchId,
+        );
         return {
           mediaBuyerId: buyer.id,
           name: buyer.name,
@@ -860,8 +1005,13 @@ export class MarketingService {
     return leaderboard;
   }
 
-  async checkHighCpaAlerts(cpaThreshold: number) {
-    const leaderboard = await this.getMediaBuyerLeaderboard();
+  async checkHighCpaAlerts(cpaThreshold: number, branchId?: string | null) {
+    const leaderboard = await this.getMediaBuyerLeaderboard(
+      'this_month',
+      undefined,
+      undefined,
+      branchId,
+    );
     const alerts = leaderboard.filter(
       (buyer) => buyer.cpa > cpaThreshold && buyer.totalOrders > 0,
     );
@@ -1002,7 +1152,7 @@ export class MarketingService {
   // Campaigns
   // ============================================
 
-  async createCampaign(input: CreateCampaignInput, mediaBuyerId: string) {
+  async createCampaign(input: CreateCampaignInput, mediaBuyerId: string, branchId?: string | null) {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${mediaBuyerId}, true)`;
 
     const rows = await this.db
@@ -1014,6 +1164,7 @@ export class MarketingService {
         deploymentType: input.deploymentType,
         formConfig: input.formConfig ?? null,
         status: 'ACTIVE',
+        branchId: branchId ?? null,
       })
       .returning();
 
@@ -1140,13 +1291,16 @@ export class MarketingService {
     };
   }
 
-  async listCampaigns(input: ListCampaignsInput) {
+  async listCampaigns(input: ListCampaignsInput, branchId?: string | null) {
     const conditions = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, input.mediaBuyerId));
     }
     if (input.status) {
       conditions.push(eq(schema.campaigns.status, input.status));
+    }
+    if (branchId) {
+      conditions.push(eq(schema.campaigns.branchId, branchId));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1160,7 +1314,7 @@ export class MarketingService {
     ]);
 
     const mediaBuyerIds = [...new Set(campaigns.map((c) => c.mediaBuyerId).filter(Boolean))] as string[];
-    let mediaBuyerNames: Map<string, string> = new Map();
+    const mediaBuyerNames: Map<string, string> = new Map();
     if (mediaBuyerIds.length > 0) {
       const users = await this.db
         .select({ id: schema.users.id, name: schema.users.name })

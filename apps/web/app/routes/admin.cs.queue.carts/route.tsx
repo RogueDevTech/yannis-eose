@@ -2,11 +2,27 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 
+type ActivityItem = {
+  id: string;
+  customerName: string;
+  customerPhoneDisplay: string;
+  productName: string | null;
+  offerLabel: string | null;
+  cartStatus: 'PENDING' | 'ABANDONED' | 'CONVERTED' | null;
+  orderStatus: string | null;
+  linkedOrderId: string | null;
+  updatedAt: string;
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'cart.read');
   const cookie = getSessionCookie(request);
 
-  const [pendingRes, abandonedRes] = await Promise.all([
+  const [activityRes, pendingRes, abandonedRes] = await Promise.all([
+    apiRequest<unknown>(
+      `/trpc/cart.listActivity?input=${encodeURIComponent(JSON.stringify({ limit: 60 }))}`,
+      { method: 'GET', cookie },
+    ),
     apiRequest<unknown>(
       `/trpc/cart.listPending?input=${encodeURIComponent(JSON.stringify({ limit: 30 }))}`,
       { method: 'GET', cookie },
@@ -17,6 +33,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
   ]);
 
+  const activityItems: ActivityItem[] = activityRes.ok
+    ? (activityRes.data as { result?: { data?: ActivityItem[] } })?.result?.data ?? []
+    : [];
   const pendingCarts = pendingRes.ok
     ? (pendingRes.data as { result?: { data?: Array<{ id: string; customerName: string; customerPhoneDisplay: string; productName: string | null; campaignName: string | null; offerLabel: string | null; updatedAt: string }> } })?.result?.data ?? []
     : [];
@@ -24,7 +43,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (abandonedRes.data as { result?: { data?: Array<{ id: string; customerName: string; customerPhoneDisplay: string; productName: string | null; campaignName: string | null; offerLabel: string | null; updatedAt: string }> } })?.result?.data ?? []
     : [];
 
-  return json({ pendingCarts, abandonedCarts });
+  return json({ activityItems, pendingCarts, abandonedCarts });
 }
 
 export async function action({ request }: ActionFunctionArgs) {

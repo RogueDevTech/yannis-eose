@@ -33,6 +33,8 @@ export type ListFundingInput = z.infer<typeof listFundingSchema>;
 
 export const listFundingRequestsSchema = z.object({
   requesterId: z.string().uuid().optional(),
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });

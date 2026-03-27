@@ -33,5 +33,12 @@ export default defineConfig({
       host: 'localhost',
       port: 4000,
     },
+    proxy: {
+      '/socket.io': {
+        target: 'http://localhost:4444',
+        ws: true,
+        changeOrigin: true,
+      },
+    },
   },
 });

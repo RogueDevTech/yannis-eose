@@ -24,6 +24,12 @@ export function defaultThisMonthRange(): { startDate: string; endDate: string } 
   };
 }
 
+/** Returns { startDate, endDate } both set to today in local time. */
+export function defaultTodayRange(): { startDate: string; endDate: string } {
+  const today = toLocalDateString(new Date());
+  return { startDate: today, endDate: today };
+}
+
 /** Default request timeout in ms. Deferred promises must resolve before Remix single-fetch timeout (~5s). */
 const DEFAULT_API_TIMEOUT_MS = 8_000;
 

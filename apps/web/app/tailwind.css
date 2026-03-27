@@ -235,6 +235,16 @@
 }
 
 @layer utilities {
+  /* Hide native scrollbar chrome while preserving scroll behavior */
+  .scrollbar-hide {
+    -ms-overflow-style: none; /* IE and legacy Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+  }
+
   /* Animations for dropdowns and toasts */
   .animate-fade-in {
     animation: fadeIn 0.15s ease-out;
@@ -308,6 +318,28 @@
     100% {
       box-shadow: inset 0 0 0 0 rgb(74 222 128 / 0), 0 0 0 0 rgb(74 222 128 / 0);
     }
+  }
+
+  /* New item slide-in — for cards/rows appearing for the first time */
+  .animate-slide-in-up {
+    animation: slideInUp 0.3s ease-out;
+  }
+
+  @keyframes slideInUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* NEW badge pulse — draws attention then fades */
+  .animate-new-badge {
+    animation: newBadgeFade 3s ease-in-out forwards;
+  }
+
+  @keyframes newBadgeFade {
+    0%   { opacity: 1; transform: scale(1.05); }
+    20%  { opacity: 1; transform: scale(1); }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
   }
 
   /* Route loader variants: orbit and arc */
