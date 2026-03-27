@@ -50,20 +50,20 @@ export const marketingRouter = router({
 
   listFunding: authedProcedure
     .input(listFundingSchema)
-    .query(async ({ input }) => {
-      return getMarketingService().listFunding(input);
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().listFunding(input, ctx.currentBranchId);
     }),
 
   fundingSummary: permissionProcedure('marketing.fundingSummary')
-    .query(async () => {
-      return getMarketingService().getFundingSummary();
+    .query(async ({ ctx }) => {
+      return getMarketingService().getFundingSummary(ctx.currentBranchId);
     }),
 
   /** Funding balance for one user. Allowed: own; HoM viewing MB; SA/FO; users.read viewing HoM/MB. */
   getFundingBalance: permissionProcedure('marketing.fundingSummary', 'marketing.read', 'users.read')
     .input(getFundingBalanceSchema)
     .query(async ({ input, ctx }) => {
-      return getMarketingService().getFundingBalanceWithAuth(input.userId, ctx.user);
+      return getMarketingService().getFundingBalanceWithAuth(input.userId, ctx.user, ctx.currentBranchId);
     }),
 
   /** List funding balances for recipients. HoM sees self + Media Buyers; SA/FO see all HoM + MB.
@@ -81,7 +81,7 @@ export const marketingRouter = router({
       return next({ ctx });
     })
     .query(async ({ ctx }) => {
-      return getMarketingService().listFundingBalances(ctx.user);
+      return getMarketingService().listFundingBalances(ctx.user, ctx.currentBranchId);
     }),
 
   /** Media Buyer or Head of Marketing: submit a funding request. MB notifies HoM; HoM notifies SuperAdmin + Finance. */
@@ -101,6 +101,7 @@ export const marketingRouter = router({
         input.reason ?? '',
         ctx.user.id,
         ctx.user.role as 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
+        ctx.currentBranchId,
       );
     }),
 
@@ -112,7 +113,7 @@ export const marketingRouter = router({
         requesterId,
         page: input.page,
         limit: input.limit,
-      });
+      }, ctx.currentBranchId);
     }),
 
   /** HoM/SuperAdmin/Finance: approve a funding request (after sending money manually) by attaching receipt. Notifies Media Buyer. */
@@ -139,7 +140,7 @@ export const marketingRouter = router({
   createAdSpend: permissionProcedure('marketing.adSpend')
     .input(createAdSpendSchema)
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().createAdSpend(input, ctx.user.id);
+      return getMarketingService().createAdSpend(input, ctx.user.id, ctx.currentBranchId);
     }),
 
   listAdSpend: authedProcedure
@@ -149,7 +150,7 @@ export const marketingRouter = router({
       const effectiveInput = ctx.user.role === 'MEDIA_BUYER'
         ? { ...input, mediaBuyerId: ctx.user.id }
         : input;
-      return getMarketingService().listAdSpend(effectiveInput);
+      return getMarketingService().listAdSpend(effectiveInput, ctx.currentBranchId);
     }),
 
   approveAdSpend: authedProcedure
@@ -170,12 +171,13 @@ export const marketingRouter = router({
         endDate: z.string().date().optional(),
       }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       return getMarketingService().getPerformanceMetrics(
         input.mediaBuyerId,
         input.startDate && input.endDate ? 'this_month' : 'all_time',
         input.startDate,
         input.endDate,
+        ctx.currentBranchId,
       );
     }),
 
@@ -188,18 +190,19 @@ export const marketingRouter = router({
         endDate: z.string().date().optional(),
       }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       return getMarketingService().getMediaBuyerLeaderboard(
         input.period ?? 'this_month',
         input.startDate,
         input.endDate,
+        ctx.currentBranchId,
       );
     }),
 
   checkHighCpa: permissionProcedure('marketing.checkHighCpa')
     .input(z.object({ threshold: z.number().positive() }))
-    .query(async ({ input }) => {
-      return getMarketingService().checkHighCpaAlerts(input.threshold);
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().checkHighCpaAlerts(input.threshold, ctx.currentBranchId);
     }),
 
   // ── Offer Templates ──────────────────────────────
@@ -231,7 +234,7 @@ export const marketingRouter = router({
   createCampaign: permissionProcedure('marketing.campaigns')
     .input(createCampaignSchema)
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().createCampaign(input, ctx.user.id);
+      return getMarketingService().createCampaign(input, ctx.user.id, ctx.currentBranchId);
     }),
 
   updateCampaign: permissionProcedure('marketing.campaigns')
@@ -248,8 +251,8 @@ export const marketingRouter = router({
 
   listCampaigns: authedProcedure
     .input(listCampaignsSchema)
-    .query(async ({ input }) => {
-      return getMarketingService().listCampaigns(input);
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().listCampaigns(input, ctx.currentBranchId);
     }),
 
   // ── Public Endpoint (Edge Worker) ──────────────

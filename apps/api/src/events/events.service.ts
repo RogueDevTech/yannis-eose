@@ -12,9 +12,17 @@ import { EventsGateway } from './events.gateway';
 export class EventsService {
   constructor(private readonly gateway: EventsGateway) {}
 
-  private safeEmit(room: string, event: string, payload: Record<string, unknown>) {
+  private resolveRoom(room: string, branchId?: string | null): string {
+    if (!branchId) return room;
+    if (!['admin', 'finance', 'cs-all', 'logistics', 'marketing-all', 'hr'].includes(room)) {
+      return room;
+    }
+    return `branch-${branchId}:${room}`;
+  }
+
+  private safeEmit(room: string, event: string, payload: Record<string, unknown>, branchId?: string | null) {
     try {
-      this.gateway.server.to(room).emit(event, payload);
+      this.gateway.server.to(this.resolveRoom(room, branchId)).emit(event, payload);
     } catch {
       // Real-time delivery is best effort. Mutations must remain DB-authoritative.
     }
@@ -31,21 +39,22 @@ export class EventsService {
     mediaBuyerId?: string | null;
     logisticsLocationId?: string | null;
     riderId?: string | null;
+    branchId?: string | null;
   }) {
     const event = 'order:status_changed';
     const payload = { ...data, timestamp: new Date().toISOString() };
 
     // Notify admin dashboard
-    this.safeEmit('admin', event, payload);
+    this.safeEmit('admin', event, payload, data.branchId);
 
     // Notify CS
-    this.safeEmit('cs-all', event, payload);
+    this.safeEmit('cs-all', event, payload, data.branchId);
     if (data.assignedCsId) {
       this.safeEmit(`cs-${data.assignedCsId}`, event, payload);
     }
 
     // Notify logistics
-    this.safeEmit('logistics', event, payload);
+    this.safeEmit('logistics', event, payload, data.branchId);
     if (data.logisticsLocationId) {
       this.safeEmit(`3pl-${data.logisticsLocationId}`, event, payload);
     }
@@ -56,7 +65,7 @@ export class EventsService {
     }
 
     // Notify marketing
-    this.safeEmit('marketing-all', event, payload);
+    this.safeEmit('marketing-all', event, payload, data.branchId);
     if (data.mediaBuyerId) {
       this.safeEmit(`marketing-${data.mediaBuyerId}`, event, payload);
     }
@@ -65,32 +74,32 @@ export class EventsService {
   /**
    * New order created — notify CS dispatch, admin, and marketing.
    */
-  emitNewOrder(data: { orderId: string; productName: string }) {
+  emitNewOrder(data: { orderId: string; productName: string; branchId?: string | null }) {
     const event = 'order:new';
     const payload = { ...data, timestamp: new Date().toISOString() };
-    this.safeEmit('admin', event, payload);
-    this.safeEmit('cs-all', event, payload);
-    this.safeEmit('marketing-all', event, payload);
+    this.safeEmit('admin', event, payload, data.branchId);
+    this.safeEmit('cs-all', event, payload, data.branchId);
+    this.safeEmit('marketing-all', event, payload, data.branchId);
   }
 
   /**
    * Financial approval required — notify finance dashboard.
    */
-  emitFinanceApproval(data: { type: string; referenceId: string; amount: string; requestedBy: string }) {
+  emitFinanceApproval(data: { type: string; referenceId: string; amount: string; requestedBy: string; branchId?: string | null }) {
     const event = 'finance:approval_required';
     const payload = { ...data, timestamp: new Date().toISOString() };
-    this.safeEmit('finance', event, payload);
-    this.safeEmit('admin', event, payload);
+    this.safeEmit('finance', event, payload, data.branchId);
+    this.safeEmit('admin', event, payload, data.branchId);
   }
 
   /**
    * Stock alert — notify logistics and admin.
    */
-  emitStockAlert(data: { productId: string; locationId: string; alertType: string; message: string }) {
+  emitStockAlert(data: { productId: string; locationId: string; alertType: string; message: string; branchId?: string | null }) {
     const event = 'stock:alert';
     const payload = { ...data, timestamp: new Date().toISOString() };
-    this.safeEmit('logistics', event, payload);
-    this.safeEmit('admin', event, payload);
+    this.safeEmit('logistics', event, payload, data.branchId);
+    this.safeEmit('admin', event, payload, data.branchId);
     this.safeEmit(`3pl-${data.locationId}`, event, payload);
   }
 
@@ -107,11 +116,11 @@ export class EventsService {
   /**
    * Generic notification to a named room.
    */
-  emitToRoom(room: string, event: string, data: Record<string, unknown>) {
+  emitToRoom(room: string, event: string, data: Record<string, unknown>, branchId?: string | null) {
     this.safeEmit(room, event, {
       ...data,
       timestamp: new Date().toISOString(),
-    });
+    }, branchId);
   }
 
   /**

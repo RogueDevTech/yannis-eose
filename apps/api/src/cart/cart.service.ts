@@ -21,6 +21,15 @@ export class CartService {
     private readonly events: EventsService,
   ) {}
 
+  private async getCampaignBranchId(campaignId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ branchId: schema.campaigns.branchId })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
+    return rows[0]?.branchId ?? null;
+  }
+
   /**
    * Save or upsert a cart. Called by Edge Worker when user fills name + phone.
    * Same campaign + phone + product = upsert (refresh updated_at).
@@ -40,6 +49,8 @@ export class CartService {
     if (actorId) {
       await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
     }
+    // Upsert key: campaign_id + phone_hash — one active PENDING cart per person per campaign.
+    // If they change product/offer mid-session we update the existing row rather than creating a duplicate.
     const existing = await this.db
       .select()
       .from(schema.cartAbandonments)
@@ -47,7 +58,6 @@ export class CartService {
         and(
           eq(schema.cartAbandonments.campaignId, input.campaignId),
           eq(schema.cartAbandonments.customerPhoneHash, input.customerPhoneHash),
-          eq(schema.cartAbandonments.productId, input.productId),
           eq(schema.cartAbandonments.status, 'PENDING'),
         ),
       )
@@ -55,17 +65,19 @@ export class CartService {
 
     const now = new Date();
     const existingRow = existing[0];
+    const branchId = await this.getCampaignBranchId(input.campaignId);
     if (existingRow) {
       await this.db
         .update(schema.cartAbandonments)
         .set({
           customerName: input.customerName,
-          offerLabel: input.offerLabel ?? existingRow.offerLabel,
+          productId: input.productId,
+          offerLabel: input.offerLabel ?? null,
           mediaBuyerId: input.mediaBuyerId ?? existingRow.mediaBuyerId,
           updatedAt: now,
         })
         .where(eq(schema.cartAbandonments.id, existingRow.id));
-      this.events.emitToRoom('cs-all', 'cart:updated', {});
+      this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
       return { id: existingRow.id, created: false };
     }
 
@@ -85,7 +97,7 @@ export class CartService {
     if (!row) {
       throw new Error('Failed to create cart');
     }
-    this.events.emitToRoom('cs-all', 'cart:updated', {});
+    this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
     return { id: row.id, created: true };
   }
 
@@ -97,6 +109,15 @@ export class CartService {
     if (actorId) {
       await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
     }
+    const cartRows = await this.db
+      .select({ campaignId: schema.cartAbandonments.campaignId })
+      .from(schema.cartAbandonments)
+      .where(eq(schema.cartAbandonments.id, cartId))
+      .limit(1);
+    const branchId = cartRows[0]?.campaignId
+      ? await this.getCampaignBranchId(cartRows[0].campaignId)
+      : null;
+
     await this.db
       .update(schema.cartAbandonments)
       .set({
@@ -105,7 +126,7 @@ export class CartService {
         updatedAt: new Date(),
       })
       .where(eq(schema.cartAbandonments.id, cartId));
-    this.events.emitToRoom('cs-all', 'cart:updated', {});
+    this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
   }
 
   /**
@@ -123,6 +144,7 @@ export class CartService {
     if (actorId) {
       await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
     }
+    const branchId = await this.getCampaignBranchId(campaignId);
     await this.db
       .update(schema.cartAbandonments)
       .set({
@@ -138,7 +160,7 @@ export class CartService {
           inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
         ),
       );
-    this.events.emitToRoom('cs-all', 'cart:updated', {});
+    this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
   }
 
   /**
@@ -173,10 +195,14 @@ export class CartService {
           lt(schema.cartAbandonments.updatedAt, threshold),
         ),
       )
-      .returning({ id: schema.cartAbandonments.id });
+      .returning({ id: schema.cartAbandonments.id, campaignId: schema.cartAbandonments.campaignId });
 
     if (result.length > 0) {
-      this.events.emitToRoom('cs-all', 'cart:updated', {});
+      const campaignIds = Array.from(new Set(result.map((row) => row.campaignId)));
+      for (const campaignId of campaignIds) {
+        const branchId = await this.getCampaignBranchId(campaignId);
+        this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
+      }
     }
     return result.length;
   }
@@ -197,24 +223,36 @@ export class CartService {
       updatedAt: Date;
     }>
   > {
-    const rows = await this.db
-      .select({
-        id: schema.cartAbandonments.id,
-        customerName: schema.cartAbandonments.customerName,
-        customerPhoneHash: schema.cartAbandonments.customerPhoneHash,
-        productId: schema.cartAbandonments.productId,
-        productName: schema.products.name,
-        campaignId: schema.cartAbandonments.campaignId,
-        campaignName: schema.campaigns.name,
-        offerLabel: schema.cartAbandonments.offerLabel,
-        updatedAt: schema.cartAbandonments.updatedAt,
-      })
-      .from(schema.cartAbandonments)
-      .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
-      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
-      .where(eq(schema.cartAbandonments.status, 'PENDING'))
-      .orderBy(desc(schema.cartAbandonments.updatedAt))
-      .limit(limit);
+    // DISTINCT ON (customerPhoneHash) keeps only the latest cart per customer phone.
+    // A customer changing product/offer selections creates multiple rows — we show only the most recent.
+    const rows = await this.db.execute<{
+      id: string;
+      customerName: string;
+      customerPhoneHash: string;
+      productId: string;
+      productName: string | null;
+      campaignId: string;
+      campaignName: string | null;
+      offerLabel: string | null;
+      updatedAt: Date;
+    }>(sql`
+      SELECT DISTINCT ON (ca.customer_phone_hash)
+        ca.id,
+        ca.customer_name   AS "customerName",
+        ca.customer_phone_hash AS "customerPhoneHash",
+        ca.product_id      AS "productId",
+        p.name             AS "productName",
+        ca.campaign_id     AS "campaignId",
+        c.name             AS "campaignName",
+        ca.offer_label     AS "offerLabel",
+        ca.updated_at      AS "updatedAt"
+      FROM cart_abandonments ca
+      LEFT JOIN products p ON p.id = ca.product_id
+      LEFT JOIN campaigns c ON c.id = ca.campaign_id
+      WHERE ca.status = 'PENDING'
+      ORDER BY ca.customer_phone_hash, ca.updated_at DESC
+      LIMIT ${limit}
+    `);
 
     return rows.map((r) => ({
       id: r.id,
@@ -280,6 +318,115 @@ export class CartService {
       campaignId: r.campaignId,
       campaignName: r.campaignName ?? null,
       offerLabel: r.offerLabel ?? null,
+      updatedAt: r.updatedAt ?? new Date(),
+    }));
+  }
+
+  /**
+   * Live activity feed for CS dashboard.
+   * Merges two sources:
+   *   1. Cart-originated activity — carts in last 6h + their linked order status
+   *   2. Direct orders (no cart) created in last 6h
+   * Deduplicates by phone hash across both sources (latest activity wins).
+   */
+  async listActivity(limit = 60): Promise<
+    Array<{
+      id: string;
+      customerName: string;
+      customerPhoneDisplay: string;
+      productName: string | null;
+      offerLabel: string | null;
+      cartStatus: 'PENDING' | 'ABANDONED' | 'CONVERTED' | null;
+      orderStatus: string | null;
+      linkedOrderId: string | null;
+      totalAmount: string | null;
+      updatedAt: Date;
+    }>
+  > {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const sixHoursAgo = todayStart.toISOString();
+    const rows = await this.db.execute<{
+      id: string;
+      customerName: string;
+      customerPhoneHash: string;
+      productName: string | null;
+      offerLabel: string | null;
+      cartStatus: 'PENDING' | 'ABANDONED' | 'CONVERTED' | null;
+      orderStatus: string | null;
+      linkedOrderId: string | null;
+      totalAmount: string | null;
+      updatedAt: Date;
+    }>(sql`
+      SELECT DISTINCT ON (phone_hash)
+        id,
+        "customerName",
+        phone_hash        AS "customerPhoneHash",
+        "productName",
+        "offerLabel",
+        "cartStatus",
+        "orderStatus",
+        "linkedOrderId",
+        "totalAmount",
+        "updatedAt"
+      FROM (
+        -- Source 1: cart-originated (with or without linked order)
+        SELECT
+          ca.id,
+          ca.customer_name                                              AS "customerName",
+          ca.customer_phone_hash                                        AS phone_hash,
+          p.name                                                        AS "productName",
+          ca.offer_label                                                AS "offerLabel",
+          ca.status::text                                               AS "cartStatus",
+          o.status                                                      AS "orderStatus",
+          ca.converted_order_id                                         AS "linkedOrderId",
+          COALESCE(o.total_amount, ot.price)::text                     AS "totalAmount",
+          GREATEST(ca.updated_at, COALESCE(o.updated_at, ca.updated_at)) AS "updatedAt"
+        FROM cart_abandonments ca
+        LEFT JOIN products p ON p.id = ca.product_id
+        LEFT JOIN orders o ON o.id = ca.converted_order_id
+        LEFT JOIN campaigns c ON c.id = ca.campaign_id
+        LEFT JOIN offer_templates ot ON ot.id = c.offer_template_id
+        WHERE ca.updated_at >= ${sixHoursAgo}
+          AND ca.status IN ('PENDING', 'ABANDONED', 'CONVERTED')
+
+        UNION ALL
+
+        -- Source 2: direct orders with no linked cart (created in last 6h)
+        SELECT
+          o.id,
+          o.customer_name                                               AS "customerName",
+          o.customer_phone_hash                                         AS phone_hash,
+          p.name                                                        AS "productName",
+          NULL::text                                                    AS "offerLabel",
+          NULL::text                                                    AS "cartStatus",
+          o.status                                                      AS "orderStatus",
+          o.id                                                          AS "linkedOrderId",
+          o.total_amount::text                                          AS "totalAmount",
+          o.updated_at                                                  AS "updatedAt"
+        FROM orders o
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        LEFT JOIN products p ON p.id = oi.product_id
+        WHERE o.updated_at >= ${sixHoursAgo}
+          AND NOT EXISTS (
+            SELECT 1 FROM cart_abandonments ca
+            WHERE ca.converted_order_id = o.id
+          )
+      ) combined
+      ORDER BY phone_hash, "updatedAt" DESC
+      LIMIT ${limit}
+    `);
+
+    return rows.map((r) => ({
+      id: r.id,
+      customerName: r.customerName,
+      customerPhoneDisplay: maskPhone(r.customerPhoneHash),
+      productName: r.productName ?? null,
+      offerLabel: r.offerLabel ?? null,
+      cartStatus: r.cartStatus,
+      orderStatus: r.orderStatus ?? null,
+      linkedOrderId: r.linkedOrderId ?? null,
+      totalAmount: r.totalAmount ?? null,
       updatedAt: r.updatedAt ?? new Date(),
     }));
   }

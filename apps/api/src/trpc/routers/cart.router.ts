@@ -56,6 +56,15 @@ export const cartRouter = router({
     }),
 
   /**
+   * Live activity feed — PENDING/ABANDONED/CONVERTED carts in last 6h with linked order status.
+   */
+  listActivity: permissionProcedure('cart.read')
+    .input(z.object({ limit: z.number().int().min(1).max(100).default(60) }).optional())
+    .query(async ({ input }) => {
+      return getCartService().listActivity(input?.limit ?? 60);
+    }),
+
+  /**
    * Get cart abandonment stats for CS dashboard.
    */
   getStats: permissionProcedure('cart.read').query(async () => {

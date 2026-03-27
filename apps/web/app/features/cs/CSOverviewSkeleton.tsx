@@ -13,7 +13,7 @@ export function CSOverviewSkeleton() {
 
       {/* Overview stat strip card */}
       <div className="card">
-        <div className="flex flex-nowrap gap-3 overflow-x-auto pb-1">
+        <div className="flex flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
           {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
             <div
               key={i}
@@ -95,7 +95,7 @@ export function CSOverviewSkeleton() {
             <div className="h-8 w-16 rounded bg-surface-100 dark:bg-surface-800" />
           </div>
         </div>
-        <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden pb-1">
+        <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="card shrink-0 w-64 space-y-3">
               <div className="flex items-center gap-3">

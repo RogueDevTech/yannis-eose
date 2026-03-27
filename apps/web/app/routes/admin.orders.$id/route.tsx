@@ -185,6 +185,28 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
   }
 
+  if (intent === 'revealPhoneForSms') {
+    const res = await apiRequest<unknown>('/trpc/orders.revealPhoneForManualCall', {
+      method: 'POST',
+      cookie,
+      body: { orderId },
+    });
+
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to prepare SMS recipient' }, { status: safeStatus(res.status) });
+    }
+
+    const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };
+    const payload = data?.result?.data;
+    return json({
+      success: true,
+      phone: payload?.phone ?? '',
+      isDialable: payload?.isDialable ?? false,
+      phoneRevealed: true,
+    });
+  }
+
   if (intent === 'preparePhoneForWhatsApp') {
     const orderRes = await apiRequest<{ result?: { data?: { status?: string } } }>(
       `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
@@ -204,6 +226,36 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
       return json({ ready: false, error: errorData?.error?.message ?? 'Failed to prepare WhatsApp recipient' }, { status: safeStatus(res.status) });
+    }
+
+    const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };
+    const payload = data?.result?.data;
+    return json({
+      ready: true,
+      phone: payload?.phone ?? '',
+      isDialable: payload?.isDialable ?? false,
+    });
+  }
+
+  if (intent === 'preparePhoneForSms') {
+    const orderRes = await apiRequest<{ result?: { data?: { status?: string } } }>(
+      `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+      { method: 'GET', cookie },
+    );
+    const currentStatus = orderRes.data?.result?.data?.status;
+    if (currentStatus !== 'CS_ENGAGED') {
+      return json({ ready: false });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/orders.revealPhoneForManualCall', {
+      method: 'POST',
+      cookie,
+      body: { orderId },
+    });
+
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ ready: false, error: errorData?.error?.message ?? 'Failed to prepare SMS recipient' }, { status: safeStatus(res.status) });
     }
 
     const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };

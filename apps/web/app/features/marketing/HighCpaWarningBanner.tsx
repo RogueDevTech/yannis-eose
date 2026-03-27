@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Link } from '@remix-run/react';
 
 export interface HighCpaBuyer {
@@ -14,6 +14,10 @@ interface HighCpaWarningBannerProps {
 
 export function HighCpaWarningBanner({ buyers, threshold }: HighCpaWarningBannerProps) {
   const [dismissed, setDismissed] = useState(false);
+  const chipsScrollRef = useRef<HTMLDivElement>(null);
+  const scrollChips = useCallback((delta: number) => {
+    chipsScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  }, []);
 
   if (buyers.length === 0 || dismissed) return null;
 
@@ -47,27 +51,50 @@ export function HighCpaWarningBanner({ buyers, threshold }: HighCpaWarningBanner
                 ₦{threshold.toLocaleString()}. Review ad performance.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setDismissed(true)}
-              className="shrink-0 p-1.5 rounded text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-200 hover:bg-warning-100 dark:hover:bg-warning-800/30 transition-colors"
-              aria-label="Dismiss"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            <div className="shrink-0 flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => scrollChips(-220)}
+                className="p-1.5 rounded border border-warning-300/70 dark:border-warning-600/60 text-warning-700 dark:text-warning-300 hover:bg-warning-100 dark:hover:bg-warning-800/40 transition-colors"
+                aria-label="Scroll buyers left"
               >
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollChips(220)}
+                className="p-1.5 rounded border border-warning-300/70 dark:border-warning-600/60 text-warning-700 dark:text-warning-300 hover:bg-warning-100 dark:hover:bg-warning-800/40 transition-colors"
+                aria-label="Scroll buyers right"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDismissed(true)}
+                className="p-1.5 rounded text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-200 hover:bg-warning-100 dark:hover:bg-warning-800/30 transition-colors"
+                aria-label="Dismiss"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
           <div
-            className="mt-2 flex flex-nowrap gap-2 overflow-x-auto pb-1 -mx-1 px-1"
+            ref={chipsScrollRef}
+            className="mt-2 flex flex-nowrap gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-1 px-1"
             role="list"
           >
             {sorted.map((b) => (

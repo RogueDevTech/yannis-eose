@@ -74,40 +74,21 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
   }
 
   async handleConnection(client: Socket) {
-    // #region agent log
-    const origin = String(client.handshake.headers.origin ?? '');
-    const rawCookie = client.handshake.headers.cookie ?? '';
-    const hasCookieHeader = rawCookie.length > 0;
-    const hasYannisSessionName = rawCookie.includes('yannis_session=');
-    // #endregion
     try {
       const user = await this.authenticateSocket(client);
       if (!user) {
-        // #region agent log
-        this.logger.warn(
-          `[DEBUG-bc49f3] ws_handshake auth_fail origin=${origin} hasCookieHeader=${hasCookieHeader} hasYannisSessionName=${hasYannisSessionName}`,
-        );
-        // #endregion
         client.disconnect();
         return;
       }
 
       // Store user data on the socket
-      client.data.user = user;
+      (client.data as { user?: SessionUser }).user = user;
 
       // Join role-appropriate rooms
       this.joinRooms(client, user);
 
       client.emit('connected', { userId: user.id, role: user.role });
-      // #region agent log
-      this.logger.warn(`[DEBUG-bc49f3] ws_handshake auth_ok role=${user.role} origin=${origin}`);
-      // #endregion
     } catch {
-      // #region agent log
-      this.logger.warn(
-        `[DEBUG-bc49f3] ws_handshake exception origin=${origin} hasCookieHeader=${hasCookieHeader}`,
-      );
-      // #endregion
       client.disconnect();
     }
   }
@@ -117,11 +98,11 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
    * Server broadcasts to cs-all for Team Live View.
    */
   @SubscribeMessage('agent:state_update')
-  async handleAgentStateUpdate(
+  handleAgentStateUpdate(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: Omit<AgentStatePayload, 'agentId'>,
   ) {
-    const user = client.data.user as SessionUser | undefined;
+    const user = (client.data as { user?: SessionUser }).user;
     if (!user || user.role !== 'CS_AGENT') return;
 
     const state: AgentStatePayload = {
@@ -132,8 +113,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
       lastActionAt: new Date().toISOString(),
     };
 
-    // Broadcast to cs-all room (Team Live View panel)
-    this.server.to('cs-all').emit('agent:state_update', state);
+    const branchRoom = user.currentBranchId ? `branch-${user.currentBranchId}:cs-all` : 'cs-all';
+    this.server.to(branchRoom).emit('agent:state_update', state);
   }
 
   /**
@@ -169,22 +150,22 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
         void client.join('hr');
         break;
       case 'HEAD_OF_CS':
-        void client.join('cs-all');
+        if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:cs-all`);
         break;
       case 'CS_AGENT':
         void client.join(`cs-${user.id}`);
         break;
       case 'FINANCE_OFFICER':
-        void client.join('finance');
+        if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:finance`);
         break;
       case 'HEAD_OF_LOGISTICS':
-        void client.join('logistics');
+        if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:logistics`);
         break;
       case 'WAREHOUSE_MANAGER':
-        void client.join('logistics');
+        if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:logistics`);
         break;
       case 'HEAD_OF_MARKETING':
-        void client.join('marketing-all');
+        if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:marketing-all`);
         break;
       case 'MEDIA_BUYER':
         void client.join(`marketing-${user.id}`);

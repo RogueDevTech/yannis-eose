@@ -1,7 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultTodayRange } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
 import {
@@ -11,6 +11,8 @@ import {
   type CSOrder,
   type DuplicatePair,
   type CSLeaderboardEntry,
+  type PendingCart,
+  type LiveActivityItem,
 } from '~/features/cs/types';
 
 const CS_QUEUE_LIVE_EVENTS = [
@@ -61,15 +63,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
 
   // ── Critical data: await these so the page always has core content ──
-  const [workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes] = await Promise.all([
+  const [workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes, activityRes, pendingRes, abandonedRes] = await Promise.all([
     apiRequest<unknown>('/trpc/orders.csWorkloads', { method: 'GET', cookie }),
     apiRequest<unknown>(
       `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'UNPROCESSED', limit: 20 }))}`,
       { method: 'GET', cookie },
     ),
-    apiRequest<unknown>('/trpc/orders.statusCounts', { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify(defaultTodayRange()))}`, { method: 'GET', cookie }),
     apiRequest<unknown>(
-      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'CS_ENGAGED', limit: 20 }))}`,
+      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'CS_ENGAGED', limit: 20, ...defaultTodayRange() }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      `/trpc/cart.listActivity?input=${encodeURIComponent(JSON.stringify({ limit: 60 }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      `/trpc/cart.listPending?input=${encodeURIComponent(JSON.stringify({ limit: 30 }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      `/trpc/cart.listAbandoned?input=${encodeURIComponent(JSON.stringify({ limit: 50 }))}`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -86,6 +100,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const statusCounts = statusCountsRes.ok
     ? (statusCountsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
     : {};
+  const activityItems = activityRes.ok
+    ? (activityRes.data as { result?: { data?: LiveActivityItem[] } })?.result?.data ?? []
+    : [];
+  const pendingCarts = pendingRes.ok
+    ? (pendingRes.data as { result?: { data?: PendingCart[] } })?.result?.data ?? []
+    : [];
+  const abandonedCarts = abandonedRes.ok
+    ? (abandonedRes.data as { result?: { data?: PendingCart[] } })?.result?.data ?? []
+    : [];
 
   const criticalData = {
     workloads,
@@ -96,6 +119,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusCounts,
     isClaimMode,
     claimCap,
+    initialCartActivity: {
+      activityItems,
+      pendingCarts,
+      abandonedCarts,
+    },
   };
 
   // ── Non-critical: deferred (stream to client) ──────────────

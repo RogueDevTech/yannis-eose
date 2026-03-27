@@ -1,16 +1,20 @@
 import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange } from '~/lib/api.server';
-import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
+import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { MarketingOverviewPage } from '~/features/marketing/MarketingOverviewPage';
 import type {
   Metrics,
   LeaderboardEntry,
   FundingBalanceRow,
+  FundingRequestRecord,
+  AdSpendRecord,
   MarketingOverviewRecentOrder,
 } from '~/features/marketing/types';
 
-const MARKETING_OVERVIEW_LIVE_EVENTS = ['order:new', 'order:status_changed'] as const;
+// order:status_changed is handled in-place by MarketingOverviewPage (hybrid — no DB round-trip).
+// Only order:new triggers revalidation since it adds a row the client doesn't have yet.
+const MARKETING_OVERVIEW_LIVE_EVENTS = ['order:new'] as const;
 
 export const meta: MetaFunction = () => [
   { title: 'Live Activities — Yannis EOSE' },
@@ -53,7 +57,7 @@ function parseRecentOrders(res: { ok: boolean; data: unknown }): MarketingOvervi
   }));
 }
 
-const defaultThisMonth = defaultThisMonthRange;
+const defaultToday = defaultTodayRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
@@ -68,7 +72,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const period = url.searchParams.get('period') ?? undefined;
   const periodAllTime = period === 'all_time';
   if (!periodAllTime && !startDate && !endDate) {
-    const def = defaultThisMonth();
+    const def = defaultToday();
     startDate = def.startDate;
     endDate = def.endDate;
   }
@@ -103,18 +107,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
     `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(recentOrdersListInput))}`,
     { method: 'GET', cookie },
   );
+  const todayRange = defaultTodayRange();
+  const fundingRequestsP = apiRequest<unknown>(
+    `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(JSON.stringify({ limit: 50, page: 1, startDate: todayRange.startDate, endDate: todayRange.endDate }))}`,
+    { method: 'GET', cookie },
+  );
+  const adSpendP = apiRequest<unknown>(
+    `/trpc/marketing.listAdSpend?input=${encodeURIComponent(JSON.stringify({ limit: 50, page: 1, ...(startDate && { startDate }), ...(endDate && { endDate }) }))}`,
+    { method: 'GET', cookie },
+  );
 
-  const [metricsRes, leaderboardRes, balancesRes, recentOrdersRes] = await Promise.all([
+  const [metricsRes, leaderboardRes, balancesRes, recentOrdersRes, fundingRequestsRes, adSpendRes] = await Promise.all([
     metricsP,
     leaderboardP,
     balancesP,
     recentOrdersP,
+    fundingRequestsP,
+    adSpendP,
   ]);
 
   const metrics = parseMetrics(metricsRes);
   const leaderboard = parseLeaderboard(leaderboardRes);
   const balancesList = parseBalancesList(balancesRes);
   const recentOrders = parseRecentOrders(recentOrdersRes);
+  const fundingRequests: FundingRequestRecord[] = fundingRequestsRes.ok
+    ? ((fundingRequestsRes.data as { result?: { data?: { records?: FundingRequestRecord[] } } })?.result?.data?.records ?? []).filter((r) => r.status === 'PENDING')
+    : [];
+  const adSpendLogs: AdSpendRecord[] = adSpendRes.ok
+    ? ((adSpendRes.data as { result?: { data?: { records?: AdSpendRecord[] } } })?.result?.data?.records ?? [])
+    : [];
 
   return {
     metrics,
@@ -122,6 +143,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     balancesList,
     leaderboardPeriod,
     recentOrders,
+    fundingRequests,
+    adSpendLogs,
     liveEvents: [...MARKETING_OVERVIEW_LIVE_EVENTS],
     filters: {
       startDate: startDate ?? '',
@@ -134,5 +157,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function MarketingOverviewRoute() {
   const data = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_OVERVIEW_LIVE_EVENTS]);
+  usePollingFallback(30_000); // fallback: poll every 30s when socket is disconnected
   return <MarketingOverviewPage {...data} leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'} />;
 }
