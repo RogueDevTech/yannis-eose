@@ -1104,4 +1104,49 @@ export class NotificationsService {
       `Automation rule ${ruleId} fired — sent to ${targetUserIds.length} user(s)`,
     );
   }
+
+  /**
+   * Get push notification status for a specific user (admin use).
+   * Returns device subscription count, device list, and most recent push sent.
+   */
+  async getPushStatusForUser(userId: string): Promise<{
+    subscribedDevices: number;
+    devices: Array<{ id: string; userAgent: string | null; createdAt: Date }>;
+    lastPushSentAt: Date | null;
+    totalPushSent: number;
+  }> {
+    const [devices, lastLog] = await Promise.all([
+      this.db
+        .select({
+          id: schema.pushSubscriptions.id,
+          userAgent: schema.pushSubscriptions.userAgent,
+          createdAt: schema.pushSubscriptions.createdAt,
+        })
+        .from(schema.pushSubscriptions)
+        .where(eq(schema.pushSubscriptions.userId, userId))
+        .orderBy(desc(schema.pushSubscriptions.createdAt)),
+      this.db
+        .select({
+          sentAt: schema.pushDeliveryLog.sentAt,
+          total: count(schema.pushDeliveryLog.id),
+        })
+        .from(schema.pushDeliveryLog)
+        .where(eq(schema.pushDeliveryLog.userId, userId))
+        .groupBy(schema.pushDeliveryLog.sentAt)
+        .orderBy(desc(schema.pushDeliveryLog.sentAt))
+        .limit(1),
+    ]);
+
+    const totalRes = await this.db
+      .select({ total: count(schema.pushDeliveryLog.id) })
+      .from(schema.pushDeliveryLog)
+      .where(eq(schema.pushDeliveryLog.userId, userId));
+
+    return {
+      subscribedDevices: devices.length,
+      devices,
+      lastPushSentAt: lastLog[0]?.sentAt ?? null,
+      totalPushSent: Number(totalRes[0]?.total ?? 0),
+    };
+  }
 }

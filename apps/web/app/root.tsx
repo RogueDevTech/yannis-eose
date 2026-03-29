@@ -231,12 +231,17 @@ export default function App() {
           if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
               navigator.serviceWorker.register('/sw.js').then(function(reg) {
+                // If there's already a waiting worker on load (e.g. tab was kept open), fire immediately
+                if (reg.waiting && navigator.serviceWorker.controller) {
+                  window.dispatchEvent(new CustomEvent('yannis:sw-update-ready'));
+                }
                 reg.addEventListener('updatefound', function() {
                   var newWorker = reg.installing;
                   if (newWorker) {
                     newWorker.addEventListener('statechange', function() {
-                      if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
-                        // New version available — could show update prompt
+                      if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        // New SW is waiting — prompt user to update
+                        window.dispatchEvent(new CustomEvent('yannis:sw-update-ready'));
                       }
                     });
                   }

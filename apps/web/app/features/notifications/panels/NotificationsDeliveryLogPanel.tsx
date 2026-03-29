@@ -177,14 +177,15 @@ export function NotificationsDeliveryLogPanel({
         <p className="mt-0.5 text-sm text-app-fg-muted">Track push notification delivery status across all recipients.</p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1 rounded-lg border border-app-border bg-app-elevated p-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        {/* Status pills */}
+        <div className="flex items-center gap-1 rounded-lg border border-app-border bg-app-elevated p-1 overflow-x-auto shrink-0" style={{ scrollbarWidth: 'none' }}>
           {STATUS_PILLS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => updateParam('logStatus', s)}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              className={`shrink-0 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                 currentStatus === s
                   ? 'bg-brand-600 text-white'
                   : 'text-app-fg-muted hover:bg-app-hover'
@@ -195,32 +196,35 @@ export function NotificationsDeliveryLogPanel({
           ))}
         </div>
 
-        <select
-          value={currentTrigger}
-          onChange={(e) => updateParam('logTrigger', e.target.value)}
-          className="rounded-lg border border-app-border bg-app-elevated px-3 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
-        >
-          {TRIGGER_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        {/* Trigger + date row */}
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <select
+            value={currentTrigger}
+            onChange={(e) => updateParam('logTrigger', e.target.value)}
+            className="rounded-lg border border-app-border bg-app-elevated px-3 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            {TRIGGER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
 
-        <div className="flex items-center gap-1.5">
-          <input
-            type="date"
-            value={currentFrom}
-            onChange={(e) => updateParam('logFrom', e.target.value)}
-            className="rounded-lg border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
-          />
-          <span className="text-xs text-app-fg-muted">to</span>
-          <input
-            type="date"
-            value={currentTo}
-            onChange={(e) => updateParam('logTo', e.target.value)}
-            className="rounded-lg border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
-          />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <input
+              type="date"
+              value={currentFrom}
+              onChange={(e) => updateParam('logFrom', e.target.value)}
+              className="min-w-0 w-[130px] rounded-lg border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            <span className="text-xs text-app-fg-muted shrink-0">to</span>
+            <input
+              type="date"
+              value={currentTo}
+              onChange={(e) => updateParam('logTo', e.target.value)}
+              className="min-w-0 w-[130px] rounded-lg border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
         </div>
       </div>
 

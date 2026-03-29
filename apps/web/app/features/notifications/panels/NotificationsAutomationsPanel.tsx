@@ -186,15 +186,15 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="text-xl font-semibold text-app-fg">Push automation rules</h2>
           <p className="mt-0.5 text-sm text-app-fg-muted">Scheduled and event-driven push notifications.</p>
         </div>
         <button
           type="button"
           onClick={openCreate}
-          className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600"
+          className="shrink-0 flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600"
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -317,11 +317,11 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
 
               <div>
                 <p className="mb-2 text-xs font-medium text-app-fg-muted">Trigger type</p>
-                <div className="flex gap-3">
+                <div className="grid grid-cols-2 gap-2">
                   {(['SCHEDULED', 'EVENT_BASED'] as const).map((t) => (
                     <label
                       key={t}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-app-border px-4 py-2 text-sm font-medium text-app-fg transition-colors has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500/10 has-[:checked]:text-brand-700 dark:has-[:checked]:border-brand-400 dark:has-[:checked]:bg-brand-900/30 dark:has-[:checked]:text-brand-300"
+                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-app-border px-4 py-2 text-sm font-medium text-app-fg transition-colors has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500/10 has-[:checked]:text-brand-700 dark:has-[:checked]:border-brand-400 dark:has-[:checked]:bg-brand-900/30 dark:has-[:checked]:text-brand-300"
                     >
                       <input
                         type="radio"
@@ -404,11 +404,11 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
 
               <div>
                 <p className="mb-2 text-xs font-medium text-app-fg-muted">Target</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
                   {(['ALL', 'ROLE', 'USER'] as const).map((t) => (
                     <label
                       key={t}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-fg transition-colors has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500/10 has-[:checked]:text-brand-700 dark:has-[:checked]:border-brand-400 dark:has-[:checked]:bg-brand-900/30 dark:has-[:checked]:text-brand-300"
+                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-fg transition-colors has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500/10 has-[:checked]:text-brand-700 dark:has-[:checked]:border-brand-400 dark:has-[:checked]:bg-brand-900/30 dark:has-[:checked]:text-brand-300"
                     >
                       <input
                         type="radio"

@@ -25,6 +25,7 @@ import type {
   PendingEmailChange,
   UserStockMovement,
   UserApprovalRecord,
+  UserPushStatus,
 } from './types';
 import { ROLE_COLORS, USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
 
@@ -88,6 +89,7 @@ export function UserDetailPage({
   pendingEmailChange,
   stockMovements,
   financeActivity,
+  pushStatus,
   canDisburseToThisUser = false,
   isSuperAdmin = false,
   isViewerHeadOfMarketing = false,
@@ -598,6 +600,71 @@ export function UserDetailPage({
                 </div>
               )}
             </DeferredSection>
+
+            {/* Push Notification Status — SuperAdmin only */}
+            {isSuperAdmin && pushStatus && (
+              <DeferredSection resolve={pushStatus} skeleton="stat">
+                {(status: UserPushStatus | null) => (
+                  <div className="card space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-app-fg">Push Notifications</h3>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                        status && status.subscribedDevices > 0
+                          ? 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-300'
+                          : 'bg-app-hover text-app-fg-muted'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${status && status.subscribedDevices > 0 ? 'bg-success-500' : 'bg-app-fg-muted/50'}`} />
+                        {status && status.subscribedDevices > 0 ? 'Subscribed' : 'Not subscribed'}
+                      </span>
+                    </div>
+
+                    {status ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-lg bg-app-hover px-3 py-2">
+                            <p className="text-[10px] text-app-fg-muted uppercase tracking-wider mb-0.5">Devices</p>
+                            <p className="text-xl font-bold text-app-fg">{status.subscribedDevices}</p>
+                          </div>
+                          <div className="rounded-lg bg-app-hover px-3 py-2">
+                            <p className="text-[10px] text-app-fg-muted uppercase tracking-wider mb-0.5">Total sent</p>
+                            <p className="text-xl font-bold text-app-fg">{status.totalPushSent}</p>
+                          </div>
+                        </div>
+
+                        {status.lastPushSentAt && (
+                          <p className="text-xs text-app-fg-muted">
+                            Last push:{' '}
+                            <span className="text-app-fg">
+                              {new Date(status.lastPushSentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </p>
+                        )}
+
+                        {status.subscribedDevices > 0 && status.devices.length > 0 && (
+                          <div className="border-t border-app-border pt-3 space-y-2">
+                            {status.devices.map((device) => (
+                              <div key={device.id} className="flex items-start gap-2">
+                                <svg className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 8.25h3m0 3.75h-3" />
+                                </svg>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs text-app-fg truncate">{device.userAgent ?? 'Unknown device'}</p>
+                                  <p className="text-[11px] text-app-fg-muted">
+                                    Added {new Date(device.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-app-fg-muted">No push data available</p>
+                    )}
+                  </div>
+                )}
+              </DeferredSection>
+            )}
           </div>
         </div>
       )}

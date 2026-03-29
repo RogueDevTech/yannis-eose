@@ -19,6 +19,7 @@ import { RouteLoader } from '~/components/ui/route-loader';
 import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
 import { useAppTheme } from '~/hooks/useAppTheme';
+import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 
 interface Notification {
   id: string;
@@ -481,6 +482,7 @@ function DashboardLayoutInner({
   // Must match SSR (no sessionStorage): hydrate first, then read storage in useEffect.
   const [moreNavOpen, setMoreNavOpen] = useState(false);
   const { isDarkTheme } = useAppTheme();
+  const [updateReady, setUpdateReady] = useState(false);
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const { isConnected } = useSocket();
   const {
@@ -496,6 +498,12 @@ function DashboardLayoutInner({
 
   useEffect(() => {
     setMoreNavOpen(readMoreOpenFromStorage());
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setUpdateReady(true);
+    window.addEventListener('yannis:sw-update-ready', handler);
+    return () => window.removeEventListener('yannis:sw-update-ready', handler);
   }, []);
 
   useEffect(() => {
@@ -714,12 +722,59 @@ function DashboardLayoutInner({
         </div>
       </Modal>
 
+      {/* App update modal — forced, no dismiss, shown when a new service worker is waiting */}
+      {updateReady && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
+          <div className="w-full max-w-sm rounded-2xl bg-app-surface shadow-2xl overflow-hidden">
+            {/* Top accent */}
+            <div className="bg-brand-600 px-6 py-5 text-white text-center">
+              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white/20">
+                <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-bold">Update Required</h2>
+              <p className="text-sm text-white/80 mt-1">A new version of Yannis is ready</p>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 text-center">
+              <p className="text-sm text-app-fg-muted leading-relaxed">
+                To keep your data accurate and avoid errors, please update to the latest version now. This only takes a second.
+              </p>
+            </div>
+
+            {/* Action */}
+            <div className="px-6 pb-6">
+              <button
+                onClick={() => {
+                  if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.ready.then((reg) => {
+                      if (reg.waiting) {
+                        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                      }
+                    });
+                  }
+                  setTimeout(() => window.location.reload(), 300);
+                }}
+                className="w-full rounded-xl bg-brand-600 py-3.5 text-sm font-semibold text-white hover:bg-brand-700 active:bg-brand-800 transition-colors"
+              >
+                Update now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main content area */}
       <main
         className={`pt-[var(--header-height)] min-h-screen transition-all duration-300 pb-[var(--bottom-nav-height)] md:pb-0
           ${collapsed ? 'lg:pl-[var(--sidebar-collapsed-width)]' : 'lg:pl-[var(--sidebar-width)]'}
         `}
       >
+      <PullToRefresh>
         <div className="p-4 lg:p-6">
           <div
             className={`relative transition-all duration-300 ${isRouteLoading ? 'min-h-[calc(100vh-var(--header-height)-3rem)]' : ''}`}
@@ -740,6 +795,7 @@ function DashboardLayoutInner({
             </div>
           </div>
         </div>
+      </PullToRefresh>
       </main>
       <BottomNav
         barItems={barItems}
