@@ -186,12 +186,12 @@ export function MarketingAdSpendPage({
       <DeferredSection resolve={leaderboard} skeleton="inline">
         {(lb) => {
           const highCpaBuyers = lb.filter((b: LeaderboardEntry) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0);
-          return (
+          return viewMode !== 'media_buyer' ? (
             <HighCpaWarningBanner
               buyers={highCpaBuyers.map((b: LeaderboardEntry) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
               threshold={HIGH_CPA_THRESHOLD}
             />
-          );
+          ) : null;
         }}
       </DeferredSection>
 

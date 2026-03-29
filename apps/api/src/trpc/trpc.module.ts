@@ -59,6 +59,9 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { db as schema } from '@yannis/shared';
 import { SessionStoreService } from '../auth/session-store.service';
 import { AuthModule } from '../auth/auth.module';
+import { CacheModule } from '../common/cache/cache.module';
+import { CacheService } from '../common/cache/cache.service';
+import { setCacheService } from './routers/dashboard.router';
 
 @Module({
   imports: [
@@ -68,6 +71,7 @@ import { AuthModule } from '../auth/auth.module';
     NotificationsModule, AuditModule, VoipModule, SettingsModule, CartModule,
     PermissionsModule, PermissionRequestsModule,
     AuthModule,
+    CacheModule,
   ],
   providers: [TrpcMiddleware],
 })
@@ -90,6 +94,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly settingsService: SettingsService,
     private readonly cartService: CartService,
     private readonly sessionStore: SessionStoreService,
+    private readonly cacheService: CacheService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -125,6 +130,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
       hr: this.hrService,
       inventory: this.inventoryService,
     });
+    setCacheService(this.cacheService);
   }
 
   configure(consumer: MiddlewareConsumer) {
