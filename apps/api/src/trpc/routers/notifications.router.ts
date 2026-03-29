@@ -264,6 +264,16 @@ export const notificationsRouter = router({
     }),
 
   /**
+   * Get push notification status for a specific user (admin/users.read only).
+   * Returns subscribed device count, device list, last push sent, and total sent.
+   */
+  getPushStatusForUser: permissionProcedure('users.read')
+    .input(z.object({ userId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getNotificationsService().getPushStatusForUser(input.userId);
+    }),
+
+  /**
    * Delete a push automation rule.
    * Unregisters cron job if applicable.
    */

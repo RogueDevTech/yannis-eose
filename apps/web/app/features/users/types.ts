@@ -199,6 +199,13 @@ export interface UserApprovalRecord {
   createdAt: string;
 }
 
+export interface UserPushStatus {
+  subscribedDevices: number;
+  devices: Array<{ id: string; userAgent: string | null; createdAt: string }>;
+  lastPushSentAt: string | null;
+  totalPushSent: number;
+}
+
 export interface UserDetailLoaderData {
   user: UserDetail;
   products: Promise<UserCreateProduct[]>;
@@ -213,6 +220,7 @@ export interface UserDetailLoaderData {
   pendingEmailChange: Promise<PendingEmailChange | null>;
   stockMovements: Promise<{ movements: UserStockMovement[]; total: number }> | null;
   financeActivity: Promise<{ approvals: UserApprovalRecord[]; total: number }> | null;
+  pushStatus?: Promise<UserPushStatus | null>;
   canDisburseToThisUser?: boolean;
   isSuperAdmin?: boolean;
   isViewerHeadOfMarketing?: boolean;

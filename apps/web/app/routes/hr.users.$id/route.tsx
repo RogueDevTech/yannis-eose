@@ -18,6 +18,7 @@ import type {
   PendingEmailChange,
   UserStockMovement,
   UserApprovalRecord,
+  UserPushStatus,
 } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -271,7 +272,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => ({ approvals: [], total: 0 }))
     : null;
 
-    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS };
+  // Push notification status (SuperAdmin only — requires users.read permission)
+  const pushStatus: Promise<UserPushStatus | null> = isSuperAdmin
+    ? apiRequest<unknown>(
+        `/trpc/notifications.getPushStatusForUser?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
+        { method: 'GET', cookie },
+      )
+        .then((res) => {
+          if (!res.ok) return null;
+          const d = res.data as { result?: { data?: UserPushStatus } };
+          return d?.result?.data ?? null;
+        })
+        .catch(() => null)
+    : Promise.resolve(null);
+
+    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS };
   })();
 
   return defer({ userDetail: userDetailPromise });
