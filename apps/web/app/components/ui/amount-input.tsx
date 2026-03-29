@@ -56,7 +56,7 @@ export function AmountInput({
   return (
     <div className={prefix ? 'relative' : undefined}>
       {prefix && (
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-800 dark:text-surface-200 pointer-events-none">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-app-fg-muted pointer-events-none">
           {prefix}
         </span>
       )}

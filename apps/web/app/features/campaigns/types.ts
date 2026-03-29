@@ -37,6 +37,8 @@ export interface FormsPageProps {
   forms: Campaign[];
   totalForms: number;
   products: Product[];
+  /** Set when products.list failed in the loader (empty products + user-visible hint). */
+  productsLoadError?: string | null;
   /** True when the current user is a Media Buyer (sees only their forms). */
   isMediaBuyer?: boolean;
   /** Show Media buyer column (HoM and SuperAdmin only). */
@@ -54,6 +56,7 @@ export interface FormsStreamData {
   forms: Campaign[];
   totalForms: number;
   products: Product[];
+  productsLoadError?: string | null;
   isMediaBuyer?: boolean;
   showMediaBuyerColumn?: boolean;
   currentUserId?: string;

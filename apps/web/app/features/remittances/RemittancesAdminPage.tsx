@@ -3,6 +3,11 @@ import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
+import { PageHeader } from '~/components/ui/page-header';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { TextInput } from '~/components/ui/text-input';
+import { NairaPrice } from '~/components/ui/naira-price';
 
 export interface RemittanceAdminRecord {
   id: string;
@@ -53,16 +58,14 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Remittances</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-          Incoming remittances from 3PL locations. Mark as received when stock arrives at the warehouse.
-        </p>
-      </div>
+      <PageHeader
+        title="Remittances"
+        description="Incoming remittances from 3PL locations. Mark as received when stock arrives at the warehouse."
+      />
 
       {sentRemittances.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Pending receipt ({sentRemittances.length})</h2>
+          <h2 className="text-lg font-semibold text-app-fg mb-3">Pending receipt ({sentRemittances.length})</h2>
           <div className="space-y-4">
             {sentRemittances.map((r) => (
               <div
@@ -70,11 +73,11 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
                 className="card p-4 flex flex-col sm:flex-row sm:items-center gap-4 flex-wrap"
               >
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-surface-900 dark:text-white">{r.productName}</p>
-                  <p className="text-sm text-surface-600 dark:text-surface-400">
+                  <p className="font-medium text-app-fg">{r.productName}</p>
+                  <p className="text-sm text-app-fg-muted">
                     From {r.fromLocationName} → {r.toLocationName}
                   </p>
-                  <p className="text-sm text-surface-600 dark:text-surface-400">
+                  <p className="text-sm text-app-fg-muted">
                     Quantity sent: {r.quantitySent} · Sent {new Date(r.sentAt).toLocaleString()}
                   </p>
                   <Button type="button" variant="ghost" size="sm" className="text-sm text-brand-600 dark:text-brand-400 hover:underline h-auto p-0" onClick={() => setRemittanceReceiptModal(r)}>
@@ -82,29 +85,25 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
                   </Button>
                 </div>
                 <div className="flex items-end gap-2 flex-wrap">
-                  <div>
-                    <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-0.5">Qty received</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={r.quantitySent}
-                      value={quantityReceived[r.id] ?? r.quantitySent}
-                      onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                      className="input w-20"
-                      disabled={markingId === r.id}
-                    />
-                  </div>
-                  <div className="min-w-[180px]">
-                    <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-0.5">Shrinkage reason (if short)</label>
-                    <input
-                      type="text"
-                      placeholder="Optional"
-                      value={shrinkageReason[r.id] ?? ''}
-                      onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                      className="input w-full"
-                      disabled={markingId === r.id}
-                    />
-                  </div>
+                  <TextInput
+                    label="Qty received"
+                    type="number"
+                    min={0}
+                    max={r.quantitySent}
+                    value={quantityReceived[r.id] ?? r.quantitySent}
+                    onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    wrapperClassName="w-20"
+                    disabled={markingId === r.id}
+                  />
+                  <TextInput
+                    label="Shrinkage reason (if short)"
+                    type="text"
+                    placeholder="Optional"
+                    value={shrinkageReason[r.id] ?? ''}
+                    onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    wrapperClassName="min-w-[180px]"
+                    disabled={markingId === r.id}
+                  />
                   <Button
                     type="button"
                     variant="primary"
@@ -123,45 +122,41 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
       )}
 
       {sentRemittances.length === 0 && (
-        <p className="text-sm text-surface-600 dark:text-surface-400">No remittances pending receipt.</p>
+        <EmptyState
+          title="No remittances pending receipt"
+          description="All incoming remittances have been processed."
+          variant="inline"
+        />
       )}
 
       {receivedOrDisputed.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Received / Disputed</h2>
+          <h2 className="text-lg font-semibold text-app-fg mb-3">Received / Disputed</h2>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-surface-200 dark:border-surface-700">
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Product</th>
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">From → To</th>
-                  <th className="text-right py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Qty</th>
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Status</th>
-                  <th className="text-left py-2 px-3 font-medium text-surface-700 dark:text-surface-300">Sent</th>
+                <tr className="border-b border-app-border">
+                  <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Product</th>
+                  <th className="text-left py-2 px-3 font-medium text-app-fg-muted">From → To</th>
+                  <th className="text-right py-2 px-3 font-medium text-app-fg-muted">Qty</th>
+                  <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Status</th>
+                  <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Sent</th>
                 </tr>
               </thead>
               <tbody>
                 {receivedOrDisputed.map((r) => (
-                  <tr key={r.id} className="border-b border-surface-100 dark:border-surface-800">
-                    <td className="py-2 px-3 text-surface-900 dark:text-white">{r.productName}</td>
-                    <td className="py-2 px-3 text-surface-800 dark:text-surface-200">
+                  <tr key={r.id} className="border-b border-app-border">
+                    <td className="py-2 px-3 text-app-fg">{r.productName}</td>
+                    <td className="py-2 px-3 text-app-fg-muted">
                       {r.fromLocationName} → {r.toLocationName}
                     </td>
                     <td className="py-2 px-3 text-right">
                       {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : '—'}
                     </td>
                     <td className="py-2 px-3">
-                      <span
-                        className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                          r.status === 'RECEIVED'
-                            ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
-                            : 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
-                        }`}
-                      >
-                        {r.status}
-                      </span>
+                      <StatusBadge status={r.status} />
                     </td>
-                    <td className="py-2 px-3 text-surface-600 dark:text-surface-400">
+                    <td className="py-2 px-3 text-app-fg-muted">
                       {new Date(r.sentAt).toLocaleDateString()}
                     </td>
                   </tr>
@@ -171,20 +166,12 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
           </div>
           <div className="md:hidden space-y-3 px-1">
             {receivedOrDisputed.map((r) => (
-              <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+              <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2 mb-2">
-                  <p className="font-medium text-surface-900 dark:text-white">{r.productName}</p>
-                  <span
-                    className={`inline-flex px-2 py-0.5 rounded text-xs font-medium shrink-0 ${
-                      r.status === 'RECEIVED'
-                        ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
-                        : 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
-                    }`}
-                  >
-                    {r.status}
-                  </span>
+                  <p className="font-medium text-app-fg">{r.productName}</p>
+                  <StatusBadge status={r.status} />
                 </div>
-                <div className="text-sm text-surface-800 dark:text-surface-200 space-y-0.5">
+                <div className="text-sm text-app-fg-muted space-y-0.5">
                   <div>From → To: {r.fromLocationName} → {r.toLocationName}</div>
                   <div>Qty: {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : '—'}</div>
                   <div>Sent: {new Date(r.sentAt).toLocaleDateString()}</div>
@@ -198,9 +185,9 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
       {/* Transfer remittance receipt modal */}
       {remittanceReceiptModal?.receiptUrl && (
         <Modal open onClose={() => setRemittanceReceiptModal(null)} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
-          <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Transfer remittance receipt</h3>
-            <button type="button" onClick={() => setRemittanceReceiptModal(null)} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+          <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+            <h3 className="text-lg font-semibold text-app-fg">Transfer remittance receipt</h3>
+            <button type="button" onClick={() => setRemittanceReceiptModal(null)} className="text-app-fg-muted hover:text-app-fg">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -208,15 +195,15 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
             <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
-              <p className="font-medium text-surface-900 dark:text-white">{remittanceReceiptModal.productName}</p>
+              <p className="font-medium text-app-fg">{remittanceReceiptModal.productName}</p>
               <p className="text-sm text-brand-600 dark:text-brand-400 mt-1">
                 {remittanceReceiptModal.fromLocationName} → {remittanceReceiptModal.toLocationName}
               </p>
-              <p className="text-sm text-surface-600 dark:text-surface-400 mt-1">
+              <p className="text-sm text-app-fg-muted mt-1">
                 Quantity sent: {remittanceReceiptModal.quantitySent} · Sent {new Date(remittanceReceiptModal.sentAt).toLocaleString()}
               </p>
             </div>
-            <div className="rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50">
+            <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover">
               <img
                 src={remittanceReceiptModal.receiptUrl}
                 alt="Transfer remittance receipt"
@@ -228,11 +215,11 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
                 }}
               />
               <div className="items-center justify-center gap-2 p-8 hidden">
-                <span className="text-sm text-surface-500 dark:text-surface-400">Receipt image could not be loaded</span>
+                <span className="text-sm text-app-fg-muted">Receipt image could not be loaded</span>
               </div>
             </div>
           </div>
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-200 dark:border-surface-700 shrink-0 px-4 sm:px-5 pb-4">
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-app-border shrink-0 px-4 sm:px-5 pb-4">
             <a href={remittanceReceiptModal.receiptUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
               Open in new tab
             </a>

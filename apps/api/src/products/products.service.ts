@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, asc, ilike, count, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, ilike, count, sql, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -28,6 +28,45 @@ export class ProductsService {
     @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly inventory: InventoryService,
   ) {}
+
+  /**
+   * Catalog visibility for MEDIA_BUYER only: assigned products when restrict_product_access
+   * is set, or when they have any user_product_assignments row. Other roles unchanged.
+   * SuperAdmin bypasses.
+   */
+  private async getCatalogScopeForViewer(
+    viewerId: string,
+    role: string,
+  ): Promise<{ allowedProductIds: string[] | null }> {
+    if (role === 'SUPER_ADMIN') {
+      return { allowedProductIds: null };
+    }
+
+    if (role !== 'MEDIA_BUYER') {
+      return { allowedProductIds: null };
+    }
+
+    const [userRow] = await this.db
+      .select({ restrictProductAccess: schema.users.restrictProductAccess })
+      .from(schema.users)
+      .where(eq(schema.users.id, viewerId))
+      .limit(1);
+
+    const assignmentRows = await this.db
+      .selectDistinct({ productId: schema.userProductAssignments.productId })
+      .from(schema.userProductAssignments)
+      .where(eq(schema.userProductAssignments.userId, viewerId));
+
+    const assignmentIds = [...new Set(assignmentRows.map((r) => r.productId))];
+    const restrict = userRow?.restrictProductAccess ?? false;
+    const shouldScope = restrict || assignmentIds.length > 0;
+
+    if (!shouldScope) {
+      return { allowedProductIds: null };
+    }
+
+    return { allowedProductIds: assignmentIds };
+  }
 
   /**
    * Create a new product.
@@ -104,7 +143,14 @@ export class ProductsService {
    * Get a single product by ID.
    * Financial field stripping is handled by the tRPC CLS middleware.
    */
-  async getById(productId: string) {
+  async getById(productId: string, viewerId: string, viewerRole: string) {
+    const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
+    if (allowedProductIds !== null) {
+      if (allowedProductIds.length === 0 || !allowedProductIds.includes(productId)) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+      }
+    }
+
     const rows = await this.db
       .select()
       .from(schema.products)
@@ -123,9 +169,25 @@ export class ProductsService {
    * List products with filtering, search, and pagination.
    * Financial field stripping is handled by the tRPC CLS middleware.
    */
-  async list(input: ListProductsInput) {
+  async list(input: ListProductsInput, viewerId: string, viewerRole: string) {
+    const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
+    if (allowedProductIds !== null && allowedProductIds.length === 0) {
+      return {
+        products: [],
+        pagination: {
+          page: input.page,
+          limit: input.limit,
+          total: 0,
+          totalPages: 0,
+        },
+      };
+    }
+
     const conditions = [];
 
+    if (allowedProductIds !== null) {
+      conditions.push(inArray(schema.products.id, allowedProductIds));
+    }
     if (input.status) {
       conditions.push(eq(schema.products.status, input.status));
     }
@@ -267,11 +329,21 @@ export class ProductsService {
   /**
    * Get distinct categories for filter dropdowns.
    */
-  async getCategories() {
+  async getCategories(viewerId: string, viewerRole: string) {
+    const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
+    if (allowedProductIds !== null && allowedProductIds.length === 0) {
+      return [];
+    }
+
+    const scopeClause =
+      allowedProductIds !== null
+        ? and(eq(schema.products.status, 'ACTIVE'), inArray(schema.products.id, allowedProductIds))
+        : eq(schema.products.status, 'ACTIVE');
+
     const rows = await this.db
       .selectDistinct({ category: schema.products.category })
       .from(schema.products)
-      .where(eq(schema.products.status, 'ACTIVE'));
+      .where(scopeClause);
 
     return rows
       .map((r) => r.category)

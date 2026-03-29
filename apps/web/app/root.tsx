@@ -11,13 +11,17 @@ import {
   isRouteErrorResponse,
   useLocation,
   useLoaderData,
+  useNavigate,
   useNavigation,
   useRouteError,
 } from '@remix-run/react';
 import { PwaInstallPrompt } from '~/components/ui/pwa-install-prompt';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
+import { useRevalidateOnAppResume } from '~/hooks/useRevalidateOnAppResume';
+import { useServerAppThemeSync } from '~/hooks/useServerAppThemeSync';
 import { ScrollToTopButton } from '~/components/ui/scroll-to-top-button';
 import stylesheet from '~/tailwind.css?url';
+import { getThemeBootScript } from '~/lib/theme';
 
 declare global {
   interface Window {
@@ -48,8 +52,7 @@ export async function loader() {
   });
 }
 
-/** Theme init script — runs before paint so error boundaries and standalone pages respect dark mode */
-const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('yannis_theme');if(t==='dark')document.documentElement.classList.add('dark');else document.documentElement.classList.remove('dark');}catch(e){}})();`;
+const THEME_SCRIPT = getThemeBootScript();
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
@@ -117,7 +120,7 @@ export default function App() {
   const { ENV } = useLoaderData<typeof loader>();
   const location = useLocation();
   const navigation = useNavigation();
-  const { install, canPromptInstall, isIosSafariLike } = usePwaInstall();
+  const { install, canPromptInstall, isIosManualInstall } = usePwaInstall();
   const envScript = JSON.stringify(ENV).replace(/<\/script>/gi, '<\\/script>');
   const [isBooting, setIsBooting] = useState(true);
   const [installPromptOpen, setInstallPromptOpen] = useState(false);
@@ -128,6 +131,9 @@ export default function App() {
     location.pathname.startsWith('/hr') ||
     location.pathname.startsWith('/tpl') ||
     location.pathname.startsWith('/rider');
+
+  useRevalidateOnAppResume(isLoggedInArea);
+  useServerAppThemeSync(isLoggedInArea);
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
@@ -171,7 +177,7 @@ export default function App() {
   }, [canPromptInstall, isAuthPage, isLoggedInArea]);
 
   return (
-    <html lang="en" className="h-full" suppressHydrationWarning>
+    <html lang="en" className="h-full" data-app-theme="light" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -208,7 +214,7 @@ export default function App() {
         <Outlet />
         <PwaInstallPrompt
           open={installPromptOpen}
-          isIosInstructions={isIosSafariLike}
+          isIosInstructions={isIosManualInstall}
           onInstall={async () => {
             const accepted = await install();
             if (accepted) setInstallPromptOpen(false);
@@ -260,6 +266,9 @@ export default function App() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
+  const navigate = useNavigate();
+  const [refreshLoading, setRefreshLoading] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
   const isResponse = isRouteErrorResponse(error);
   const status = isResponse ? error.status : 500;
   const is404 = status === 404;
@@ -274,7 +283,7 @@ export function ErrorBoundary() {
       : 'An unexpected error occurred. Please try refreshing the page.';
 
   return (
-    <html lang="en" className="h-full" suppressHydrationWarning>
+    <html lang="en" className="h-full" data-app-theme="light" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -283,11 +292,11 @@ export function ErrorBoundary() {
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <Links />
       </head>
-      <body className="h-full flex items-center justify-center bg-surface-50 dark:bg-surface-950">
+      <body className="h-full flex items-center justify-center bg-app-canvas">
         <div className="text-center p-8 max-w-md">
-          <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">{status}</p>
-          <h1 className="text-xl font-bold text-surface-900 dark:text-white">{title}</h1>
-          <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">{description}</p>
+          <p className="text-6xl font-bold text-app-border mb-4">{status}</p>
+          <h1 className="text-xl font-bold text-app-fg">{title}</h1>
+          <p className="mt-2 text-sm text-app-fg-muted">{description}</p>
           <div className="mt-6 flex gap-3 justify-center">
             {is401 ? (
               <a href="/auth" className="btn-primary">
@@ -295,12 +304,30 @@ export function ErrorBoundary() {
               </a>
             ) : (
               <>
-                <Button variant="primary" onClick={() => window.location.reload()}>
+                <Button
+                  variant="primary"
+                  loading={refreshLoading}
+                  loadingText="Refreshing…"
+                  disabled={dashboardLoading}
+                  onClick={() => {
+                    setRefreshLoading(true);
+                    window.location.reload();
+                  }}
+                >
                   Refresh Page
                 </Button>
-                <a href="/admin" className="btn-secondary">
+                <Button
+                  variant="secondary"
+                  loading={dashboardLoading}
+                  loadingText="Opening…"
+                  disabled={refreshLoading}
+                  onClick={() => {
+                    setDashboardLoading(true);
+                    navigate('/admin');
+                  }}
+                >
                   Back to Dashboard
-                </a>
+                </Button>
               </>
             )}
           </div>

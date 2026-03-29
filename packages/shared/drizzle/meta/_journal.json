@@ -2,201 +2,64 @@
   "version": "7",
   "dialect": "postgresql",
   "entries": [
-    {
-      "idx": 0,
-      "version": "7",
-      "when": 1772373908817,
-      "tag": "0000_redundant_warbound",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1772377908454,
-      "tag": "0001_cuddly_vivisector",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1772380000000,
-      "tag": "0002_add_users_last_action_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1772383000000,
-      "tag": "0003_sync_users_history_columns",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1772386000000,
-      "tag": "0004_add_product_categories",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1772389000000,
-      "tag": "0005_capture_insert_in_audit_history",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1772392000000,
-      "tag": "0006_add_product_offers_remove_sku",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1772395000000,
-      "tag": "0007_add_email_change_requests",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1772398000000,
-      "tag": "0008_add_permissions_rbac",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1772401000000,
-      "tag": "0009_add_cart_abandonments",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1772410000000,
-      "tag": "0019_add_marketing_funding_requests",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1772411000000,
-      "tag": "0020_add_funding_request_receipt_url",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1772412000000,
-      "tag": "0025_audit_add_gap1_temporal_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1772413000000,
-      "tag": "0026_audit_add_gap2_temporal_columns",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1772414000000,
-      "tag": "0027_audit_add_gap3_temporal_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1772415000000,
-      "tag": "0028_add_order_status_cs_assigned",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1772416000000,
-      "tag": "0029_add_call_status_manual_call",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "7",
-      "when": 1772417000000,
-      "tag": "0030_add_orders_customer_phone",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "7",
-      "when": 1772418000000,
-      "tag": "0031_add_transfer_remittances",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "7",
-      "when": 1772419000000,
-      "tag": "0032_add_orders_delivery_proof_url",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "7",
-      "when": 1772420000000,
-      "tag": "0033_add_delivery_confirmation_requests",
-      "breakpoints": true
-    },
-    {
-      "idx": 21,
-      "version": "7",
-      "when": 1772421000000,
-      "tag": "0034_add_delivery_remittances",
-      "breakpoints": true
-    },
-    {
-      "idx": 22,
-      "version": "7",
-      "when": 1772422000000,
-      "tag": "0035_sync_ad_spend_logs_history_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "7",
-      "when": 1772423000000,
-      "tag": "0036_rename_products_to_pharmaceutical",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "7",
-      "when": 1772424000000,
-      "tag": "0037_add_orders_order_source",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "7",
-      "when": 1772425000000,
-      "tag": "0038_add_ceo_overview_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "7",
-      "when": 1772426000000,
-      "tag": "0039_add_orders_delivery_discount",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "7",
-      "when": 1772427000000,
-      "tag": "0040_add_orders_resolve_receipt_url",
-      "breakpoints": true
-    }
+    { "idx": 0, "version": "7", "when": 1772373908817, "tag": "0000_redundant_warbound", "breakpoints": true },
+    { "idx": 1, "version": "7", "when": 1772377908454, "tag": "0001_cuddly_vivisector", "breakpoints": true },
+    { "idx": 2, "version": "7", "when": 1772380000000, "tag": "0002_add_users_last_action_at", "breakpoints": true },
+    { "idx": 3, "version": "7", "when": 1772383000000, "tag": "0003_sync_users_history_columns", "breakpoints": true },
+    { "idx": 4, "version": "7", "when": 1772386000000, "tag": "0004_add_product_categories", "breakpoints": true },
+    { "idx": 5, "version": "7", "when": 1772389000000, "tag": "0005_capture_insert_in_audit_history", "breakpoints": true },
+    { "idx": 6, "version": "7", "when": 1772392000000, "tag": "0006_add_product_offers_remove_sku", "breakpoints": true },
+    { "idx": 7, "version": "7", "when": 1772395000000, "tag": "0007_add_email_change_requests", "breakpoints": true },
+    { "idx": 8, "version": "7", "when": 1772398000000, "tag": "0008_add_permissions_rbac", "breakpoints": true },
+    { "idx": 9, "version": "7", "when": 1772401000000, "tag": "0009_add_cart_abandonments", "breakpoints": true },
+    { "idx": 10, "version": "7", "when": 1772402000000, "tag": "0010_add_finance_disburse", "breakpoints": true },
+    { "idx": 11, "version": "7", "when": 1772403000000, "tag": "0011_add_permission_requests", "breakpoints": true },
+    { "idx": 12, "version": "7", "when": 1772404000000, "tag": "0012_fix_capture_history_insert_numeric", "breakpoints": true },
+    { "idx": 13, "version": "7", "when": 1772405000000, "tag": "0013_add_logistics_locations_dispatch_locked", "breakpoints": true },
+    { "idx": 14, "version": "7", "when": 1772406000000, "tag": "0014_add_orders_missing_columns", "breakpoints": true },
+    { "idx": 15, "version": "7", "when": 1772407000000, "tag": "0015_sync_order_items_history_offer_label", "breakpoints": true },
+    { "idx": 16, "version": "7", "when": 1772408000000, "tag": "0016_fix_orders_history_insert_trigger", "breakpoints": true },
+    { "idx": 17, "version": "7", "when": 1772409000000, "tag": "0017_add_orders_missing_columns_v2", "breakpoints": true },
+    { "idx": 18, "version": "7", "when": 1772410000000, "tag": "0018_add_orders_payment_columns", "breakpoints": true },
+    { "idx": 19, "version": "7", "when": 1772410100000, "tag": "0018_add_record_status_pending_deactivated", "breakpoints": true },
+    { "idx": 20, "version": "7", "when": 1772410200000, "tag": "0019_add_marketing_funding_requests", "breakpoints": true },
+    { "idx": 21, "version": "7", "when": 1772410300000, "tag": "0019_create_system_settings", "breakpoints": true },
+    { "idx": 22, "version": "7", "when": 1772410400000, "tag": "0020_add_funding_request_receipt_url", "breakpoints": true },
+    { "idx": 23, "version": "7", "when": 1772410500000, "tag": "0021_add_ad_spend_status", "breakpoints": true },
+    { "idx": 24, "version": "7", "when": 1772410600000, "tag": "0022_order_transfer_requests", "breakpoints": true },
+    { "idx": 25, "version": "7", "when": 1772410700000, "tag": "0023_add_order_transfer_request_reason", "breakpoints": true },
+    { "idx": 26, "version": "7", "when": 1772410800000, "tag": "0024_revoke_head_of_logistics_users_read", "breakpoints": true },
+    { "idx": 27, "version": "7", "when": 1772410900000, "tag": "0025_audit_add_gap1_temporal_tables", "breakpoints": true },
+    { "idx": 28, "version": "7", "when": 1772411000000, "tag": "0026_audit_add_gap2_temporal_columns", "breakpoints": true },
+    { "idx": 29, "version": "7", "when": 1772411100000, "tag": "0027_audit_add_gap3_temporal_tables", "breakpoints": true },
+    { "idx": 30, "version": "7", "when": 1772411200000, "tag": "0028_add_order_status_cs_assigned", "breakpoints": true },
+    { "idx": 31, "version": "7", "when": 1772411300000, "tag": "0029_add_call_status_manual_call", "breakpoints": true },
+    { "idx": 32, "version": "7", "when": 1772411400000, "tag": "0030_add_orders_customer_phone", "breakpoints": true },
+    { "idx": 33, "version": "7", "when": 1772411500000, "tag": "0031_add_transfer_remittances", "breakpoints": true },
+    { "idx": 34, "version": "7", "when": 1772411600000, "tag": "0032_add_orders_delivery_proof_url", "breakpoints": true },
+    { "idx": 35, "version": "7", "when": 1772411700000, "tag": "0033_add_delivery_confirmation_requests", "breakpoints": true },
+    { "idx": 36, "version": "7", "when": 1772411800000, "tag": "0034_add_delivery_remittances", "breakpoints": true },
+    { "idx": 37, "version": "7", "when": 1772411900000, "tag": "0035_sync_ad_spend_logs_history_status", "breakpoints": true },
+    { "idx": 38, "version": "7", "when": 1772412000000, "tag": "0036_rename_products_to_pharmaceutical", "breakpoints": true },
+    { "idx": 39, "version": "7", "when": 1772412100000, "tag": "0037_add_orders_order_source", "breakpoints": true },
+    { "idx": 40, "version": "7", "when": 1772412200000, "tag": "0038_add_ceo_overview_indexes", "breakpoints": true },
+    { "idx": 41, "version": "7", "when": 1772412300000, "tag": "0039_add_orders_delivery_discount", "breakpoints": true },
+    { "idx": 42, "version": "7", "when": 1772412400000, "tag": "0040_add_orders_resolve_receipt_url", "breakpoints": true },
+    { "idx": 43, "version": "7", "when": 1772412500000, "tag": "0041_feature_batch2_schema", "breakpoints": true },
+    { "idx": 44, "version": "7", "when": 1772412600000, "tag": "0042_branch_rls_policies", "breakpoints": true },
+    { "idx": 45, "version": "7", "when": 1772412700000, "tag": "0043_default_message_templates", "breakpoints": true },
+    { "idx": 46, "version": "7", "when": 1772412800000, "tag": "0044_more_default_whatsapp_templates", "breakpoints": true },
+    { "idx": 47, "version": "7", "when": 1772412900000, "tag": "0045_user_branches_unique", "breakpoints": true },
+    { "idx": 48, "version": "7", "when": 1772413000000, "tag": "0046_tighten_branch_rls", "breakpoints": true },
+    { "idx": 49, "version": "7", "when": 1772413100000, "tag": "0047_backfill_user_branches", "breakpoints": true },
+    { "idx": 50, "version": "7", "when": 1772413200000, "tag": "0048_enable_rls_orders_messaging", "breakpoints": true },
+    { "idx": 51, "version": "7", "when": 1772413300000, "tag": "0049_add_auth_sessions", "breakpoints": true },
+    { "idx": 52, "version": "7", "when": 1772413400000, "tag": "0050_add_cart_delete_permission", "breakpoints": true },
+    { "idx": 53, "version": "7", "when": 1772428000000, "tag": "0051_push_notification_tables", "breakpoints": true },
+    { "idx": 54, "version": "7", "when": 1772429000000, "tag": "0052_add_settlement_configs", "breakpoints": true },
+    { "idx": 55, "version": "7", "when": 1772430000000, "tag": "0053_ensure_permission_requests", "breakpoints": true },
+    { "idx": 56, "version": "7", "when": 1772431000000, "tag": "0054_backfill_orders_branch_id", "breakpoints": true },
+    { "idx": 57, "version": "7", "when": 1772432000000, "tag": "0055_users_app_theme", "breakpoints": true },
+    { "idx": 58, "version": "7", "when": 1772433000000, "tag": "0056_unique_head_per_branch", "breakpoints": true }
   ]
 }

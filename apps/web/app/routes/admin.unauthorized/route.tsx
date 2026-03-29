@@ -25,10 +25,10 @@ export default function Unauthorized() {
             />
           </svg>
         </div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-app-fg">
           Access Denied
         </h1>
-        <p className="mt-3 text-sm text-surface-800 dark:text-surface-200">
+        <p className="mt-3 text-sm text-app-fg-muted">
           You do not have permission to view this page. Your role does not include
           access to this module. If you believe this is an error, contact your administrator.
         </p>

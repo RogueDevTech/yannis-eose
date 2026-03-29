@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { randomBytes } from 'crypto';
-import { eq, and, desc, asc, ilike, or, count, ne, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, ilike, or, count, ne, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -219,6 +219,29 @@ export class UsersService {
       });
     }
 
+    // Enforce one active HEAD_OF_* per branch
+    const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
+    if (HEAD_ROLES.includes(input.role as typeof HEAD_ROLES[number]) && input.primaryBranchId) {
+      const existingHead = await this.db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.role, input.role as typeof schema.users.role._.data),
+            eq(schema.users.primaryBranchId, input.primaryBranchId),
+            eq(schema.users.status, 'ACTIVE'),
+          ),
+        )
+        .limit(1);
+
+      if (existingHead[0]) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `Branch already has an active ${input.role.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
+        });
+      }
+    }
+
     // Check for duplicate phone
     if (input.phone) {
       const phoneRows = await this.db
@@ -384,6 +407,22 @@ export class UsersService {
         this.logger.error(`Failed to send invite email to ${input.email}: ${err}`);
       });
 
+    if (input.productIds && input.productIds.length > 0) {
+      this.notificationsService
+        .create({
+          userId: user.id,
+          type: 'account:updated',
+          title: 'Your account was updated',
+          body: `Product access: ${input.productIds.length} product(s) assigned to your account. Sign in to use the catalog.`,
+          data: {
+            userId: user.id,
+            changedKeys: ['productIds'],
+            productCount: input.productIds.length,
+          },
+        })
+        .catch(() => {});
+    }
+
     return {
       ...user,
       phone: this.maskPhone(user.phone),
@@ -423,10 +462,18 @@ export class UsersService {
     const membershipsByUser = await this.getUserBranchMemberships([user.id]);
     const branchMemberships = membershipsByUser.get(user.id) ?? [];
 
+    const assignmentRows = await this.db
+      .select({ productId: schema.userProductAssignments.productId })
+      .from(schema.userProductAssignments)
+      .where(eq(schema.userProductAssignments.userId, user.id));
+
+    const assignedProductIds = [...new Set(assignmentRows.map((r) => r.productId))];
+
     return {
       ...user,
       phone: this.maskPhone(user.phone),
       branchMemberships,
+      assignedProductIds,
     };
   }
 
@@ -512,6 +559,44 @@ export class UsersService {
   }
 
   /**
+   * Minimal active-user search for push broadcast recipient picker.
+   * Router gates with notifications.broadcast | users.read.
+   */
+  async searchForPushTarget(
+    rawQuery: string,
+    limit: number,
+    offset: number,
+  ): Promise<Array<{ id: string; name: string; email: string; role: string; hasPushSubscription: boolean }>> {
+    const q = rawQuery.replace(/[%_\\]/g, ' ').trim();
+    const cap = Math.min(25, Math.max(1, limit));
+    const skip = Math.max(0, offset);
+
+    const baseWhere = eq(schema.users.status, 'ACTIVE');
+    const where =
+      q.length > 0
+        ? and(baseWhere, or(ilike(schema.users.name, `%${q}%`), ilike(schema.users.email, `%${q}%`)))
+        : baseWhere;
+
+    const rows = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        role: schema.users.role,
+        hasPushSubscription: sql<boolean>`EXISTS (
+          SELECT 1 FROM push_subscriptions ps WHERE ps.user_id = "users"."id"
+        )`,
+      })
+      .from(schema.users)
+      .where(where)
+      .orderBy(asc(schema.users.name))
+      .limit(cap)
+      .offset(skip);
+
+    return rows;
+  }
+
+  /**
    * List CS team members (HEAD_OF_CS + CS_AGENT) for Team page.
    * Gated by cs.teamOverview; does not require users.read.
    */
@@ -566,7 +651,19 @@ export class UsersService {
     }
 
     const existingRows = await this.db
-      .select({ id: schema.users.id, status: schema.users.status })
+      .select({
+        id: schema.users.id,
+        status: schema.users.status,
+        name: schema.users.name,
+        email: schema.users.email,
+        role: schema.users.role,
+        capacity: schema.users.capacity,
+        logisticsLocationId: schema.users.logisticsLocationId,
+        phone: schema.users.phone,
+        visibleOrderStatuses: schema.users.visibleOrderStatuses,
+        restrictProductAccess: schema.users.restrictProductAccess,
+        primaryBranchId: schema.users.primaryBranchId,
+      })
       .from(schema.users)
       .where(eq(schema.users.id, input.userId))
       .limit(1);
@@ -575,8 +672,15 @@ export class UsersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
     }
 
+    const beforeRow = existingRows[0];
+    const assignmentRowsBefore = await this.db
+      .select({ productId: schema.userProductAssignments.productId })
+      .from(schema.userProductAssignments)
+      .where(eq(schema.userProductAssignments.userId, input.userId));
+    const beforeProductIds = [...new Set(assignmentRowsBefore.map((r) => r.productId))].sort();
+
     // DEACTIVATED is permanent: cannot reactivate; admin must re-invite
-    const currentStatus = existingRows[0].status;
+    const currentStatus = beforeRow.status;
     if (
       currentStatus === 'DEACTIVATED' &&
       input.status !== undefined &&
@@ -634,6 +738,37 @@ export class UsersService {
           requestId: req.id,
           message: 'Role change request submitted. SuperAdmin will review.',
         };
+      }
+    }
+
+    // Enforce one active HEAD_OF_* per branch on role change or branch change
+    const HEAD_ROLES_UPDATE = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
+    const roleBeingSet = input.role ?? beforeRow.role;
+    const branchBeingSet = beforeRow.primaryBranchId ?? null;
+    if (
+      HEAD_ROLES_UPDATE.includes(roleBeingSet as typeof HEAD_ROLES_UPDATE[number]) &&
+      branchBeingSet &&
+      input.role // only run if role is actually changing
+    ) {
+      const existingHead = await this.db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.role, roleBeingSet as typeof schema.users.role._.data),
+            eq(schema.users.primaryBranchId, branchBeingSet),
+            eq(schema.users.status, 'ACTIVE'),
+            // exclude the user being updated themselves
+            sql`${schema.users.id} != ${input.userId}`,
+          ),
+        )
+        .limit(1);
+
+      if (existingHead[0]) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `Branch already has an active ${roleBeingSet.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
+        });
       }
     }
 
@@ -734,6 +869,8 @@ export class UsersService {
         capacity: schema.users.capacity,
         logisticsLocationId: schema.users.logisticsLocationId,
         phone: schema.users.phone,
+        visibleOrderStatuses: schema.users.visibleOrderStatuses,
+        restrictProductAccess: schema.users.restrictProductAccess,
         updatedAt: schema.users.updatedAt,
       });
 
@@ -766,6 +903,39 @@ export class UsersService {
     if (input.status === 'INACTIVE' || input.status === 'ARCHIVED' || input.status === 'DEACTIVATED') {
       await this.authService.killUserSessions(input.userId);
     }
+
+    const afterProductIds =
+      input.productIds !== undefined
+        ? [...new Set(input.productIds)].sort()
+        : beforeProductIds;
+
+    this.notifyTargetUserAfterStaffUpdate({
+      targetUserId: input.userId,
+      before: {
+        name: beforeRow.name,
+        email: beforeRow.email,
+        role: beforeRow.role,
+        capacity: beforeRow.capacity,
+        logisticsLocationId: beforeRow.logisticsLocationId,
+        status: beforeRow.status,
+        phone: beforeRow.phone,
+        visibleOrderStatuses: beforeRow.visibleOrderStatuses,
+        restrictProductAccess: beforeRow.restrictProductAccess,
+      },
+      beforeProductIds,
+      after: {
+        name: updated.name,
+        email: updated.email,
+        role: updated.role,
+        capacity: updated.capacity,
+        logisticsLocationId: updated.logisticsLocationId,
+        status: updated.status,
+        phone: updated.phone,
+        visibleOrderStatuses: updated.visibleOrderStatuses,
+        restrictProductAccess: updated.restrictProductAccess,
+      },
+      afterProductIds,
+    });
 
     return {
       ...updated,
@@ -810,6 +980,16 @@ export class UsersService {
 
     await this.authService.killUserSessions(userId);
 
+    this.notificationsService
+      .create({
+        userId,
+        type: 'account:security',
+        title: 'Your account was deactivated',
+        body: 'Your account has been deactivated. You can no longer sign in. Contact your administrator if you believe this is an error.',
+        data: { userId, event: 'deactivated' },
+      })
+      .catch(() => {});
+
     return updated;
   }
 
@@ -832,6 +1012,16 @@ export class UsersService {
     }
 
     await this.authService.killUserSessions(input.userId);
+
+    this.notificationsService
+      .create({
+        userId: input.userId,
+        type: 'account:security',
+        title: 'Your password was reset',
+        body: 'An administrator reset your password. Use the new credentials you were given. Contact support if you did not expect this.',
+        data: { userId: input.userId, event: 'password_reset' },
+      })
+      .catch(() => {});
 
     return { success: true };
   }
@@ -910,6 +1100,159 @@ export class UsersService {
       })
       .where(eq(schema.emailChangeRequests.id, input.requestId));
 
+    const body =
+      input.action === 'APPROVED'
+        ? `Your login email was updated to ${req.requestedNewEmail}. Use this address to sign in from now on.`
+        : `Your email change request was not approved. Reason: ${input.reason}`;
+
+    this.notificationsService
+      .create({
+        userId: req.userId,
+        type: 'account:updated',
+        title:
+          input.action === 'APPROVED' ? 'Your email was updated' : 'Email change request declined',
+        body,
+        data: {
+          userId: req.userId,
+          changedKeys: input.action === 'APPROVED' ? ['email'] : [],
+          emailChangeAction: input.action,
+        },
+      })
+      .catch(() => {});
+
     return { success: true, action: input.action };
+  }
+
+  /**
+   * Notify the affected user after staff profile/access fields change (one notification per save).
+   */
+  private notifyTargetUserAfterStaffUpdate(params: {
+    targetUserId: string;
+    before: {
+      name: string;
+      email: string;
+      role: string;
+      capacity: number;
+      logisticsLocationId: string | null;
+      status: string;
+      phone: string | null;
+      visibleOrderStatuses: unknown;
+      restrictProductAccess: boolean;
+    };
+    beforeProductIds: string[];
+    after: {
+      name: string;
+      email: string;
+      role: string;
+      capacity: number;
+      logisticsLocationId: string | null;
+      status: string;
+      phone: string | null;
+      visibleOrderStatuses: unknown;
+      restrictProductAccess: boolean;
+    };
+    afterProductIds: string[];
+  }): void {
+    const { targetUserId, before, after, beforeProductIds, afterProductIds } = params;
+
+    const normJson = (v: unknown) => JSON.stringify(v ?? null);
+    const changedKeys: string[] = [];
+    if (before.name !== after.name) changedKeys.push('name');
+    if (before.email !== after.email) changedKeys.push('email');
+    if (before.role !== after.role) changedKeys.push('role');
+    if (before.capacity !== after.capacity) changedKeys.push('capacity');
+    if (before.logisticsLocationId !== after.logisticsLocationId) {
+      changedKeys.push('logisticsLocationId');
+    }
+    if (before.status !== after.status) changedKeys.push('status');
+    if (before.phone !== after.phone) changedKeys.push('phone');
+    if (normJson(before.visibleOrderStatuses) !== normJson(after.visibleOrderStatuses)) {
+      changedKeys.push('visibleOrderStatuses');
+    }
+    if (before.restrictProductAccess !== after.restrictProductAccess) {
+      changedKeys.push('restrictProductAccess');
+    }
+    const productsChanged = beforeProductIds.join('\0') !== afterProductIds.join('\0');
+    if (productsChanged) changedKeys.push('productIds');
+
+    if (changedKeys.length === 0) return;
+
+    const lines: string[] = [];
+    if (changedKeys.includes('name')) lines.push('Your display name was updated.');
+    if (changedKeys.includes('email')) lines.push('Your login email was changed.');
+    if (changedKeys.includes('role')) lines.push(`Your role was updated to ${after.role}.`);
+    if (changedKeys.includes('capacity')) lines.push(`Your order capacity was set to ${after.capacity}.`);
+    if (changedKeys.includes('logisticsLocationId')) {
+      lines.push('Your logistics location assignment was updated.');
+    }
+    if (changedKeys.includes('status')) {
+      lines.push(`Your account status is now ${after.status}.`);
+    }
+    if (changedKeys.includes('phone')) lines.push('Your phone number on file was updated.');
+    if (changedKeys.includes('visibleOrderStatuses')) {
+      lines.push('Your visible order statuses preference was updated.');
+    }
+    if (changedKeys.includes('restrictProductAccess')) {
+      lines.push(
+        after.restrictProductAccess
+          ? 'Product access is now limited to assigned products only.'
+          : 'Product access restriction was turned off.',
+      );
+    }
+    if (changedKeys.includes('productIds')) {
+      const n = afterProductIds.length;
+      lines.push(
+        n === 0
+          ? 'Your product assignments were cleared; catalog access follows your role defaults.'
+          : `Your product access was updated (${n} product(s) assigned).`,
+      );
+    }
+
+    const becameDeactivated = before.status !== 'DEACTIVATED' && after.status === 'DEACTIVATED';
+    const type = becameDeactivated ? 'account:security' : 'account:updated';
+    const title = becameDeactivated ? 'Your account was deactivated' : 'Your account was updated';
+
+    this.notificationsService
+      .create({
+        userId: targetUserId,
+        type,
+        title,
+        body: lines.join(' '),
+        data: {
+          userId: targetUserId,
+          changedKeys,
+          ...(becameDeactivated ? { event: 'deactivated' as const } : {}),
+        },
+      })
+      .catch(() => {});
+  }
+
+  /** Current saved theme preference from DB (null = org default). */
+  async getAppThemePreference(userId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ appTheme: schema.users.appTheme })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    return row?.appTheme ?? null;
+  }
+
+  /**
+   * Persists the current user's appearance theme. `null` = follow org default (`client_ui_config`).
+   */
+  async updateMyAppTheme(appTheme: string | null, actor: SessionUser): Promise<{ appTheme: string | null }> {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+
+    const [row] = await this.db
+      .update(schema.users)
+      .set({ appTheme, updatedAt: new Date() })
+      .where(eq(schema.users.id, actor.id))
+      .returning({ appTheme: schema.users.appTheme });
+
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+
+    return { appTheme: row.appTheme ?? null };
   }
 }

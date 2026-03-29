@@ -1,13 +1,5 @@
 # Yannis EOSE
 
-**Enterprise Operations & Sales Engine** — A high-integrity ERP and sales platform for performance marketing companies.
-
-**Status:** 97%+ complete. All 7 core modules built. Only infrastructure tasks (Multi-CDN, Load Testing) remain.
-
-## Quick Start
-
-Use pnpm 9.15.4 (e.g. `corepack enable && corepack prepare pnpm@9.15.4 --activate` or install via npm).
-
 ```bash
 pnpm install
 cp apps/api/.env.example apps/api/.env    # Configure database + Redis
@@ -16,6 +8,24 @@ cd packages/shared && pnpm db:migrate    # Run database migrations
 cd packages/shared && pnpm db:seed       # Seed test data (optional)
 cd ../.. && pnpm turbo dev               # Start all apps
 ```
+migrate
+cd packages/shared && pnpm run db:migrate
+cd apps/api && npm run dev
+cd apps/web && npm run dev
+
+
+
+# Unit tests — no DB needed, runs in ~2 seconds
+  pnpm turbo test --filter=@yannis/api --filter=@yannis/shared
+  pnpm turbo test --filter=@yannis/api
+  pnpm turbo test --filter=@yannis/shared
+
+  # Integration tests — needs test DB
+  pnpm turbo test:integration --filter=@yannis/api
+
+  # E2E tests — needs full app running
+  pnpm --filter @yannis/web exec playwright test
+
 
 **URLs:**
 - Web: http://localhost:4000

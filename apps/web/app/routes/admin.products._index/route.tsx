@@ -19,6 +19,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const canEditProduct =
     user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.update');
+  const canCreateProduct =
+    user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.create');
 
   const input = { page, limit: 20, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
   const productsPromise = apiRequest<unknown>(
@@ -38,11 +40,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   }).catch(() => ({ products: [] as Product[], total: 0, page, totalPages: 0 }));
 
-  return defer({ products: productsPromise, canEditProduct });
+  return defer({ products: productsPromise, canEditProduct, canCreateProduct });
 }
 
 export default function ProductsRoute() {
-  const { products, canEditProduct } = useLoaderData<typeof loader>();
+  const { products, canEditProduct, canCreateProduct } = useLoaderData<typeof loader>();
   return (
     <DeferredSection resolve={products} skeleton="table">
       {(data) => (
@@ -52,6 +54,7 @@ export default function ProductsRoute() {
           page={data.page}
           totalPages={data.totalPages}
           canEditProduct={canEditProduct}
+          canCreateProduct={canCreateProduct}
         />
       )}
     </DeferredSection>

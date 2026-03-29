@@ -4,19 +4,27 @@ import {
   createStaffSchema,
   updateStaffSchema,
   listUsersSchema,
+  searchUsersForPushTargetSchema,
   resetPasswordSchema,
   processEmailChangeSchema,
+  updateMyAppThemeSchema,
 } from '@yannis/shared';
 import type { UsersService } from '../../users/users.service';
+import type { SessionStoreService } from '../../auth/session-store.service';
 
 /**
  * Factory pattern: NestJS injects the service, tRPC router consumes it.
  * This bridges NestJS DI with tRPC's static router definitions.
  */
 let usersServiceInstance: UsersService | null = null;
+let sessionStoreInstance: SessionStoreService | null = null;
 
 export function setUsersService(service: UsersService) {
   usersServiceInstance = service;
+}
+
+export function setUsersSessionStore(store: SessionStoreService) {
+  sessionStoreInstance = store;
 }
 
 function getUsersService(): UsersService {
@@ -24,6 +32,13 @@ function getUsersService(): UsersService {
     throw new Error('UsersService not initialized. Call setUsersService() first.');
   }
   return usersServiceInstance;
+}
+
+function getSessionStore(): SessionStoreService {
+  if (!sessionStoreInstance) {
+    throw new Error('Users SessionStore not initialized. Call setUsersSessionStore() first.');
+  }
+  return sessionStoreInstance;
 }
 
 export const usersRouter = router({
@@ -35,6 +50,17 @@ export const usersRouter = router({
     .input(listUsersSchema)
     .query(async ({ input }) => {
       return getUsersService().list(input);
+    }),
+
+  /**
+   * Search active users by name/email for push broadcast "one user" picker.
+   * Also allowed for users.read (e.g. global search) without notifications.broadcast.
+   */
+  searchForPushTarget: permissionProcedure('notifications.broadcast', 'users.read')
+    .input(searchUsersForPushTargetSchema)
+    .query(async ({ input }) => {
+      const users = await getUsersService().searchForPushTarget(input.q, input.limit, input.offset);
+      return { users };
     }),
 
   /**
@@ -51,6 +77,30 @@ export const usersRouter = router({
     .input(z.object({ userId: z.string().uuid() }))
     .query(async ({ input }) => {
       return getUsersService().getById(input.userId);
+    }),
+
+  /**
+   * Save appearance theme for the current user. `null` = follow org default.
+   * Updates Redis session so the next request sees the new preference.
+   */
+  updateMyAppTheme: authedProcedure
+    .input(updateMyAppThemeSchema)
+    .mutation(async ({ input, ctx }) => {
+      const result = await getUsersService().updateMyAppTheme(input.appTheme, ctx.user);
+      const sessionToken = ctx.sessionToken ?? undefined;
+      if (sessionToken) {
+        const store = getSessionStore();
+        const current = await store.getSession(sessionToken);
+        if (current) {
+          const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
+          await store.updateSession(
+            sessionToken,
+            { ...current, appTheme: result.appTheme },
+            ttl,
+          );
+        }
+      }
+      return result;
     }),
 
   /**

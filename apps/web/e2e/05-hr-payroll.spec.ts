@@ -1,76 +1,110 @@
 import { test, expect } from '@playwright/test';
-import { loginAsSuperAdmin, navigateTo } from './helpers';
+import { loginAsSuperAdmin, loginAsHR, navigateTo } from './helpers';
 
 /**
  * E2E Test: HR Payroll — Payouts, Commission, Clawback
  *
  * Tests payout generation, cross-month settlement, and clawback engine.
+ * Requires seed data: at least one commission plan and one CS agent.
  */
 
-test.describe('HR Payroll & Commission', () => {
+test.describe('HR Payroll — SuperAdmin', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsSuperAdmin(page);
   });
 
-  test('should display HR page with tabs', async ({ page }) => {
+  test('HR page loads with commission/payout content', async ({ page }) => {
     await navigateTo(page, 'hr');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
     await expect(page.locator('body')).toContainText(/commission|payout|hr/i);
   });
 
-  test('should show commission plans tab', async ({ page }) => {
+  test('commission plans tab shows plans table or empty state', async ({ page }) => {
     await navigateTo(page, 'hr');
     const plansTab = page.getByRole('button', { name: /plan/i }).first();
-    const hasTab = await plansTab.isVisible().catch(() => false);
-    if (hasTab) {
-      await plansTab.click();
-      // Should show plan creation form or existing plans
-      await expect(page.locator('body')).toContainText(/plan|salary|rate|threshold/i);
+
+    if (!await plansTab.isVisible().catch(() => false)) {
+      test.skip();
+      return;
     }
+
+    await plansTab.click();
+    await page.waitForLoadState('networkidle');
+
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    const hasEmptyState = await page.locator('body').getByText(/no plans|empty|no records/i).isVisible().catch(() => false);
+    expect(hasTable || hasEmptyState).toBe(true);
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
   });
 
-  test('should show payouts tab with breakdown', async ({ page }) => {
+  test('payouts tab loads with table or empty state', async ({ page }) => {
     await navigateTo(page, 'hr');
     const payoutsTab = page.getByRole('button', { name: /payout/i }).first();
-    const hasTab = await payoutsTab.isVisible().catch(() => false);
-    if (hasTab) {
-      await payoutsTab.click();
-      // Should show payout records with approve/reject actions
-      await expect(page.locator('body')).toContainText(/payout|status|amount/i);
+
+    if (!await payoutsTab.isVisible().catch(() => false)) {
+      test.skip();
+      return;
     }
+
+    await payoutsTab.click();
+    await page.waitForLoadState('networkidle');
+
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    const hasEmptyState = await page.locator('body').getByText(/no payouts|empty|no records/i).isVisible().catch(() => false);
+    expect(hasTable || hasEmptyState).toBe(true);
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
   });
 
-  test('should show adjustments tab', async ({ page }) => {
+  test('payouts tab shows period date inputs for payout generation', async ({ page }) => {
+    await navigateTo(page, 'hr');
+    const payoutsTab = page.getByRole('button', { name: /payout/i }).first();
+
+    if (!await payoutsTab.isVisible().catch(() => false)) {
+      test.skip();
+      return;
+    }
+
+    await payoutsTab.click();
+    await page.waitForLoadState('networkidle');
+
+    // Period start and end date inputs must exist for payout generation
+    const dateInputs = page.locator('input[type="date"]');
+    await expect(dateInputs.first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('adjustments tab loads with table or empty state', async ({ page }) => {
     await navigateTo(page, 'hr');
     const adjTab = page.getByRole('button', { name: /adjust/i }).first();
-    const hasTab = await adjTab.isVisible().catch(() => false);
-    if (hasTab) {
-      await adjTab.click();
-      // Should show bonus/clawback adjustments
-      await expect(page.locator('body')).toContainText(/adjust|bonus|clawback|category/i);
+
+    if (!await adjTab.isVisible().catch(() => false)) {
+      test.skip();
+      return;
     }
+
+    await adjTab.click();
+    await page.waitForLoadState('networkidle');
+
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    const hasEmptyState = await page.locator('body').getByText(/no adjustments|empty|no records/i).isVisible().catch(() => false);
+    expect(hasTable || hasEmptyState).toBe(true);
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+  });
+});
+
+test.describe('HR Payroll — HR Manager access', () => {
+  test('HR manager can access HR page', async ({ page }) => {
+    await loginAsHR(page);
+    await page.goto('/admin/hr');
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+    await expect(page.locator('body')).not.toContainText(/unauthorized|forbidden/i);
   });
 
-  test('should show clawback alerts if any pending', async ({ page }) => {
-    await navigateTo(page, 'hr');
-    // If there are pending clawbacks, an alert banner should appear
-    // This is a non-blocking test — just verifies the page loads
-    const alertBanner = page.locator('[class*="warning"], [class*="alert"], [class*="clawback"]').first();
-    const hasAlert = await alertBanner.isVisible().catch(() => false);
-    // Alert may or may not be present depending on data
-    expect(typeof hasAlert).toBe('boolean');
-  });
+  test('HR manager sees commission plan controls', async ({ page }) => {
+    await loginAsHR(page);
+    await page.goto('/admin/hr');
+    await page.waitForLoadState('networkidle');
 
-  test('should use DELIVERED_AT for commission calculation', async ({ page }) => {
-    // This test verifies the commission form shows period date controls
-    await navigateTo(page, 'hr');
-    const payoutsTab = page.getByRole('button', { name: /payout/i }).first();
-    if (await payoutsTab.isVisible().catch(() => false)) {
-      await payoutsTab.click();
-      // Should have period start/end date inputs for payout generation
-      const dateInputs = page.locator('input[type="date"]');
-      const dateCount = await dateInputs.count();
-      // At minimum should have period start and end dates
-      expect(dateCount).toBeGreaterThanOrEqual(0);
-    }
+    await expect(page.locator('body')).toContainText(/commission|plan|payout/i);
   });
 });

@@ -9,8 +9,15 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { Spinner } from '~/components/ui/spinner';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
+import { PageHeader } from '~/components/ui/page-header';
+import { SearchInput } from '~/components/ui/search-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { EmptyState } from '~/components/ui/empty-state';
+import { Pagination } from '~/components/ui/pagination';
+import { TextInput } from '~/components/ui/text-input';
 import { formatStatus } from '~/features/shared/order-status';
 import type { Order } from '~/features/orders/types';
 import type { Location } from './types';
@@ -155,21 +162,6 @@ export function LogisticsOrdersPage({
     }
   }, [fetcher.data, bulkResult]);
 
-  const buildQueryString = (overrides: { page?: number; status?: string; search?: string }) => {
-    const params = new URLSearchParams(searchParams);
-    if (overrides.page !== undefined) params.set('page', String(overrides.page));
-    if (overrides.status !== undefined) {
-      if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
-      else params.set('status', overrides.status);
-    }
-    if (overrides.search !== undefined) {
-      if (overrides.search) params.set('search', overrides.search);
-      else params.delete('search');
-    }
-    const qs = params.toString();
-    return qs ? `?${qs}` : '';
-  };
-
   const confirmedCount = statusCounts['CONFIRMED'] ?? 0;
   const allocatedCount = statusCounts['ALLOCATED'] ?? 0;
   const dispatchedCount = statusCounts['DISPATCHED'] ?? 0;
@@ -243,62 +235,35 @@ export function LogisticsOrdersPage({
   return (
     <div className="space-y-4">
       <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">{pageTitle}</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Allocate confirmed orders to 3PL locations and dispatch to riders
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          <div className="flex items-center min-h-[2rem] rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 pl-2.5 pr-2 py-1">
-            <DateFilterBar
-              startDate={filters.startDate}
-              endDate={filters.endDate}
-              periodAllTime={filters.periodAllTime}
-            />
-          </div>
-        </div>
+        <PageHeader
+          title={pageTitle}
+          description="Allocate confirmed orders to 3PL locations and dispatch to riders"
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <PageRefreshButton />
+              <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                />
+              </div>
+            </div>
+          }
+        />
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-            Total Orders
-          </p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{totalOrdersCount.toLocaleString()}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-            Awaiting allocation
-          </p>
-          <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{confirmedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-            Allocated
-          </p>
-          <p className="text-2xl font-bold text-info-600 dark:text-info-400 mt-1">{allocatedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-            Dispatched
-          </p>
-          <p className="text-2xl font-bold text-info-600 dark:text-info-400 mt-1">{dispatchedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-            In transit
-          </p>
-          <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{inTransitCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-            Delivered
-          </p>
-          <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{deliveredCount}</p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        tileClassName="min-w-[6rem]"
+        items={[
+          { label: 'Total Orders', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg' },
+          { label: 'Awaiting allocation', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Allocated', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
+          { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400' },
+          { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
+        ]}
+      />
 
       {/* Bulk action toolbar */}
       {selectedIds.size > 0 && (
@@ -315,19 +280,14 @@ export function LogisticsOrdersPage({
             <div className="flex flex-wrap items-center gap-2">
               {canBulkAllocate && !allocationOnDetailOnly && (
                 <>
-                  <select
+                  <FormSelect
                     value={allocateLocationId}
                     onChange={(e) => setAllocateLocationId(e.target.value)}
-                    className="input py-1.5 text-sm w-48"
                     aria-label="3PL location"
-                  >
-                    <option value="">Select location</option>
-                    {allocatableLocations.map((loc) => (
-                      <option key={loc.id} value={loc.id}>
-                        {loc.name}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Select location"
+                    options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
+                    className="w-48"
+                  />
                   <Button
                     variant="primary"
                     size="sm"
@@ -353,19 +313,14 @@ export function LogisticsOrdersPage({
               )}
               {canBulkDispatch && ridersForBulkDispatch.length > 0 && (
                 <>
-                  <select
+                  <FormSelect
                     value={dispatchRiderId}
                     onChange={(e) => setDispatchRiderId(e.target.value)}
-                    className="input py-1.5 text-sm w-48"
                     aria-label="Rider"
-                  >
-                    <option value="">Select rider</option>
-                    {ridersForBulkDispatch.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Select rider"
+                    options={ridersForBulkDispatch.map((r) => ({ value: r.id, label: r.name }))}
+                    className="w-48"
+                  />
                   <Button
                     variant="primary"
                     size="sm"
@@ -411,7 +366,7 @@ export function LogisticsOrdersPage({
                 </Button>
               )}
               {selectedIds.size > 0 && !canBulkAllocate && !canBulkDispatch && !canBulkMarkDelivered && (
-                <span className="text-xs text-surface-600 dark:text-surface-400">
+                <span className="text-xs text-app-fg-muted">
                   {allocationOnDetailOnly
                     ? 'Open an order to allocate. Select only ALLOCATED orders (same location) to bulk dispatch, or only IN_TRANSIT to mark delivered.'
                     : 'Select only CONFIRMED orders to bulk allocate, only ALLOCATED orders (same location) to bulk dispatch, or only IN_TRANSIT orders to mark delivered.'}
@@ -420,7 +375,7 @@ export function LogisticsOrdersPage({
             </div>
           </div>
           {bulkResult && (
-            <div className="mt-3 p-3 rounded-lg bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700">
+            <div className="mt-3 p-3 rounded-lg bg-app-elevated border border-app-border">
               <div className="flex gap-3 text-sm">
                 {bulkResult.succeeded > 0 && (
                   <span className="text-success-600 dark:text-success-400 font-medium">{bulkResult.succeeded} succeeded</span>
@@ -437,7 +392,7 @@ export function LogisticsOrdersPage({
                     </p>
                   ))}
                   {bulkResult.errors.length > 5 && (
-                    <p className="text-xs text-surface-600 dark:text-surface-400">
+                    <p className="text-xs text-app-fg-muted">
                       +{bulkResult.errors.length - 5} more
                     </p>
                   )}
@@ -450,30 +405,27 @@ export function LogisticsOrdersPage({
 
       <div className="flex flex-col sm:flex-row gap-3">
         <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1">
-          <input
-            type="search"
-            placeholder="Search by customer or order ID..."
+          <SearchInput
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="input flex-1"
+            onChange={(val) => setSearchQuery(val)}
+            placeholder="Search by customer or order ID..."
+            className="flex-1"
           />
           <Button type="submit" variant="secondary" size="sm">
             Search
           </Button>
         </form>
-        <select
+        <FormSelect
           value={selectedStatus}
           onChange={(e) => handleStatusChange(e.target.value)}
-          className="input w-auto py-1.5"
-        >
-          {LOGISTICS_STATUS_OPTIONS.map((status) => (
-            <option key={status} value={status}>
-              {status === 'ALL' ? 'All statuses' : formatStatus(status)}
-            </option>
-          ))}
-        </select>
+          options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+            value: status,
+            label: status === 'ALL' ? 'All statuses' : formatStatus(status),
+          }))}
+          className="w-auto"
+        />
         {isFilterLoading && (
-          <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+          <span className="flex items-center text-app-fg-muted" aria-hidden>
             <Spinner size="sm" className="shrink-0" />
           </span>
         )}
@@ -525,7 +477,7 @@ export function LogisticsOrdersPage({
                         {order.id.slice(0, 8)}...
                       </Link>
                     </td>
-                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">
+                    <td className="table-cell font-medium text-app-fg">
                       {order.customerName}
                     </td>
                     <td className="table-cell">
@@ -534,8 +486,8 @@ export function LogisticsOrdersPage({
                     <td className="table-cell">
                       <DeliveryDateCell date={order.preferredDeliveryDate} />
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">{order.locationName}</td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">{order.riderName}</td>
+                    <td className="table-cell text-app-fg-muted">{order.locationName}</td>
+                    <td className="table-cell text-app-fg-muted">{order.riderName}</td>
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1.5 flex-wrap">
                         <Link to={`${orderDetailBasePath}/${order.id}`}>
@@ -571,19 +523,13 @@ export function LogisticsOrdersPage({
                           <fetcher.Form method="post" className="inline-flex items-center gap-1">
                             <input type="hidden" name="intent" value="allocate" />
                             <input type="hidden" name="orderId" value={order.id} />
-                            <select
+                            <FormSelect
                               name="logisticsLocationId"
                               required
-                              className="input py-1 text-xs w-36"
-                              defaultValue=""
-                            >
-                              <option value="">Location</option>
-                              {allocatableLocations.map((loc) => (
-                                <option key={loc.id} value={loc.id}>
-                                  {loc.name}
-                                </option>
-                              ))}
-                            </select>
+                              placeholder="Location"
+                              options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
+                              className="w-36"
+                            />
                             <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting}>
                               Allocate
                             </Button>
@@ -593,22 +539,14 @@ export function LogisticsOrdersPage({
                           <fetcher.Form method="post" className="inline-flex items-center gap-1">
                             <input type="hidden" name="intent" value="dispatch" />
                             <input type="hidden" name="orderId" value={order.id} />
-                            <select
+                            <FormSelect
                               name="riderId"
                               required
-                              className="input py-1 text-xs w-36"
-                              defaultValue=""
                               disabled={ridersForOrder.length === 0}
-                            >
-                              <option value="">
-                                {ridersForOrder.length === 0 ? 'No riders' : 'Rider'}
-                              </option>
-                              {ridersForOrder.map((r) => (
-                                <option key={r.id} value={r.id}>
-                                  {r.name}
-                                </option>
-                              ))}
-                            </select>
+                              placeholder={ridersForOrder.length === 0 ? 'No riders' : 'Rider'}
+                              options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
+                              className="w-36"
+                            />
                             <Button
                               type="submit"
                               variant="primary"
@@ -639,9 +577,10 @@ export function LogisticsOrdersPage({
           </table>
         </div>
         {orders.length === 0 && (
-          <div className="py-12 text-center text-surface-700 dark:text-surface-300">
-            No orders found. Try changing the status filter or date range.
-          </div>
+          <EmptyState
+            title="No orders found"
+            description="Try changing the status filter or date range."
+          />
         )}
 
         {/* Mobile cards */}
@@ -652,7 +591,7 @@ export function LogisticsOrdersPage({
                 ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
                 : [];
             return (
-              <div key={order.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+              <div key={order.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <Link
                     to={`${orderDetailBasePath}/${order.id}`}
@@ -662,8 +601,8 @@ export function LogisticsOrdersPage({
                   </Link>
                   <OrderStatusBadge status={order.status} />
                 </div>
-                <p className="text-sm text-surface-900 dark:text-surface-100">{order.customerName}</p>
-                <div className="flex items-center gap-2 text-sm text-surface-700 dark:text-surface-300">
+                <p className="text-sm text-app-fg">{order.customerName}</p>
+                <div className="flex items-center gap-2 text-sm text-app-fg-muted">
                   <span>{order.locationName} · {order.riderName}</span>
                   {order.preferredDeliveryDate && (
                     <span className="text-brand-600 dark:text-brand-400 font-medium">
@@ -705,14 +644,13 @@ export function LogisticsOrdersPage({
                     <fetcher.Form method="post" className="flex gap-1 flex-wrap">
                       <input type="hidden" name="intent" value="allocate" />
                       <input type="hidden" name="orderId" value={order.id} />
-                      <select name="logisticsLocationId" required className="input py-1 text-xs flex-1 min-w-0">
-                        <option value="">Location</option>
-                        {allocatableLocations.map((loc) => (
-                          <option key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </option>
-                        ))}
-                      </select>
+                      <FormSelect
+                        name="logisticsLocationId"
+                        required
+                        placeholder="Location"
+                        options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
+                        className="flex-1 min-w-0"
+                      />
                       <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
                         Allocate
                       </Button>
@@ -722,14 +660,12 @@ export function LogisticsOrdersPage({
                     <fetcher.Form method="post" className="flex gap-1">
                       <input type="hidden" name="intent" value="dispatch" />
                       <input type="hidden" name="orderId" value={order.id} />
-                      <select name="riderId" required className="input py-1 text-xs">
-                        <option value="">Rider</option>
-                        {ridersForOrder.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name}
-                          </option>
-                        ))}
-                      </select>
+                      <FormSelect
+                        name="riderId"
+                        required
+                        placeholder="Rider"
+                        options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
+                      />
                       <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
                         Dispatch
                       </Button>
@@ -753,23 +689,7 @@ export function LogisticsOrdersPage({
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Link
-            to={buildQueryString({ page: page - 1 })}
-            className={`btn-secondary btn-sm ${page <= 1 ? 'opacity-50 pointer-events-none' : ''}`}
-          >
-            Previous
-          </Link>
-          <span className="text-sm text-surface-700 dark:text-surface-300">
-            Page {page} of {totalPages}
-          </span>
-          <Link
-            to={buildQueryString({ page: page + 1 })}
-            className={`btn-secondary btn-sm ${page >= totalPages ? 'opacity-50 pointer-events-none' : ''}`}
-          >
-            Next
-          </Link>
-        </div>
+        <Pagination page={page} totalPages={totalPages} pageParam="page" />
       )}
 
       {/* Mark Delivered confirmation modal */}
@@ -789,31 +709,27 @@ export function LogisticsOrdersPage({
           }
           details={
             <div className="space-y-2">
-              <label className="block text-xs font-medium text-surface-600 dark:text-surface-400">
-                Cost of delivery (₦) — optional
-              </label>
-              <input
+              <TextInput
                 type="number"
+                label="Cost of delivery (₦) — optional"
                 min={0}
                 step="0.01"
                 value={deliverConfirmDeliveryCost}
                 onChange={(e) => setDeliverConfirmDeliveryCost(e.target.value)}
-                className="input w-28 py-1.5"
                 placeholder="0"
                 disabled={fetcher.state === 'submitting'}
+                className="w-28"
               />
-              <label className="block text-xs font-medium text-surface-600 dark:text-surface-400">
-                Discount at delivery (₦) — optional
-              </label>
-              <input
+              <TextInput
                 type="number"
+                label="Discount at delivery (₦) — optional"
                 min={0}
                 step="0.01"
                 value={deliverConfirmDiscount}
                 onChange={(e) => setDeliverConfirmDiscount(e.target.value)}
-                className="input w-28 py-1.5"
                 placeholder="0"
                 disabled={fetcher.state === 'submitting'}
+                className="w-28"
               />
             </div>
           }
@@ -910,54 +826,45 @@ function EditDeliveryDateModal({
   };
 
   return (
-    <Modal open onClose={onClose} maxWidth="max-w-md" role="dialog" aria-labelledby="edit-delivery-date-title" contentClassName="p-0 border border-surface-200 dark:border-surface-700">
-        <div className="flex items-center justify-between pb-2 border-b border-surface-200 dark:border-surface-700 px-4 pt-4 sm:px-5 sm:pt-5">
-          <h3 id="edit-delivery-date-title" className="text-lg font-semibold text-surface-900 dark:text-white">
+    <Modal open onClose={onClose} maxWidth="max-w-md" role="dialog" aria-labelledby="edit-delivery-date-title" contentClassName="p-0 border border-app-border">
+        <div className="flex items-center justify-between pb-2 border-b border-app-border px-4 pt-4 sm:px-5 sm:pt-5">
+          <h3 id="edit-delivery-date-title" className="text-lg font-semibold text-app-fg">
             Resolve order
           </h3>
         </div>
         <div className="space-y-4 pt-4 px-4 sm:px-5">
-          <p className="text-sm text-surface-700 dark:text-surface-200">
+          <p className="text-sm text-app-fg-muted">
             Order <strong>{orderId.slice(0, 8)}...</strong> · {customerName}
           </p>
-          <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">
-            Preferred delivery date
-          </label>
-          <input
+          <TextInput
             type="date"
+            label="Preferred delivery date"
             value={dateValue}
             onChange={(e) => setDateValue(e.target.value)}
-            className="input w-full"
             disabled={loading}
           />
-          <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">
-            Cost of delivery (₦) — optional
-          </label>
-          <input
+          <TextInput
             type="number"
+            label="Cost of delivery (₦) — optional"
             min={0}
             step="0.01"
             value={deliveryCost}
             onChange={(e) => setDeliveryCost(e.target.value)}
-            className="input w-full"
             placeholder="0"
             disabled={loading}
           />
-          <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">
-            Discount at delivery (₦) — optional
-          </label>
-          <input
+          <TextInput
             type="number"
+            label="Discount at delivery (₦) — optional"
             min={0}
             step="0.01"
             value={discount}
             onChange={(e) => setDiscount(e.target.value)}
-            className="input w-full"
             placeholder="0"
             disabled={loading}
           />
           <div>
-            <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">
+            <label className="block text-sm font-medium text-app-fg-muted">
               Receipt <span className="text-danger-600 dark:text-danger-400">*</span>
             </label>
             <FileUpload
@@ -969,7 +876,7 @@ function EditDeliveryDateModal({
             />
           </div>
         </div>
-        <div className="flex items-center justify-end gap-3 pt-4 mt-4 border-t border-surface-200 dark:border-surface-700 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center justify-end gap-3 pt-4 mt-4 border-t border-app-border px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
@@ -1003,7 +910,7 @@ function isToday(date: string): boolean {
 
 function DeliveryDateCell({ date }: { date?: string | null }) {
   if (!date) {
-    return <span className="text-surface-400 dark:text-surface-500 text-sm">Not set</span>;
+    return <span className="text-app-fg-muted text-sm">Not set</span>;
   }
 
   const overdue = isOverdue(date);
@@ -1016,7 +923,7 @@ function DeliveryDateCell({ date }: { date?: string | null }) {
           ? 'text-danger-600 dark:text-danger-400'
           : today
             ? 'text-warning-600 dark:text-warning-400'
-            : 'text-surface-900 dark:text-surface-100'
+            : 'text-app-fg'
       }`}
     >
       {formatDeliveryDate(date)}

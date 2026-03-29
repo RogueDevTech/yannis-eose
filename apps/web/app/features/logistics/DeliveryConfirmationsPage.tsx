@@ -4,6 +4,11 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { PageHeader } from '~/components/ui/page-header';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { Textarea } from '~/components/ui/textarea';
+import { Pagination } from '~/components/ui/pagination';
 import type { DeliveryConfirmationRequest } from './types';
 
 interface DeliveryConfirmationsPageProps {
@@ -42,36 +47,36 @@ export function DeliveryConfirmationsPage({
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Delivery confirmations</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-          Approve or reject delivery confirmations submitted by riders and 3PL.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <PageRefreshButton />
-        <Link to="/admin/logistics/delivery-confirmations?status=PENDING">
-          <Button variant={statusFilter === 'PENDING' ? 'primary' : 'secondary'} size="sm">
-            Pending {statusFilter === 'PENDING' ? `(${total})` : ''}
-          </Button>
-        </Link>
-        <Link to="/admin/logistics/delivery-confirmations?status=">
-          <Button variant={statusFilter === '' ? 'primary' : 'secondary'} size="sm">
-            All
-          </Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="Delivery confirmations"
+        description="Approve or reject delivery confirmations submitted by riders and 3PL."
+        actions={
+          <>
+            <PageRefreshButton />
+            <Link to="/admin/logistics/delivery-confirmations?status=PENDING">
+              <Button variant={statusFilter === 'PENDING' ? 'primary' : 'secondary'} size="sm">
+                Pending {statusFilter === 'PENDING' ? `(${total})` : ''}
+              </Button>
+            </Link>
+            <Link to="/admin/logistics/delivery-confirmations?status=">
+              <Button variant={statusFilter === '' ? 'primary' : 'secondary'} size="sm">
+                All
+              </Button>
+            </Link>
+          </>
+        }
+      />
 
       {/* Order Pipeline — same card style as dashboard bottom */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Pipeline</h2>
+        <h2 className="text-lg font-semibold text-app-fg mb-4">Order Pipeline</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {PIPELINE_STAGES.map(({ key, label, color }) => {
             const value = orderCounts[key] ?? 0;
             return (
-              <div key={key} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
+              <div key={key} className="text-center p-3 rounded-lg bg-app-hover">
                 <p className={`text-2xl font-bold ${color}`}>{value}</p>
-                <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{label}</p>
+                <p className="text-sm text-app-fg-muted mt-0.5">{label}</p>
               </div>
             );
           })}
@@ -109,31 +114,21 @@ export function DeliveryConfirmationsPage({
                               {req.orderId.slice(0, 8)}…
                             </Link>
                             {order && (
-                              <span className="text-xs text-surface-600 dark:text-surface-400">
+                              <span className="text-xs text-app-fg-muted">
                                 {order.customerName}
                                 {order.deliveryAddress ? ` · ${order.deliveryAddress.slice(0, 40)}…` : ''}
                               </span>
                             )}
-                            <span className="text-xs text-surface-500 dark:text-surface-500 mt-0.5">{newStatus}</span>
+                            <span className="text-xs text-app-fg-muted dark:text-app-fg-muted mt-0.5">{newStatus}</span>
                           </div>
                         </td>
-                        <td className="table-cell text-surface-800 dark:text-surface-200">
+                        <td className="table-cell text-app-fg-muted">
                           {req.requesterName ?? req.requestedBy.slice(0, 8)}
                         </td>
                         <td className="table-cell">
-                          <span
-                            className={
-                              req.status === 'PENDING'
-                                ? 'text-amber-600 dark:text-amber-400'
-                                : req.status === 'APPROVED'
-                                  ? 'text-green-600 dark:text-green-400'
-                                  : 'text-red-600 dark:text-red-400'
-                            }
-                          >
-                            {req.status}
-                          </span>
+                          <StatusBadge status={req.status} showDot />
                         </td>
-                        <td className="table-cell text-surface-800 dark:text-surface-200">
+                        <td className="table-cell text-app-fg-muted">
                           {new Date(req.requestedAt).toLocaleString('en-NG', {
                             dateStyle: 'short',
                             timeStyle: 'short',
@@ -168,48 +163,28 @@ export function DeliveryConfirmationsPage({
             </div>
           </>
         ) : (
-          <div className="py-12 text-center text-surface-700 dark:text-surface-300">
-            {statusFilter === 'PENDING' ? 'No pending delivery confirmations.' : 'No delivery confirmation requests.'}
-          </div>
+          <EmptyState
+            title={statusFilter === 'PENDING' ? 'No pending confirmations' : 'No confirmation requests'}
+            description={statusFilter === 'PENDING' ? 'No pending delivery confirmations.' : 'No delivery confirmation requests.'}
+            variant="card"
+          />
         )}
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Link
-            to={`/admin/logistics/delivery-confirmations?status=${statusFilter}&page=${page - 1}`}
-            className={`btn-secondary btn-sm ${page <= 1 ? 'opacity-50 pointer-events-none' : ''}`}
-          >
-            Previous
-          </Link>
-          <span className="text-sm text-surface-700 dark:text-surface-300">
-            Page {page} of {totalPages}
-          </span>
-          <Link
-            to={`/admin/logistics/delivery-confirmations?status=${statusFilter}&page=${page + 1}`}
-            className={`btn-secondary btn-sm ${page >= totalPages ? 'opacity-50 pointer-events-none' : ''}`}
-          >
-            Next
-          </Link>
-        </div>
-      )}
+      <Pagination page={page} totalPages={totalPages} pageParam="page" />
 
       {/* Reject reason modal */}
       {rejectModal && (
-        <Modal open onClose={() => setRejectModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white shrink-0">Reject delivery confirmation</h3>
+        <Modal open onClose={() => setRejectModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-app-border bg-app-elevated">
+              <h3 className="text-lg font-semibold text-app-fg shrink-0">Reject delivery confirmation</h3>
               <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Reason <span className="text-surface-500">(optional)</span>
-                  </label>
-                  <textarea
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                    className="input min-h-[80px]"
-                    placeholder="Reason for rejection..."
-                  />
-                </div>
+                <Textarea
+                  label="Reason (optional)"
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  rows={3}
+                  placeholder="Reason for rejection..."
+                />
               </div>
               <div className="flex gap-2 justify-end shrink-0 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <Button type="button" variant="secondary" size="sm" onClick={() => setRejectModal(null)}>

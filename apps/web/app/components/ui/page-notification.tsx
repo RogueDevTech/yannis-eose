@@ -20,27 +20,27 @@ const variantClasses: Record<
   { container: string; text: string; title: string; bar: string }
 > = {
   error: {
-    container: 'bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50',
-    text: 'text-danger-700 dark:text-danger-500',
-    title: 'text-danger-800 dark:text-danger-400',
+    container: 'bg-danger-50 dark:bg-transparent border border-danger-200 dark:border-danger-500/60',
+    text: 'text-danger-700 dark:text-danger-300',
+    title: 'text-danger-800 dark:text-danger-200',
     bar: 'bg-danger-500/80',
   },
   success: {
-    container: 'bg-success-50 dark:bg-success-700/20 border border-success-200 dark:border-success-700/50',
-    text: 'text-success-700 dark:text-success-500',
-    title: 'text-success-800 dark:text-success-400',
+    container: 'bg-success-50 dark:bg-transparent border border-success-200 dark:border-success-500/60',
+    text: 'text-success-700 dark:text-success-300',
+    title: 'text-success-800 dark:text-success-200',
     bar: 'bg-success-500/80',
   },
   warning: {
-    container: 'bg-warning-50 dark:bg-warning-700/20 border border-warning-200 dark:border-warning-700/50',
-    text: 'text-warning-800 dark:text-warning-200',
-    title: 'text-warning-900 dark:text-warning-100',
+    container: 'bg-warning-50 dark:bg-transparent border border-warning-200 dark:border-warning-500/60',
+    text: 'text-warning-800 dark:text-warning-300',
+    title: 'text-warning-900 dark:text-warning-200',
     bar: 'bg-warning-500/80',
   },
   info: {
-    container: 'bg-info-50 dark:bg-info-700/20 border border-info-200 dark:border-info-700/50',
-    text: 'text-info-700 dark:text-info-500',
-    title: 'text-info-800 dark:text-info-400',
+    container: 'bg-info-50 dark:bg-transparent border border-info-200 dark:border-info-500/60',
+    text: 'text-info-700 dark:text-info-300',
+    title: 'text-info-800 dark:text-info-200',
     bar: 'bg-info-500/80',
   },
 };
@@ -98,7 +98,7 @@ export function PageNotification({
           <button
             type="button"
             onClick={() => setPaused((p) => !p)}
-            className="p-1.5 rounded-md text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-200 hover:bg-surface-200/50 dark:hover:bg-surface-700/50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-surface-400 dark:focus:ring-offset-surface-900"
+            className="p-1.5 rounded-md text-app-fg-muted hover:text-app-fg hover:bg-app-hover/50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-app-border focus:ring-offset-app-canvas"
             aria-label={paused ? 'Resume countdown' : 'Pause countdown'}
           >
             {paused ? (
@@ -115,7 +115,7 @@ export function PageNotification({
           <button
             type="button"
             onClick={handleDismiss}
-            className="p-1.5 rounded-md text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-200 hover:bg-surface-200/50 dark:hover:bg-surface-700/50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-surface-400 dark:focus:ring-offset-surface-900"
+            className="p-1.5 rounded-md text-app-fg-muted hover:text-app-fg hover:bg-app-hover/50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-app-border focus:ring-offset-app-canvas"
             aria-label="Dismiss"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

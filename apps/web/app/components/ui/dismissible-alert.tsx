@@ -76,7 +76,7 @@ export function DismissibleAlert({
         <button
           type="button"
           onClick={handleDismiss}
-          className="shrink-0 p-1 rounded-md text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-200 hover:bg-surface-200/50 dark:hover:bg-surface-700/50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-surface-400 dark:focus:ring-offset-surface-900"
+          className="shrink-0 p-1 rounded-md text-app-fg-muted hover:text-app-fg hover:bg-app-hover/50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-app-border focus:ring-offset-app-canvas"
           aria-label="Dismiss"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

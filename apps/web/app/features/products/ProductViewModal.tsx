@@ -17,11 +17,11 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
       maxWidth="max-w-2xl"
       role="dialog"
       aria-labelledby="product-view-modal-title"
-      contentClassName="p-0 max-h-[90dvh] flex flex-col overflow-hidden border border-surface-200 dark:border-surface-700"
+      contentClassName="p-0 max-h-[90dvh] flex flex-col overflow-hidden border border-app-border"
     >
         {/* Header */}
-        <div className="flex items-center justify-between gap-3 p-4 border-b border-surface-200 dark:border-surface-700 shrink-0">
-          <h2 id="product-view-modal-title" className="text-lg font-semibold text-surface-900 dark:text-white truncate">
+        <div className="flex items-center justify-between gap-3 p-4 border-b border-app-border shrink-0">
+          <h2 id="product-view-modal-title" className="text-lg font-semibold text-app-fg truncate">
             {product.name}
           </h2>
           <div className="flex items-center gap-2 shrink-0">
@@ -42,7 +42,7 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
             <button
               type="button"
               onClick={onClose}
-              className="p-2 rounded-lg text-surface-500 hover:text-surface-700 hover:bg-surface-100 dark:hover:bg-surface-800 dark:text-surface-400 dark:hover:text-surface-200"
+              className="p-2 rounded-lg text-app-fg-muted hover:text-app-fg hover:bg-app-hover"
               aria-label="Close"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -56,23 +56,23 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
         <div className="overflow-y-auto p-4 space-y-4">
           {/* Product Details */}
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Product Details</h3>
+            <h3 className="text-sm font-semibold text-app-fg">Product Details</h3>
             <dl className="space-y-2 text-sm">
               {product.description && (
                 <div>
-                  <dt className="text-surface-500 dark:text-surface-400">Description</dt>
-                  <dd className="text-surface-900 dark:text-white mt-0.5 whitespace-pre-wrap">{product.description}</dd>
+                  <dt className="text-app-fg-muted">Description</dt>
+                  <dd className="text-app-fg mt-0.5 whitespace-pre-wrap">{product.description}</dd>
                 </div>
               )}
               <div>
-                <dt className="text-surface-500 dark:text-surface-400">Category</dt>
-                <dd className="text-surface-900 dark:text-white mt-0.5">
+                <dt className="text-app-fg-muted">Category</dt>
+                <dd className="text-app-fg mt-0.5">
                   {product.categoryName ?? product.category ?? '—'}
                 </dd>
               </div>
               <div>
-                <dt className="text-surface-500 dark:text-surface-400">Created</dt>
-                <dd className="text-surface-900 dark:text-white mt-0.5">
+                <dt className="text-app-fg-muted">Created</dt>
+                <dd className="text-app-fg mt-0.5">
                   {new Date(product.createdAt).toLocaleString('en-NG')}
                 </dd>
               </div>
@@ -81,36 +81,36 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
 
           {/* Offer Bundles */}
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Offer Bundles</h3>
+            <h3 className="text-sm font-semibold text-app-fg">Offer Bundles</h3>
             {product.offers?.length ? (
               <div className="space-y-2">
                 {product.offers.map((offer, index) => (
                   <div
                     key={index}
-                    className="flex items-center justify-between gap-4 p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700"
+                    className="flex items-center justify-between gap-4 p-3 rounded-lg bg-app-hover border border-app-border"
                   >
                     <div className="min-w-0">
-                      <p className="font-medium text-surface-900 dark:text-white">{offer.label || `Qty ${offer.qty}`}</p>
-                      <p className="text-xs text-surface-600 dark:text-surface-400">
+                      <p className="font-medium text-app-fg">{offer.label || `Qty ${offer.qty}`}</p>
+                      <p className="text-xs text-app-fg-muted">
                         {offer.qty} unit{offer.qty !== 1 ? 's' : ''}
                       </p>
                     </div>
-                    <span className="text-sm font-semibold text-surface-900 dark:text-white tabular-nums">
+                    <span className="text-sm font-semibold text-app-fg tabular-nums">
                       &#8358;{Number(offer.price).toLocaleString()}
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-surface-600 dark:text-surface-400">No offer tiers defined.</p>
+              <p className="text-sm text-app-fg-muted">No offer tiers defined.</p>
             )}
           </div>
 
           {/* Cost (if visible) */}
           {product.costPrice != null && product.costPrice !== '' && (
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Cost</h3>
-              <p className="text-sm text-surface-900 dark:text-white">
+              <h3 className="text-sm font-semibold text-app-fg">Cost</h3>
+              <p className="text-sm text-app-fg">
                 &#8358;{Number(product.costPrice).toLocaleString()} per unit
               </p>
             </div>
@@ -118,7 +118,7 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-surface-200 dark:border-surface-700 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="p-4 border-t border-app-border shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button
             type="button"
             onClick={onClose}

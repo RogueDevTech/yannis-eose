@@ -59,7 +59,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 const mobileInput =
-  'max-lg:!bg-surface-800 max-lg:!border-surface-700 max-lg:!text-surface-100 max-lg:!placeholder-surface-500';
+  'max-lg:!bg-app-elevated max-lg:!border-app-border max-lg:!text-app-fg max-lg:!placeholder-app-fg-muted';
 
 export default function ResetPasswordRoute() {
   const { token } = useLoaderData<typeof loader>();
@@ -97,12 +97,12 @@ export default function ResetPasswordRoute() {
               className="h-14 w-auto max-w-full object-contain"
             />
           </div>
-          <p className="text-surface-400 text-lg">Enterprise Operations & Sales Engine</p>
+          <p className="text-slate-400 text-lg">Enterprise Operations & Sales Engine</p>
         </div>
       </div>
 
-      {/* Right panel — form (always light-mode on auth) */}
-      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white">
+      {/* Right panel — form (app theme) */}
+      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-app-canvas lg:bg-app-elevated">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
           <div className="lg:hidden text-center">
@@ -113,16 +113,16 @@ export default function ResetPasswordRoute() {
                 className="h-10 w-auto max-w-full object-contain"
               />
             </div>
-            <p className="text-surface-400 text-sm">Enterprise Operations & Sales Engine</p>
+            <p className="text-app-fg-muted text-sm">Enterprise Operations & Sales Engine</p>
           </div>
 
           {actionData?.success ? (
             <>
               <div>
-                <h2 className="text-2xl font-bold text-white lg:text-surface-900">
+                <h2 className="text-2xl font-bold text-app-fg">
                   Password reset
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
+                <p className="mt-2 text-sm text-app-fg-muted">
                   {actionData.success} You can now sign in with your new password.
                 </p>
               </div>
@@ -137,10 +137,10 @@ export default function ResetPasswordRoute() {
           ) : !hasToken ? (
             <>
               <div>
-                <h2 className="text-2xl font-bold text-white lg:text-surface-900">
+                <h2 className="text-2xl font-bold text-app-fg">
                   Invalid reset link
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
+                <p className="mt-2 text-sm text-app-fg-muted">
                   This password reset link is invalid or has expired. Please request a new one.
                 </p>
               </div>
@@ -164,10 +164,10 @@ export default function ResetPasswordRoute() {
           ) : (
             <>
               <div>
-                <h2 className="text-2xl font-bold text-white lg:text-surface-900">
+                <h2 className="text-2xl font-bold text-app-fg">
                   Set new password
                 </h2>
-                <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
+                <p className="mt-2 text-sm text-app-fg-muted">
                   Enter your new password below. Must be at least 8 characters.
                 </p>
               </div>
@@ -187,7 +187,7 @@ export default function ResetPasswordRoute() {
                 <div>
                   <label
                     htmlFor="newPassword"
-                    className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
+                    className="block text-sm font-medium text-app-fg-muted mb-1.5"
                   >
                     New password
                   </label>
@@ -207,7 +207,7 @@ export default function ResetPasswordRoute() {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-app-fg-muted hover:text-app-fg"
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
                       {showPassword ? (
@@ -251,7 +251,7 @@ export default function ResetPasswordRoute() {
                 <div>
                   <label
                     htmlFor="confirmPassword"
-                    className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
+                    className="block text-sm font-medium text-app-fg-muted mb-1.5"
                   >
                     Confirm new password
                   </label>

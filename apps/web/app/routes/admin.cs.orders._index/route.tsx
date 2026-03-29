@@ -147,7 +147,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'createOffline') {
     const createOfflineUser = await requirePermission(request, 'orders.read');
     if (!['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'].includes(createOfflineUser.role)) {
-      return json({ error: 'Only CS agents and Head of CS can create offline orders' }, { status: 403 });
+      return json({ error: 'Only closers and Head of CS can create offline orders' }, { status: 403 });
     }
     const customerName = form.get('customerName')?.toString()?.trim() ?? '';
     const customerPhone = form.get('customerPhone')?.toString()?.trim() ?? '';

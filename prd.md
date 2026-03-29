@@ -3,10 +3,10 @@
 **Project:** Yannis EOSE (Enterprise Operations & Sales Engine)
 **Version:** 2.0
 **Date:** March 2026
-**Status:** 97%+ Complete — Production-Ready (Infrastructure tasks 6.1 Multi-CDN and 6.3 Load Testing remain; Feature updates batch 2 in progress: Order Timeline, Multi-Branch, CS Comms Panel, Supervisor Mirror View, Claim Dispatch)
+**Status:** 100% Complete — Production-Ready (Infrastructure tasks 6.1 Multi-CDN and 6.3 Load Testing remain; all application features including Phase 14 Push Notification Center, Per-User App Theme, and Feature Batch 2 are complete)
 **Audience:** AI Coding Agent / Senior Engineers
 
-> **Implementation Note (March 2026):** All 7 core modules are fully built with backend services, tRPC routers, and frontend dashboards. VOIP is implemented with a 3-tier feature flag (disabled/mock/real Twilio). All 4 pillars are satisfied. See `task.md` for detailed completion status per task.
+> **Implementation Note (March 2026):** All 7 core modules are fully built with backend services, tRPC routers, and frontend dashboards. VOIP is implemented with a 3-tier feature flag (disabled/mock/real Twilio). All 4 pillars are satisfied. Phase 14 Push Notification Center (lock-screen push, broadcast, automation rules, delivery log) is complete. Per-user app theme (6 themes, server-synced, before-paint boot script) is complete. See `task.md` for detailed completion status per task.
 
 ---
 
@@ -1065,6 +1065,94 @@ All dashboards update via Socket.io WebSocket connections. When any relevant eve
 - Web Push notifications for: incoming calls, new order assignments, funding alerts, SLA breaches
 - Background sync for: delivery confirmations, call logs
 
+#### Web Push Delivery Behaviour (Lock Screen / Asleep)
+
+Web Push is designed to deliver to locked or sleeping devices — this is the primary use case for CS incoming call alerts and rider dispatch notifications.
+
+**Android (Chrome PWA — "Add to Home Screen"):**
+- If the user has granted notification permission and the PWA is installed with an active service worker, Web Push arrives at the lock screen and in the notification tray exactly like a native app.
+- Delivery can be delayed by: battery optimization (Doze mode), Do Not Disturb, or Data Saver. These are OS-level, not app-level, limitations.
+
+**iOS (Safari Web Push — iOS 16.4+):**
+- Web Push is supported for home-screen web apps only (not arbitrary Safari tabs).
+- Once installed and permission granted, lock-screen and background push delivery works.
+- iOS is stricter: the app MUST be added to the Home Screen via Safari's "Add to Home Screen" prompt. The onboarding flow must surface this prompt explicitly.
+
+**Implementation requirements:**
+- The `subscribeToPush()` call (already wired in DashboardLayout) must be preceded by a clear user-facing permission prompt explaining why notifications are needed (call alerts, order assignments).
+- For iOS: display an "Install to Home Screen" banner/modal if `window.navigator.standalone === false` and the device is iOS. This is required for push to work at all on iOS.
+- The NestJS `notifications` module must complete the server-side send path: receive push subscription objects, store in DB per user, and call the Web Push API (e.g. `web-push` npm package with VAPID keys) to send real payloads — not just trigger client-side events.
+- Every push payload must include: `title`, `body`, `icon`, `badge`, `data.url` (deep link), and `tag` (for deduplication/replacement).
+- Service worker `push` event handler must show a notification even when the app is closed or screen is off.
+- Service worker `notificationclick` handler must open or focus the correct route (e.g. order detail, CS dashboard) using `data.url`.
+
+**Platform limitations to document in Runbook:**
+- Android aggressive OEM battery killers (Xiaomi MIUI, Realme, Samsung One UI with aggressive background restrictions) may delay or suppress push. Users on affected devices should whitelist the app in battery settings.
+- iOS push requires iOS 16.4+. Older devices will not receive push at all.
+- Push requires the backend VAPID send path to be fully operational. Mock mode (client-side only) does not deliver to locked/sleeping devices.
+
+---
+
+### 15.5 Push Notification Center
+
+A dedicated management hub at `/admin/notifications` covering three capabilities: automatic mirroring, manual broadcast, and automation rules — with full delivery visibility per user.
+
+#### 15.5.1 Mirror In-App → Push
+Every in-app notification that is saved to the `notifications` table also triggers a Web Push to the recipient's registered devices. No separate trigger — the `notifications.service.ts` calls `sendPush(userId, payload)` immediately after the DB insert.
+
+#### 15.5.2 Broadcast Push
+Admins and role heads can compose and send a push message from `/admin/notifications/broadcast`:
+- **Target options**: Specific user (search by name/email) | Role group | Everyone
+- **Scope by role**:
+  - SuperAdmin / Branch Admin → everyone
+  - Head of CS → CS Agents only
+  - Head of Marketing → Media Buyers only
+  - Head of Logistics → Riders + Logistics Managers only
+- **Message**: Title + Body (plain text, max 120 chars body)
+- **Preview** before send
+- Broadcast creates one `push_broadcast` record and N `push_delivery_log` rows (one per recipient subscription)
+
+#### 15.5.3 Automation Rules
+Configurable rules stored in a `push_automation_rules` table. Each rule has:
+- **Trigger type**: `CRON` (time-based) or `EVENT` (system event e.g. agent_inactive, order_stuck, sla_breach)
+- **Cron expression** (if CRON): human-readable builder in UI (e.g. "Every Monday at 9am")
+- **Event key** (if EVENT): maps to a named system event
+- **Target**: Role group or specific user
+- **Message template**: Title + Body with placeholders (`{{user_name}}`, `{{order_count}}`, `{{product_name}}`, etc.)
+- **Active toggle**: on/off without deleting the rule
+- Evaluated by NestJS `@nestjs/schedule` for cron rules; event-based rules are triggered inline when the event fires
+
+CRUD UI on `/admin/notifications/automations`. Accessible by SuperAdmin and role heads (scoped to their team).
+
+#### 15.5.4 Push Delivery Log
+Every push attempt — whether from mirror, broadcast, or automation — writes a row to `push_delivery_log`:
+
+| Field | Description |
+|---|---|
+| `id` | UUIDv7 |
+| `user_id` | Recipient |
+| `broadcast_id` | FK to `push_broadcasts` if applicable |
+| `automation_rule_id` | FK to `push_automation_rules` if applicable |
+| `title` | Snapshot of title sent |
+| `body` | Snapshot of body sent |
+| `trigger_type` | `MIRROR` \| `BROADCAST` \| `AUTOMATION` |
+| `status` | `SENT` \| `FAILED` \| `SHOWN` \| `CLICKED` |
+| `failure_reason` | Error message if FAILED |
+| `sent_at` | Timestamp |
+| `shown_at` | Set when SW pings back after `showNotification()` |
+| `clicked_at` | Set when SW pings back after `notificationclick` |
+
+**Status progression:** `SENT` → `SHOWN` (SW ping-back) → `CLICKED` (SW ping-back on tap). `FAILED` is terminal and resendable.
+
+**Visibility page** (`/admin/notifications/log`):
+- Table of all push delivery records
+- Filter by: status, trigger type, date range, target user/role
+- Per-broadcast aggregate header: Sent · Shown · Clicked · Failed counts
+- **Resend** button on any `FAILED` or `SENT` row older than 30 minutes
+- **Bulk Resend** — select multiple failed rows and resend in one action
+
+**SW ping-back endpoint:** `POST /api/push/ack` — accepts `{ logId, event: 'shown' | 'clicked' }`. Updates `push_delivery_log` status and timestamp. No auth required (called from service worker context), but validates `logId` exists.
+
 ---
 
 ## 16. Database Schema Overview
@@ -1073,7 +1161,7 @@ All dashboards update via Socket.io WebSocket connections. When any relevant eve
 
 | Table | Key Fields | Temporal? | RLS? |
 |---|---|---|---|
-| users | id, name, email, role, status, capacity | Yes | Yes (role-based) |
+| users | id, name, email, role, status, capacity, app_theme | Yes | Yes (role-based) |
 | products | id, name, sku, base_sale_price, cost_price, min_threshold | Yes | Yes (cost fields restricted) |
 | inventory_levels | id, product_id, location_id, stock_count, reserved_count, batch_id | Yes | Yes (location-based) |
 | stock_batches | id, product_id, factory_cost, landing_cost, quantity, received_at | Yes | Yes (finance only for costs) |
@@ -1097,6 +1185,10 @@ All dashboards update via Socket.io WebSocket connections. When any relevant eve
 | order_timeline_events | id, order_id, event_type, actor_id, actor_name, description, metadata (JSONB), branch_id, created_at | No | Yes |
 | message_templates | id, name, channel, body, created_by, branch_id, status | Yes | Yes |
 | outbound_messages | id, order_id, agent_id, channel, template_id, rendered_body, status, sent_at | No | Yes |
+| push_subscriptions | id, user_id, endpoint, auth, p256dh, created_at | No | Yes (own only) |
+| push_broadcasts | id, created_by, target_type, target_role, target_user_id, title, body, sent_at, branch_id | No | Yes |
+| push_automation_rules | id, name, trigger_type, cron_expr, event_key, target_type, target_role, title_template, body_template, is_active, branch_id | Yes | Yes |
+| push_delivery_log | id, user_id, broadcast_id, automation_rule_id, title, body, trigger_type, status, failure_reason, sent_at, shown_at, clicked_at | No | Yes |
 
 ### 16.2 Key Relationships
 

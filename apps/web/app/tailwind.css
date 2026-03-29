@@ -11,6 +11,79 @@
     --sidebar-collapsed-width: 72px;
     --header-height: 56px;
     --bottom-nav-height: 4.5rem;
+    /* Default until data-app-theme is set (SSR / first line) */
+    --app-canvas: 248 250 252;
+    --app-elevated: 255 255 255;
+    --app-border: 226 232 240;
+    --app-border-strong: 203 213 225;
+    --app-fg: 15 23 42;
+    --app-fg-muted: 100 116 139;
+    --app-hover: 241 245 249;
+    --app-logo-strip-bg: 255 255 255;
+    --app-logo-strip-border: 226 232 240;
+  }
+
+  [data-app-theme='light'] {
+    --app-canvas: 248 250 252;
+    --app-elevated: 255 255 255;
+    --app-border: 226 232 240;
+    --app-border-strong: 203 213 225;
+    --app-fg: 15 23 42;
+    --app-fg-muted: 100 116 139;
+    --app-hover: 241 245 249;
+    --app-logo-strip-bg: 255 255 255;
+    --app-logo-strip-border: 226 232 240;
+  }
+
+  [data-app-theme='soft'] {
+    /* Calm: low-contrast layers, warm linen, borders that almost disappear */
+    --app-canvas: 241 237 229;
+    --app-elevated: 246 243 236;
+    --app-border: 232 228 219;
+    --app-border-strong: 216 211 201;
+    --app-fg: 54 50 45;
+    --app-fg-muted: 130 123 112;
+    --app-hover: 236 232 224;
+    --app-logo-strip-bg: 246 243 236;
+    --app-logo-strip-border: 232 228 219;
+  }
+
+  [data-app-theme='dark'] {
+    --app-canvas: 2 6 23;
+    --app-elevated: 15 23 42;
+    --app-border: 51 65 85;
+    --app-border-strong: 71 85 105;
+    --app-fg: 241 245 249;
+    --app-fg-muted: 148 163 184;
+    --app-hover: 30 41 59;
+    --app-logo-strip-bg: 15 23 42;
+    --app-logo-strip-border: 51 65 85;
+  }
+
+  /* Blue-gray dark (GitHub Dim–style) — uses html.dark like [data-app-theme='dark'] */
+  [data-app-theme='dim'] {
+    --app-canvas: 34 39 46;
+    --app-elevated: 45 51 59;
+    --app-border: 68 76 86;
+    --app-border-strong: 99 110 123;
+    --app-fg: 205 217 229;
+    --app-fg-muted: 139 148 158;
+    --app-hover: 55 62 71;
+    --app-logo-strip-bg: 45 51 59;
+    --app-logo-strip-border: 68 76 86;
+  }
+
+  /* OLED-style: near-black canvas, neutral zinc surfaces — uses html.dark like dark/dim */
+  [data-app-theme='ink'] {
+    --app-canvas: 8 8 10;
+    --app-elevated: 20 20 23;
+    --app-border: 48 48 54;
+    --app-border-strong: 63 63 70;
+    --app-fg: 245 245 245;
+    --app-fg-muted: 161 161 170;
+    --app-hover: 39 39 42;
+    --app-logo-strip-bg: 20 20 23;
+    --app-logo-strip-border: 48 48 54;
   }
 
   html {
@@ -19,12 +92,7 @@
   }
 
   body {
-    @apply font-sans text-surface-900 bg-surface-50;
-  }
-
-  /* Dark mode body */
-  .dark body {
-    @apply bg-surface-950 text-surface-100;
+    @apply font-sans bg-app-canvas text-app-fg;
   }
 
   /* Scrollbar styling */
@@ -37,26 +105,46 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-surface-300 rounded-full;
-  }
-
-  .dark ::-webkit-scrollbar-thumb {
-    @apply bg-surface-600;
+    @apply rounded-full;
+    background-color: rgb(var(--app-border-strong) / 0.85);
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-surface-400;
+    background-color: rgb(var(--app-fg-muted) / 0.45);
+  }
+
+  /* iOS/Android: avoid viewport zoom on focus when computed font-size < 16px.
+     pointer: coarse = touch-primary; !important beats utility text-sm/text-xs on same node. */
+  @media (pointer: coarse) {
+    input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']):not([type='file']):not([type='range']):not([type='image']),
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
   }
 }
 
 @layer components {
   /* Card component */
   .card {
-    @apply bg-white rounded-xl shadow-card border border-surface-100 p-5;
+    @apply bg-app-elevated rounded-xl shadow-card border border-app-border p-5 text-app-fg;
   }
 
   .dark .card {
-    @apply bg-surface-900 border-surface-800 shadow-none;
+    @apply shadow-none;
+  }
+
+  /* Calm theme: barely-there elevation so surfaces feel quieter */
+  [data-app-theme='soft'] .card {
+    box-shadow:
+      0 1px 2px rgb(54 50 45 / 0.03),
+      0 1px 1px rgb(54 50 45 / 0.02);
+  }
+
+  [data-app-theme='soft'] .card-hover:hover {
+    box-shadow:
+      0 2px 8px rgb(54 50 45 / 0.05),
+      0 1px 3px rgb(54 50 45 / 0.03);
   }
 
   .card-hover {
@@ -118,11 +206,7 @@
   }
 
   .btn-secondary {
-    @apply btn bg-surface-100 text-surface-700 hover:bg-surface-200 focus:ring-surface-400;
-  }
-
-  .dark .btn-secondary {
-    @apply bg-surface-800 text-surface-100 hover:bg-surface-700 hover:text-white;
+    @apply btn bg-app-hover text-app-fg hover:opacity-90 focus:ring-surface-400;
   }
 
   .btn-danger {
@@ -138,11 +222,7 @@
   }
 
   .btn-ghost {
-    @apply btn bg-transparent text-surface-600 hover:bg-surface-100 focus:ring-surface-400;
-  }
-
-  .dark .btn-ghost {
-    @apply text-surface-300 hover:bg-surface-800;
+    @apply btn bg-transparent text-app-fg-muted hover:bg-app-hover focus:ring-surface-400;
   }
 
   .btn-sm {
@@ -153,31 +233,28 @@
     @apply px-6 py-3 text-base;
   }
 
-  /* Input styling — use text-base (16px) on mobile to prevent iOS Safari zoom, text-sm on desktop */
+  /* Input styling — on touch devices, @layer base (pointer: coarse) forces 16px min to prevent zoom.
+     Here: mouse-primary sizing (html is 14px so text-base = 1rem = 14px; sm:text-sm for compact desktop). */
   .input {
-    @apply w-full rounded-lg border border-surface-300 bg-white px-3 py-2 text-base sm:text-sm text-surface-900 placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition-colors duration-150;
+    @apply w-full rounded-lg border border-app-border-strong bg-app-elevated px-3 py-2 text-base sm:text-sm text-app-fg placeholder:text-app-fg-muted focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition-colors duration-150;
   }
 
-  .dark .input {
-    @apply bg-surface-800 border-surface-700 text-surface-100 placeholder:text-surface-500;
-  }
-
-  /* Override browser autofill white background in dark mode */
-  .dark input:-webkit-autofill,
-  .dark input:-webkit-autofill:hover,
-  .dark input:-webkit-autofill:focus,
-  .dark input:-webkit-autofill:active,
-  .dark textarea:-webkit-autofill,
-  .dark textarea:-webkit-autofill:hover,
-  .dark textarea:-webkit-autofill:focus,
-  .dark textarea:-webkit-autofill:active,
-  .dark select:-webkit-autofill,
-  .dark select:-webkit-autofill:hover,
-  .dark select:-webkit-autofill:focus,
-  .dark select:-webkit-autofill:active {
-    -webkit-box-shadow: 0 0 0 30px rgb(30 41 59) inset !important;
-    -webkit-text-fill-color: rgb(241 245 249) !important;
-    caret-color: rgb(241 245 249);
+  /* Override browser autofill to match elevated surface */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus,
+  textarea:-webkit-autofill:active,
+  select:-webkit-autofill,
+  select:-webkit-autofill:hover,
+  select:-webkit-autofill:focus,
+  select:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px rgb(var(--app-elevated)) inset !important;
+    -webkit-text-fill-color: rgb(var(--app-fg)) !important;
+    caret-color: rgb(var(--app-fg));
   }
 
   .input-error {
@@ -205,27 +282,15 @@
 
   /* Table styling */
   .table-header {
-    @apply bg-surface-50 text-left text-xs font-semibold uppercase tracking-wider text-surface-800 px-4 py-3;
-  }
-
-  .dark .table-header {
-    @apply bg-surface-800/50 text-surface-300;
+    @apply bg-app-hover text-left text-xs font-semibold uppercase tracking-wider text-app-fg px-4 py-3;
   }
 
   .table-cell {
-    @apply px-4 py-3 text-sm text-surface-800 whitespace-nowrap;
-  }
-
-  .dark .table-cell {
-    @apply text-surface-300;
+    @apply px-4 py-3 text-sm text-app-fg whitespace-nowrap;
   }
 
   .table-row {
-    @apply border-b border-surface-100 hover:bg-surface-50 transition-colors duration-100;
-  }
-
-  .dark .table-row {
-    @apply border-surface-800 hover:bg-surface-800/50;
+    @apply border-b border-app-border hover:bg-app-hover/80 transition-colors duration-100;
   }
 
   /* Status dot indicators */

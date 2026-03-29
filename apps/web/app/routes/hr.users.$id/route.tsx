@@ -294,35 +294,101 @@ export async function action({ request, params }: ActionFunctionArgs) {
       `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
       { method: 'GET', cookie },
     );
-    const targetData = targetRes.data as { result?: { data?: { role: string } } };
-    if (targetData?.result?.data?.role === 'SUPER_ADMIN') {
+    if (!targetRes.ok) {
+      return json({ error: 'User not found' }, { status: 404 });
+    }
+    const targetPayload = targetRes.data as {
+      result?: {
+        data?: {
+          role: string;
+          name: string;
+          email: string;
+          status: string;
+          capacity: number;
+          logisticsLocationId: string | null;
+          restrictProductAccess: boolean;
+          assignedProductIds?: string[];
+        };
+      };
+    };
+    const target = targetPayload?.result?.data;
+    if (!target) {
+      return json({ error: 'User not found' }, { status: 404 });
+    }
+    if (target.role === 'SUPER_ADMIN') {
       return json({ error: 'SuperAdmin accounts cannot be updated from this page. Use Settings to edit your own profile.' }, { status: 403 });
     }
 
     const body: Record<string, unknown> = { userId };
+    const prevAssignedKey = [...(target.assignedProductIds ?? [])].sort().join('\0');
 
-    const name = formData.get('name')?.toString();
-    const email = formData.get('email')?.toString();
-    const role = formData.get('role')?.toString();
-    const status = formData.get('status')?.toString();
-    const capacityStr = formData.get('capacity')?.toString();
-    const logisticsLocationId = formData.get('logisticsLocationId')?.toString();
-    const phone = formData.get('phone')?.toString();
-    const visibleOrderStatusesStr = formData.get('visibleOrderStatuses')?.toString();
-    const productIdsStr = formData.get('productIds')?.toString();
-    const restrictProductAccess = formData.get('restrictProductAccess');
-
-    if (name) body.name = name;
-    if (email) body.email = email;
-    if (role) body.role = role;
-    if (status) body.status = status;
-    if (capacityStr) body.capacity = parseInt(capacityStr, 10);
-    if (logisticsLocationId !== undefined) body.logisticsLocationId = logisticsLocationId || null;
-    if (phone !== undefined) body.phone = phone || null;
-    if (productIdsStr) {
-      try { body.productIds = JSON.parse(productIdsStr); } catch { /* skip */ }
+    const name = formData.get('name')?.toString().trim() ?? '';
+    if (name.length >= 2 && name !== target.name) {
+      body.name = name;
     }
-    if (restrictProductAccess !== null) body.restrictProductAccess = restrictProductAccess === 'true';
+
+    const email = formData.get('email')?.toString().trim() ?? '';
+    if (email.length > 0 && email.toLowerCase() !== target.email.toLowerCase()) {
+      body.email = email;
+    }
+
+    const role = formData.get('role')?.toString();
+    if (role && role !== target.role) {
+      body.role = role;
+    }
+
+    const status = formData.get('status')?.toString();
+    if (status && status !== target.status) {
+      body.status = status;
+    }
+
+    const capacityStr = formData.get('capacity')?.toString();
+    if (capacityStr !== undefined && capacityStr !== '') {
+      const capacity = parseInt(capacityStr, 10);
+      if (!Number.isNaN(capacity) && capacity !== target.capacity) {
+        body.capacity = capacity;
+      }
+    }
+
+    if (formData.has('logisticsLocationId')) {
+      const raw = formData.get('logisticsLocationId')?.toString() ?? '';
+      const next = raw || null;
+      const prev = target.logisticsLocationId ?? null;
+      if (next !== prev) {
+        body.logisticsLocationId = next;
+      }
+    }
+
+    const phone = formData.get('phone')?.toString().trim() ?? '';
+    if (phone.length > 0) {
+      body.phone = phone;
+    }
+
+    const productIdsStr = formData.get('productIds')?.toString();
+    if (productIdsStr) {
+      try {
+        const ids = JSON.parse(productIdsStr) as unknown;
+        if (Array.isArray(ids) && ids.every((id): id is string => typeof id === 'string')) {
+          const nextAssignedKey = [...ids].sort().join('\0');
+          if (nextAssignedKey !== prevAssignedKey) {
+            body.productIds = ids;
+          }
+          const submittedRestrict =
+            formData.get('restrictProductAccess') === 'true' ||
+            formData.get('restrictProductAccess') === 'on';
+          if (submittedRestrict !== target.restrictProductAccess) {
+            body.restrictProductAccess = submittedRestrict;
+          }
+        }
+      } catch {
+        /* invalid productIds JSON */
+      }
+    }
+
+    const changedKeys = Object.keys(body).filter((k) => k !== 'userId');
+    if (changedKeys.length === 0) {
+      return json({ success: true, message: 'No changes to save' });
+    }
 
     const res = await apiRequest<unknown>('/trpc/users.update', {
       method: 'POST', cookie, body,
@@ -464,9 +530,9 @@ export default function UserDetailRoute() {
       {(data) =>
         'notFound' in data && data.notFound ? (
           <div className="card text-center py-12">
-            <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
-            <h2 className="text-xl font-bold text-surface-900 dark:text-white">User not found</h2>
-            <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
+            <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
+            <h2 className="text-xl font-bold text-app-fg">User not found</h2>
+            <p className="mt-2 text-sm text-app-fg-muted">
               The user you're looking for doesn't exist or has been removed.
             </p>
             <a href="/hr/users" className="btn-primary mt-4 inline-block">

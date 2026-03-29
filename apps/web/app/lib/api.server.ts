@@ -138,7 +138,16 @@ export async function getCurrentUser(request: Request) {
   if (!cookie) return null;
 
   const res = await apiRequest<{
-    user: { id: string; email: string; name: string; role: string; permissions?: string[]; logisticsLocationId?: string | null; currentBranchId?: string | null };
+    user: {
+      id: string;
+      email: string;
+      name: string;
+      role: string;
+      permissions?: string[];
+      logisticsLocationId?: string | null;
+      currentBranchId?: string | null;
+      appTheme?: string | null;
+    };
   }>('/auth/me', { method: 'POST', cookie });
 
   if (!res.ok) return null;

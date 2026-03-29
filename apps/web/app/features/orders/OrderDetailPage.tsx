@@ -6,7 +6,6 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
-import { Tabs } from '~/components/ui/tabs';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useVoipDevice } from '~/hooks/useVoipDevice';
@@ -88,10 +87,10 @@ interface DetailFieldConfig {
   rowAccent?: string;
 }
 
-const DETAIL_DATE_CLASS = 'text-surface-600 dark:text-surface-400 tabular-nums';
+const DETAIL_DATE_CLASS = 'text-app-fg-muted tabular-nums';
 const DETAIL_CURRENCY_CLASS = 'font-semibold text-success-600 dark:text-success-400 tabular-nums';
 const DETAIL_PERSON_CLASS = 'font-medium text-brand-600 dark:text-brand-400';
-const DETAIL_ID_CLASS = 'font-mono text-xs text-surface-500 dark:text-surface-400 break-all';
+const DETAIL_ID_CLASS = 'font-mono text-xs text-app-fg-muted break-all';
 
 const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   {
@@ -108,7 +107,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
       if (s === 'PAID') return 'font-medium text-success-600 dark:text-success-400';
       if (s === 'PENDING') return 'font-medium text-warning-600 dark:text-warning-400';
       if (s === 'FAILED') return 'font-medium text-danger-600 dark:text-danger-400';
-      return 'font-medium text-surface-700 dark:text-surface-300';
+      return 'font-medium text-app-fg-muted';
     },
     rowAccent: 'border-l-4 border-l-surface-200 dark:border-l-surface-700',
   },
@@ -187,7 +186,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     ddClassName: (v) =>
       Number(v) > 0
         ? 'font-medium text-warning-600 dark:text-warning-400 tabular-nums'
-        : 'text-surface-600 dark:text-surface-400 tabular-nums',
+        : 'text-app-fg-muted tabular-nums',
   },
   {
     label: 'Callback notes',
@@ -201,7 +200,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     ddClassName: (v) => {
       const s = String(v ?? '').toUpperCase();
       if (s === 'FLAGGED') return 'font-medium text-warning-600 dark:text-warning-400';
-      if (s === 'MERGED' || s === 'DISMISSED') return 'text-surface-600 dark:text-surface-400';
+      if (s === 'MERGED' || s === 'DISMISSED') return 'text-app-fg-muted';
       return '';
     },
   },
@@ -209,7 +208,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     label: 'Duplicate of',
     getValue: (o) => o.duplicateOfId,
     format: (v) => (v ? String(v) : ''),
-    ddClassName: 'font-mono text-xs text-surface-600 dark:text-surface-400 break-all',
+    ddClassName: 'font-mono text-xs text-app-fg-muted break-all',
   },
   {
     label: 'Locked until',
@@ -282,13 +281,13 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     label: 'Parent order',
     getValue: (o) => o.parentOrderId,
     format: (v) => (v ? String(v) : ''),
-    ddClassName: 'font-mono text-xs text-surface-600 dark:text-surface-400 break-all',
+    ddClassName: 'font-mono text-xs text-app-fg-muted break-all',
   },
   {
     label: 'Delivery OTP',
     getValue: (o) => o.deliveryOtp,
     format: (v) => (v ? String(v) : ''),
-    ddClassName: 'font-mono text-sm text-surface-700 dark:text-surface-300',
+    ddClassName: 'font-mono text-sm text-app-fg-muted',
   },
   {
     label: 'Customer gender',
@@ -339,7 +338,7 @@ function CallStatusIndicator({ call }: { call: CallLogEntry }) {
               {call.callStatus === 'BUSY' && 'Line busy'}
             </p>
             {call.durationSeconds != null && call.durationSeconds > 0 && (
-              <p className="text-xs text-surface-800 dark:text-surface-200">
+              <p className="text-xs text-app-fg-muted">
                 Duration: {call.durationSeconds}s
                 {call.durationSeconds >= 15 && (
                   <span className="ml-1 text-success-600 dark:text-success-400 font-medium">
@@ -397,7 +396,7 @@ function InCallOverlay({
   const isActive = callStatus === 'INITIATED' || callStatus === 'RINGING' || callStatus === 'IN_PROGRESS';
 
   return (
-    <div className="rounded-xl bg-surface-900 dark:bg-surface-950 p-4 sm:p-5 text-white animate-fade-in w-full max-w-sm mx-auto max-h-[90dvh] overflow-y-auto">
+    <div className="rounded-xl bg-app-elevated border border-app-border p-4 sm:p-5 text-app-fg animate-fade-in w-full max-w-sm mx-auto max-h-[90dvh] overflow-y-auto">
       {/* Status + pulsing dot */}
       <div className="flex items-center justify-center gap-2 mb-3">
         {isActive && (
@@ -506,7 +505,7 @@ function VoipCallPanel({
   return (
     <div className="card">
       <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white">VOIP Call</h2>
+        <h2 className="text-lg font-semibold text-app-fg">VOIP Call</h2>
         <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2 py-0.5 text-2xs font-medium text-success-700 dark:text-success-400">
           VOIP Enabled
         </span>
@@ -541,20 +540,20 @@ function VoipCallPanel({
               Try again
             </Button>
             {(voip.error?.toLowerCase().includes('31202') || voip.error?.toLowerCase().includes('jwt signature')) && (
-              <div className="mt-3 rounded-md border border-warning-300 dark:border-warning-600 bg-warning-50 dark:bg-warning-900/30 px-2 py-2 text-xs text-surface-700 dark:text-surface-300">
+              <div className="mt-3 rounded-md border border-warning-300 dark:border-warning-600 bg-warning-50 dark:bg-warning-900/30 px-2 py-2 text-xs text-app-fg-muted">
                 <p className="font-semibold text-warning-800 dark:text-warning-200 mb-1">Twilio 31202 — JWT signature validation failed</p>
-                <p className="mb-1">Use an <strong>API Key Secret</strong> in <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_API_KEY_SECRET</code>, not the account Auth Token. In Twilio Console: Account → API keys → Create API Key, then copy the <strong>Secret</strong> (not the SID) into your API env.</p>
-                <p className="text-surface-600 dark:text-surface-400">API Key SID should start with <code>SK</code>; Account SID starts with <code>AC</code>.</p>
+                <p className="mb-1">Use an <strong>API Key Secret</strong> in <code className="bg-app-hover px-1 rounded">TWILIO_API_KEY_SECRET</code>, not the account Auth Token. In Twilio Console: Account → API keys → Create API Key, then copy the <strong>Secret</strong> (not the SID) into your API env.</p>
+                <p className="text-app-fg-muted">API Key SID should start with <code>SK</code>; Account SID starts with <code>AC</code>.</p>
               </div>
             )}
             {(voip.debugInfo?.raw?.includes('53000') || voip.debugInfo?.phase === 'device_init') && (
-              <div className="mt-3 rounded-md border border-warning-300 dark:border-warning-600 bg-warning-50 dark:bg-warning-900/30 px-2 py-2 text-xs text-surface-700 dark:text-surface-300">
+              <div className="mt-3 rounded-md border border-warning-300 dark:border-warning-600 bg-warning-50 dark:bg-warning-900/30 px-2 py-2 text-xs text-app-fg-muted">
                 <p className="font-semibold text-warning-800 dark:text-warning-200 mb-1">Error 53000 / device init — things to check:</p>
                 <ul className="list-disc list-inside space-y-0.5 ml-1">
-                  <li><strong>31202 in browser console?</strong> Use <strong>API Key Secret</strong> in <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_API_KEY_SECRET</code> (Console → API keys → Create → copy <strong>Secret</strong>), not the account Auth Token.</li>
-                  <li><code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_API_KEY_SID</code> must start with <code>SK</code>; <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_TWIML_APP_SID</code> with <code>AP</code>.</li>
+                  <li><strong>31202 in browser console?</strong> Use <strong>API Key Secret</strong> in <code className="bg-app-hover px-1 rounded">TWILIO_API_KEY_SECRET</code> (Console → API keys → Create → copy <strong>Secret</strong>), not the account Auth Token.</li>
+                  <li><code className="bg-app-hover px-1 rounded">TWILIO_API_KEY_SID</code> must start with <code>SK</code>; <code className="bg-app-hover px-1 rounded">TWILIO_TWIML_APP_SID</code> with <code>AP</code>.</li>
                   <li>Identity uses only letters, numbers, underscore (no hyphens).</li>
-                  <li>If not in the US: set <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">TWILIO_VOICE_REGION=ie1</code> or <code className="bg-surface-200 dark:bg-surface-700 px-1 rounded">au1</code>.</li>
+                  <li>If not in the US: set <code className="bg-app-hover px-1 rounded">TWILIO_VOICE_REGION=ie1</code> or <code className="bg-app-hover px-1 rounded">au1</code>.</li>
                   <li>Network: firewall must allow WebSocket (wss) to Twilio.</li>
                 </ul>
               </div>
@@ -564,7 +563,7 @@ function VoipCallPanel({
                 <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-medium text-danger-700 dark:text-danger-300">
                   Technical details (for debugging)
                 </summary>
-                <pre className="p-2 text-[11px] text-surface-700 dark:text-surface-300 whitespace-pre-wrap break-all overflow-x-auto max-h-48 overflow-y-auto font-mono">
+                <pre className="p-2 text-[11px] text-app-fg-muted whitespace-pre-wrap break-all overflow-x-auto max-h-48 overflow-y-auto font-mono">
                   {JSON.stringify(
                     {
                       phase: voip.debugInfo.phase,
@@ -721,11 +720,9 @@ export function OrderDetailPage({
   const isCSAgent = userRole === 'CS_AGENT';
   useAgentStateBroadcast(
     isCSAgent
-      ? { currentRoute: `/admin/orders/${order.id}`, currentOrderId: order.id, currentPanel: activeTab }
+      ? { currentRoute: `/admin/orders/${order.id}`, currentOrderId: order.id, currentPanel: 'details' }
       : { currentRoute: '' }
   );
-
-  const [activeTab, setActiveTab] = useState<'details' | 'timeline'>('details');
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [assignToId, setAssignToId] = useState('');
@@ -931,27 +928,27 @@ export function OrderDetailPage({
     <div className="space-y-4 overflow-x-hidden min-w-0">
       {/* Breadcrumb */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <Link to="/admin/cs/orders" className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
+        <Link to="/admin/cs/orders" className="text-app-fg-muted hover:text-brand-500">
           Orders
         </Link>
-        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
-        <span className="text-surface-900 dark:text-white font-medium truncate min-w-0">{order.id.slice(0, 8)}...</span>
+        <span className="text-app-fg font-medium truncate min-w-0">{order.id.slice(0, 8)}...</span>
       </div>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 min-w-0">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-white truncate">{order.customerName}</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 font-mono mt-0.5 break-all">
+          <h1 className="text-xl sm:text-2xl font-bold text-app-fg truncate">{order.customerName}</h1>
+          <p className="text-sm text-app-fg-muted font-mono mt-0.5 break-all">
             {order.customerPhoneDisplay}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <PageRefreshButton />
           {!canEditOrder && (
-            <span className="inline-flex items-center rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-1 text-xs font-medium text-surface-600 dark:text-surface-400">
+            <span className="inline-flex items-center rounded-full bg-app-hover px-2.5 py-1 text-xs font-medium text-app-fg-muted">
               View only
             </span>
           )}
@@ -968,23 +965,12 @@ export function OrderDetailPage({
         />
       )}
 
-      <Tabs
-        value={activeTab}
-        onChange={(v) => setActiveTab(v as 'details' | 'timeline')}
-        tabs={[
-          { value: 'details', label: 'Details' },
-          { value: 'timeline', label: 'Activity' },
-        ]}
-      />
-
-      {/* Tab content */}
-      {activeTab === 'details' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Left column */}
           <div className="lg:col-span-2 space-y-4">
             {/* Status Timeline */}
             <div className="card overflow-hidden">
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Progress</h2>
+              <h2 className="text-lg font-semibold text-app-fg mb-4">Order Progress</h2>
               <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain lg:overflow-x-visible lg:mx-0 lg:px-0 lg:pb-0">
                 <div className="flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:grid-cols-5 lg:gap-x-3 lg:gap-y-4">
                 {STATUS_FLOW.map((status, idx) => {
@@ -999,7 +985,7 @@ export function OrderDetailPage({
                             ? 'bg-brand-500 text-white ring-4 ring-brand-100 dark:ring-brand-900'
                             : isPast
                             ? 'bg-success-500 text-white'
-                            : 'bg-surface-200 dark:bg-surface-700 text-surface-700 dark:text-surface-300'
+                            : 'bg-app-hover text-app-fg-muted'
                         }`}>
                           {isPast ? (
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -1010,13 +996,13 @@ export function OrderDetailPage({
                           )}
                         </div>
                         <span className={`text-2xs mt-1 whitespace-nowrap lg:whitespace-normal lg:text-center lg:leading-tight ${
-                          isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-surface-700 dark:text-surface-300'
+                          isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-app-fg-muted'
                         }`}>
                           {status.replace(/_/g, ' ')}
                         </span>
                       </div>
                       {idx < STATUS_FLOW.length - 1 && (
-                        <div className={`h-0.5 w-8 mx-1 flex-shrink-0 lg:hidden ${isPast ? 'bg-success-500' : 'bg-surface-200 dark:bg-surface-700'}`} />
+                        <div className={`h-0.5 w-8 mx-1 flex-shrink-0 lg:hidden ${isPast ? 'bg-success-500' : 'bg-app-hover'}`} />
                       )}
                     </div>
                   );
@@ -1027,23 +1013,23 @@ export function OrderDetailPage({
 
             {/* Order Items — card layout (typically 3–4 items) */}
             <div className="card">
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Order Items</h2>
+              <h2 className="text-lg font-semibold text-app-fg mb-3">Order Items</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {order.orderItems.map((item) => {
                   const subtotal = item.quantity * Number(item.unitPrice);
                   return (
                     <div
                       key={item.id}
-                      className="rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 p-3 flex flex-col"
+                      className="rounded-lg border border-app-border bg-app-hover p-3 flex flex-col"
                     >
-                      <p className="font-medium text-surface-900 dark:text-surface-100 line-clamp-2" title={item.productName ?? item.productId}>
+                      <p className="font-medium text-app-fg line-clamp-2" title={item.productName ?? item.productId}>
                         {item.productName ?? `${item.productId.slice(0, 8)}...`}
                       </p>
-                      <div className="mt-2 flex items-center justify-between text-sm text-surface-800 dark:text-surface-200">
+                      <div className="mt-2 flex items-center justify-between text-sm text-app-fg-muted">
                         <span>Qty: {item.quantity}</span>
                         <span>&#8358;{Number(item.unitPrice).toLocaleString()} each</span>
                       </div>
-                      <p className="mt-1.5 text-sm font-semibold text-surface-900 dark:text-white">
+                      <p className="mt-1.5 text-sm font-semibold text-app-fg">
                         Subtotal: &#8358;{subtotal.toLocaleString()}
                       </p>
                       <Link
@@ -1061,21 +1047,36 @@ export function OrderDetailPage({
                 })}
               </div>
               {order.totalAmount && (
-                <div className="mt-3 pt-3 border-t border-surface-200 dark:border-surface-700 flex justify-end">
-                  <p className="text-base font-bold text-surface-900 dark:text-white">
+                <div className="mt-3 pt-3 border-t border-app-border flex justify-end">
+                  <p className="text-base font-bold text-app-fg">
                     Total: &#8358;{Number(order.totalAmount).toLocaleString()}
                   </p>
                 </div>
               )}
             </div>
 
+            {/* Order activity — lifecycle timeline */}
+            <div className="card">
+              <h2 className="text-lg font-semibold text-app-fg mb-1">Order Activity</h2>
+              <p className="text-sm text-app-fg-muted mb-3">
+                Every step taken on this order, with who did it and when.
+              </p>
+              {timeline ? (
+                <DeferredSection resolve={timeline} skeleton="table">
+                  {(resolvedTimeline) => <OrderTimeline events={resolvedTimeline as TimelineEvent[]} />}
+                </DeferredSection>
+              ) : (
+                <p className="text-sm text-app-fg-muted py-4 text-center">No timeline data.</p>
+              )}
+            </div>
+
             {/* Call History */}
             {order.callLogs.length > 0 && (
               <div className="card">
-                <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Call History</h2>
+                <h2 className="text-lg font-semibold text-app-fg mb-3">Call History</h2>
                 <div className="space-y-2">
                   {order.callLogs.map((call) => (
-                    <div key={call.id} className="flex items-center justify-between p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <div key={call.id} className="flex items-center justify-between p-3 rounded-lg bg-app-hover">
                       <div className="flex items-center gap-3">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                           call.callStatus === 'COMPLETED' && (call.durationSeconds ?? 0) >= 15
@@ -1091,7 +1092,7 @@ export function OrderDetailPage({
                           </svg>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
+                          <p className="text-sm font-medium text-app-fg">
                             {call.callStatus}
                             {call.callStatus === 'COMPLETED' && (call.durationSeconds ?? 0) >= 15 && (
                               <span className="ml-2 text-xs text-success-600 dark:text-success-400 font-normal">
@@ -1099,12 +1100,12 @@ export function OrderDetailPage({
                               </span>
                             )}
                           </p>
-                          <p className="text-xs text-surface-800 dark:text-surface-200">
+                          <p className="text-xs text-app-fg-muted">
                             {new Date(call.startedAt).toLocaleString('en-NG')}
                           </p>
                         </div>
                       </div>
-                      <span className="text-sm font-mono text-surface-600 dark:text-surface-300">
+                      <span className="text-sm font-mono text-app-fg-muted">
                         {call.durationSeconds ?? 0}s
                       </span>
                     </div>
@@ -1119,7 +1120,7 @@ export function OrderDetailPage({
             {/* Order Actions — CS / Head of CS only, role-based */}
             {canEditOrder && isCSOrHoS && (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || order.status === 'CS_ENGAGED') && (
               <div className="card">
-                <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Order Actions</h2>
+                <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {!canPerformCSActionsOnOrder && (
                   <div className="rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3 mb-3">
                     <p className="text-sm text-warning-800 dark:text-warning-200">
@@ -1257,7 +1258,7 @@ export function OrderDetailPage({
                       )}
                     </DeferredSection>
                   ) : (
-                    <p className="text-sm text-surface-500 dark:text-surface-400">
+                    <p className="text-sm text-app-fg-muted">
                       VOIP calling is available once the order is in CS Engaged status.
                     </p>
                   )
@@ -1267,7 +1268,7 @@ export function OrderDetailPage({
 
             {/* Order Info — dynamic fields: show when value present or alwaysShow */}
             <div className="card">
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Details</h2>
+              <h2 className="text-lg font-semibold text-app-fg mb-3">Details</h2>
               <dl className="space-y-2.5 text-sm">
                 {ORDER_DETAIL_FIELDS.map((field) => {
                   const value = field.getValue(order);
@@ -1279,7 +1280,7 @@ export function OrderDetailPage({
                       : field.ddClassName ?? '';
                   const ddClass = [
                     'mt-0.5 break-words',
-                    valueClass || 'text-surface-900 dark:text-surface-100',
+                    valueClass || 'text-app-fg',
                   ].filter(Boolean).join(' ');
                   const rowClass = [
                     'min-w-0 pl-3 py-1.5 rounded-r-md -ml-px',
@@ -1287,7 +1288,7 @@ export function OrderDetailPage({
                   ].filter(Boolean).join(' ');
                   return (
                     <div key={field.label} className={rowClass}>
-                      <dt className="text-surface-600 dark:text-surface-400 text-xs font-medium uppercase tracking-wider">
+                      <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wider">
                         {field.label}
                       </dt>
                       <dd className={ddClass}>{formatted}</dd>
@@ -1298,32 +1299,12 @@ export function OrderDetailPage({
             </div>
           </div>
         </div>
-      ) : (
-        /* Timeline Tab — order lifecycle events */
-        <div>
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Order Activity</h2>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-              Every step taken on this order, with who did it and when.
-            </p>
-          </div>
-          <div className="card">
-            {timeline ? (
-              <DeferredSection resolve={timeline} skeleton="table">
-                {(resolvedTimeline) => <OrderTimeline events={resolvedTimeline as TimelineEvent[]} />}
-              </DeferredSection>
-            ) : (
-              <p className="text-sm text-surface-600 dark:text-surface-400 py-4 text-center">No timeline data.</p>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Confirm order modal — Confirm now or Schedule callback */}
       {confirmModalOpen && (
         <Modal open onClose={() => { setConfirmModalOpen(false); setDeliveryDate(''); setScheduleDelayMinutes(120); setScheduleNotes(''); }} maxWidth="max-w-md" contentClassName="p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Confirm order</h3>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Confirm order</h3>
+            <p className="text-sm text-app-fg-muted mb-4">
               Confirm the order now or schedule a callback for later.
             </p>
             <div className="space-y-4">
@@ -1335,7 +1316,7 @@ export function OrderDetailPage({
                 <input type="hidden" name="newStatus" value="CONFIRMED" />
                 <input type="hidden" name="preferredDeliveryDate" value={deliveryDate} />
                 <div className="space-y-2 mb-4">
-                  <label className="block text-xs font-medium text-surface-600 dark:text-surface-400">
+                  <label className="block text-xs font-medium text-app-fg-muted">
                     Scheduled delivery date
                   </label>
                   <input
@@ -1346,7 +1327,7 @@ export function OrderDetailPage({
                     className="input w-full"
                     aria-label="Delivery date"
                   />
-                  <p className="text-xs text-surface-600 dark:text-surface-400">
+                  <p className="text-xs text-app-fg-muted">
                     When should logistics deliver this order? Leave empty if not specified.
                   </p>
                 </div>
@@ -1361,13 +1342,13 @@ export function OrderDetailPage({
                   Confirm now
                 </Button>
               </fetcher.Form>
-              <div className="border-t border-surface-200 dark:border-surface-700 pt-4">
-                <p className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Schedule callback</p>
-                <p className="text-xs text-surface-600 dark:text-surface-400 mb-3">
+              <div className="border-t border-app-border pt-4">
+                <p className="text-sm font-medium text-app-fg-muted mb-2">Schedule callback</p>
+                <p className="text-xs text-app-fg-muted mb-3">
                   Move order back to queue and set a time to call again (e.g. customer not picking).
                 </p>
                 <div className="space-y-2 mb-3">
-                  <label className="block text-xs font-medium text-surface-600 dark:text-surface-400">Delay</label>
+                  <label className="block text-xs font-medium text-app-fg-muted">Delay</label>
                   <select
                     value={scheduleDelayMinutes}
                     onChange={(e) => setScheduleDelayMinutes(parseInt(e.target.value, 10))}
@@ -1381,7 +1362,7 @@ export function OrderDetailPage({
                     <option value={480}>8 hours</option>
                     <option value={1440}>24 hours</option>
                   </select>
-                  <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mt-2">Notes (optional)</label>
+                  <label className="block text-xs font-medium text-app-fg-muted mt-2">Notes (optional)</label>
                   <textarea
                     value={scheduleNotes}
                     onChange={(e) => setScheduleNotes(e.target.value)}
@@ -1427,8 +1408,8 @@ export function OrderDetailPage({
       {/* Delete order modal (cancel with reason) */}
       {cancelModalOpen && (
         <Modal open onClose={() => { setCancelModalOpen(false); setCancelReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Delete order</h3>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Delete order</h3>
+            <p className="text-sm text-app-fg-muted mb-3">
               Please provide a reason (at least 10 characters). This will move the order to Cancelled.
             </p>
             <div className="flex flex-wrap gap-2 mb-3">
@@ -1445,7 +1426,7 @@ export function OrderDetailPage({
                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       isActive
                         ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700'
-                        : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 border border-surface-200 dark:border-surface-700 hover:bg-surface-200 dark:hover:bg-surface-700'
+                        : 'bg-app-hover text-app-fg-muted border border-app-border hover:bg-app-hover'
                     }`}
                   >
                     {preset}
@@ -1495,10 +1476,10 @@ export function OrderDetailPage({
       {/* Call customer modal — VOIP: Start call + status + debug; VOIP off: reveal number, copy, open dialer */}
       {callCustomerModalOpen && (
         <Modal open onClose={() => setCallCustomerModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Call customer</h3>
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Call customer</h3>
             {voipEnabled ? (
               <>
-                <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+                <p className="text-sm text-app-fg-muted mb-3">
                   Start the call from here. The modal stays open so you can see status and debug info. Close when done.
                 </p>
                 <div className="flex flex-col gap-3 mb-4">
@@ -1558,21 +1539,21 @@ export function OrderDetailPage({
                       </div>
                     );
                   })()}
-                  <p className="text-sm text-surface-600 dark:text-surface-400">
+                  <p className="text-sm text-app-fg-muted">
                     Status: {fetcher.state === 'submitting' ? 'Connecting...' : (fetcher.data as { callLog?: { callStatus?: string } })?.callLog?.callStatus ?? order.callLogs[0]?.callStatus ?? 'Idle'}
                   </p>
                 </div>
-                <details className="mb-4 rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden">
-                  <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 bg-surface-50 dark:bg-surface-800/50">
+                <details className="mb-4 rounded-lg border border-app-border overflow-hidden">
+                  <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-app-fg-muted bg-app-hover">
                     Logs &amp; debug
                   </summary>
-                  <div className="p-3 border-t border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/30">
-                    <p className="text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Last response</p>
-                    <pre className="p-2 text-[11px] text-surface-700 dark:text-surface-300 whitespace-pre-wrap break-all overflow-x-auto max-h-32 overflow-y-auto font-mono bg-surface-100 dark:bg-surface-800 rounded mb-2">
+                  <div className="p-3 border-t border-app-border bg-app-hover">
+                    <p className="text-xs font-medium text-app-fg-muted mb-1">Last response</p>
+                    <pre className="p-2 text-[11px] text-app-fg-muted whitespace-pre-wrap break-all overflow-x-auto max-h-32 overflow-y-auto font-mono bg-app-hover rounded mb-2">
                       {fetcher.data != null ? JSON.stringify(fetcher.data, null, 2) : '—'}
                     </pre>
-                    <p className="text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Latest call</p>
-                    <pre className="p-2 text-[11px] text-surface-700 dark:text-surface-300 whitespace-pre-wrap break-all overflow-x-auto max-h-24 overflow-y-auto font-mono bg-surface-100 dark:bg-surface-800 rounded mb-2">
+                    <p className="text-xs font-medium text-app-fg-muted mb-1">Latest call</p>
+                    <pre className="p-2 text-[11px] text-app-fg-muted whitespace-pre-wrap break-all overflow-x-auto max-h-24 overflow-y-auto font-mono bg-app-hover rounded mb-2">
                       {order.callLogs[0] != null
                         ? JSON.stringify(
                             {
@@ -1588,8 +1569,8 @@ export function OrderDetailPage({
                     </pre>
                     {callDebugLog.length > 0 && (
                       <>
-                        <p className="text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Event log</p>
-                        <ul className="list-disc list-inside text-[11px] text-surface-600 dark:text-surface-400 space-y-0.5">
+                        <p className="text-xs font-medium text-app-fg-muted mb-1">Event log</p>
+                        <ul className="list-disc list-inside text-[11px] text-app-fg-muted space-y-0.5">
                           {callDebugLog.map((line, i) => (
                             <li key={i}>{line}</li>
                           ))}
@@ -1606,7 +1587,7 @@ export function OrderDetailPage({
               </>
             ) : !revealData?.phoneRevealed ? (
               <>
-                <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+                <p className="text-sm text-app-fg-muted mb-4">
                   Reveal the customer&apos;s number to call them manually. The call is recorded when you click &quot;Copy number&quot; or &quot;Call on my phone&quot;.
                 </p>
                 {revealData?.error && (
@@ -1636,7 +1617,7 @@ export function OrderDetailPage({
               </>
             ) : !revealData?.isDialable ? (
               <>
-                <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+                <p className="text-sm text-app-fg-muted mb-3">
                   This order was created with phone protection. The customer&apos;s number is not stored in a dialable form and cannot be shown. Enable VOIP in Settings to call via the app, or record that you called using your own records below.
                 </p>
                 <div className="flex gap-2 justify-end flex-wrap">
@@ -1659,11 +1640,11 @@ export function OrderDetailPage({
               </>
             ) : (
               <>
-                <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+                <p className="text-sm text-app-fg-muted mb-3">
                   Click &quot;Copy number&quot; or &quot;Call on my phone&quot; to record the call, then use the number to contact the customer.
                 </p>
-                <div className="rounded-lg bg-surface-100 dark:bg-surface-800 p-4 mb-4">
-                  <p className="text-sm text-surface-600 dark:text-surface-400">
+                <div className="rounded-lg bg-app-hover p-4 mb-4">
+                  <p className="text-sm text-app-fg-muted">
                     Number is loaded. Click &quot;Copy number&quot; or &quot;Call on my phone&quot; to use it — the number is not shown in the app.
                   </p>
                 </div>
@@ -1726,10 +1707,10 @@ export function OrderDetailPage({
       {/* Adjust order items modal */}
       {adjustItemsModalOpen && (
         <Modal open onClose={() => setAdjustItemsModalOpen(false)} maxWidth="max-w-lg" role="dialog" aria-labelledby="adjust-items-title" contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col">
-            <h2 id="adjust-items-title" className="text-lg font-semibold text-surface-900 dark:text-white p-6 pb-2">
+            <h2 id="adjust-items-title" className="text-lg font-semibold text-app-fg p-6 pb-2">
               Adjust order items
             </h2>
-            <p className="text-sm text-surface-600 dark:text-surface-400 px-6 pb-4">
+            <p className="text-sm text-app-fg-muted px-6 pb-4">
               Update quantities or prices. This changes the order details only, not the order status.
             </p>
             {adjustItemsData?.error && (
@@ -1739,14 +1720,14 @@ export function OrderDetailPage({
               {editedItems.map((item, index) => (
                 <div
                   key={`${item.productId}-${index}`}
-                  className="rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-2"
+                  className="rounded-lg border border-app-border p-3 space-y-2"
                 >
-                  <p className="font-medium text-surface-900 dark:text-surface-100 text-sm line-clamp-2">
+                  <p className="font-medium text-app-fg text-sm line-clamp-2">
                     {item.productName ?? item.productId.slice(0, 8) + '...'}
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-surface-500 dark:text-surface-400 mb-1">Quantity</label>
+                      <label className="block text-xs text-app-fg-muted mb-1">Quantity</label>
                       <input
                         type="number"
                         min={1}
@@ -1764,7 +1745,7 @@ export function OrderDetailPage({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-surface-500 dark:text-surface-400 mb-1">Unit price (&#8358;)</label>
+                      <label className="block text-xs text-app-fg-muted mb-1">Unit price (&#8358;)</label>
                       <input
                         type="number"
                         min={0}
@@ -1786,8 +1767,8 @@ export function OrderDetailPage({
                 </div>
               ))}
             </div>
-            <div className="p-6 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] border-t border-surface-200 dark:border-surface-700">
-              <p className="text-sm font-semibold text-surface-900 dark:text-white mb-4">
+            <div className="p-6 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] border-t border-app-border">
+              <p className="text-sm font-semibold text-app-fg mb-4">
                 Total: &#8358;
                 {editedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </p>

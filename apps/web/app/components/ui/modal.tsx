@@ -8,6 +8,8 @@ const MAX_WIDTH_CLASSES: Record<string, string> = {
   'max-w-xl': 'md:max-w-xl',
   'max-w-2xl': 'md:max-w-2xl',
   'max-w-4xl': 'md:max-w-4xl',
+  /** Full width of the viewport padding area (see outer `md:p-4` wrapper). */
+  'max-w-full': 'md:max-w-none',
 };
 
 export type ModalMaxWidth = keyof typeof MAX_WIDTH_CLASSES;
@@ -86,7 +88,7 @@ export function Modal({
           className={[
             'w-full max-h-[90dvh] overflow-y-auto',
             'rounded-t-2xl md:rounded-xl',
-            'bg-white dark:bg-surface-900 shadow-xl',
+            'bg-app-elevated shadow-xl',
             'pb-[max(2.5rem,env(safe-area-inset-bottom))] md:pb-5',
             'max-md:animate-slide-up-from-bottom md:animate-fade-in',
             maxWidthClass,

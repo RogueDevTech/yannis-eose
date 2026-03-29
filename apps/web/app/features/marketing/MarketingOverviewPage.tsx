@@ -47,15 +47,15 @@ function renderMediaBuyerLeaderboardCard(
           <span className="text-sm font-bold text-brand-600 dark:text-brand-400">{initials}</span>
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">{buyer.name}</p>
-          <p className="text-xs text-surface-800 dark:text-surface-200">
+          <p className="text-sm font-medium text-app-fg truncate">{buyer.name}</p>
+          <p className="text-xs text-app-fg-muted">
             {buyer.totalOrders} order{buyer.totalOrders !== 1 ? 's' : ''} · {buyer.deliveredOrders} delivered
           </p>
         </div>
       </div>
 
       {/* ROAS progress bar */}
-      <div className="w-full h-2 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
+      <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-500 ${barColor}`}
           style={{ width: `${roasBarWidth}%` }}
@@ -64,7 +64,7 @@ function renderMediaBuyerLeaderboardCard(
 
       {/* ROAS label + High CPA tag */}
       <div className="flex items-center justify-between mt-2">
-        <span className="text-xs text-surface-700 dark:text-surface-300">
+        <span className="text-xs text-app-fg-muted">
           ROAS <span className={`font-bold ${roasTextColor}`}>{buyer.trueRoas.toFixed(2)}x</span>
         </span>
         {isHighCpa && (
@@ -218,11 +218,11 @@ export function MarketingOverviewPage({
       {/* Page header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Live Activities</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+          <h1 className="text-2xl font-bold text-app-fg">Live Activities</h1>
+          <p className="text-sm text-app-fg-muted mt-0.5">
             Manage media buyers, monitor team performance, and track funding
           </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-1 flex items-center gap-1.5">
+          <p className="text-xs text-app-fg-muted mt-1 flex items-center gap-1.5">
             <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -244,118 +244,118 @@ export function MarketingOverviewPage({
         </div>
       </div>
 
-      {/* High CPA Alert Banner */}
-      <HighCpaWarningBanner
-        buyers={highCpaBuyers.map((b) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
-        threshold={HIGH_CPA_THRESHOLD}
-      />
-
       {/* Stats strip — CS-style horizontal scroll */}
       <div className="card">
-        <div className="flex justify-end items-center gap-2 mb-3">
+        <div className="flex justify-end items-center gap-0.5 sm:gap-2 mb-3">
           <button
             type="button"
             onClick={() => scrollStatsStrip(-280)}
-            className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
+            className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
             aria-label="Scroll stats left"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
           <button
             type="button"
             onClick={() => scrollStatsStrip(280)}
-            className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
+            className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
             aria-label="Scroll stats right"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
           </button>
         </div>
         <div ref={statsScrollRef} className="flex flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Media Buyers
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+            <p className="text-xl font-bold text-app-fg mt-1">
               {leaderboard.length > 0 ? leaderboard.length : balancesList.filter((b) => b.role === 'MEDIA_BUYER').length}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Total Spend
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+            <p className="text-xl font-bold text-app-fg mt-1">
               {formatNaira(Math.round(metrics.totalSpend))}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Total Orders
             </p>
             <p className="text-xl font-bold text-brand-600 dark:text-brand-400 mt-1">{metrics.totalOrders}</p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Delivered
             </p>
             <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">{metrics.deliveredOrders}</p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Confirmed
             </p>
             <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">{metrics.confirmedOrders}</p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Avg CPA
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+            <p className="text-xl font-bold text-app-fg mt-1">
               {formatNaira(Math.round(avgCpa))}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Delivery Rate
             </p>
             <p className={`text-xl font-bold mt-1 ${metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400'}`}>
               {metrics.deliveryRate.toFixed(1)}%
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Confirmation Rate
             </p>
             <p className={`text-xl font-bold mt-1 ${metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400'}`}>
               {metrics.confirmationRate.toFixed(1)}%
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               True ROAS
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">{metrics.trueRoas.toFixed(2)}x</p>
+            <p className="text-xl font-bold text-app-fg mt-1">{metrics.trueRoas.toFixed(2)}x</p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Del. Revenue
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+            <p className="text-xl font-bold text-app-fg mt-1">
               {formatNaira(Math.round(metrics.deliveredRevenue))}
             </p>
           </div>
         </div>
       </div>
 
+      {/* High CPA Alert Banner */}
+      <HighCpaWarningBanner
+        buyers={highCpaBuyers.map((b) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
+        threshold={HIGH_CPA_THRESHOLD}
+      />
+
       {/* Live activity feed */}
       <div>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-app-fg flex items-center gap-2">
                 Live orders
                 {liveOrdersPage === 1 && highlightedIds.size > 0 && (
                   <span className="animate-new-badge inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
@@ -363,7 +363,7 @@ export function MarketingOverviewPage({
                   </span>
                 )}
               </h2>
-              <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
+              <p className="text-xs text-app-fg-muted mt-0.5">
                 {localOrders.length} orders · updates instantly
               </p>
             </div>
@@ -375,11 +375,11 @@ export function MarketingOverviewPage({
             View all
           </Link>
         </div>
-        <div className="rounded-xl border border-surface-100 dark:border-surface-800 overflow-hidden bg-white dark:bg-surface-800">
+        <div className="rounded-xl border border-app-border overflow-hidden bg-app-elevated">
           {localOrders.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 gap-2">
-              <span className="h-3 w-3 rounded-full bg-surface-300 dark:bg-surface-600 animate-pulse" />
-              <p className="text-sm text-surface-500 dark:text-surface-400">Waiting for orders…</p>
+              <span className="h-3 w-3 rounded-full bg-app-border animate-pulse" />
+              <p className="text-sm text-app-fg-muted">Waiting for orders…</p>
             </div>
           ) : (
             (() => {
@@ -388,14 +388,14 @@ export function MarketingOverviewPage({
               const start = (page - 1) * pageSize;
               const rows = localOrders.slice(start, start + pageSize);
               return (
-                <div className="divide-y divide-surface-100 dark:divide-surface-800">
+                <div className="divide-y divide-app-border">
                   {rows.map((order, idx) => {
                     const isHighlighted = highlightedIds.has(order.id);
                     const isLatest = idx === 0 && page === 1;
                     return (
                       <div
                         key={order.id}
-                        className={`relative flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-50 dark:hover:bg-surface-800/50 ${isHighlighted ? 'animate-slide-in-up bg-success-50/60 dark:bg-success-900/10' : ''}`}
+                        className={`relative flex items-center gap-3 px-4 py-3 transition-colors hover:bg-app-hover/50 ${isHighlighted ? 'animate-slide-in-up bg-success-50/60 dark:bg-success-900/10' : ''}`}
                       >
                         {/* Timeline dot */}
                         <div className="shrink-0 flex flex-col items-center self-stretch pt-1">
@@ -404,10 +404,10 @@ export function MarketingOverviewPage({
                               ? 'bg-success-500 ring-4 ring-success-500/20 animate-pulse'
                               : isHighlighted
                                 ? 'bg-success-400'
-                                : 'bg-surface-300 dark:bg-surface-600'
+                                : 'bg-app-border'
                           }`} />
                           {idx < rows.length - 1 && (
-                            <span className="w-px flex-1 mt-1 bg-surface-200 dark:bg-surface-700" />
+                            <span className="w-px flex-1 mt-1 bg-app-hover" />
                           )}
                         </div>
                         {/* Content */}
@@ -416,7 +416,7 @@ export function MarketingOverviewPage({
                             <div className="flex items-center gap-2 min-w-0">
                               <Link
                                 to={`/admin/orders/${order.id}`}
-                                className="text-sm font-semibold text-surface-900 dark:text-surface-100 hover:text-brand-600 dark:hover:text-brand-400 truncate"
+                                className="text-sm font-semibold text-app-fg hover:text-brand-600 dark:hover:text-brand-400 truncate"
                               >
                                 {order.customerName}
                               </Link>
@@ -429,25 +429,25 @@ export function MarketingOverviewPage({
                                 </span>
                               )}
                             </div>
-                            <span className="text-xs text-surface-400 dark:text-surface-500 whitespace-nowrap shrink-0">
+                            <span className="text-xs text-app-fg-muted whitespace-nowrap shrink-0">
                               {new Date(order.createdAt).toLocaleDateString('en-NG', {
                                 month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                               })}
                             </span>
                           </div>
                           <div className="flex items-center gap-3 mt-0.5">
-                            <span className="text-xs text-surface-500 dark:text-surface-400 truncate">
+                            <span className="text-xs text-app-fg-muted truncate">
                               {order.mediaBuyerName ?? 'No media buyer'}
                             </span>
                             {order.totalAmount && (
                               <>
-                                <span className="text-surface-300 dark:text-surface-600">·</span>
-                                <span className="text-xs font-medium text-surface-700 dark:text-surface-300">
+                                <span className="text-app-border">·</span>
+                                <span className="text-xs font-medium text-app-fg-muted">
                                   {formatNaira(Number(order.totalAmount))}
                                 </span>
                               </>
                             )}
-                            <span className="text-surface-300 dark:text-surface-600">·</span>
+                            <span className="text-app-border">·</span>
                             <Link
                               to={`/admin/orders/${order.id}`}
                               className="text-xs text-brand-500 hover:text-brand-600 dark:hover:text-brand-400 font-medium shrink-0"
@@ -460,8 +460,8 @@ export function MarketingOverviewPage({
                     );
                   })}
                   {/* Pagination footer */}
-                  <div className="flex items-center justify-between gap-2 px-4 py-3 bg-surface-50/50 dark:bg-surface-800/30">
-                    <span className="text-xs text-surface-500 dark:text-surface-400">
+                  <div className="flex items-center justify-between gap-2 px-4 py-3 bg-app-hover">
+                    <span className="text-xs text-app-fg-muted">
                       {start + 1}–{Math.min(start + pageSize, localOrders.length)} of {localOrders.length} orders
                     </span>
                     <div className="flex items-center gap-1">
@@ -484,8 +484,8 @@ export function MarketingOverviewPage({
       <div>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Media Buyer Performance</h2>
-            <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+            <h2 className="text-lg font-semibold text-app-fg">Media Buyer Performance</h2>
+            <p className="text-xs text-app-fg-muted mt-0.5">
               Updates live when orders change.
             </p>
           </div>
@@ -497,24 +497,24 @@ export function MarketingOverviewPage({
             const hasCards = hasLeaderboard || showCardsFromBalances;
             if (!hasCards) return null;
             return (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 sm:gap-2">
                 <button
                   type="button"
                   onClick={() => scrollMediaBuyerStrip(-280)}
-                  className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                  className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover disabled:opacity-50 disabled:pointer-events-none transition-colors flex items-center justify-center"
                   aria-label="Scroll left"
                 >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                   </svg>
                 </button>
                 <button
                   type="button"
                   onClick={() => scrollMediaBuyerStrip(280)}
-                  className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                  className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover disabled:opacity-50 disabled:pointer-events-none transition-colors flex items-center justify-center"
                   aria-label="Scroll right"
                 >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
@@ -536,7 +536,7 @@ export function MarketingOverviewPage({
           if (!hasLeaderboard && !showCardsFromBalances) {
             return (
               <div className="card text-center py-8">
-                <p className="text-surface-700 dark:text-surface-300">No media buyer data for {periodLabel}.</p>
+                <p className="text-app-fg-muted">No media buyer data for {periodLabel}.</p>
               </div>
             );
           }
@@ -593,14 +593,14 @@ export function MarketingOverviewPage({
             aria-labelledby="view-all-media-buyers-title"
             contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col"
           >
-              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
-                <h2 id="view-all-media-buyers-title" className="text-lg font-semibold text-surface-900 dark:text-white">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-app-border shrink-0">
+                <h2 id="view-all-media-buyers-title" className="text-lg font-semibold text-app-fg">
                   Media Buyer Performance
                 </h2>
                 <button
                   type="button"
                   onClick={() => setViewAllMediaBuyersOpen(false)}
-                  className="p-2 rounded-lg text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                  className="p-2 rounded-lg text-app-fg-muted hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
                   aria-label="Close"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -608,8 +608,8 @@ export function MarketingOverviewPage({
                   </svg>
                 </button>
               </div>
-              <div className="px-4 py-2 border-b border-surface-100 dark:border-surface-800 shrink-0">
-                <p className="text-sm text-surface-600 dark:text-surface-400">
+              <div className="px-4 py-2 border-b border-app-border shrink-0">
+                <p className="text-sm text-app-fg-muted">
                   {allItems.length} media buyer{allItems.length !== 1 ? 's' : ''}
                 </p>
               </div>
@@ -623,8 +623,8 @@ export function MarketingOverviewPage({
                     )
                   )}
                 </div>
-                <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-surface-100 dark:border-surface-800">
-                  <span className="text-sm text-surface-600 dark:text-surface-400">
+                <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-app-border">
+                  <span className="text-sm text-app-fg-muted">
                     Page {page} of {totalPages}
                     {allItems.length > 0 && (
                       <span className="ml-1">
@@ -660,7 +660,7 @@ export function MarketingOverviewPage({
 
       {/* Funding Requests + Ad Spend tabs */}
       <div>
-        <div className="flex items-center justify-between gap-3 border-b border-surface-200 dark:border-surface-700 mb-4">
+        <div className="flex items-center justify-between gap-3 border-b border-app-border mb-4">
           <Tabs
             value={bottomTab}
             onChange={(v) => setBottomTab(v as typeof bottomTab)}
@@ -669,7 +669,11 @@ export function MarketingOverviewPage({
               { value: 'adspend', label: `Ad Spend (${adSpendLogs.length})` },
             ]}
           />
-          <Link to="/admin/marketing/funding" prefetch="intent" className="text-xs font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 shrink-0 mb-2">
+          <Link
+            to={bottomTab === 'funding' ? '/admin/marketing/funding' : '/admin/marketing/ad-spend'}
+            prefetch="intent"
+            className="text-xs font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 shrink-0 mb-2"
+          >
             View all →
           </Link>
         </div>
@@ -677,22 +681,22 @@ export function MarketingOverviewPage({
         {bottomTab === 'funding' && (
           fundingRequests.length === 0 ? (
             <div className="card text-center py-8">
-              <p className="text-sm text-surface-500 dark:text-surface-400">No pending funding requests today</p>
+              <p className="text-sm text-app-fg-muted">No pending funding requests today</p>
             </div>
           ) : (
-            <div className="rounded-xl border border-surface-100 dark:border-surface-800 overflow-hidden bg-white dark:bg-surface-800 divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="rounded-xl border border-app-border overflow-hidden bg-app-elevated divide-y divide-app-border">
               {fundingRequests.slice(0, 10).map((req) => (
                 <div key={req.id} className="flex items-center gap-3 px-4 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-surface-900 dark:text-surface-100">
+                      <p className="text-sm font-semibold text-app-fg">
                         {formatNaira(Number(req.amount))}
                       </p>
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide text-warning-600 dark:text-warning-400 bg-warning-50 dark:bg-warning-900/20">
                         PENDING
                       </span>
                     </div>
-                    <p className="text-xs text-surface-500 dark:text-surface-400 truncate mt-0.5">
+                    <p className="text-xs text-app-fg-muted truncate mt-0.5">
                       {req.requesterName ? `From ${req.requesterName}` : ''}{req.reason ? ` · ${req.reason}` : ''}
                     </p>
                   </div>
@@ -712,10 +716,10 @@ export function MarketingOverviewPage({
         {bottomTab === 'adspend' && (
           adSpendLogs.length === 0 ? (
             <div className="card text-center py-8">
-              <p className="text-sm text-surface-500 dark:text-surface-400">No ad spend logged today</p>
+              <p className="text-sm text-app-fg-muted">No ad spend logged today</p>
             </div>
           ) : (
-            <div className="rounded-xl border border-surface-100 dark:border-surface-800 overflow-hidden bg-white dark:bg-surface-800 divide-y divide-surface-100 dark:divide-surface-800">
+            <div className="rounded-xl border border-app-border overflow-hidden bg-app-elevated divide-y divide-app-border">
               {adSpendLogs.slice(0, 10).map((log) => {
                 const statusColor =
                   log.status === 'APPROVED' ? 'text-success-600 dark:text-success-400 bg-success-50 dark:bg-success-900/20' :
@@ -725,14 +729,14 @@ export function MarketingOverviewPage({
                   <div key={log.id} className="flex items-center gap-3 px-4 py-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-semibold text-surface-900 dark:text-surface-100">
+                        <p className="text-sm font-semibold text-app-fg">
                           {formatNaira(Number(log.spendAmount))}
                         </p>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${statusColor}`}>
                           {log.status}
                         </span>
                       </div>
-                      <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
+                      <p className="text-xs text-app-fg-muted mt-0.5">
                         {new Date(log.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </p>
                     </div>

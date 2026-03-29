@@ -217,6 +217,8 @@ export class AuthController {
     } else {
       user = { ...user, permissions: [] };
     }
+    const appTheme = await this.usersService.getAppThemePreference(user.id);
+    user = { ...user, appTheme };
     return { user };
   }
 

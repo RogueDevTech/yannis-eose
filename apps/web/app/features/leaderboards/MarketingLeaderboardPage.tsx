@@ -27,8 +27,8 @@ export function MarketingLeaderboardPage({
     <div className="space-y-6 px-3 sm:px-0">
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Marketing Leaderboard</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
+          <h1 className="text-2xl font-bold text-app-fg">Marketing Leaderboard</h1>
+          <p className="text-sm text-app-fg-muted mt-1">
             Media buyer performance ranked by True ROAS ({periodLabel}).
           </p>
         </div>
@@ -39,7 +39,7 @@ export function MarketingLeaderboardPage({
             periodAllTime={dateFilters.periodAllTime}
           />
           {isFilterLoading && (
-            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+            <span className="flex items-center text-app-fg-muted" aria-hidden>
               <Spinner size="sm" className="shrink-0" />
             </span>
           )}
@@ -51,15 +51,15 @@ export function MarketingLeaderboardPage({
           if (lb.length === 0) {
             return (
               <div className="card p-8 text-center">
-                <p className="text-sm text-surface-700 dark:text-surface-200">No media buyer data for {periodLabel}.</p>
+                <p className="text-sm text-app-fg-muted">No media buyer data for {periodLabel}.</p>
               </div>
             );
           }
           return (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-surface-100 dark:border-surface-800">
-                <h2 className="text-base font-semibold text-surface-900 dark:text-white sm:text-lg">Media Buyer Performance</h2>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+              <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
+                <h2 className="text-base font-semibold text-app-fg sm:text-lg">Media Buyer Performance</h2>
+                <p className="text-xs text-app-fg-muted mt-0.5">
                   Ranked by True ROAS ({periodLabel})
                 </p>
               </div>
@@ -71,23 +71,23 @@ export function MarketingLeaderboardPage({
                   return (
                     <div
                       key={b.mediaBuyerId}
-                      className={`rounded-lg border border-surface-100 bg-white p-4 dark:border-surface-800 dark:bg-surface-900/50 ${
-                        isTopThree ? 'bg-surface-50/80 dark:bg-surface-800/40' : ''
+                      className={`rounded-lg border border-app-border bg-app-elevated p-4 ${
+                        isTopThree ? 'bg-app-hover' : ''
                       } ${isHighCpa ? 'border-warning-200 bg-warning-50/50 dark:border-warning-800/50 dark:bg-warning-900/10' : ''}`}
                     >
                       {/* Mobile: stacked layout. Desktop: single row */}
                       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                         {/* Rank + trophy + name + email */}
                         <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-200 dark:bg-surface-700 font-mono text-sm font-medium text-surface-700 dark:text-surface-300">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-medium text-app-fg-muted">
                             #{rank}
                           </span>
                           {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
                           <div className="min-w-0 flex-1 sm:flex-none">
-                            <p className={`truncate text-sm font-medium text-surface-900 dark:text-white ${isTopThree ? 'font-semibold' : ''}`}>
+                            <p className={`truncate text-sm font-medium text-app-fg ${isTopThree ? 'font-semibold' : ''}`}>
                               {b.name}
                             </p>
-                            <p className="truncate text-xs text-surface-600 dark:text-surface-400">{b.email}</p>
+                            <p className="truncate text-xs text-app-fg-muted">{b.email}</p>
                           </div>
                         </div>
                         {/* Primary metric pill — right-aligned on mobile */}
@@ -106,11 +106,11 @@ export function MarketingLeaderboardPage({
                         </div>
                         {/* Metrics: 2-col grid on mobile, inline on desktop */}
                         <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
-                          <span className="text-surface-600 dark:text-surface-400 font-medium">
+                          <span className="text-app-fg-muted font-medium">
                             {'\u20A6'}{Math.round(b.totalSpend).toLocaleString()} spend
                           </span>
-                          <span className="text-surface-600 dark:text-surface-400">
-                            Orders <strong className="text-surface-900 dark:text-white">{b.totalOrders}</strong>
+                          <span className="text-app-fg-muted">
+                            Orders <strong className="text-app-fg">{b.totalOrders}</strong>
                           </span>
                           <span className="text-success-600 dark:text-success-400">
                             Delivered <strong>{b.deliveredOrders}</strong>
@@ -118,17 +118,17 @@ export function MarketingLeaderboardPage({
                           <span className="text-success-600 dark:text-success-400">
                             Confirmed <strong>{b.confirmedOrders}</strong>
                           </span>
-                          <span className="text-surface-600 dark:text-surface-400 font-medium">
+                          <span className="text-app-fg-muted font-medium">
                             {'\u20A6'}{Math.round(b.deliveredRevenue).toLocaleString()} revenue
                           </span>
-                          <span className={isHighCpa ? 'text-danger-600 dark:text-danger-400' : 'text-surface-600 dark:text-surface-400'}>
+                          <span className={isHighCpa ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}>
                             CPA <strong>{'\u20A6'}{Math.round(b.cpa).toLocaleString()}</strong>
                           </span>
-                          <span className="text-surface-600 dark:text-surface-400">
-                            Del. rate <strong className="text-surface-900 dark:text-white">{b.deliveryRate.toFixed(1)}%</strong>
+                          <span className="text-app-fg-muted">
+                            Del. rate <strong className="text-app-fg">{b.deliveryRate.toFixed(1)}%</strong>
                           </span>
-                          <span className="text-surface-600 dark:text-surface-400">
-                            Conf. rate <strong className="text-surface-900 dark:text-white">{b.confirmationRate.toFixed(1)}%</strong>
+                          <span className="text-app-fg-muted">
+                            Conf. rate <strong className="text-app-fg">{b.confirmationRate.toFixed(1)}%</strong>
                           </span>
                         </div>
                       </div>

@@ -161,16 +161,16 @@ export function CreateOfflineOrderModal({
       maxWidth="max-w-2xl"
       role="dialog"
       aria-labelledby="create-offline-order-title"
-      contentClassName="p-0 flex flex-col overflow-hidden min-h-0 border border-surface-200 dark:border-surface-700"
+      contentClassName="p-0 flex flex-col overflow-hidden min-h-0 border border-app-border"
     >
-        <div className="flex items-center justify-between border-b border-surface-200 dark:border-surface-700 pb-3 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-          <h2 id="create-offline-order-title" className="text-lg font-semibold text-surface-900 dark:text-white">
+        <div className="flex items-center justify-between border-b border-app-border pb-3 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+          <h2 id="create-offline-order-title" className="text-lg font-semibold text-app-fg">
             Create offline order
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-200"
+            className="text-app-fg-muted hover:text-app-fg"
             aria-label="Close"
           >
             <span className="text-xl leading-none">&times;</span>
@@ -190,7 +190,7 @@ export function CreateOfflineOrderModal({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">
                 Customer name *
               </label>
               <input
@@ -204,7 +204,7 @@ export function CreateOfflineOrderModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">
                 Customer phone *
               </label>
               <input
@@ -219,7 +219,7 @@ export function CreateOfflineOrderModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+            <label className="block text-sm font-medium text-app-fg-muted mb-1">
               Customer address
             </label>
             <input
@@ -231,7 +231,7 @@ export function CreateOfflineOrderModal({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+            <label className="block text-sm font-medium text-app-fg-muted mb-1">
               Delivery address
             </label>
             <input
@@ -244,7 +244,7 @@ export function CreateOfflineOrderModal({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">
                 Delivery state
               </label>
               <input
@@ -256,7 +256,7 @@ export function CreateOfflineOrderModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">
                 Preferred delivery date
               </label>
               <input
@@ -270,7 +270,7 @@ export function CreateOfflineOrderModal({
           </div>
           <div className="flex gap-3">
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">
                 Gender
               </label>
               <select
@@ -284,7 +284,7 @@ export function CreateOfflineOrderModal({
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">
                 Payment method
               </label>
               <select
@@ -299,7 +299,7 @@ export function CreateOfflineOrderModal({
           </div>
           {paymentMethod === 'PAY_ONLINE' && (
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">
                 Customer email *
               </label>
               <input
@@ -315,7 +315,7 @@ export function CreateOfflineOrderModal({
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
+              <label className="block text-sm font-medium text-app-fg-muted">
                 Items *
               </label>
               <Button type="button" variant="secondary" size="sm" onClick={addItem}>
@@ -324,9 +324,9 @@ export function CreateOfflineOrderModal({
             </div>
             <div className="space-y-2">
               {items.map((item, index) => (
-                <div key={index} className="flex flex-wrap items-end gap-2 p-2 rounded-lg bg-surface-50 dark:bg-surface-800/50">
+                <div key={index} className="flex flex-wrap items-end gap-2 p-2 rounded-lg bg-app-hover">
                   <div className="flex-1 min-w-[140px]">
-                    <label className="block text-xs text-surface-600 dark:text-surface-400 mb-0.5">Product</label>
+                    <label className="block text-xs text-app-fg-muted mb-0.5">Product</label>
                     <select
                       required
                       value={item.productId}
@@ -342,7 +342,7 @@ export function CreateOfflineOrderModal({
                     </select>
                   </div>
                   <div className="w-20">
-                    <label className="block text-xs text-surface-600 dark:text-surface-400 mb-0.5">Qty</label>
+                    <label className="block text-xs text-app-fg-muted mb-0.5">Qty</label>
                     <input
                       type="number"
                       min={1}
@@ -352,7 +352,7 @@ export function CreateOfflineOrderModal({
                     />
                   </div>
                   <div className="w-28">
-                    <label className="block text-xs text-surface-600 dark:text-surface-400 mb-0.5">Unit price</label>
+                    <label className="block text-xs text-app-fg-muted mb-0.5">Unit price</label>
                     <input
                       type="number"
                       required
@@ -376,13 +376,13 @@ export function CreateOfflineOrderModal({
                 </div>
               ))}
             </div>
-            <p className="text-sm text-surface-600 dark:text-surface-400 mt-1">
+            <p className="text-sm text-app-fg-muted mt-1">
               Total: ₦{totalAmount.toFixed(2)}
             </p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
+            <label className="block text-sm font-medium text-app-fg-muted mb-1">
               Delivery notes
             </label>
             <input
@@ -395,7 +395,7 @@ export function CreateOfflineOrderModal({
           </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-surface-200 dark:border-surface-700 shrink-0 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-app-border shrink-0 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>

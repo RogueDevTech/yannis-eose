@@ -5,6 +5,10 @@ import { Modal } from '~/components/ui/modal';
 import { Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
+import { PageHeader } from '~/components/ui/page-header';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { Textarea } from '~/components/ui/textarea';
 import type { PermissionRequest } from './types';
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
@@ -28,12 +32,10 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Permission Requests</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-          HR requests for sensitive roles (Super Admin, Finance Officer) require your approval.
-        </p>
-      </div>
+      <PageHeader
+        title="Permission Requests"
+        description="HR requests for sensitive roles (Super Admin, Finance Officer) require your approval."
+      />
 
       {fetcherError && !dismissedError && (
         <PageNotification
@@ -62,26 +64,24 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
               {requests.map((req) => (
                 <tr key={req.id} className="table-row">
                   <td className="table-cell">
-                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
-                      {REQUEST_TYPE_LABELS[req.type] ?? req.type}
-                    </span>
+                    <StatusBadge status={REQUEST_TYPE_LABELS[req.type] ?? req.type} />
                   </td>
                   <td className="table-cell text-sm">
-                    <span className="font-medium text-surface-900 dark:text-white">{req.requesterName}</span>
-                    <span className="block text-xs text-surface-600 dark:text-surface-200">{req.requesterEmail}</span>
+                    <span className="font-medium text-app-fg">{req.requesterName}</span>
+                    <span className="block text-xs text-app-fg-muted">{req.requesterEmail}</span>
                   </td>
                   <td className="table-cell text-sm">
                     {req.type === 'USER_CREATION' && req.payload ? (
                       <span>
                         {(req.payload as { name?: string }).name ?? '—'}
-                        <span className="block text-xs text-surface-600 dark:text-surface-200">
+                        <span className="block text-xs text-app-fg-muted">
                           {(req.payload as { email?: string }).email ?? ''}
                         </span>
                       </span>
                     ) : req.targetUserName ? (
                       <span>
                         {req.targetUserName}
-                        <span className="block text-xs text-surface-600 dark:text-surface-200">{req.targetUserEmail ?? ''}</span>
+                        <span className="block text-xs text-app-fg-muted">{req.targetUserEmail ?? ''}</span>
                       </span>
                     ) : (
                       '—'
@@ -89,17 +89,17 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
                   </td>
                   <td className="table-cell text-sm">
                     {req.requestedRole && (
-                      <span className="font-medium text-surface-900 dark:text-white">{req.requestedRole.replace(/_/g, ' ')}</span>
+                      <span className="font-medium text-app-fg">{req.requestedRole.replace(/_/g, ' ')}</span>
                     )}
                     {req.permissionCode && (
-                      <span className="font-mono text-xs text-surface-600 dark:text-surface-200">{req.permissionCode}</span>
+                      <span className="font-mono text-xs text-app-fg-muted">{req.permissionCode}</span>
                     )}
                     {!req.requestedRole && !req.permissionCode && '—'}
                   </td>
-                  <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-xs truncate">
+                  <td className="table-cell text-sm text-app-fg-muted max-w-xs truncate">
                     {req.reason}
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                  <td className="table-cell text-app-fg-muted text-sm">
                     {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </td>
                   {canApprove && (
@@ -130,8 +130,12 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
               ))}
               {requests.length === 0 && (
                 <tr>
-                  <td colSpan={canApprove ? 7 : 6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                    No pending permission requests
+                  <td colSpan={canApprove ? 7 : 6} className="px-4 py-8">
+                    <EmptyState
+                      title="No pending permission requests"
+                      description="New requests from HR will appear here for your review."
+                      variant="inline"
+                    />
                   </td>
                 </tr>
               )}
@@ -142,16 +146,14 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
         {/* Mobile */}
         <div className="md:hidden space-y-3 px-1">
           {requests.map((req) => (
-            <div key={req.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+            <div key={req.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
-                  {REQUEST_TYPE_LABELS[req.type] ?? req.type}
-                </span>
+                <StatusBadge status={REQUEST_TYPE_LABELS[req.type] ?? req.type} />
               </div>
-              <p className="text-sm font-medium text-surface-900 dark:text-white">
+              <p className="text-sm font-medium text-app-fg">
                 {req.requesterName} → {req.requestedRole?.replace(/_/g, ' ') ?? req.permissionCode ?? '—'}
               </p>
-              <p className="text-sm text-surface-600 dark:text-surface-200">{req.reason}</p>
+              <p className="text-sm text-app-fg-muted">{req.reason}</p>
               {canApprove && (
                 <div className="flex gap-2 pt-1">
                   <Button
@@ -177,31 +179,34 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
             </div>
           ))}
           {requests.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-300">No pending permission requests</div>
+            <div className="py-6">
+              <EmptyState
+                title="No pending permission requests"
+                description="New requests from HR will appear here for your review."
+                variant="inline"
+              />
+            </div>
           )}
         </div>
       </div>
 
       {/* Approve/Reject Modal */}
       {modal && (
-        <Modal open onClose={() => setModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white shrink-0">
+        <Modal open onClose={() => setModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-app-border bg-app-elevated">
+              <h3 className="text-lg font-semibold text-app-fg shrink-0">
                 {modal.action === 'APPROVED' ? 'Approve Request' : 'Reject Request'}
               </h3>
               <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Reason <span className="text-surface-700">(min 10 characters)</span>
-                  </label>
-                  <textarea
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    className="input min-h-[80px]"
-                    placeholder={
-                      modal.action === 'APPROVED' ? 'Reason for approval...' : 'Reason for rejection...'
-                    }
-                  />
-                </div>
+                <Textarea
+                  label="Reason"
+                  hint="Minimum 10 characters"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={3}
+                  placeholder={
+                    modal.action === 'APPROVED' ? 'Reason for approval...' : 'Reason for rejection...'
+                  }
+                />
               </div>
               <div className="flex gap-2 justify-end shrink-0 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <Button type="button" variant="secondary" size="sm" onClick={() => setModal(null)}>

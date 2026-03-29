@@ -4,6 +4,12 @@ import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
+import { Breadcrumb } from '~/components/ui/breadcrumb';
+import { PageHeader } from '~/components/ui/page-header';
+import { TextInput } from '~/components/ui/text-input';
+import { Textarea } from '~/components/ui/textarea';
+import { FormSelect } from '~/components/ui/form-select';
+import { FormField } from '~/components/ui/form-field';
 
 interface CategoryOption {
   id: string;
@@ -58,23 +64,12 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
 
   return (
     <div className="w-full space-y-6">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
-        <Link to="/admin/products" className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
-          Products
-        </Link>
-        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-        <span className="text-surface-900 dark:text-white font-medium">Add Product</span>
-      </div>
+      <Breadcrumb items={[{ label: 'Products', to: '/admin/products' }, { label: 'Add Product' }]} />
 
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Add Product</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
-          Add a new product to the catalog with bundle offers and stock thresholds.
-        </p>
-      </div>
+      <PageHeader
+        title="Add Product"
+        description="Add a new product to the catalog with bundle offers and stock thresholds."
+      />
 
       {actionData?.error && !dismissedError && (
         <div ref={errorRef}>
@@ -99,32 +94,38 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
 
         {/* Basic Info */}
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Product Details</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Product Details</h2>
+
+          <TextInput
+            id="name"
+            name="name"
+            label="Product Name"
+            required
+            minLength={2}
+            placeholder="e.g. Premium Face Cream"
+          />
 
           <div>
-            <label htmlFor="name" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-              Product Name
-            </label>
-            <input id="name" name="name" type="text" required minLength={2} className="input" placeholder="e.g. Premium Face Cream" />
-          </div>
-
-          <div>
-            <label htmlFor="categoryId" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-              Category
-            </label>
             {categories.length > 0 ? (
-              <select id="categoryId" name="categoryId" className="input">
-                <option value="">— Select category —</option>
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name} ({cat.brandName})
-                  </option>
-                ))}
-              </select>
+              <FormSelect
+                id="categoryId"
+                name="categoryId"
+                label="Category"
+                placeholder="— Select category —"
+                options={categories.map((cat) => ({
+                  value: cat.id,
+                  label: `${cat.name} (${cat.brandName})`,
+                }))}
+              />
             ) : (
               <div>
-                <input id="category" name="category" type="text" className="input" placeholder="e.g. Skincare" />
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                <TextInput
+                  id="category"
+                  name="category"
+                  label="Category"
+                  placeholder="e.g. Skincare"
+                />
+                <p className="text-xs text-app-fg-muted mt-1">
                   <Link to="/admin/categories" className="text-brand-500 hover:text-brand-600">
                     Create categories
                   </Link>{' '}
@@ -134,20 +135,21 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
             )}
           </div>
 
-          <div>
-            <label htmlFor="description" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-              Description
-            </label>
-            <textarea id="description" name="description" rows={3} className="input resize-none" placeholder="Optional product description" />
-          </div>
+          <Textarea
+            id="description"
+            name="description"
+            label="Description"
+            rows={3}
+            placeholder="Optional product description"
+          />
         </div>
 
         {/* Offer Bundles */}
         <div className="card space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Offer Bundles</h2>
-              <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+              <h2 className="text-lg font-semibold text-app-fg">Offer Bundles</h2>
+              <p className="text-xs text-app-fg-muted mt-0.5">
                 Define pricing tiers. E.g. &quot;Buy 1 Get 1 Free&quot; = 2 units at &#8358;16,500
               </p>
             </div>
@@ -171,49 +173,41 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
             {offers.map((offer, index) => (
               <div
                 key={index}
-                className="flex flex-col sm:flex-row items-stretch sm:items-end gap-4 p-4 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700"
+                className="flex flex-col sm:flex-row items-stretch sm:items-end gap-4 p-4 rounded-lg bg-app-hover border border-app-border"
               >
                 <div className="flex-1 min-w-[280px]">
-                  <label htmlFor={`offer-label-${index}`} className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Label
-                  </label>
-                  <input
+                  <TextInput
                     id={`offer-label-${index}`}
-                    type="text"
+                    label="Label"
                     required
-                    className="input py-2 text-sm w-full"
                     placeholder="e.g. Buy 1 Get 1 Free"
                     value={offer.label}
                     onChange={(e) => updateOffer(index, 'label', e.target.value)}
                   />
                 </div>
                 <div className="w-full sm:w-32 sm:flex-shrink-0">
-                  <label htmlFor={`offer-qty-${index}`} className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Total Qty
-                  </label>
-                  <input
+                  <TextInput
                     id={`offer-qty-${index}`}
+                    label="Total Qty"
                     type="number"
                     required
                     min={1}
-                    className="input py-2 text-sm"
                     placeholder="2"
                     value={offer.qty}
                     onChange={(e) => updateOffer(index, 'qty', e.target.value)}
                   />
                 </div>
                 <div className="w-full sm:w-32 sm:flex-shrink-0">
-                  <label htmlFor={`offer-price-${index}`} className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Price (&#8358;)
-                  </label>
-                  <AmountInput
-                    id={`offer-price-${index}`}
-                    required
-                    className="input py-2 text-sm"
-                    placeholder="16,500.00"
-                    value={offer.price}
-                    onChange={(v) => updateOffer(index, 'price', v)}
-                  />
+                  <FormField label="Price (&#8358;)" htmlFor={`offer-price-${index}`}>
+                    <AmountInput
+                      id={`offer-price-${index}`}
+                      required
+                      className="input py-2 text-sm"
+                      placeholder="16,500.00"
+                      value={offer.price}
+                      onChange={(v) => updateOffer(index, 'price', v)}
+                    />
+                  </FormField>
                 </div>
                 {offers.length > 1 && (
                   <button
@@ -234,12 +228,9 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
 
         {/* Cost & Stock */}
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Cost & Stock</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Cost & Stock</h2>
 
-          <div>
-            <label htmlFor="costPrice" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-              Cost Price per Unit (&#8358;)
-            </label>
+          <FormField label="Cost Price per Unit (&#8358;)" htmlFor="costPrice">
             <AmountInput
               id="costPrice"
               name="costPrice"
@@ -247,10 +238,10 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
               className="input"
               placeholder="0.00"
             />
-            <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+            <p className="text-xs text-app-fg-muted mt-1">
               Only visible to Finance and SuperAdmin roles.
             </p>
-          </div>
+          </FormField>
           <InlineNotification
             variant="info"
             message="Add stock after creating the product via Inventory → Stock Intake."

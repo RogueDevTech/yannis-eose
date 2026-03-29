@@ -5,10 +5,12 @@ import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { SessionStoreService } from '../../auth/session-store.service';
+import type { NotificationsService } from '../../notifications/notifications.service';
 
 // Service instances injected via factory pattern
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
 let sessionStoreInstance: SessionStoreService | null = null;
+let notificationsServiceInstance: NotificationsService | null = null;
 
 export function setBranchesDb(db: PostgresJsDatabase<typeof schema>) {
   drizzleInstance = db;
@@ -16,6 +18,10 @@ export function setBranchesDb(db: PostgresJsDatabase<typeof schema>) {
 
 export function setBranchesSessionStore(sessionStore: SessionStoreService) {
   sessionStoreInstance = sessionStore;
+}
+
+export function setBranchesNotificationsService(service: NotificationsService) {
+  notificationsServiceInstance = service;
 }
 
 function getDb(): PostgresJsDatabase<typeof schema> {
@@ -26,6 +32,13 @@ function getDb(): PostgresJsDatabase<typeof schema> {
 function getSessionStore(): SessionStoreService {
   if (!sessionStoreInstance) throw new Error('Branches SessionStore not initialized');
   return sessionStoreInstance;
+}
+
+function getBranchesNotificationsService(): NotificationsService {
+  if (!notificationsServiceInstance) {
+    throw new Error('Branches NotificationsService not initialized');
+  }
+  return notificationsServiceInstance;
 }
 
 const CS_OVERVIEW_ROLES = new Set(['CS_AGENT', 'HEAD_OF_CS']);
@@ -241,15 +254,51 @@ export const branchesRouter = router({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
-      await db
-        .insert(schema.userBranches)
-        .values({
+      const notifications = getBranchesNotificationsService();
+
+      const existing = await db
+        .select({ userId: schema.userBranches.userId })
+        .from(schema.userBranches)
+        .where(
+          and(
+            eq(schema.userBranches.userId, input.userId),
+            eq(schema.userBranches.branchId, input.branchId),
+          ),
+        )
+        .limit(1);
+
+      if (existing[0]) {
+        return { success: true, alreadyMember: true as const };
+      }
+
+      await db.insert(schema.userBranches).values({
+        userId: input.userId,
+        branchId: input.branchId,
+        roleInBranch: (input.roleInBranch as (typeof schema.userBranches.$inferInsert)['roleInBranch']) ?? null,
+        isPrimary: input.isPrimary ?? false,
+      });
+
+      const branchRows = await db
+        .select({ name: schema.branches.name })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, input.branchId))
+        .limit(1);
+      const branchName = branchRows[0]?.name ?? 'A branch';
+
+      notifications
+        .create({
           userId: input.userId,
-          branchId: input.branchId,
-          roleInBranch: (input.roleInBranch as (typeof schema.userBranches.$inferInsert)['roleInBranch']) ?? null,
-          isPrimary: input.isPrimary ?? false,
+          type: 'account:updated',
+          title: 'Your account was updated',
+          body: `You were added to branch "${branchName}".`,
+          data: {
+            userId: input.userId,
+            changedKeys: ['branch'],
+            branchId: input.branchId,
+          },
         })
-        .onConflictDoNothing();
+        .catch(() => {});
+
       return { success: true };
     }),
 
@@ -265,14 +314,41 @@ export const branchesRouter = router({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
-      await db
+      const notifications = getBranchesNotificationsService();
+
+      const branchRows = await db
+        .select({ name: schema.branches.name })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, input.branchId))
+        .limit(1);
+      const branchName = branchRows[0]?.name ?? 'A branch';
+
+      const removed = await db
         .delete(schema.userBranches)
         .where(
           and(
             eq(schema.userBranches.userId, input.userId),
             eq(schema.userBranches.branchId, input.branchId),
           ),
-        );
+        )
+        .returning({ userId: schema.userBranches.userId });
+
+      if (removed[0]) {
+        notifications
+          .create({
+            userId: input.userId,
+            type: 'account:updated',
+            title: 'Your account was updated',
+            body: `You were removed from branch "${branchName}".`,
+            data: {
+              userId: input.userId,
+              changedKeys: ['branch'],
+              branchId: input.branchId,
+            },
+          })
+          .catch(() => {});
+      }
+
       return { success: true };
     }),
 

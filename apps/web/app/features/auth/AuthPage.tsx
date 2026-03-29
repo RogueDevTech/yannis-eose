@@ -4,13 +4,9 @@ import { Button } from '~/components/ui/button';
 import { PageNotification } from '~/components/ui/page-notification';
 import type { AuthActionData, AuthPageProps } from './types';
 
-/**
- * Shared mobile-only input class — dark inputs for the surface-900 mobile background.
- * Desktop inputs use the default .input styles (white bg, dark text).
- * Auth page is always light mode — no dark: variants.
- */
+/** Mobile: match elevated field chrome to app theme (same tokens as desktop). */
 const mobileInput =
-  'max-lg:!bg-surface-800 max-lg:!border-surface-700 max-lg:!text-surface-100 max-lg:!placeholder-surface-500';
+  'max-lg:!bg-app-elevated max-lg:!border-app-border max-lg:!text-app-fg max-lg:!placeholder-app-fg-muted';
 
 export function AuthPage({ needsSetup }: AuthPageProps) {
   const actionData = useActionData<AuthActionData>();
@@ -29,12 +25,12 @@ export function AuthPage({ needsSetup }: AuthPageProps) {
               className="h-14 w-auto max-w-full object-contain"
             />
           </div>
-          <p className="text-surface-400 text-lg">Enterprise Operations & Sales Engine</p>
+          <p className="text-slate-400 text-lg">Enterprise Operations & Sales Engine</p>
         </div>
       </div>
 
-      {/* Right panel — form (always light-mode styling) */}
-      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white">
+      {/* Right panel — form (app theme canvas / elevated) */}
+      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-app-canvas lg:bg-app-elevated">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
           <div className="lg:hidden text-center">
@@ -45,7 +41,7 @@ export function AuthPage({ needsSetup }: AuthPageProps) {
                 className="h-10 w-auto max-w-full object-contain"
               />
             </div>
-            <p className="text-surface-400 text-sm">Enterprise Operations & Sales Engine</p>
+            <p className="text-app-fg-muted text-sm">Enterprise Operations & Sales Engine</p>
           </div>
 
           {needsSetup ? (
@@ -90,10 +86,10 @@ function LoginForm({
   return (
     <>
       <div>
-        <h2 className="text-2xl font-bold text-white lg:text-surface-900">
+        <h2 className="text-2xl font-bold text-app-fg">
           Sign in to your account
         </h2>
-        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
+        <p className="mt-2 text-sm text-app-fg-muted">
           Enter your credentials to access the dashboard
         </p>
       </div>
@@ -122,7 +118,7 @@ function LoginForm({
         <div>
           <label
             htmlFor="email"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
+            className="block text-sm font-medium text-app-fg-muted mb-1.5"
           >
             Email address
           </label>
@@ -142,7 +138,7 @@ function LoginForm({
           <div className="flex items-center justify-between mb-1.5">
             <label
               htmlFor="password"
-              className="block text-sm font-medium text-surface-300 lg:text-surface-700"
+              className="block text-sm font-medium text-app-fg-muted"
             >
               Password
             </label>
@@ -167,7 +163,7 @@ function LoginForm({
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-app-fg-muted hover:text-app-fg"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? (
@@ -249,8 +245,8 @@ function SetupForm({
             First Time Setup
           </span>
         </div>
-        <h2 className="text-2xl font-bold text-white lg:text-surface-900">Create Super Admin</h2>
-        <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
+        <h2 className="text-2xl font-bold text-app-fg">Create Super Admin</h2>
+        <p className="mt-2 text-sm text-app-fg-muted">
           Set up the first administrator account. This can only be done once.
         </p>
       </div>
@@ -270,7 +266,7 @@ function SetupForm({
         <div>
           <label
             htmlFor="name"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
+            className="block text-sm font-medium text-app-fg-muted mb-1.5"
           >
             Full Name
           </label>
@@ -289,7 +285,7 @@ function SetupForm({
         <div>
           <label
             htmlFor="email"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
+            className="block text-sm font-medium text-app-fg-muted mb-1.5"
           >
             Email Address
           </label>
@@ -308,7 +304,7 @@ function SetupForm({
         <div>
           <label
             htmlFor="password"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
+            className="block text-sm font-medium text-app-fg-muted mb-1.5"
           >
             Password
           </label>
@@ -326,7 +322,7 @@ function SetupForm({
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-300 lg:hover:text-surface-600"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-app-fg-muted hover:text-app-fg"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? (
@@ -370,7 +366,7 @@ function SetupForm({
         <div>
           <label
             htmlFor="confirmPassword"
-            className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
+            className="block text-sm font-medium text-app-fg-muted mb-1.5"
           >
             Confirm Password
           </label>

@@ -2,12 +2,15 @@ import {
   createFundingSchema,
   verifyFundingSchema,
   listFundingSchema,
+  fundingStatusCountsSchema,
+  fundingRequestStatusCountsSchema,
   listFundingRequestsSchema,
   getFundingBalanceSchema,
   approveFundingRequestSchema,
   rejectFundingRequestSchema,
   createAdSpendSchema,
   listAdSpendSchema,
+  adSpendStatusCountsSchema,
   approveAdSpendSchema,
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
@@ -52,6 +55,18 @@ export const marketingRouter = router({
     .input(listFundingSchema)
     .query(async ({ input, ctx }) => {
       return getMarketingService().listFunding(input, ctx.currentBranchId);
+    }),
+
+  fundingStatusCounts: authedProcedure
+    .input(fundingStatusCountsSchema)
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().fundingStatusCounts(input, ctx.currentBranchId);
+    }),
+
+  fundingRequestStatusCounts: authedProcedure
+    .input(fundingRequestStatusCountsSchema)
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().fundingRequestStatusCounts(input, ctx.user, ctx.currentBranchId);
     }),
 
   fundingSummary: permissionProcedure('marketing.fundingSummary')
@@ -109,11 +124,17 @@ export const marketingRouter = router({
     .input(listFundingRequestsSchema)
     .query(async ({ input, ctx }) => {
       const requesterId = ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : input.requesterId;
-      return getMarketingService().listFundingRequests({
-        requesterId,
-        page: input.page,
-        limit: input.limit,
-      }, ctx.currentBranchId);
+      return getMarketingService().listFundingRequests(
+        {
+          requesterId,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          status: input.status,
+          page: input.page,
+          limit: input.limit,
+        },
+        ctx.currentBranchId,
+      );
     }),
 
   /** HoM/SuperAdmin/Finance: approve a funding request (after sending money manually) by attaching receipt. Notifies Media Buyer. */
@@ -151,6 +172,14 @@ export const marketingRouter = router({
         ? { ...input, mediaBuyerId: ctx.user.id }
         : input;
       return getMarketingService().listAdSpend(effectiveInput, ctx.currentBranchId);
+    }),
+
+  adSpendStatusCounts: authedProcedure
+    .input(adSpendStatusCountsSchema)
+    .query(async ({ input, ctx }) => {
+      const effectiveInput =
+        ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
+      return getMarketingService().adSpendStatusCounts(effectiveInput, ctx.currentBranchId);
     }),
 
   approveAdSpend: authedProcedure

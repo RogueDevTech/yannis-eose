@@ -43,7 +43,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 const mobileInput =
-  'max-lg:!bg-surface-800 max-lg:!border-surface-700 max-lg:!text-surface-100 max-lg:!placeholder-surface-500';
+  'max-lg:!bg-app-elevated max-lg:!border-app-border max-lg:!text-app-fg max-lg:!placeholder-app-fg-muted';
 
 export default function ForgotPasswordRoute() {
   const actionData = useActionData<{ error?: string; success?: string }>();
@@ -69,12 +69,12 @@ export default function ForgotPasswordRoute() {
               className="h-14 w-auto max-w-full object-contain"
             />
           </div>
-          <p className="text-surface-400 text-lg">Enterprise Operations & Sales Engine</p>
+          <p className="text-slate-400 text-lg">Enterprise Operations & Sales Engine</p>
         </div>
       </div>
 
-      {/* Right panel — form (always light-mode on auth) */}
-      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-surface-900 lg:bg-white">
+      {/* Right panel — form (app theme) */}
+      <div className="flex w-full lg:w-1/2 items-center justify-center p-6 sm:p-8 bg-app-canvas lg:bg-app-elevated">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
           <div className="lg:hidden text-center">
@@ -85,14 +85,14 @@ export default function ForgotPasswordRoute() {
                 className="h-10 w-auto max-w-full object-contain"
               />
             </div>
-            <p className="text-surface-400 text-sm">Enterprise Operations & Sales Engine</p>
+            <p className="text-app-fg-muted text-sm">Enterprise Operations & Sales Engine</p>
           </div>
 
           <div>
-            <h2 className="text-2xl font-bold text-white lg:text-surface-900">
+            <h2 className="text-2xl font-bold text-app-fg">
               Reset your password
             </h2>
-            <p className="mt-2 text-sm text-surface-400 lg:text-surface-500">
+            <p className="mt-2 text-sm text-app-fg-muted">
               Enter your email address and we'll send you a reset link.
             </p>
           </div>
@@ -129,7 +129,7 @@ export default function ForgotPasswordRoute() {
               <div>
                 <label
                   htmlFor="email"
-                  className="block text-sm font-medium text-surface-300 lg:text-surface-700 mb-1.5"
+                  className="block text-sm font-medium text-app-fg-muted mb-1.5"
                 >
                   Email address
                 </label>

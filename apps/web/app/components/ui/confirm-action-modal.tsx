@@ -40,12 +40,12 @@ const VARIANT_STYLES: Record<
     borderBottom: 'border-warning-100 dark:border-warning-900/50',
   },
   archive: {
-    border: 'border-2 border-surface-200 dark:border-surface-700',
-    iconBg: 'bg-surface-100 dark:bg-surface-800',
-    iconColor: 'text-surface-600 dark:text-surface-400',
-    titleColor: 'text-surface-800 dark:text-surface-200',
-    detailsBox: 'bg-surface-50 dark:bg-surface-800/50 border-surface-200 dark:border-surface-700',
-    borderBottom: 'border-surface-200 dark:border-surface-700',
+    border: 'border-2 border-app-border',
+    iconBg: 'bg-app-hover',
+    iconColor: 'text-app-fg-muted',
+    titleColor: 'text-app-fg-muted',
+    detailsBox: 'bg-app-hover border border-app-border',
+    borderBottom: 'border-app-border',
   },
 };
 
@@ -121,7 +121,7 @@ export function ConfirmActionModal({
     variant === 'danger'
       ? 'bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700'
       : variant === 'archive'
-        ? 'bg-surface-700 hover:bg-surface-800 text-white dark:bg-surface-600 dark:hover:bg-surface-700 border-surface-700 hover:border-surface-800'
+        ? 'bg-neutral-600 hover:bg-neutral-700 text-white border-neutral-600 hover:border-neutral-700 dark:bg-neutral-500 dark:hover:bg-neutral-600'
         : undefined;
 
   return (
@@ -144,7 +144,7 @@ export function ConfirmActionModal({
           </h3>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-5 p-1 px-4 sm:px-5">
-          <p id="confirm-action-modal-desc" className="text-sm text-surface-700 dark:text-surface-200">
+          <p id="confirm-action-modal-desc" className="text-sm text-app-fg-muted">
             {description}
           </p>
           {details && (

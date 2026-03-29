@@ -26,14 +26,14 @@ export function PwaInstallPrompt({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold leading-5 text-surface-900">Install Yannis App</h3>
-            <p className="mt-0.5 text-xs leading-4 text-surface-700">
+            <p className="mt-0.5 text-xs leading-4 text-app-fg-muted">
               Add Yannis to your home screen for faster access and better offline reliability.
             </p>
           </div>
           <button
             type="button"
             aria-label="Dismiss install prompt"
-            className="rounded-md p-1 text-surface-500 transition-colors hover:bg-surface-100 hover:text-surface-800"
+            className="rounded-md p-1 text-app-fg-muted transition-colors hover:bg-surface-100 hover:text-surface-800"
             onClick={onClose}
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -47,8 +47,8 @@ export function PwaInstallPrompt({
             <summary className="cursor-pointer text-xs font-semibold text-surface-800">
               iPhone/iPad install steps
             </summary>
-            <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-surface-700">
-              <li>Tap the Share icon in Safari.</li>
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-app-fg-muted">
+              <li>Tap Share in the browser toolbar (often at the bottom on iPhone).</li>
               <li>Select Add to Home Screen.</li>
               <li>Tap Add to finish.</li>
             </ol>

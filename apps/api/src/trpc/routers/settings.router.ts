@@ -1,6 +1,10 @@
 import {
   updateSystemSettingSchema,
   notificationEmailConfigSchema,
+  CLIENT_UI_CONFIG_KEY,
+  clientUiConfigSchema,
+  updateClientUiConfigSchema,
+  type AppThemeId,
 } from '@yannis/shared';
 import {
   NOTIFICATION_EMAIL_CONFIG_KEY,
@@ -8,13 +12,34 @@ import {
   MANDATORY_EMAIL_TYPES,
   NOTIFICATION_TYPE_META,
 } from '@yannis/shared';
-import { router, authedProcedure, permissionProcedure } from '../trpc';
+import { eq } from 'drizzle-orm';
+import { router, authedProcedure, permissionProcedure, publicProcedure } from '../trpc';
 import type { SettingsService } from '../../settings/settings.service';
+import { db as schema } from '@yannis/shared';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+
+function resolveDefaultAppTheme(raw: Record<string, unknown> | null): AppThemeId {
+  const merged = { defaultAppTheme: 'system' as const, ...(raw ?? {}) };
+  const parsed = clientUiConfigSchema.safeParse(merged);
+  return parsed.success ? parsed.data.defaultAppTheme : 'system';
+}
 
 let settingsServiceInstance: SettingsService | null = null;
+let settingsDbInstance: PostgresJsDatabase<typeof schema> | null = null;
 
 export function setSettingsService(service: SettingsService) {
   settingsServiceInstance = service;
+}
+
+export function setSettingsDb(db: PostgresJsDatabase<typeof schema>) {
+  settingsDbInstance = db;
+}
+
+function getSettingsDb(): PostgresJsDatabase<typeof schema> {
+  if (!settingsDbInstance) {
+    throw new Error('Settings DB not initialized. Call setSettingsDb() first.');
+  }
+  return settingsDbInstance;
 }
 
 function getSettingsService(): SettingsService {
@@ -25,6 +50,44 @@ function getSettingsService(): SettingsService {
 }
 
 export const settingsRouter = router({
+  /**
+   * Public UI defaults + effective theme for the current session (if any).
+   * Anonymous callers receive org default only.
+   */
+  getClientConfig: publicProcedure.query(async ({ ctx }) => {
+    const raw = await getSettingsService().get(CLIENT_UI_CONFIG_KEY);
+    const defaultAppTheme = resolveDefaultAppTheme(raw);
+    let appThemePreference: string | null = null;
+    if (ctx.user) {
+      const [row] = await getSettingsDb()
+        .select({ appTheme: schema.users.appTheme })
+        .from(schema.users)
+        .where(eq(schema.users.id, ctx.user.id))
+        .limit(1);
+      appThemePreference = row?.appTheme ?? null;
+    }
+    const effectiveAppTheme = appThemePreference ?? defaultAppTheme;
+    return {
+      defaultAppTheme,
+      appThemePreference,
+      effectiveAppTheme,
+    };
+  }),
+
+  /**
+   * Update org-wide default appearance (system_settings.client_ui_config).
+   */
+  updateClientUiConfig: permissionProcedure('settings.write')
+    .input(updateClientUiConfigSchema)
+    .mutation(async ({ input, ctx }) => {
+      await getSettingsService().set(
+        CLIENT_UI_CONFIG_KEY,
+        { defaultAppTheme: input.defaultAppTheme },
+        ctx.user.id,
+      );
+      return { success: true };
+    }),
+
   /**
    * Get all system settings.
    * Any authenticated user can read (CS pages need to know the mode).

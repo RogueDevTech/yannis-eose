@@ -10,6 +10,8 @@ export interface SessionUser {
   permissions?: string[];
   /** Active branch for multi-branch context. NULL = cross-branch (SuperAdmin). */
   currentBranchId?: string | null;
+  /** Saved appearance id; undefined/null = use org default (`client_ui_config`). */
+  appTheme?: string | null;
 }
 
 /**

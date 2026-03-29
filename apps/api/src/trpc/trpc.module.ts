@@ -5,7 +5,7 @@ import { OrdersService } from '../orders/orders.service';
 import { setOrdersService } from './routers/orders.router';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
-import { setUsersService } from './routers/users.router';
+import { setUsersService, setUsersSessionStore } from './routers/users.router';
 import { ProductsModule } from '../products/products.module';
 import { ProductsService } from '../products/products.service';
 import { setProductsService } from './routers/products.router';
@@ -28,7 +28,8 @@ import { HrService } from '../hr/hr.service';
 import { setHrService } from './routers/hr.router';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { NotificationsService } from '../notifications/notifications.service';
-import { setNotificationsService } from './routers/notifications.router';
+import { PushSchedulerService } from '../notifications/push-scheduler.service';
+import { setNotificationsService, setPushSchedulerService } from './routers/notifications.router';
 import { AuditModule } from '../audit/audit.module';
 import { AuditService } from '../audit/audit.service';
 import { setAuditService } from './routers/audit.router';
@@ -39,7 +40,7 @@ import { setDashboardServices } from './routers/dashboard.router';
 import { setVoipServiceForRouter } from './routers/voip.router';
 import { SettingsModule } from '../settings/settings.module';
 import { SettingsService } from '../settings/settings.service';
-import { setSettingsService } from './routers/settings.router';
+import { setSettingsService, setSettingsDb } from './routers/settings.router';
 import { setCartService } from './routers/cart.router';
 import { CartModule } from '../cart/cart.module';
 import { CartService } from '../cart/cart.service';
@@ -47,7 +48,11 @@ import { PermissionsModule } from '../permissions/permissions.module';
 import { PermissionRequestsModule } from '../permission-requests/permission-requests.module';
 import { PermissionRequestsService } from '../permission-requests/permission-requests.service';
 import { setPermissionRequestsService } from './routers/permission-requests.router';
-import { setBranchesDb, setBranchesSessionStore } from './routers/branches.router';
+import {
+  setBranchesDb,
+  setBranchesSessionStore,
+  setBranchesNotificationsService,
+} from './routers/branches.router';
 import { setMessagingDb } from './routers/messaging.router';
 import { DRIZZLE, DatabaseModule } from '../database/database.module';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -79,6 +84,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly financeService: FinanceService,
     private readonly hrService: HrService,
     private readonly notificationsService: NotificationsService,
+    private readonly pushSchedulerService: PushSchedulerService,
     private readonly auditService: AuditService,
     private readonly voipService: VoipService,
     private readonly settingsService: SettingsService,
@@ -92,6 +98,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setPermissionRequestsService(this.permissionRequestsService);
     setOrdersService(this.ordersService);
     setUsersService(this.usersService);
+    setUsersSessionStore(this.sessionStore);
     setProductsService(this.productsService);
     setProductCategoriesService(this.productCategoriesService);
     setInventoryService(this.inventoryService);
@@ -100,13 +107,16 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setFinanceService(this.financeService);
     setHrService(this.hrService);
     setNotificationsService(this.notificationsService);
+    setPushSchedulerService(this.pushSchedulerService);
     setAuditService(this.auditService);
     setVoipService(this.voipService);
     setVoipServiceForRouter(this.voipService);
     setSettingsService(this.settingsService);
+    setSettingsDb(this.db as Parameters<typeof setSettingsDb>[0]);
     setCartService(this.cartService);
     setBranchesDb(this.db as Parameters<typeof setBranchesDb>[0]);
     setBranchesSessionStore(this.sessionStore);
+    setBranchesNotificationsService(this.notificationsService);
     setMessagingDb(this.db as Parameters<typeof setMessagingDb>[0]);
     setDashboardServices({
       orders: this.ordersService,

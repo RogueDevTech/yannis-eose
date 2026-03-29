@@ -36,7 +36,7 @@ export default function RiderLayout() {
   const { canInstall, install } = usePwaInstall();
 
   return (
-    <div className="min-h-screen bg-surface-50 dark:bg-surface-950">
+    <div className="min-h-screen bg-app-canvas">
       {/* Offline banner */}
       {!isOnline && (
         <div className="bg-warning-600 text-white text-center text-xs py-1.5 px-4 font-medium">
@@ -53,16 +53,16 @@ export default function RiderLayout() {
       )}
 
       {/* Mobile top bar */}
-      <header className="sticky top-0 z-30 flex items-center justify-between bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800 px-4 py-3">
+      <header className="sticky top-0 z-30 flex items-center justify-between bg-app-elevated border-b border-app-border px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center">
             <span className="text-xs font-bold text-white">{user.name.charAt(0).toUpperCase()}</span>
           </div>
           <div>
-            <p className="text-sm font-semibold text-surface-900 dark:text-white leading-tight">{user.name}</p>
+            <p className="text-sm font-semibold text-app-fg leading-tight">{user.name}</p>
             <div className="flex items-center gap-1.5">
               <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-success-500' : 'bg-danger-500'}`} />
-              <p className="text-2xs text-surface-800 dark:text-surface-200">
+              <p className="text-2xs text-app-fg-muted">
                 Rider {isOnline ? '' : '(Offline)'}
               </p>
             </div>
@@ -83,7 +83,7 @@ export default function RiderLayout() {
           <Form method="post" action="/auth/logout">
             <button
               type="submit"
-              className="p-2 rounded-lg text-surface-400 hover:text-danger-500 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+              className="p-2 rounded-lg text-app-fg-muted hover:text-danger-500 hover:bg-app-hover transition-colors"
               title="Sign out"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

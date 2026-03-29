@@ -4,7 +4,13 @@ import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
-import { Spinner } from '~/components/ui/spinner';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { PageHeader } from '~/components/ui/page-header';
+import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { SearchInput } from '~/components/ui/search-input';
+import { EmptyState } from '~/components/ui/empty-state';
 
 interface Category {
   id: string;
@@ -60,8 +66,8 @@ function CategoryModal({
   return (
     <Modal open onClose={onClose} maxWidth="max-w-lg" contentClassName="p-0 max-h-[90dvh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
+          <h3 className="text-lg font-semibold text-app-fg">
             {isEdit ? 'Update Category' : 'New Category'}
           </h3>
           <button
@@ -80,127 +86,90 @@ function CategoryModal({
           <input type="hidden" name="intent" value={isEdit ? 'update' : 'create'} />
           {isEdit && <input type="hidden" name="categoryId" value={category.id} />}
 
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-              Category Name
-            </label>
-            <input
-              id="name"
-              name="name"
-              type="text"
-              required
-              minLength={2}
-              defaultValue={category?.name ?? ''}
-              className="input"
-              placeholder="e.g. Prosma"
-            />
-          </div>
+          <TextInput
+            id="name"
+            name="name"
+            label="Category Name"
+            required
+            minLength={2}
+            defaultValue={category?.name ?? ''}
+            placeholder="e.g. Prosma"
+          />
 
           <div>
-            <label htmlFor="brandName" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-              Brand Name
-              <span className="text-surface-700 dark:text-surface-300 font-normal ml-1">(shown on invoices)</span>
-            </label>
-            <input
+            <TextInput
               id="brandName"
               name="brandName"
-              type="text"
+              label="Brand Name (shown on invoices)"
               required
               defaultValue={category?.brandName ?? ''}
-              className="input"
               placeholder="e.g. Prosma"
             />
-            <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+            <p className="text-xs text-app-fg-muted mt-1">
               All products under this category will carry this brand name.
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="brandPhone" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Brand Phone
-                <span className="text-surface-700 dark:text-surface-300 font-normal ml-1">(invoices)</span>
-              </label>
-              <input
-                id="brandPhone"
-                name="brandPhone"
-                type="text"
-                defaultValue={category?.brandPhone ?? ''}
-                className="input"
-                placeholder="+2348000000000"
-              />
-            </div>
-            <div>
-              <label htmlFor="brandEmail" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Brand Email
-                <span className="text-surface-700 dark:text-surface-300 font-normal ml-1">(invoices)</span>
-              </label>
-              <input
-                id="brandEmail"
-                name="brandEmail"
-                type="email"
-                defaultValue={category?.brandEmail ?? ''}
-                className="input"
-                placeholder="brand@company.com"
-              />
-            </div>
+            <TextInput
+              id="brandPhone"
+              name="brandPhone"
+              label="Brand Phone (invoices)"
+              type="text"
+              defaultValue={category?.brandPhone ?? ''}
+              placeholder="+2348000000000"
+            />
+            <TextInput
+              id="brandEmail"
+              name="brandEmail"
+              label="Brand Email (invoices)"
+              type="email"
+              defaultValue={category?.brandEmail ?? ''}
+              placeholder="brand@company.com"
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="brandWhatsapp" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Brand WhatsApp Number
-              </label>
-              <input
+              <TextInput
                 id="brandWhatsapp"
                 name="brandWhatsapp"
+                label="Brand WhatsApp Number"
                 type="text"
                 defaultValue={category?.brandWhatsapp ?? ''}
-                className="input"
                 placeholder="+2348000000000"
+                hint="For automatic messaging."
               />
-              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
-                For automatic messaging.
-              </p>
             </div>
             <div>
-              <label htmlFor="smsSenderId" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                SMS Sender ID
-              </label>
-              <input
+              <TextInput
                 id="smsSenderId"
                 name="smsSenderId"
+                label="SMS Sender ID"
                 type="text"
                 defaultValue={category?.smsSenderId ?? ''}
-                className="input"
                 placeholder="e.g. Prosma"
+                hint="Used as sender ID when sending SMS to customers."
               />
-              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
-                Used as sender ID when sending SMS to customers.
-              </p>
             </div>
           </div>
 
           {isEdit && (
-            <div>
-              <label htmlFor="status" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Status
-              </label>
-              <select
-                id="status"
-                name="status"
-                defaultValue={category.status}
-                className="input"
-              >
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-                <option value="ARCHIVED">Archived</option>
-              </select>
-            </div>
+            <FormSelect
+              id="status"
+              name="status"
+              label="Status"
+              defaultValue={category.status}
+              options={[
+                { value: 'ACTIVE', label: 'Active' },
+                { value: 'INACTIVE', label: 'Inactive' },
+                { value: 'ARCHIVED', label: 'Archived' },
+              ]}
+            />
           )}
 
           {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-surface-200 dark:border-surface-700">
+          <div className="flex items-center justify-end gap-3 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-app-border">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
@@ -223,7 +192,7 @@ function CategoryModal({
           title={`Archive "${category.name}"?`}
           description={<><strong>{category.name}</strong> will be hidden from default category lists.</>}
           details={
-            <ul className="list-disc list-inside text-sm text-surface-600 dark:text-surface-400 space-y-1">
+            <ul className="list-disc list-inside text-sm text-app-fg-muted space-y-1">
               <li>Hidden from default category lists</li>
               <li>You can change status back anytime</li>
             </ul>
@@ -249,7 +218,6 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
     if (actionData?.error) setDismissedError(false);
   }, [actionData?.error]);
   const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
 
   // Close modal on successful action
   useEffect(() => {
@@ -274,23 +242,18 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Product Categories</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
-            Manage brand categories for products. Brand info appears on invoices and SMS.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" className="flex items-center gap-2" onClick={() => setModalCategory(null)}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          New Category
-        </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Product Categories"
+        description="Manage brand categories for products. Brand info appears on invoices and SMS."
+        actions={
+          <Button variant="primary" className="flex items-center gap-2" onClick={() => setModalCategory(null)}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            New Category
+          </Button>
+        }
+      />
 
       {actionData?.error && !dismissedError && (
         <PageNotification
@@ -301,33 +264,23 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         />
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200">Total Categories</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200">Active</p>
-          <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{activeCount}</p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        showScrollControls={false}
+        items={[
+          { label: 'Total Categories', value: total, valueClassName: 'text-app-fg' },
+          { label: 'Active', value: activeCount, valueClassName: 'text-success-600 dark:text-success-400' },
+        ]}
+      />
 
       {/* Search */}
       <div className="card">
         <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="Search categories or brand names..."
+          <SearchInput
             value={search}
-            onChange={(e) => updateSearch(e.target.value)}
-            className="input text-sm flex-1"
+            onChange={updateSearch}
+            placeholder="Search categories or brand names..."
+            className="flex-1"
           />
-          {isFilterLoading && (
-            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
         </div>
       </div>
 
@@ -350,35 +303,29 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
             <tbody>
               {categories.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
-                    No categories found. Create one to get started.
+                  <td colSpan={8}>
+                    <EmptyState title="No categories found" description="Create one to get started." />
                   </td>
                 </tr>
               )}
               {categories.map((cat, idx) => (
                 <tr key={cat.id} className="table-row">
-                  <td className="table-cell text-xs text-surface-800 dark:text-surface-200">{idx + 1}</td>
-                  <td className="table-cell font-medium text-surface-900 dark:text-white">{cat.name}</td>
-                  <td className="table-cell text-surface-700 dark:text-surface-300">{cat.brandName}</td>
-                  <td className="table-cell hidden md:table-cell text-xs text-surface-600 dark:text-surface-200">
+                  <td className="table-cell text-xs text-app-fg-muted">{idx + 1}</td>
+                  <td className="table-cell font-medium text-app-fg">{cat.name}</td>
+                  <td className="table-cell text-app-fg-muted">{cat.brandName}</td>
+                  <td className="table-cell hidden md:table-cell text-xs text-app-fg-muted">
                     {cat.brandPhone && <div>{cat.brandPhone}</div>}
                     {cat.brandEmail && <div className="text-brand-500 dark:text-brand-400">{cat.brandEmail}</div>}
                     {!cat.brandPhone && !cat.brandEmail && '—'}
                   </td>
-                  <td className="table-cell hidden lg:table-cell text-xs text-surface-600 dark:text-surface-200">
+                  <td className="table-cell hidden lg:table-cell text-xs text-app-fg-muted">
                     {cat.brandWhatsapp || '—'}
                   </td>
-                  <td className="table-cell hidden lg:table-cell text-xs text-surface-600 dark:text-surface-200">
+                  <td className="table-cell hidden lg:table-cell text-xs text-app-fg-muted">
                     {cat.smsSenderId || '—'}
                   </td>
                   <td className="table-cell">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
-                      cat.status === 'ACTIVE'
-                        ? 'bg-success-50 dark:bg-success-700/20 text-success-700 dark:text-success-400'
-                        : 'bg-surface-100 dark:bg-surface-700 text-surface-800 dark:text-surface-200'
-                    }`}>
-                      {cat.status === 'ACTIVE' ? 'Active' : cat.status === 'INACTIVE' ? 'Inactive' : 'Archived'}
-                    </span>
+                    <StatusBadge status={cat.status} />
                   </td>
                   <td className="table-cell text-right">
                     <Button
@@ -399,27 +346,19 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         {/* Mobile card list */}
         <div className="md:hidden space-y-3 px-1">
           {categories.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
-              No categories found. Create one to get started.
-            </div>
+            <EmptyState title="No categories found" description="Create one to get started." />
           ) : (
             categories.map((cat) => (
-              <div key={cat.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+              <div key={cat.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
-                    <p className="font-medium text-surface-900 dark:text-white">{cat.name}</p>
-                    <p className="text-sm text-surface-700 dark:text-surface-300">{cat.brandName}</p>
+                    <p className="font-medium text-app-fg">{cat.name}</p>
+                    <p className="text-sm text-app-fg-muted">{cat.brandName}</p>
                   </div>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium shrink-0 ${
-                    cat.status === 'ACTIVE'
-                      ? 'bg-success-50 dark:bg-success-700/20 text-success-700 dark:text-success-400'
-                      : 'bg-surface-100 dark:bg-surface-700 text-surface-800 dark:text-surface-200'
-                  }`}>
-                    {cat.status === 'ACTIVE' ? 'Active' : cat.status === 'INACTIVE' ? 'Inactive' : 'Archived'}
-                  </span>
+                  <StatusBadge status={cat.status} />
                 </div>
                 {(cat.brandPhone || cat.brandEmail || cat.brandWhatsapp || cat.smsSenderId) && (
-                  <div className="text-sm text-surface-600 dark:text-surface-400 space-y-0.5 mb-2">
+                  <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
                     {cat.brandPhone && <div>Phone: {cat.brandPhone}</div>}
                     {cat.brandEmail && <div className="text-brand-500 dark:text-brand-400">{cat.brandEmail}</div>}
                     {cat.brandWhatsapp && <div>WhatsApp: {cat.brandWhatsapp}</div>}

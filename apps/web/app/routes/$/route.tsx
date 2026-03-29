@@ -18,11 +18,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function CatchAll() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-50 dark:bg-surface-950 p-6">
+    <div className="min-h-screen flex items-center justify-center bg-app-canvas p-6">
       <div className="text-center max-w-md">
-        <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
-        <h1 className="text-xl font-bold text-surface-900 dark:text-white">Page Not Found</h1>
-        <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
+        <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
+        <h1 className="text-xl font-bold text-app-fg">Page Not Found</h1>
+        <p className="mt-2 text-sm text-app-fg-muted">
           The page you're looking for doesn't exist or has been moved.
         </p>
         <div className="mt-6 flex gap-3 justify-center">

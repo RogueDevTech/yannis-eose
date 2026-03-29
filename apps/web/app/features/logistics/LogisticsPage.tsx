@@ -6,9 +6,15 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Tabs } from '~/components/ui/tabs';
+import { PageHeader } from '~/components/ui/page-header';
+import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
 import type {
   Provider,
   Location,
@@ -69,7 +75,7 @@ function AddProviderForm({
   return (
     <fetcher.Form method="post" className="card space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Add Provider{rows.length > 1 ? 's' : ''}</h3>
+        <h3 className="text-lg font-semibold text-app-fg">Add Provider{rows.length > 1 ? 's' : ''}</h3>
         <Button type="button" variant="secondary" size="sm" onClick={addRow}>
           + Add another
         </Button>
@@ -78,39 +84,32 @@ function AddProviderForm({
       <div className="space-y-3">
         {rows.map((row, idx) => (
           <div key={idx} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-            <div>
-              {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Provider name</label>}
-              <input
-                name={rows.length > 1 ? `provider_${idx}_name` : 'name'}
-                type="text"
-                value={row.name}
-                onChange={(e) => updateRow(idx, 'name', e.target.value)}
-                placeholder="Provider name"
-                className="input"
-                required={idx === 0}
-              />
-            </div>
-            <div>
-              {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Contact info</label>}
-              <input
-                name={rows.length > 1 ? `provider_${idx}_contactInfo` : 'contactInfo'}
-                type="text"
-                value={row.contactInfo}
-                onChange={(e) => updateRow(idx, 'contactInfo', e.target.value)}
-                placeholder="Contact info"
-                className="input"
-              />
-            </div>
-            <div className="flex gap-2">
+            <TextInput
+              name={rows.length > 1 ? `provider_${idx}_name` : 'name'}
+              type="text"
+              label={idx === 0 ? 'Provider name' : undefined}
+              value={row.name}
+              onChange={(e) => updateRow(idx, 'name', e.target.value)}
+              placeholder="Provider name"
+              required={idx === 0}
+            />
+            <TextInput
+              name={rows.length > 1 ? `provider_${idx}_contactInfo` : 'contactInfo'}
+              type="text"
+              label={idx === 0 ? 'Contact info' : undefined}
+              value={row.contactInfo}
+              onChange={(e) => updateRow(idx, 'contactInfo', e.target.value)}
+              placeholder="Contact info"
+            />
+            <div className="flex gap-2 items-end">
               <div className="flex-1">
-                {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Coverage area</label>}
-                <input
+                <TextInput
                   name={rows.length > 1 ? `provider_${idx}_coverageArea` : 'coverageArea'}
                   type="text"
+                  label={idx === 0 ? 'Coverage area' : undefined}
                   value={row.coverageArea}
                   onChange={(e) => updateRow(idx, 'coverageArea', e.target.value)}
                   placeholder="Coverage area"
-                  className="input"
                 />
               </div>
               {rows.length > 1 && (
@@ -174,8 +173,8 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
             <span className="text-green-600 dark:text-green-400 text-lg">&#10003;</span>
           </div>
           <div>
-            <p className="text-sm font-medium text-surface-900 dark:text-white">All clear</p>
-            <p className="text-xs text-surface-800 dark:text-surface-200">No active escalations found</p>
+            <p className="text-sm font-medium text-app-fg">All clear</p>
+            <p className="text-xs text-app-fg-muted">No active escalations found</p>
           </div>
         </div>
       </div>
@@ -184,32 +183,31 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
 
   return (
     <div className="space-y-4">
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Shrinkage Alerts</p>
-          <p className={`text-2xl font-bold mt-1 ${shrinkageAlerts.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-surface-900 dark:text-white'}`}>
-            {shrinkageAlerts.length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Stuck Orders (&gt;24h)</p>
-          <p className={`text-2xl font-bold mt-1 ${stuckOrders.length > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-surface-900 dark:text-white'}`}>
-            {stuckOrders.length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Transfer Delays (&gt;48h)</p>
-          <p className={`text-2xl font-bold mt-1 ${transferDelays.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-surface-900 dark:text-white'}`}>
-            {transferDelays.length}
-          </p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        showScrollControls={false}
+        items={[
+          {
+            label: 'Shrinkage Alerts',
+            value: shrinkageAlerts.length,
+            valueClassName: shrinkageAlerts.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-app-fg',
+          },
+          {
+            label: 'Stuck Orders (>24h)',
+            value: stuckOrders.length,
+            valueClassName: stuckOrders.length > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-app-fg',
+          },
+          {
+            label: 'Transfer Delays (>48h)',
+            value: transferDelays.length,
+            valueClassName: transferDelays.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
+          },
+        ]}
+      />
 
       {/* Shrinkage Alerts Table */}
       {shrinkageAlerts.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-2 flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-app-fg mb-2 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
             Shrinkage Alerts
           </h3>
@@ -228,18 +226,18 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
               <tbody>
                 {shrinkageAlerts.map((alert) => (
                   <tr key={alert.transferId} className="table-row">
-                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{alert.productName}</td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">
+                    <td className="table-cell font-medium text-app-fg">{alert.productName}</td>
+                    <td className="table-cell text-app-fg-muted">
                       {alert.fromLocationName} → {alert.toLocationName}
                     </td>
-                    <td className="table-cell text-right text-surface-700 dark:text-surface-300">{alert.quantitySent}</td>
-                    <td className="table-cell text-right text-surface-700 dark:text-surface-300">{alert.quantityReceived ?? 0}</td>
+                    <td className="table-cell text-right text-app-fg-muted">{alert.quantitySent}</td>
+                    <td className="table-cell text-right text-app-fg-muted">{alert.quantityReceived ?? 0}</td>
                     <td className="table-cell text-right">
                       <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
                         -{alert.shortage}
                       </span>
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200 text-xs">
+                    <td className="table-cell text-app-fg-muted text-xs">
                       {alert.shrinkageReason ?? '—'}
                     </td>
                   </tr>
@@ -253,7 +251,7 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
       {/* Stuck Orders Table */}
       {stuckOrders.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-2 flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-app-fg mb-2 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block"></span>
             Stuck Orders
           </h3>
@@ -271,14 +269,14 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
               <tbody>
                 {stuckOrders.map((order) => (
                   <tr key={order.orderId} className="table-row">
-                    <td className="table-cell font-mono text-xs text-surface-700 dark:text-surface-300">
+                    <td className="table-cell font-mono text-xs text-app-fg-muted">
                       {order.orderId.slice(0, 8)}...
                     </td>
                     <td className="table-cell">
                       <OrderStatusBadge status={order.status} />
                     </td>
-                    <td className="table-cell text-surface-700 dark:text-surface-300">{order.customerName}</td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">{order.riderName ?? '—'}</td>
+                    <td className="table-cell text-app-fg-muted">{order.customerName}</td>
+                    <td className="table-cell text-app-fg-muted">{order.riderName ?? '—'}</td>
                     <td className="table-cell">
                       <SeverityBadge hours={order.stuckHours} warningThreshold={24} criticalThreshold={48} />
                     </td>
@@ -293,7 +291,7 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
       {/* Transfer Delays Table */}
       {transferDelays.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-2 flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-app-fg mb-2 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>
             Transfer Delays
           </h3>
@@ -311,14 +309,14 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
               <tbody>
                 {transferDelays.map((transfer) => (
                   <tr key={transfer.transferId} className="table-row">
-                    <td className="table-cell font-mono text-xs text-surface-700 dark:text-surface-300">
+                    <td className="table-cell font-mono text-xs text-app-fg-muted">
                       {transfer.transferId.slice(0, 8)}...
                     </td>
-                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{transfer.productName}</td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">
+                    <td className="table-cell font-medium text-app-fg">{transfer.productName}</td>
+                    <td className="table-cell text-app-fg-muted">
                       {transfer.fromLocationName} → {transfer.toLocationName}
                     </td>
-                    <td className="table-cell text-right text-surface-700 dark:text-surface-300">{transfer.quantitySent}</td>
+                    <td className="table-cell text-right text-app-fg-muted">{transfer.quantitySent}</td>
                     <td className="table-cell">
                       <SeverityBadge hours={transfer.delayHours} warningThreshold={48} criticalThreshold={72} />
                     </td>
@@ -369,23 +367,21 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Logistics</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Manage 3PL providers, locations, and delivery operations
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <PageRefreshButton />
-          <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(!showAddProvider)}>
-            {showAddProvider ? 'Close' : '+ Provider'}
-          </Button>
-          <Button variant="primary" size="sm" onClick={() => setShowAddLocation(!showAddLocation)}>
-            {showAddLocation ? 'Close' : '+ Location'}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Logistics"
+        description="Manage 3PL providers, locations, and delivery operations"
+        actions={
+          <div className="flex gap-2">
+            <PageRefreshButton />
+            <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(!showAddProvider)}>
+              {showAddProvider ? 'Close' : '+ Provider'}
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => setShowAddLocation(!showAddLocation)}>
+              {showAddLocation ? 'Close' : '+ Location'}
+            </Button>
+          </div>
+        }
+      />
 
       {actionError && !dismissedError && (
         <PageNotification
@@ -396,34 +392,34 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         />
       )}
 
-      {/* Stats */}
-      <div className={`grid gap-3 ${canViewEscalations ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2'}`}>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Providers</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{totalProviders}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Locations</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{totalLocations}</p>
-        </div>
-        {canViewEscalations && healthDashboard && (
-          <DeferredSection resolve={healthDashboard} skeleton="stat">
-            {(resolvedHealth) => resolvedHealth ? (
-              <div className="card">
-                <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Escalations</p>
-                <p className={`text-2xl font-bold mt-1 ${resolvedHealth.totalEscalations > 0 ? 'text-red-600 dark:text-red-400' : 'text-surface-900 dark:text-white'}`}>
-                  {resolvedHealth.totalEscalations}
-                </p>
-              </div>
-            ) : (
-              <div className="card">
-                <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Escalations</p>
-                <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">--</p>
-              </div>
-            )}
-          </DeferredSection>
-        )}
-      </div>
+      {canViewEscalations && healthDashboard ? (
+        <DeferredSection resolve={healthDashboard} fallback={<OverviewStatStripSkeleton count={3} />}>
+          {(resolvedHealth) => (
+            <OverviewStatStrip
+              items={[
+                { label: 'Providers', value: totalProviders, valueClassName: 'text-app-fg' },
+                { label: 'Locations', value: totalLocations, valueClassName: 'text-app-fg' },
+                {
+                  label: 'Escalations',
+                  value: resolvedHealth ? resolvedHealth.totalEscalations : '—',
+                  valueClassName:
+                    resolvedHealth && resolvedHealth.totalEscalations > 0
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-app-fg',
+                },
+              ]}
+            />
+          )}
+        </DeferredSection>
+      ) : (
+        <OverviewStatStrip
+          showScrollControls={false}
+          items={[
+            { label: 'Providers', value: totalProviders, valueClassName: 'text-app-fg' },
+            { label: 'Locations', value: totalLocations, valueClassName: 'text-app-fg' },
+          ]}
+        />
+      )}
 
       {/* Add Provider Form */}
       <ResponsiveFormPanel open={showAddProvider} onClose={() => setShowAddProvider(false)}>
@@ -436,18 +432,18 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {/* Add Location Form */}
       <ResponsiveFormPanel open={showAddLocation} onClose={() => setShowAddLocation(false)}>
         <fetcher.Form method="post" className="card space-y-3">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Add Location</h3>
+          <h3 className="text-lg font-semibold text-app-fg">Add Location</h3>
           <input type="hidden" name="intent" value="createLocation" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <select name="providerId" required className="input">
-              <option value="">Select provider...</option>
-              {providers.map((p: Provider) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <input name="name" type="text" required placeholder="Location name" className="input" />
-            <input name="address" type="text" required placeholder="Address" className="input" />
-            <input name="coordinates" type="text" placeholder="GPS coordinates (optional)" className="input" />
+            <FormSelect
+              name="providerId"
+              required
+              options={providers.map((p: Provider) => ({ value: p.id, label: p.name }))}
+              placeholder="Select provider..."
+            />
+            <TextInput name="name" type="text" required placeholder="Location name" />
+            <TextInput name="address" type="text" required placeholder="Address" />
+            <TextInput name="coordinates" type="text" placeholder="GPS coordinates (optional)" />
           </div>
           <div className="flex gap-2">
             <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
@@ -461,12 +457,12 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {/* Edit Provider Modal */}
       {editingProvider && (
         <Modal open onClose={() => setEditingProvider(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-0">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Edit Provider</h3>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
+              <h3 className="text-lg font-semibold text-app-fg">Edit Provider</h3>
               <button
                 type="button"
                 onClick={() => setEditingProvider(null)}
-                className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-200 transition-colors"
+                className="text-app-fg-muted hover:text-app-fg transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -476,44 +472,37 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             <fetcher.Form method="post" className="px-6 py-4 space-y-4">
               <input type="hidden" name="intent" value="updateProvider" />
               <input type="hidden" name="providerId" value={editingProvider.id} />
-              <div>
-                <label className="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">Provider name</label>
-                <input
-                  name="name"
-                  type="text"
-                  defaultValue={editingProvider.name}
-                  required
-                  className="input w-full"
-                  placeholder="Provider name"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">Contact info</label>
-                <input
-                  name="contactInfo"
-                  type="text"
-                  defaultValue={editingProvider.contactInfo ?? ''}
-                  className="input w-full"
-                  placeholder="Phone, email, or contact name"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">Coverage area</label>
-                <input
-                  name="coverageArea"
-                  type="text"
-                  defaultValue={editingProvider.coverageArea ?? ''}
-                  className="input w-full"
-                  placeholder="e.g. Lagos, Abuja"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">Status</label>
-                <select name="status" defaultValue={editingProvider.status} className="input w-full">
-                  <option value="ACTIVE">Active</option>
-                  <option value="INACTIVE">Inactive</option>
-                </select>
-              </div>
+              <TextInput
+                name="name"
+                type="text"
+                label="Provider name"
+                defaultValue={editingProvider.name}
+                required
+                placeholder="Provider name"
+              />
+              <TextInput
+                name="contactInfo"
+                type="text"
+                label="Contact info"
+                defaultValue={editingProvider.contactInfo ?? ''}
+                placeholder="Phone, email, or contact name"
+              />
+              <TextInput
+                name="coverageArea"
+                type="text"
+                label="Coverage area"
+                defaultValue={editingProvider.coverageArea ?? ''}
+                placeholder="e.g. Lagos, Abuja"
+              />
+              <FormSelect
+                name="status"
+                label="Status"
+                defaultValue={editingProvider.status}
+                options={[
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'INACTIVE', label: 'Inactive' },
+                ]}
+              />
               <div className="flex gap-2 pt-2">
                 <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
                   Save changes
@@ -529,12 +518,12 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {/* Partner details view modal */}
       {viewingProvider && (
         <Modal open onClose={() => setViewingProvider(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-0">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Partner details</h3>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
+            <h3 className="text-lg font-semibold text-app-fg">Partner details</h3>
             <button
               type="button"
               onClick={() => setViewingProvider(null)}
-              className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-200 transition-colors"
+              className="text-app-fg-muted hover:text-app-fg transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -544,53 +533,53 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           <div className="px-6 py-4 space-y-4">
             <dl className="space-y-3">
               <div>
-                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Name</dt>
-                <dd className="mt-0.5 text-sm text-surface-900 dark:text-white">{viewingProvider.name}</dd>
+                <dt className="text-xs font-medium text-app-fg-muted">Name</dt>
+                <dd className="mt-0.5 text-sm text-app-fg">{viewingProvider.name}</dd>
               </div>
               <div>
-                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Contact info</dt>
-                <dd className="mt-0.5 text-sm text-surface-900 dark:text-white">{viewingProvider.contactInfo ?? '—'}</dd>
+                <dt className="text-xs font-medium text-app-fg-muted">Contact info</dt>
+                <dd className="mt-0.5 text-sm text-app-fg">{viewingProvider.contactInfo ?? '—'}</dd>
               </div>
               <div>
-                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Coverage area</dt>
-                <dd className="mt-0.5 text-sm text-surface-900 dark:text-white">{viewingProvider.coverageArea ?? '—'}</dd>
+                <dt className="text-xs font-medium text-app-fg-muted">Coverage area</dt>
+                <dd className="mt-0.5 text-sm text-app-fg">{viewingProvider.coverageArea ?? '—'}</dd>
               </div>
               <div>
-                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Status</dt>
+                <dt className="text-xs font-medium text-app-fg-muted">Status</dt>
                 <dd className="mt-0.5">
-                  <span className={viewingProvider.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{viewingProvider.status}</span>
+                  <StatusBadge status={viewingProvider.status} />
                 </dd>
               </div>
               <div>
-                <dt className="text-xs font-medium text-surface-700 dark:text-surface-300">Created</dt>
-                <dd className="mt-0.5 text-sm text-surface-800 dark:text-surface-200">
+                <dt className="text-xs font-medium text-app-fg-muted">Created</dt>
+                <dd className="mt-0.5 text-sm text-app-fg-muted">
                   {new Date(viewingProvider.createdAt).toLocaleString('en-NG', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </dd>
               </div>
             </dl>
             <div>
-              <h4 className="text-sm font-medium text-surface-900 dark:text-white mb-2">Locations</h4>
+              <h4 className="text-sm font-medium text-app-fg mb-2">Locations</h4>
               {locations.filter((l) => l.providerId === viewingProvider.id).length === 0 ? (
-                <p className="text-sm text-surface-600 dark:text-surface-400">No locations.</p>
+                <p className="text-sm text-app-fg-muted">No locations.</p>
               ) : (
                 <ul className="space-y-2">
                   {locations
                     .filter((l) => l.providerId === viewingProvider.id)
                     .map((l) => (
-                      <li key={l.id} className="rounded-lg border border-surface-200 dark:border-surface-700 p-3 text-sm">
-                        <p className="font-medium text-surface-900 dark:text-white">{l.name}</p>
-                        <p className="text-surface-800 dark:text-surface-200 mt-0.5">{l.address}</p>
+                      <li key={l.id} className="rounded-lg border border-app-border p-3 text-sm">
+                        <p className="font-medium text-app-fg">{l.name}</p>
+                        <p className="text-app-fg-muted mt-0.5">{l.address}</p>
                         {l.coordinates && (
-                          <p className="text-surface-600 dark:text-surface-400 mt-0.5 text-xs">{l.coordinates}</p>
+                          <p className="text-app-fg-muted mt-0.5 text-xs">{l.coordinates}</p>
                         )}
-                        <span className={`inline-block mt-1 ${l.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}`}>{l.status}</span>
+                        <div className="mt-1"><StatusBadge status={l.status} /></div>
                       </li>
                     ))}
                 </ul>
               )}
             </div>
           </div>
-          <div className="flex gap-2 px-6 py-4 border-t border-surface-200 dark:border-surface-700">
+          <div className="flex gap-2 px-6 py-4 border-t border-app-border">
             <Button
               type="button"
               variant="primary"
@@ -654,11 +643,11 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               <tbody>
                 {providers.map((p: Provider) => (
                   <tr key={p.id} className="table-row">
-                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{p.name}</td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">{p.contactInfo ?? '—'}</td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">{p.coverageArea ?? '—'}</td>
+                    <td className="table-cell font-medium text-app-fg">{p.name}</td>
+                    <td className="table-cell text-app-fg-muted">{p.contactInfo ?? '—'}</td>
+                    <td className="table-cell text-app-fg-muted">{p.coverageArea ?? '—'}</td>
                     <td className="table-cell">
-                      <span className={p.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{p.status}</span>
+                      <StatusBadge status={p.status} />
                     </td>
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -684,8 +673,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 ))}
                 {providers.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                      No logistics providers yet
+                    <td colSpan={5}>
+                      <EmptyState title="No logistics providers yet" />
                     </td>
                   </tr>
                 )}
@@ -694,17 +683,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           </div>
           <div className="md:hidden space-y-3 px-1">
             {providers.length === 0 ? (
-              <div className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                No logistics providers yet
-              </div>
+              <EmptyState title="No logistics providers yet" />
             ) : (
               providers.map((p: Provider) => (
-                <div key={p.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                <div key={p.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                   <div className="flex items-start justify-between gap-2 mb-2">
-                    <p className="font-medium text-surface-900 dark:text-surface-100">{p.name}</p>
-                    <span className={p.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{p.status}</span>
+                    <p className="font-medium text-app-fg">{p.name}</p>
+                    <StatusBadge status={p.status} />
                   </div>
-                  <div className="text-sm text-surface-800 dark:text-surface-200 space-y-0.5 mb-2">
+                  <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
                     {p.contactInfo && <div>Contact: {p.contactInfo}</div>}
                     {p.coverageArea && <div>Coverage: {p.coverageArea}</div>}
                   </div>
@@ -750,19 +737,19 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                   const provider = providers.find((p: Provider) => p.id === l.providerId);
                   return (
                     <tr key={l.id} className="table-row">
-                      <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{l.name}</td>
-                      <td className="table-cell text-surface-800 dark:text-surface-200">{l.address}</td>
-                      <td className="table-cell text-surface-800 dark:text-surface-200">{provider?.name ?? l.providerId.slice(0, 8)}</td>
+                      <td className="table-cell font-medium text-app-fg">{l.name}</td>
+                      <td className="table-cell text-app-fg-muted">{l.address}</td>
+                      <td className="table-cell text-app-fg-muted">{provider?.name ?? l.providerId.slice(0, 8)}</td>
                       <td className="table-cell">
-                        <span className={l.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{l.status}</span>
+                        <StatusBadge status={l.status} />
                       </td>
                     </tr>
                   );
                 })}
                 {locations.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                      No locations yet. Add a provider first, then add locations.
+                    <td colSpan={4}>
+                      <EmptyState title="No locations yet" description="Add a provider first, then add locations." />
                     </td>
                   </tr>
                 )}
@@ -771,19 +758,17 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           </div>
           <div className="md:hidden space-y-3 px-1">
             {locations.length === 0 ? (
-              <div className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                No locations yet. Add a provider first, then add locations.
-              </div>
+              <EmptyState title="No locations yet" description="Add a provider first, then add locations." />
             ) : (
               locations.map((l: Location) => {
                 const provider = providers.find((p: Provider) => p.id === l.providerId);
                 return (
-                  <div key={l.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                  <div key={l.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                     <div className="flex items-start justify-between gap-2 mb-2">
-                      <p className="font-medium text-surface-900 dark:text-surface-100">{l.name}</p>
-                      <span className={l.status === 'ACTIVE' ? 'badge-success' : 'badge-warning'}>{l.status}</span>
+                      <p className="font-medium text-app-fg">{l.name}</p>
+                      <StatusBadge status={l.status} />
                     </div>
-                    <div className="text-sm text-surface-800 dark:text-surface-200 space-y-0.5">
+                    <div className="text-sm text-app-fg-muted space-y-0.5">
                       <div>Address: {l.address}</div>
                       <div>Provider: {provider?.name ?? l.providerId.slice(0, 8)}</div>
                     </div>
@@ -801,7 +786,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             <EscalationsPanel healthDashboard={resolvedHealth} />
           ) : (
             <div className="card">
-              <p className="text-sm text-surface-800 dark:text-surface-200 text-center py-8">
+              <p className="text-sm text-app-fg-muted text-center py-8">
                 Unable to load escalation data. Please try again.
               </p>
             </div>
@@ -811,7 +796,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
 
       {activeTab === 'escalations' && canViewEscalations && !healthDashboard && (
         <div className="card">
-          <p className="text-sm text-surface-800 dark:text-surface-200 text-center py-8">
+          <p className="text-sm text-app-fg-muted text-center py-8">
             Unable to load escalation data. Please try again.
           </p>
         </div>

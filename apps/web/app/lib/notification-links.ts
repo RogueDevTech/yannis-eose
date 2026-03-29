@@ -40,7 +40,8 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
   }
   const type = notif.type;
   if (type?.startsWith('order:')) return { link: '/admin/orders', label: 'View orders' };
-  if (type?.startsWith('funding:') || type === 'marketing:high_cpa') return { link: '/admin/marketing/funding', label: 'View funding' };
+  if (type === 'marketing:high_cpa') return { link: '/admin/marketing/ad-spend', label: 'View ad spend' };
+  if (type?.startsWith('funding:')) return { link: '/admin/marketing/funding', label: 'View funding' };
   if (type?.startsWith('transfer:') || type?.startsWith('logistics:') || type?.startsWith('stock:')) return { link: '/admin/inventory', label: 'View inventory' };
   if (type?.startsWith('finance:')) return { link: '/admin/finance/overview', label: 'View finance' };
   if (type?.startsWith('payout:')) return { link: '/hr/payroll', label: 'View payroll' };

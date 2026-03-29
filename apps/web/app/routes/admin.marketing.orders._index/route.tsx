@@ -85,8 +85,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const total = trpcData?.pagination?.total ?? 0;
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
+  const orders: Order[] = (trpcData?.orders ?? []).map((o) => ({
+    ...o,
+    customerPhoneDisplay: '',
+  }));
+
   return {
-    orders: trpcData?.orders ?? [],
+    orders,
     total,
     totalPages,
     page,

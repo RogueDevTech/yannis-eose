@@ -76,7 +76,7 @@ export const ordersRouter = router({
           message: 'Only CS agents and Head of CS can create offline orders',
         });
       }
-      return getOrdersService().createOffline(input, ctx.user.id);
+      return getOrdersService().createOffline(input, ctx.user.id, ctx.currentBranchId);
     }),
 
   /**

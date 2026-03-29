@@ -1,53 +1,72 @@
 import { test, expect } from '@playwright/test';
-import { loginAsSuperAdmin, navigateTo } from './helpers';
+import { loginAsSuperAdmin, loginAsFinance, loginAsCsAgent, navigateTo } from './helpers';
 
 /**
  * E2E Test: Finance Approval Queue
  *
  * Tests invoice creation, approval flow, and True Profit dashboard.
+ * Requires seed data: at least one invoice or approval request.
  */
 
-test.describe('Finance Approval Queue', () => {
+test.describe('Finance Overview — SuperAdmin', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsSuperAdmin(page);
   });
 
-  test('should display finance page with profit overview', async ({ page }) => {
-    await navigateTo(page, 'finance');
-    // Should show revenue, profit, margin KPIs
+  test('finance overview page loads without errors', async ({ page }) => {
+    await navigateTo(page, 'finance/overview');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
     await expect(page.locator('body')).toContainText(/revenue|profit|finance/i);
   });
 
-  test('should show True Profit formula breakdown', async ({ page }) => {
-    await navigateTo(page, 'finance');
-    // Should show cost waterfall: COGS, Delivery, Ads, Commission
+  test('finance page shows profit breakdown section', async ({ page }) => {
+    await navigateTo(page, 'finance/overview');
     await expect(page.locator('body')).toContainText(/cost|breakdown|profit/i);
   });
 
-  test('should display invoices tab', async ({ page }) => {
-    await navigateTo(page, 'finance');
-    const invoiceTab = page.getByRole('button', { name: /invoice/i }).first();
-    const hasTab = await invoiceTab.isVisible().catch(() => false);
-    if (hasTab) {
-      await invoiceTab.click();
-      await expect(page.locator('body')).toContainText(/invoice|recipient|status/i);
-    }
+  test('invoices page loads with table or empty state', async ({ page }) => {
+    await page.goto('/admin/finance/invoices');
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    const hasEmptyState = await page.locator('body').getByText(/no invoices|empty|no records/i).isVisible().catch(() => false);
+    expect(hasTable || hasEmptyState).toBe(true);
   });
 
-  test('should show date range filter', async ({ page }) => {
-    await navigateTo(page, 'finance');
-    // Finance page should have date range filtering
-    const dateInput = page.locator('input[type="date"]').first();
-    await expect(dateInput).toBeVisible({ timeout: 5000 }).catch(() => {
-      // Date filter may be in a different format
-    });
+  test('approvals page loads with table or empty state', async ({ page }) => {
+    await page.goto('/admin/finance/approvals');
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
   });
 
-  test('should not expose cost_price to unauthorized roles', async ({ page }) => {
-    // This test verifies Column-Level Security
-    // SuperAdmin SHOULD see cost data
-    await navigateTo(page, 'finance');
-    // The page should load without errors
+  test('SuperAdmin sees cost/margin data — column-level security allows it', async ({ page }) => {
+    await navigateTo(page, 'finance/overview');
+    // SuperAdmin must NOT be blocked by column-level security
     await expect(page.locator('body')).not.toContainText(/unauthorized|forbidden/i);
+  });
+});
+
+test.describe('Finance — Finance Officer access', () => {
+  test('finance officer can access finance overview', async ({ page }) => {
+    await loginAsFinance(page);
+    await page.goto('/admin/finance/overview');
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+    await expect(page.locator('body')).not.toContainText(/unauthorized|forbidden/i);
+  });
+});
+
+test.describe('Finance — CS Agent blocked from cost fields', () => {
+  test('CS agent cannot access finance overview', async ({ page }) => {
+    await loginAsCsAgent(page);
+    await page.goto('/admin/finance/overview');
+    await page.waitForLoadState('networkidle');
+
+    // CS agent should be redirected or shown forbidden — NOT see profit data
+    const body = await page.locator('body').textContent() ?? '';
+    const isBlocked = /unauthorized|forbidden|403|not allowed|access denied/i.test(body);
+    const isRedirected = !page.url().includes('/finance');
+    expect(isBlocked || isRedirected).toBe(true);
   });
 });

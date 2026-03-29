@@ -208,7 +208,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const csAgentId = formData.get('csAgentId')?.toString() ?? '';
 
     if (!orderId || !csAgentId) {
-      return json({ error: 'Order ID and agent ID are required' }, { status: 400 });
+      return json({ error: 'Order and closer selection are required' }, { status: 400 });
     }
 
     const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
@@ -238,11 +238,11 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (orderIds.length === 0 || !fromAgentId || !toAgentId) {
-      return json({ error: 'Must select orders and both agents' }, { status: 400 });
+      return json({ error: 'Must select orders and both closers' }, { status: 400 });
     }
 
     if (fromAgentId === toAgentId) {
-      return json({ error: 'Cannot reassign to the same agent' }, { status: 400 });
+      return json({ error: 'Cannot reassign to the same closer' }, { status: 400 });
     }
 
     const res = await apiRequest<unknown>('/trpc/orders.bulkReassign', {
