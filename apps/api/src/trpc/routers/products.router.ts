@@ -27,8 +27,8 @@ export const productsRouter = router({
    */
   list: authedProcedure
     .input(listProductsSchema)
-    .query(async ({ input }) => {
-      return getProductsService().list(input);
+    .query(async ({ input, ctx }) => {
+      return getProductsService().list(input, ctx.user.id, ctx.user.role);
     }),
 
   /**
@@ -37,8 +37,8 @@ export const productsRouter = router({
    */
   getById: authedProcedure
     .input(z.object({ productId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getProductsService().getById(input.productId);
+    .query(async ({ input, ctx }) => {
+      return getProductsService().getById(input.productId, ctx.user.id, ctx.user.role);
     }),
 
   /**
@@ -63,7 +63,7 @@ export const productsRouter = router({
   /**
    * Get distinct product categories.
    */
-  categories: authedProcedure.query(async () => {
-    return getProductsService().getCategories();
+  categories: authedProcedure.query(async ({ ctx }) => {
+    return getProductsService().getCategories(ctx.user.id, ctx.user.role);
   }),
 });

@@ -7,6 +7,14 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageNotification } from '~/components/ui/page-notification';
 import { useFetcherToast } from '~/components/ui/toast';
 import { exportToCsv } from '~/lib/csv-export';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { PageHeader } from '~/components/ui/page-header';
+import { FormSelect } from '~/components/ui/form-select';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { NairaPrice } from '~/components/ui/naira-price';
+import { Textarea } from '~/components/ui/textarea';
+import { Pagination } from '~/components/ui/pagination';
 
 export interface DeliveryRemittanceListItem {
   id: string;
@@ -56,39 +64,34 @@ const STATUS_LABEL: Record<string, string> = {
   DISPUTED: 'Disputed',
 };
 
-const STATUS_STYLE: Record<string, string> = {
-  SENT: 'bg-warning-50 text-warning-700 dark:bg-warning-700/20 dark:text-warning-500',
-  RECEIVED: 'bg-success-50 text-success-700 dark:bg-success-700/20 dark:text-success-500',
-  DISPUTED: 'bg-danger-50 text-danger-700 dark:bg-danger-700/20 dark:text-danger-500',
-};
 
 /** Loading skeleton for the modal content */
 function ModalLoadingSkeleton() {
   return (
     <div className="space-y-4 py-4 animate-pulse">
       {/* Price card skeleton */}
-      <div className="rounded-lg bg-surface-100 dark:bg-surface-800 p-4 space-y-2">
-        <div className="h-3 w-24 bg-surface-200 dark:bg-surface-700 rounded" />
-        <div className="h-8 w-36 bg-surface-200 dark:bg-surface-700 rounded" />
-        <div className="h-3 w-32 bg-surface-200 dark:bg-surface-700 rounded" />
+      <div className="rounded-lg bg-app-hover p-4 space-y-2">
+        <div className="h-3 w-24 bg-app-hover rounded" />
+        <div className="h-8 w-36 bg-app-hover rounded" />
+        <div className="h-3 w-32 bg-app-hover rounded" />
       </div>
       {/* Receipt skeleton */}
       <div className="space-y-2">
-        <div className="h-4 w-28 bg-surface-200 dark:bg-surface-700 rounded" />
-        <div className="rounded-lg bg-surface-100 dark:bg-surface-800 h-48" />
+        <div className="h-4 w-28 bg-app-hover rounded" />
+        <div className="rounded-lg bg-app-hover h-48" />
       </div>
       {/* Orders skeleton */}
       <div className="space-y-2">
-        <div className="h-4 w-24 bg-surface-200 dark:bg-surface-700 rounded" />
+        <div className="h-4 w-24 bg-app-hover rounded" />
         {[1, 2, 3].map((i) => (
-          <div key={i} className="rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-2">
+          <div key={i} className="rounded-lg border border-app-border p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <div className="h-4 w-28 bg-surface-200 dark:bg-surface-700 rounded" />
-              <div className="h-4 w-20 bg-surface-200 dark:bg-surface-700 rounded" />
+              <div className="h-4 w-28 bg-app-hover rounded" />
+              <div className="h-4 w-20 bg-app-hover rounded" />
             </div>
             <div className="flex items-center justify-between">
-              <div className="h-3 w-16 bg-surface-200 dark:bg-surface-700 rounded" />
-              <div className="h-3 w-24 bg-surface-200 dark:bg-surface-700 rounded" />
+              <div className="h-3 w-16 bg-app-hover rounded" />
+              <div className="h-3 w-24 bg-app-hover rounded" />
             </div>
           </div>
         ))}
@@ -163,12 +166,12 @@ function ReceiptReviewModal({
   return (
     <Modal open onClose={onClose} maxWidth="max-w-2xl" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 md:px-5 pt-4 md:pt-5 pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0">
+        <div className="flex items-center justify-between px-4 md:px-5 pt-4 md:pt-5 pb-3 border-b border-app-border shrink-0">
           <div>
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
+            <h3 className="text-lg font-semibold text-app-fg">
               {status === 'SENT' ? 'Review remittance' : 'View remittance'}
             </h3>
-            <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
+            <p className="text-xs text-app-fg-muted mt-0.5">
               {locationName} &middot; {orderCount} order(s) &middot; {sentAt ? new Date(sentAt).toLocaleString() : '—'}
               {sentBy && (
                 <> &middot; by {userMap[sentBy] ?? sentBy.slice(0, 8) + '…'}</>
@@ -179,7 +182,7 @@ function ReceiptReviewModal({
             type="button"
             onClick={onClose}
             disabled={isSubmitting}
-            className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300"
+            className="text-app-fg-muted hover:text-app-fg"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -199,7 +202,7 @@ function ReceiptReviewModal({
               <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
                 <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Remittance total</p>
                 <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-                  &#8358;{detail.orders.reduce((sum, o) => sum + (o.totalAmount != null ? Number(o.totalAmount) : 0), 0).toLocaleString()}
+                  <NairaPrice amount={detail.orders.reduce((sum, o) => sum + (o.totalAmount != null ? Number(o.totalAmount) : 0), 0)} />
                 </p>
                 <p className="text-xs text-brand-500 dark:text-brand-400 mt-0.5">
                   Across {detail.orders.length} delivered order(s)
@@ -208,7 +211,7 @@ function ReceiptReviewModal({
 
               {/* Receipt Viewer */}
               <div>
-                <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">
+                <h4 className="text-sm font-medium text-app-fg-muted mb-2">
                   Payment receipt(s)
                   {detail.status === 'SENT' && !receiptViewed && (
                     <span className="ml-2 text-xs text-warning-600 dark:text-warning-400">
@@ -229,7 +232,7 @@ function ReceiptReviewModal({
                             className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                               activeReceiptIndex === i
                                 ? 'bg-brand-600 text-white'
-                                : 'bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700'
+                                : 'bg-app-hover text-app-fg-muted hover:bg-app-hover'
                             }`}
                           >
                             Receipt {i + 1}
@@ -241,7 +244,7 @@ function ReceiptReviewModal({
                     <div
                       role="button"
                       tabIndex={0}
-                      className="rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50 cursor-pointer flex items-center justify-center min-h-[12rem]"
+                      className="rounded-lg border border-app-border overflow-hidden bg-app-hover cursor-pointer flex items-center justify-center min-h-[12rem]"
                       onClick={() => {
                         setReceiptViewed(true);
                         const url = (detail.receiptUrls ?? [])[activeReceiptIndex];
@@ -256,10 +259,10 @@ function ReceiptReviewModal({
                     >
                       {receiptImageError ? (
                         <div className="flex flex-col items-center justify-center gap-2 p-6 text-center">
-                          <svg className="w-10 h-10 text-surface-400 dark:text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <svg className="w-10 h-10 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008H12.75V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
                           </svg>
-                          <span className="text-sm text-surface-600 dark:text-surface-400">Image unavailable</span>
+                          <span className="text-sm text-app-fg-muted">Image unavailable</span>
                           <span className="text-xs text-brand-600 dark:text-brand-400 font-medium">Click to open receipt in new tab</span>
                         </div>
                       ) : (
@@ -272,36 +275,36 @@ function ReceiptReviewModal({
                         />
                       )}
                     </div>
-                    <p className="text-xs text-surface-500 dark:text-surface-400">
+                    <p className="text-xs text-app-fg-muted">
                       Click receipt to open in new tab
                     </p>
                   </div>
                 ) : (
-                  <p className="text-sm text-surface-500 dark:text-surface-400 italic">No receipts attached</p>
+                  <p className="text-sm text-app-fg-muted italic">No receipts attached</p>
                 )}
               </div>
 
               {/* Orders list — grid so at least 3 per row on desktop */}
               <div>
-                <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Orders included ({detail.orders.length})</h4>
+                <h4 className="text-sm font-medium text-app-fg-muted mb-2">Orders included ({detail.orders.length})</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                   {detail.orders.map((o) => (
                     <Link
                       key={o.id}
                       to={`/admin/orders/${o.id}`}
-                      className="block rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 p-2.5 hover:border-brand-300 dark:hover:border-brand-600 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors min-w-0"
+                      className="block rounded-lg border border-app-border bg-app-hover p-2.5 hover:border-brand-300 dark:hover:border-brand-600 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors min-w-0"
                     >
                       <div className="flex items-center justify-between gap-1.5 mb-1">
-                        <span className="text-xs font-medium text-surface-900 dark:text-white truncate min-w-0">{o.customerName}</span>
+                        <span className="text-xs font-medium text-app-fg truncate min-w-0">{o.customerName}</span>
                         {o.totalAmount != null && (
-                          <span className="text-xs font-semibold text-surface-900 dark:text-white shrink-0">
-                            &#8358;{Number(o.totalAmount).toLocaleString()}
+                          <span className="text-xs font-semibold text-app-fg shrink-0">
+                            <NairaPrice amount={o.totalAmount} />
                           </span>
                         )}
                       </div>
                       <div className="flex items-center justify-between gap-1.5">
-                        <span className="font-mono text-[10px] text-surface-400 dark:text-surface-500 truncate">{o.id.slice(0, 8)}</span>
-                        <span className="text-[10px] text-surface-500 dark:text-surface-400 shrink-0">
+                        <span className="font-mono text-[10px] text-app-fg-muted truncate">{o.id.slice(0, 8)}</span>
+                        <span className="text-[10px] text-app-fg-muted shrink-0">
                           {o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '—'}
                         </span>
                       </div>
@@ -314,21 +317,15 @@ function ReceiptReviewModal({
               {/* Dispute reason input */}
               {disputeMode && (
                 <div>
-                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                    Dispute reason <span className="text-danger-500">*</span>
-                  </label>
-                  <textarea
+                  <Textarea
+                    label="Dispute reason"
+                    required
                     value={disputeReason}
                     onChange={(e) => setDisputeReason(e.target.value)}
                     rows={3}
                     placeholder="Explain why this remittance is being disputed (min 10 chars)..."
-                    className="w-full rounded-lg border border-surface-300 dark:border-surface-600 bg-white dark:bg-surface-800 text-surface-900 dark:text-white text-sm px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 placeholder:text-surface-400"
+                    error={disputeReason.length > 0 && disputeReason.length < 10 ? `At least 10 characters required (${disputeReason.length}/10)` : undefined}
                   />
-                  {disputeReason.length > 0 && disputeReason.length < 10 && (
-                    <p className="text-xs text-danger-500 mt-1">
-                      At least 10 characters required ({disputeReason.length}/10)
-                    </p>
-                  )}
                 </div>
               )}
 
@@ -342,8 +339,8 @@ function ReceiptReviewModal({
 
             {/* Actions */}
             {hasApprovePermission && detail.status === 'SENT' && (
-              <div className="flex items-center justify-between gap-3 px-4 md:px-5 pt-3 pb-4 md:pb-5 border-t border-surface-200 dark:border-surface-700 shrink-0">
-                <div className="text-xs text-surface-500 dark:text-surface-400">
+              <div className="flex items-center justify-between gap-3 px-4 md:px-5 pt-3 pb-4 md:pb-5 border-t border-app-border shrink-0">
+                <div className="text-xs text-app-fg-muted">
                   {!receiptViewed && 'View the receipt above to unlock actions'}
                 </div>
                 <div className="flex items-center gap-2">
@@ -420,21 +417,6 @@ const STATUS_FILTER_LABELS: Record<string, string> = {
   DISPUTED: 'Disputed',
 };
 
-function buildQueryString(
-  searchParams: URLSearchParams,
-  overrides: Record<string, string | undefined>,
-): string {
-  const params = new URLSearchParams(searchParams);
-  for (const [key, val] of Object.entries(overrides)) {
-    if (val === undefined || val === '') {
-      params.delete(key);
-    } else {
-      params.set(key, val);
-    }
-  }
-  const qs = params.toString();
-  return qs ? `?${qs}` : '';
-}
 
 export function DeliveryRemittancesPage({
   remittances,
@@ -447,7 +429,7 @@ export function DeliveryRemittancesPage({
 }: DeliveryRemittancesPageProps) {
   const [modalRemittanceId, setModalRemittanceId] = useState<string | null>(null);
   const [modalDetail, setModalDetail] = useState<DeliveryRemittanceDetail | null>(null);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const [dismissedError, setDismissedError] = useState(false);
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const detailFetcher = useFetcher<{ _detailOnly?: boolean; detail?: DeliveryRemittanceDetail | null }>();
@@ -533,25 +515,23 @@ export function DeliveryRemittancesPage({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Delivery remittances</h1>
-          <p className="text-sm text-surface-600 dark:text-surface-400 mt-0.5">
-            3PL submit batches of delivered orders with payment receipts. Review receipts and confirm or dispute payment.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <DateFilterBar
-            startDate={filters.startDate}
-            endDate={filters.endDate}
-            periodAllTime={filters.periodAllTime}
-          />
-          <PageRefreshButton />
-          <Button variant="secondary" size="sm" onClick={handleExportCsv}>
-            Export CSV
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Delivery remittances"
+        description="3PL submit batches of delivered orders with payment receipts. Review receipts and confirm or dispute payment."
+        actions={
+          <>
+            <DateFilterBar
+              startDate={filters.startDate}
+              endDate={filters.endDate}
+              periodAllTime={filters.periodAllTime}
+            />
+            <PageRefreshButton />
+            <Button variant="secondary" size="sm" onClick={handleExportCsv}>
+              Export CSV
+            </Button>
+          </>
+        }
+      />
 
       {actionError && !dismissedError && (
         <PageNotification
@@ -562,45 +542,34 @@ export function DeliveryRemittancesPage({
         />
       )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-600 dark:text-surface-400 uppercase tracking-wider">Total remitted</p>
-          <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
-            &#8358;{Number(summary.totalRemitted).toLocaleString()}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
-            {Number(summary.totalCount)} remittance(s)
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-warning-600 dark:text-warning-400 uppercase tracking-wider">Pending</p>
-          <p className="text-xl font-bold text-warning-600 dark:text-warning-400 mt-1">
-            &#8358;{Number(summary.pendingAmount).toLocaleString()}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
-            {Number(summary.pendingCount)} remittance(s)
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-success-600 dark:text-success-400 uppercase tracking-wider">Received</p>
-          <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">
-            &#8358;{Number(summary.receivedAmount).toLocaleString()}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
-            {Number(summary.receivedCount)} remittance(s)
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-danger-600 dark:text-danger-400 uppercase tracking-wider">Disputed</p>
-          <p className="text-xl font-bold text-danger-600 dark:text-danger-400 mt-1">
-            &#8358;{Number(summary.disputedAmount).toLocaleString()}
-          </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
-            {Number(summary.disputedCount)} remittance(s)
-          </p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        items={[
+          {
+            label: 'Total remitted',
+            value: <NairaPrice amount={summary.totalRemitted} />,
+            valueClassName: 'text-app-fg tabular-nums',
+            title: `${Number(summary.totalCount)} remittance(s)`,
+          },
+          {
+            label: 'Pending',
+            value: <NairaPrice amount={summary.pendingAmount} />,
+            valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
+            title: `${Number(summary.pendingCount)} remittance(s)`,
+          },
+          {
+            label: 'Received',
+            value: <NairaPrice amount={summary.receivedAmount} />,
+            valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
+            title: `${Number(summary.receivedCount)} remittance(s)`,
+          },
+          {
+            label: 'Disputed',
+            value: <NairaPrice amount={summary.disputedAmount} />,
+            valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
+            title: `${Number(summary.disputedCount)} remittance(s)`,
+          },
+        ]}
+      />
 
       {/* Filter bar */}
       <div className="card">
@@ -614,26 +583,23 @@ export function DeliveryRemittancesPage({
                 className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
                   filters.status === s
                     ? 'bg-brand-600 text-white border-brand-600'
-                    : 'bg-white dark:bg-surface-800 text-surface-600 dark:text-surface-400 border-surface-200 dark:border-surface-700 hover:border-surface-400 dark:hover:border-surface-500'
+                    : 'bg-app-elevated text-app-fg-muted border-app-border hover:border-app-border-strong'
                 }`}
               >
                 {STATUS_FILTER_LABELS[s] ?? 'All'}
               </button>
             ))}
           </div>
-          <select
+          <FormSelect
             value={filters.location}
             onChange={(e) => handleLocationChange(e.target.value)}
-            className="input w-full sm:w-52 py-1.5"
             aria-label="Filter by location"
-          >
-            <option value="">All locations</option>
-            {locations.map((loc) => (
-              <option key={loc.id} value={loc.id}>
-                {loc.name}
-              </option>
-            ))}
-          </select>
+            className="w-full sm:w-52"
+            options={[
+              { value: '', label: 'All locations' },
+              ...locations.map((loc) => ({ value: loc.id, label: loc.name })),
+            ]}
+          />
         </div>
       </div>
 
@@ -656,21 +622,19 @@ export function DeliveryRemittancesPage({
               {remittances.map((r) => (
                 <tr key={r.id} className="table-row">
                   <td className="table-cell">
-                    <span className="font-mono text-xs text-surface-500 dark:text-surface-400">{r.id.slice(0, 8)}…</span>
+                    <span className="font-mono text-xs text-app-fg-muted">{r.id.slice(0, 8)}…</span>
                   </td>
-                  <td className="table-cell text-sm text-surface-900 dark:text-white">
+                  <td className="table-cell text-sm text-app-fg">
                     {r.locationName ?? '—'}
                   </td>
-                  <td className="table-cell text-sm text-surface-700 dark:text-surface-300">
+                  <td className="table-cell text-sm text-app-fg-muted">
                     {userMap[r.sentBy] ?? r.sentBy.slice(0, 8) + '…'}
                   </td>
                   <td className="table-cell text-right">{r.orderCount}</td>
                   <td className="table-cell">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] ?? ''}`}>
-                      {STATUS_LABEL[r.status] ?? r.status}
-                    </span>
+                    <StatusBadge status={r.status} label={STATUS_LABEL[r.status]} />
                   </td>
-                  <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                  <td className="table-cell text-sm text-app-fg-muted">
                     {new Date(r.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </td>
                   <td className="table-cell">
@@ -692,17 +656,15 @@ export function DeliveryRemittancesPage({
         {/* Mobile cards */}
         <div className="md:hidden space-y-3 px-1">
           {remittances.map((r) => (
-            <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+            <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-xs text-surface-500 dark:text-surface-400">{r.id.slice(0, 8)}…</span>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] ?? ''}`}>
-                  {STATUS_LABEL[r.status] ?? r.status}
-                </span>
+                <span className="font-mono text-xs text-app-fg-muted">{r.id.slice(0, 8)}…</span>
+                <StatusBadge status={r.status} label={STATUS_LABEL[r.status]} />
               </div>
-              <div className="text-sm text-surface-700 dark:text-surface-300">
+              <div className="text-sm text-app-fg-muted">
                 {r.locationName ?? '—'} · {r.orderCount} order(s) · {userMap[r.sentBy] ?? 'Unknown'}
               </div>
-              <div className="flex items-center justify-between gap-2 text-xs text-surface-500 dark:text-surface-400">
+              <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                 <span>{new Date(r.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                 <Button
                   type="button"
@@ -718,43 +680,16 @@ export function DeliveryRemittancesPage({
         </div>
 
         {remittances.length === 0 && (
-          <div className="px-4 py-12 text-center text-surface-500 dark:text-surface-400">
-            <p className="text-sm font-medium">No delivery remittances found</p>
-            <p className="text-xs mt-1">
-              {hasFilters ? 'Try adjusting your filters' : '3PL locations will appear here once they submit remittances'}
-            </p>
-          </div>
+          <EmptyState
+            title="No delivery remittances found"
+            description={hasFilters ? 'Try adjusting your filters' : '3PL locations will appear here once they submit remittances'}
+          />
         )}
       </div>
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-sm text-surface-600 dark:text-surface-400">
-            Showing {(page - 1) * 20 + 1}&ndash;{Math.min(page * 20, total)} of {total} remittances
-          </p>
-          <div className="flex items-center gap-2">
-            <Link
-              to={page > 1 ? buildQueryString(searchParams, { page: String(page - 1) }) : '#'}
-              prefetch="intent"
-              className={`btn-secondary btn-sm ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
-              aria-disabled={page <= 1}
-            >
-              Previous
-            </Link>
-            <span className="text-sm text-surface-600 dark:text-surface-400 px-2">
-              Page {page} of {totalPages}
-            </span>
-            <Link
-              to={page < totalPages ? buildQueryString(searchParams, { page: String(page + 1) }) : '#'}
-              prefetch="intent"
-              className={`btn-secondary btn-sm ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
-              aria-disabled={page >= totalPages}
-            >
-              Next
-            </Link>
-          </div>
-        </div>
+        <Pagination page={page} totalPages={totalPages} pageParam="page" />
       )}
 
       {/* Receipt Review Modal — opens instantly, loads detail client-side */}

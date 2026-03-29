@@ -6,8 +6,15 @@ import { Checkbox } from '~/components/ui/checkbox';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { Spinner } from '~/components/ui/spinner';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { PageHeader } from '~/components/ui/page-header';
+import { SearchInput } from '~/components/ui/search-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { Pagination } from '~/components/ui/pagination';
+import { EmptyState } from '~/components/ui/empty-state';
+import { NairaPrice } from '~/components/ui/naira-price';
+import { Textarea } from '~/components/ui/textarea';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
@@ -85,8 +92,6 @@ export function OrdersListPage({
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const liveState = useLiveIndicator(liveEvents ?? []);
   const navigate = useNavigate();
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
 
@@ -266,7 +271,7 @@ export function OrdersListPage({
       [
         { key: 'id', label: 'Order ID' },
         { key: 'customer', label: 'Customer' },
-        ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned CS' }] : []),
+        ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
         { key: 'phone', label: 'Phone' },
         { key: 'status', label: 'Status' },
         { key: 'amount', label: 'Amount' },
@@ -278,6 +283,16 @@ export function OrdersListPage({
 
   const canBulkAction = userRole === 'SUPER_ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'WAREHOUSE_MANAGER';
 
+  const statusOptions = STATUS_OPTIONS.map((status) => ({
+    value: status,
+    label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+  }));
+
+  const csAgentOptions = [
+    { value: 'ALL', label: 'All closers' },
+    ...(csAgentsForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName })),
+  ];
+
   return (
     <div className="space-y-4">
       {canCreateOffline && (
@@ -288,69 +303,66 @@ export function OrdersListPage({
           products={productsForOfflineOrder}
         />
       )}
+
       {/* Page header */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
-            {isCSAgent ? 'My Orders' : 'CS Orders'}
-          </h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            {isCSAgent ? 'Track your assigned orders' : 'Manage and track all customer orders'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          {canCreateOffline && (
-            <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
-              Create offline order
+      <PageHeader
+        title={isCSAgent ? 'My Orders' : 'CS Orders'}
+        description={isCSAgent ? 'Track your assigned orders' : 'Manage and track all customer orders'}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <PageRefreshButton />
+            {canCreateOffline && (
+              <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
+                Create offline order
+              </Button>
+            )}
+            {liveEvents != null && liveEvents.length > 0 && (
+              <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+            )}
+            {filters != null && (
+              <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                <DateFilterBar
+                  startDate={filters.startDate ?? ''}
+                  endDate={filters.endDate ?? ''}
+                  periodAllTime={filters.periodAllTime ?? false}
+                />
+              </div>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => exportToCsv(
+                filteredOrders.map((o) => ({
+                  id: o.id,
+                  customer: o.customerName,
+                  ...(showCSAgentColumn && { assignedCs: o.assignedCsName ?? '—' }),
+                  phone: o.customerPhoneDisplay,
+                  status: o.status,
+                  amount: o.totalAmount ?? '',
+                  created: new Date(o.createdAt).toLocaleDateString(),
+                })),
+                [
+                  { key: 'id', label: 'Order ID' },
+                  { key: 'customer', label: 'Customer' },
+                  ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
+                  { key: 'phone', label: 'Phone' },
+                  { key: 'status', label: 'Status' },
+                  { key: 'amount', label: 'Amount' },
+                  { key: 'created', label: 'Created' },
+                ],
+                `orders-${new Date().toISOString().split('T')[0]}.csv`,
+              )}
+            >
+              Export CSV
             </Button>
-          )}
-          {liveEvents != null && liveEvents.length > 0 && (
-            <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-          )}
-          {filters != null && (
-            <div className="flex items-center min-h-[2rem] rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 pl-2.5 pr-2 py-1">
-              <DateFilterBar
-                startDate={filters.startDate ?? ''}
-                endDate={filters.endDate ?? ''}
-                periodAllTime={filters.periodAllTime ?? false}
-              />
-            </div>
-          )}
-          <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => exportToCsv(
-            filteredOrders.map((o) => ({
-              id: o.id,
-              customer: o.customerName,
-              ...(showCSAgentColumn && { assignedCs: o.assignedCsName ?? '—' }),
-              phone: o.customerPhoneDisplay,
-              status: o.status,
-              amount: o.totalAmount ?? '',
-              created: new Date(o.createdAt).toLocaleDateString(),
-            })),
-            [
-              { key: 'id', label: 'Order ID' },
-              { key: 'customer', label: 'Customer' },
-              ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned CS' }] : []),
-              { key: 'phone', label: 'Phone' },
-              { key: 'status', label: 'Status' },
-              { key: 'amount', label: 'Amount' },
-              { key: 'created', label: 'Created' },
-            ],
-            `orders-${new Date().toISOString().split('T')[0]}.csv`,
-          )}
-        >
-          Export CSV
-        </Button>
-      </div>
-      </div>
+          </div>
+        }
+      />
 
       {/* My workload (CS agent only) */}
       {isCSAgent && myWorkload && (
         <div className="card">
-          <h2 className="text-sm font-semibold text-surface-900 dark:text-white mb-2">
+          <h2 className="text-sm font-semibold text-app-fg mb-2">
             My Workload
           </h2>
           <div className="flex items-center gap-3 mb-3">
@@ -365,10 +377,10 @@ export function OrdersListPage({
               </span>
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
+              <p className="text-sm font-medium text-app-fg truncate">
                 {myWorkload.agentName}
               </p>
-              <p className="text-xs text-surface-800 dark:text-surface-200">
+              <p className="text-xs text-app-fg-muted">
                 {myWorkload.pendingCount} of {myWorkload.capacity} slots
               </p>
             </div>
@@ -386,14 +398,14 @@ export function OrdersListPage({
                   : 'bg-success-500';
             return (
               <>
-                <div className="w-full h-2 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
+                <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${barColor}`}
                     style={{ width: `${Math.min(utilization, 100)}%` }}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
-                  <span className="text-xs text-surface-700 dark:text-surface-300">
+                  <span className="text-xs text-app-fg-muted">
                     {Math.round(utilization)}% utilized
                   </span>
                   {myWorkload.pendingCount >= myWorkload.capacity && (
@@ -408,26 +420,14 @@ export function OrdersListPage({
         </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Unprocessed</p>
-          <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{unprocessedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Confirmed</p>
-          <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{confirmedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivered</p>
-          <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{deliveredCount}</p>
-        </div>
-      </div>
-
+      <OverviewStatStrip
+        items={[
+          { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+          { label: 'Unprocessed', value: unprocessedCount, valueClassName: 'text-warning-600 dark:text-warning-400' },
+          { label: 'Confirmed', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
+        ]}
+      />
 
       {/* Bulk Action Toolbar */}
       {selectedIds.size > 0 && canBulkAction && (
@@ -457,7 +457,7 @@ export function OrdersListPage({
                 </Button>
               ))}
               {selectedStatuses.length > 1 && (
-                <span className="text-xs text-surface-800 dark:text-surface-200 italic">
+                <span className="text-xs text-app-fg-muted italic">
                   Select orders with same status for bulk transition
                 </span>
               )}
@@ -469,7 +469,7 @@ export function OrdersListPage({
           </div>
           {/* Bulk result summary */}
           {bulkResult && (
-            <div className="mt-3 p-3 rounded-lg bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700">
+            <div className="mt-3 p-3 rounded-lg bg-app-elevated border border-app-border">
               <div className="flex items-center gap-3 text-sm">
                 {bulkResult.succeeded > 0 && (
                   <span className="text-success-600 dark:text-success-400 font-medium">
@@ -508,7 +508,7 @@ export function OrdersListPage({
           </div>
           <form
             method="get"
-            className="relative flex-1"
+            className="flex-1"
             onSubmit={(e) => {
               e.preventDefault();
               setSearchParams((p) => {
@@ -520,25 +520,15 @@ export function OrdersListPage({
               });
             }}
           >
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-700"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-            <input
-              type="text"
+            <SearchInput
               name="search"
               placeholder="Search by customer name..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input pl-10 py-1.5 w-full"
+              onChange={(val) => setSearchQuery(val)}
+              wrapperClassName="w-full"
             />
           </form>
-          <select
+          <FormSelect
             value={selectedStatus}
             onChange={(e) => {
               const v = e.target.value;
@@ -553,16 +543,11 @@ export function OrdersListPage({
                 return next;
               });
             }}
-            className="input w-full sm:w-48 py-1.5"
-          >
-            {STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
-                {status === 'ALL' ? 'All Statuses' : formatStatus(status)}
-              </option>
-            ))}
-          </select>
+            options={statusOptions}
+            wrapperClassName="w-full sm:w-48"
+          />
           {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && (
-            <select
+            <FormSelect
               value={searchParams.get('csAgentId') || 'ALL'}
               onChange={(e) => {
                 const v = e.target.value;
@@ -576,21 +561,10 @@ export function OrdersListPage({
                   return next;
                 });
               }}
-              className="input w-full sm:w-48 py-1.5"
-              aria-label="Filter by CS agent"
-            >
-              <option value="ALL">All agents</option>
-              {csAgentsForFilter!.map((a) => (
-                <option key={a.agentId} value={a.agentId}>
-                  {a.agentName}
-                </option>
-              ))}
-            </select>
-          )}
-          {isFilterLoading && (
-            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
+              options={csAgentOptions}
+              wrapperClassName="w-full sm:w-48"
+              aria-label="Filter by closer"
+            />
           )}
         </div>
       </div>
@@ -611,7 +585,7 @@ export function OrdersListPage({
                 )}
                 <th className="table-header">Order ID</th>
                 <th className="table-header">Customer</th>
-                {showCSAgentColumn && <th className="table-header">Assigned CS</th>}
+                {showCSAgentColumn && <th className="table-header">Assigned closer</th>}
                 <th className="table-header">Phone</th>
                 <th className="table-header">Status</th>
                 <th className="table-header text-right">Amount</th>
@@ -641,11 +615,11 @@ export function OrdersListPage({
                       {order.id.slice(0, 8)}...
                     </Link>
                   </td>
-                  <td className="table-cell font-medium text-surface-900 dark:text-surface-100">
+                  <td className="table-cell font-medium text-app-fg">
                     {order.customerName}
                   </td>
                   {showCSAgentColumn && (
-                    <td className="table-cell text-surface-800 dark:text-surface-200">
+                    <td className="table-cell text-app-fg-muted">
                       {order.assignedCsId ? (
                         <Link
                           to={`/hr/users/${order.assignedCsId}`}
@@ -665,9 +639,9 @@ export function OrdersListPage({
                     <OrderStatusBadge status={order.status} />
                   </td>
                   <td className="table-cell text-right font-medium">
-                    {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
+                    <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200">
+                  <td className="table-cell text-app-fg-muted">
                     {new Date(order.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
                       day: 'numeric',
@@ -689,8 +663,12 @@ export function OrdersListPage({
               ))}
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={(canBulkAction ? 1 : 0) + 6 + (showCSAgentColumn ? 1 : 0)} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                    {orders.length === 0 ? 'No orders yet' : 'No orders found'}
+                  <td colSpan={(canBulkAction ? 1 : 0) + 6 + (showCSAgentColumn ? 1 : 0)}>
+                    <EmptyState
+                      title={orders.length === 0 ? 'No orders yet' : 'No orders found'}
+                      description={orders.length === 0 ? undefined : 'Try adjusting your filters or search query'}
+                      variant="card"
+                    />
                   </td>
                 </tr>
               )}
@@ -701,7 +679,7 @@ export function OrdersListPage({
         {/* Mobile card list */}
         <div className="md:hidden space-y-3 px-1">
           {filteredOrders.map((order) => (
-            <div key={order.id} className={`rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 relative ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}>
+            <div key={order.id} className={`rounded-lg border border-app-border bg-app-elevated relative ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}>
               {canBulkAction && (
                 <div className="absolute top-4 left-4 z-10">
                   <Checkbox
@@ -716,13 +694,13 @@ export function OrdersListPage({
                   className="block hover:opacity-90 transition-opacity"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-surface-900 dark:text-surface-100">
+                    <span className="font-medium text-app-fg">
                       {order.customerName}
                     </span>
                     <OrderStatusBadge status={order.status} />
                   </div>
                   {showCSAgentColumn && (order.assignedCsName || order.assignedCsId) && (
-                    <div className="text-sm mb-0.5 text-surface-600 dark:text-surface-400">
+                    <div className="text-sm mb-0.5 text-app-fg-muted">
                       {order.assignedCsId ? (
                         <Button
                           type="button"
@@ -741,13 +719,13 @@ export function OrdersListPage({
                       )}
                     </div>
                   )}
-                  <div className="flex items-center justify-between text-sm text-surface-800 dark:text-surface-200">
+                  <div className="flex items-center justify-between text-sm text-app-fg-muted">
                     <span className="font-mono">{order.customerPhoneDisplay}</span>
-                    <span className="font-medium text-surface-900 dark:text-surface-100">
-                      {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
+                    <span className="font-medium text-app-fg">
+                      <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
                     </span>
                   </div>
-                  <div className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                  <div className="text-xs text-app-fg-muted mt-1">
                     {new Date(order.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
                       day: 'numeric',
@@ -756,7 +734,7 @@ export function OrdersListPage({
                     })}
                   </div>
                 </Link>
-                <div className="flex flex-wrap items-center gap-3 mt-2 pt-2 border-t border-surface-100 dark:border-surface-700">
+                <div className="flex flex-wrap items-center gap-3 mt-2 pt-2 border-t border-app-border">
                   <Link
                     to={`/admin/orders/${order.id}`}
                     className="btn-secondary btn-sm"
@@ -768,51 +746,32 @@ export function OrdersListPage({
             </div>
           ))}
           {filteredOrders.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-300">
-              {orders.length === 0 ? 'No orders yet' : 'No orders found'}
-            </div>
+            <EmptyState
+              title={orders.length === 0 ? 'No orders yet' : 'No orders found'}
+              description={orders.length === 0 ? undefined : 'Try adjusting your filters or search query'}
+              variant="card"
+            />
           )}
         </div>
       </div>
 
       {/* Pagination */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-surface-800 dark:text-surface-200">
+        <p className="text-sm text-app-fg-muted">
           {total > 0
             ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
             : 'No orders'}
         </p>
-        <div className="flex items-center gap-2">
-          <Link
-            to={page > 1 ? buildQueryString({ page: page - 1 }) || '?' : '#'}
-            prefetch="intent"
-            className={`btn-secondary btn-sm ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
-            aria-disabled={page <= 1}
-          >
-            Previous
-          </Link>
-          <span className="text-sm text-surface-800 dark:text-surface-200 px-2">
-            Page {page} of {totalPages || 1}
-          </span>
-          <Link
-            to={page < totalPages ? buildQueryString({ page: page + 1 }) || '?' : '#'}
-            prefetch="intent"
-            className={`btn-secondary btn-sm ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
-            aria-disabled={page >= totalPages}
-          >
-            Next
-          </Link>
-        </div>
+        <Pagination page={page} totalPages={totalPages} pageParam="page" />
       </div>
-
 
       {/* Bulk cancel confirmation modal */}
       {cancelModalOpen && (
         <Modal open onClose={() => { setCancelModalOpen(false); setCancelReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">
+            <h3 className="text-lg font-semibold text-app-fg mb-1">
               Cancel {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}?
             </h3>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mb-3">
+            <p className="text-sm text-app-fg-muted mb-3">
               Please provide a reason (at least 10 characters). Selected orders will be moved to Cancelled.
             </p>
             {/* Preset reason buttons */}
@@ -830,7 +789,7 @@ export function OrdersListPage({
                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       isActive
                         ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700'
-                        : 'bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 border border-surface-200 dark:border-surface-700 hover:bg-surface-200 dark:hover:bg-surface-700'
+                        : 'bg-app-hover text-app-fg-muted border border-app-border hover:bg-app-hover'
                     }`}
                   >
                     {preset}
@@ -839,11 +798,10 @@ export function OrdersListPage({
               })}
             </div>
             {/* Textarea for custom reason */}
-            <textarea
+            <Textarea
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
               placeholder="Enter cancellation reason..."
-              className="input w-full min-h-[80px]"
               rows={3}
             />
             {/* Modal actions */}

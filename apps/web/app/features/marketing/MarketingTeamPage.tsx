@@ -1,4 +1,11 @@
+import { useState } from 'react';
 import { Link } from '@remix-run/react';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { TeamViewToggle } from '~/components/ui/team-view-toggle';
+import { PageHeader } from '~/components/ui/page-header';
+import { EmptyState } from '~/components/ui/empty-state';
+import { NairaPrice } from '~/components/ui/naira-price';
+import { formatNaira } from '~/lib/format-amount';
 import { MediaBuyerBalanceCard } from './MediaBuyerBalanceCard';
 import type { FundingBalanceRow } from './types';
 
@@ -7,50 +14,142 @@ export interface MarketingTeamPageProps {
   fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
 }
 
+function memberInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeamPageProps) {
+  const [view, setView] = useState<'table' | 'grid'>('table');
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Team</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-          Media buyers and funding balance — same cards as Live Activities
-        </p>
-      </div>
+      <PageHeader
+        title="Team"
+        description="Media buyers and funding balance — same cards as Live Activities"
+      />
 
       {/* Funding Summary */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">Funding Summary</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Sent</p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
-              ₦{parseFloat(fundingSummary.totalSent).toLocaleString()}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Completed</p>
-            <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">
-              ₦{parseFloat(fundingSummary.totalCompleted).toLocaleString()}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Disputed</p>
-            <p className={`text-xl font-bold mt-1 ${parseFloat(fundingSummary.totalDisputed) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-surface-900 dark:text-white'}`}>
-              ₦{parseFloat(fundingSummary.totalDisputed).toLocaleString()}
-            </p>
-          </div>
-        </div>
+        <h2 className="text-lg font-semibold text-app-fg mb-3">Funding Summary</h2>
+        <OverviewStatStrip
+          embedded
+          showScrollControls={false}
+          items={[
+            {
+              label: 'Total Sent',
+              value: <NairaPrice amount={parseFloat(fundingSummary.totalSent)} />,
+              valueClassName: 'text-app-fg',
+            },
+            {
+              label: 'Completed',
+              value: <NairaPrice amount={parseFloat(fundingSummary.totalCompleted)} />,
+              valueClassName: 'text-success-600 dark:text-success-400',
+            },
+            {
+              label: 'Disputed',
+              value: <NairaPrice amount={parseFloat(fundingSummary.totalDisputed)} />,
+              valueClassName:
+                parseFloat(fundingSummary.totalDisputed) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
+            },
+          ]}
+        />
       </div>
 
-      {/* Team members as cards — same as Live Activities */}
       <div>
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Team members</h2>
-        <p className="text-sm text-surface-700 dark:text-surface-300 mb-4">
-          Funding received (confirmed) minus approved ad spend
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-app-fg">Team members</h2>
+            <p className="text-sm text-app-fg-muted mt-0.5">
+              Funding received (confirmed) minus approved ad spend
+            </p>
+          </div>
+          {teamMembers.length > 0 && <TeamViewToggle value={view} onChange={setView} />}
+        </div>
+
         {teamMembers.length === 0 ? (
-          <div className="card text-center py-12 text-surface-500 dark:text-surface-400">
-            No team members yet. Manage staff from HR → Users.
+          <div className="card">
+            <EmptyState
+              title="No team members yet"
+              description="Manage staff from HR → Users."
+            />
+          </div>
+        ) : view === 'table' ? (
+          <div className="card p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px]">
+                <thead>
+                  <tr>
+                    <th className="table-header">Member</th>
+                    <th className="table-header text-right">Balance</th>
+                    <th className="table-header text-right">Received</th>
+                    <th className="table-header text-right">Spent</th>
+                    <th className="table-header text-right">Confirm %</th>
+                    <th className="table-header text-right">Delivery %</th>
+                    <th className="table-header">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamMembers.map((m) => (
+                    <tr key={m.userId} className="table-row">
+                      <td className="table-cell">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+                            <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
+                              {memberInitials(m.name)}
+                            </span>
+                          </div>
+                          <Link
+                            to={`/hr/users/${m.userId}`}
+                            prefetch="intent"
+                            className="font-medium text-app-fg truncate hover:text-brand-600 dark:hover:text-brand-400"
+                          >
+                            {m.name}
+                          </Link>
+                        </div>
+                      </td>
+                      <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400 whitespace-nowrap">
+                        {formatNaira(Number(m.balance))}
+                      </td>
+                      <td className="table-cell text-right text-app-fg-muted whitespace-nowrap">
+                        {formatNaira(Number(m.totalReceived))}
+                      </td>
+                      <td className="table-cell text-right text-app-fg-muted whitespace-nowrap">
+                        {formatNaira(Number(m.totalSpend))}
+                      </td>
+                      <td className="table-cell text-right text-app-fg whitespace-nowrap">
+                        {m.confirmationRate != null ? `${Math.round(m.confirmationRate)}%` : '\u2014'}
+                      </td>
+                      <td className="table-cell text-right text-app-fg whitespace-nowrap">
+                        {m.deliveryRate != null ? `${Math.round(m.deliveryRate)}%` : '\u2014'}
+                      </td>
+                      <td className="table-cell">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            to={`/admin/marketing/orders?mediaBuyerId=${m.userId}`}
+                            prefetch="intent"
+                            className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
+                          >
+                            View orders
+                          </Link>
+                          <Link
+                            to={`/hr/users/${m.userId}`}
+                            prefetch="intent"
+                            className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
+                          >
+                            View profile
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -62,7 +161,7 @@ export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeam
       </div>
 
       <div className="card">
-        <p className="text-sm text-surface-700 dark:text-surface-300">
+        <p className="text-sm text-app-fg-muted">
           <Link to="/admin/marketing/overview" prefetch="intent" className="text-brand-500 hover:text-brand-600">
             Live Activities
           </Link>

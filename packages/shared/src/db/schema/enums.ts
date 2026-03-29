@@ -219,6 +219,18 @@ export const dispatchModeEnum = pgEnum('dispatch_mode', [
   'CLAIM',
 ]);
 
+/** Trigger source for a push notification (who/what initiated it). */
+export const pushTriggerTypeEnum = pgEnum('push_trigger_type', ['MIRROR', 'BROADCAST', 'AUTOMATION']);
+
+/** Delivery status for a web push attempt. */
+export const pushDeliveryStatusEnum = pgEnum('push_delivery_status', ['SENT', 'FAILED', 'SHOWN', 'CLICKED']);
+
+/** Audience selector for push broadcasts and automation rules. */
+export const pushTargetTypeEnum = pgEnum('push_target_type', ['ALL', 'ROLE', 'USER']);
+
+/** How a push automation rule is triggered — time-based cron or event-based. */
+export const pushAutomationTriggerEnum = pgEnum('push_automation_trigger', ['CRON', 'EVENT']);
+
 /** Human-readable order lifecycle timeline event types. */
 export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'ORDER_RECEIVED',

@@ -167,7 +167,13 @@ export function UserDetailPage({
 
   // Edit form state
   const [selectedRole, setSelectedRole] = useState(user.role);
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>(user.assignedProductIds ?? []);
+
+  const assignedProductIdsKey = [...(user.assignedProductIds ?? [])].sort().join(',');
+  useEffect(() => {
+    setSelectedRole(user.role);
+    setSelectedProductIds(user.assignedProductIds ? [...user.assignedProductIds] : []);
+  }, [user.id, user.updatedAt, user.role, assignedProductIdsKey]);
 
   const showCapacity = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
   const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
@@ -195,13 +201,13 @@ export function UserDetailPage({
     <div className="w-full space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <Link to="/hr/users" prefetch="intent" className="text-surface-800 dark:text-surface-200 hover:text-brand-500 transition-colors">
+        <Link to="/hr/users" prefetch="intent" className="text-app-fg-muted hover:text-brand-500 transition-colors">
           Users
         </Link>
-        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-4 h-4 text-app-border" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
-        <span className="text-surface-900 dark:text-white font-medium truncate">{user.name}</span>
+        <span className="text-app-fg font-medium truncate">{user.name}</span>
       </div>
 
       {/* Action feedback */}
@@ -248,8 +254,8 @@ export function UserDetailPage({
             <div className="flex-1 min-w-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-white">{user.name}</h1>
-                  <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{user.email}</p>
+                  <h1 className="text-xl sm:text-2xl font-bold text-app-fg">{user.name}</h1>
+                  <p className="text-sm text-app-fg-muted mt-0.5">{user.email}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <PageRefreshButton />
@@ -297,7 +303,7 @@ export function UserDetailPage({
                           </Form>
                         )}
                         {user.status === 'DEACTIVATED' && (
-                          <p className="text-xs text-surface-600 dark:text-surface-400 italic">
+                          <p className="text-xs text-app-fg-muted italic">
                             Deactivated accounts cannot be reactivated. Re-invite the user to create a new account.
                           </p>
                         )}
@@ -314,14 +320,14 @@ export function UserDetailPage({
           <div className="flex flex-wrap items-center gap-2 mt-4">
             <span className={ROLE_COLORS[user.role] ?? 'badge'}>{formatRole(user.role)}</span>
             <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               {tenure}
             </span>
             {user.phone && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300">
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
                 </svg>
@@ -340,7 +346,7 @@ export function UserDetailPage({
           </div>
 
           {/* Role description */}
-          <p className="text-xs text-surface-600 dark:text-surface-300 mt-3">
+          <p className="text-xs text-app-fg-muted mt-3">
             {ROLE_DESCRIPTIONS[user.role] ?? ''}
           </p>
         </div>
@@ -360,7 +366,7 @@ export function UserDetailPage({
             {/* Account Information */}
             <div className="card space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold text-surface-900 dark:text-white">Account Information</h2>
+                <h2 className="text-base font-semibold text-app-fg">Account Information</h2>
                 {!isSuperAdminProfile && !restrictHeadView && (
                   <button type="button" onClick={() => setActiveTab('edit')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
                     Edit
@@ -419,12 +425,12 @@ export function UserDetailPage({
             {/* Role Settings */}
             {(user.logisticsLocationId || user.restrictProductAccess || user.commissionPlanId) && (
               <div className="card space-y-4">
-                <h2 className="text-base font-semibold text-surface-900 dark:text-white">Role Configuration</h2>
+                <h2 className="text-base font-semibold text-app-fg">Role Configuration</h2>
 
                 {user.logisticsLocationId && (
                   <div>
-                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-1">Assigned Location</p>
-                    <p className="text-xs font-mono text-surface-900 dark:text-surface-100 bg-surface-50 dark:bg-surface-800 px-2 py-1 rounded inline-block">{user.logisticsLocationId}</p>
+                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Assigned Location</p>
+                    <p className="text-xs font-mono text-app-fg bg-app-hover px-2 py-1 rounded inline-block">{user.logisticsLocationId}</p>
                   </div>
                 )}
 
@@ -439,8 +445,8 @@ export function UserDetailPage({
 
                 {user.commissionPlanId && (
                   <div>
-                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-1">Commission Plan ID</p>
-                    <p className="text-xs font-mono bg-surface-50 dark:bg-surface-800 px-2 py-1 rounded inline-block text-surface-900 dark:text-surface-100">{user.commissionPlanId}</p>
+                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Commission Plan ID</p>
+                    <p className="text-xs font-mono bg-app-hover px-2 py-1 rounded inline-block text-app-fg">{user.commissionPlanId}</p>
                   </div>
                 )}
               </div>
@@ -451,7 +457,7 @@ export function UserDetailPage({
               <DeferredSection resolve={marketingMetrics} skeleton="stat">
                 {(metrics) => metrics && (
                   <div className="card space-y-4">
-                    <h2 className="text-base font-semibold text-surface-900 dark:text-white">Marketing Performance</h2>
+                    <h2 className="text-base font-semibold text-app-fg">Marketing Performance</h2>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                       <MetricCard label="Total Spend" value={formatNaira(Number(metrics.totalSpend))} />
                       <MetricCard label="Total Orders" value={String(metrics.totalOrders)} />
@@ -472,21 +478,21 @@ export function UserDetailPage({
               <DeferredSection resolve={fundingBalance} skeleton="stat">
                 {(balance) => balance && (
                   <div className="card space-y-4 border-brand-200 dark:border-brand-700/50 bg-brand-50/20 dark:bg-brand-900/10">
-                    <h2 className="text-base font-semibold text-surface-900 dark:text-white">Funding balance</h2>
-                    <p className="text-xs text-surface-600 dark:text-surface-400">Confirmed funding received minus approved ad spend</p>
+                    <h2 className="text-base font-semibold text-app-fg">Funding balance</h2>
+                    <p className="text-xs text-app-fg-muted">Confirmed funding received minus approved ad spend</p>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div>
-                        <p className="text-xs text-surface-600 dark:text-surface-400">Total received</p>
-                        <p className="text-lg font-medium text-surface-900 dark:text-white">{formatNaira(Number(balance.totalReceived))}</p>
+                        <p className="text-xs text-app-fg-muted">Total received</p>
+                        <p className="text-lg font-medium text-app-fg">{formatNaira(Number(balance.totalReceived))}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-surface-600 dark:text-surface-400">Total spent</p>
-                        <p className="text-lg font-medium text-surface-900 dark:text-white">
+                        <p className="text-xs text-app-fg-muted">Total spent</p>
+                        <p className="text-lg font-medium text-app-fg">
                           {user.role === 'MEDIA_BUYER' ? formatNaira(Number(balance.totalSpend)) : '—'}
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-surface-600 dark:text-surface-400">Balance</p>
+                        <p className="text-xs text-app-fg-muted">Balance</p>
                         <p className="text-xl font-bold text-brand-600 dark:text-brand-400">{formatNaira(Number(balance.balance))}</p>
                       </div>
                     </div>
@@ -504,20 +510,20 @@ export function UserDetailPage({
                 {(data) => (
                   <div className="card space-y-3">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Orders</h3>
+                      <h3 className="text-sm font-semibold text-app-fg">Orders</h3>
                       <button type="button" onClick={() => setActiveTab('orders')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
                         View all
                       </button>
                     </div>
-                    <p className="text-3xl font-bold text-surface-900 dark:text-white">{data.total}</p>
-                    <p className="text-xs text-surface-600 dark:text-surface-300">
+                    <p className="text-3xl font-bold text-app-fg">{data.total}</p>
+                    <p className="text-xs text-app-fg-muted">
                       {isCSRole ? 'Orders handled as CS agent' : isMarketingRole ? 'Orders from campaigns' : isLogisticsRole ? 'Deliveries assigned' : 'Total orders in system'}
                     </p>
                     {data.orders.length > 0 && (
-                      <div className="border-t border-surface-100 dark:border-surface-800 pt-3 space-y-2">
+                      <div className="border-t border-app-border pt-3 space-y-2">
                         {data.orders.slice(0, 3).map((order) => (
-                          <Link key={order.id} to={`/admin/orders/${order.id}`} prefetch="intent" className="flex items-center justify-between text-xs hover:bg-surface-50 dark:hover:bg-surface-800/50 -mx-1 px-1 py-1 rounded transition-colors">
-                            <span className="text-surface-900 dark:text-surface-100 font-medium">{order.referenceNumber || order.id.slice(0, 8)}</span>
+                          <Link key={order.id} to={`/admin/orders/${order.id}`} prefetch="intent" className="flex items-center justify-between text-xs hover:bg-app-hover/50 -mx-1 px-1 py-1 rounded transition-colors">
+                            <span className="text-app-fg font-medium">{order.referenceNumber || order.id.slice(0, 8)}</span>
                             <OrderStatusBadge status={order.status} />
                           </Link>
                         ))}
@@ -534,23 +540,23 @@ export function UserDetailPage({
               {(payoutList) => (
                 <div className="card space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Payroll</h3>
+                    <h3 className="text-sm font-semibold text-app-fg">Payroll</h3>
                     <button type="button" onClick={() => setActiveTab('payroll')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
                       View all
                     </button>
                   </div>
-                  <p className="text-3xl font-bold text-surface-900 dark:text-white">{payoutList.length}</p>
-                  <p className="text-xs text-surface-600 dark:text-surface-300">Payout records</p>
+                  <p className="text-3xl font-bold text-app-fg">{payoutList.length}</p>
+                  <p className="text-xs text-app-fg-muted">Payout records</p>
                   {payoutList.length > 0 && (
-                    <div className="border-t border-surface-100 dark:border-surface-800 pt-3 space-y-2">
+                    <div className="border-t border-app-border pt-3 space-y-2">
                       {payoutList.slice(0, 3).map((p) => (
                         <div key={p.id} className="flex items-center justify-between text-xs">
-                          <span className="text-surface-700 dark:text-surface-200">
+                          <span className="text-app-fg-muted">
                             {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                             {' — '}
                             {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                           </span>
-                          <span className="font-medium text-surface-900 dark:text-surface-100">{formatNaira(Number(p.netAmount))}</span>
+                          <span className="font-medium text-app-fg">{formatNaira(Number(p.netAmount))}</span>
                         </div>
                       ))}
                     </div>
@@ -565,7 +571,7 @@ export function UserDetailPage({
               {(entries) => (
                 <div className="card space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Recent Activity</h3>
+                    <h3 className="text-sm font-semibold text-app-fg">Recent Activity</h3>
                     <button type="button" onClick={() => setActiveTab('audit')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
                       View all
                     </button>
@@ -576,10 +582,10 @@ export function UserDetailPage({
                         <div key={entry.id} className="flex items-start gap-2 text-xs">
                           <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
                           <div className="min-w-0 flex-1">
-                            <p className="text-surface-900 dark:text-surface-200 truncate">
+                            <p className="text-app-fg truncate">
                               {formatActivityDescription(entry)}
                             </p>
-                            <p className="text-surface-500 dark:text-surface-600 text-[11px] mt-0.5">
+                            <p className="text-app-fg-muted text-[11px] mt-0.5">
                               {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </p>
                           </div>
@@ -587,7 +593,7 @@ export function UserDetailPage({
                       ))}
                     </div>
                   ) : (
-                    <p className="text-xs text-surface-500">No activity recorded yet</p>
+                    <p className="text-xs text-app-fg-muted">No activity recorded yet</p>
                   )}
                 </div>
               )}
@@ -601,10 +607,10 @@ export function UserDetailPage({
         <DeferredSection resolve={recentOrders} skeleton="table">
           {(data) => (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-surface-900 dark:text-white">
+              <div className="px-4 py-3 border-b border-app-border flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-app-fg">
                   {isCSRole ? 'Orders Handled' : isMarketingRole ? 'Campaign Orders' : isLogisticsRole ? 'Delivery Orders' : 'All Orders'}
-                  <span className="text-surface-500 dark:text-surface-200 font-normal ml-2">({data.total})</span>
+                  <span className="text-app-fg-muted font-normal ml-2">({data.total})</span>
                 </h2>
               </div>
               {data.orders.length > 0 ? (
@@ -627,14 +633,14 @@ export function UserDetailPage({
                               {order.referenceNumber || order.id.slice(0, 8)}
                             </Link>
                           </td>
-                          <td className="table-cell text-sm text-surface-800 dark:text-surface-300">{order.customerName || '—'}</td>
+                          <td className="table-cell text-sm text-app-fg-muted">{order.customerName || '—'}</td>
                           <td className="table-cell">
                             <OrderStatusBadge status={order.status} />
                           </td>
-                          <td className="table-cell text-right text-sm font-medium text-surface-900 dark:text-surface-100">
+                          <td className="table-cell text-right text-sm font-medium text-app-fg">
                             {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
                           </td>
-                          <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
+                          <td className="table-cell text-sm text-app-fg-muted">
                             {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                           </td>
                         </tr>
@@ -643,7 +649,7 @@ export function UserDetailPage({
                   </table>
                 </div>
               ) : (
-                <div className="px-4 py-12 text-center text-surface-500">No orders found for this user</div>
+                <div className="px-4 py-12 text-center text-app-fg-muted">No orders found for this user</div>
               )}
             </div>
           )}
@@ -657,8 +663,8 @@ export function UserDetailPage({
           <DeferredSection resolve={payouts} skeleton="table">
             {(payoutList) => (
               <div className="card p-0 overflow-hidden">
-                <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                  <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Payout History</h2>
+                <div className="px-4 py-3 border-b border-app-border">
+                  <h2 className="text-sm font-semibold text-app-fg">Payout History</h2>
                 </div>
                 {payoutList.length > 0 ? (
                   <div className="overflow-x-auto">
@@ -680,11 +686,11 @@ export function UserDetailPage({
                               {' — '}
                               {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                             </td>
-                            <td className="table-cell text-right text-sm text-surface-900 dark:text-surface-100">{formatNaira(Number(p.grossAmount))}</td>
+                            <td className="table-cell text-right text-sm text-app-fg">{formatNaira(Number(p.grossAmount))}</td>
                             <td className="table-cell text-right text-sm text-danger-600 dark:text-danger-400">
                               {Number(p.deductions) > 0 ? formatNaira(-Number(p.deductions)) : '—'}
                             </td>
-                            <td className="table-cell text-right text-sm font-semibold text-surface-900 dark:text-surface-100">{formatNaira(Number(p.netAmount))}</td>
+                            <td className="table-cell text-right text-sm font-semibold text-app-fg">{formatNaira(Number(p.netAmount))}</td>
                             <td className="table-cell">
                               <span className={p.status === 'PAID' ? 'badge-success' : p.status === 'PENDING' ? 'badge-warning' : 'badge'}>{p.status}</span>
                             </td>
@@ -694,7 +700,7 @@ export function UserDetailPage({
                     </table>
                   </div>
                 ) : (
-                  <div className="px-4 py-12 text-center text-surface-500">No payout records found</div>
+                  <div className="px-4 py-12 text-center text-app-fg-muted">No payout records found</div>
                 )}
               </div>
             )}
@@ -704,8 +710,8 @@ export function UserDetailPage({
           <DeferredSection resolve={adjustments} skeleton="table">
             {(adjList) => (
               <div className="card p-0 overflow-hidden">
-                <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                  <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Adjustments & Bonuses</h2>
+                <div className="px-4 py-3 border-b border-app-border">
+                  <h2 className="text-sm font-semibold text-app-fg">Adjustments & Bonuses</h2>
                 </div>
                 {adjList.length > 0 ? (
                   <div className="overflow-x-auto">
@@ -730,11 +736,11 @@ export function UserDetailPage({
                             <td className={`table-cell text-right text-sm font-medium ${adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
                               {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? formatNaira(-Math.abs(Number(adj.amount))) : `+${formatNaira(Number(adj.amount))}`}
                             </td>
-                            <td className="table-cell text-sm text-surface-700 dark:text-surface-200 max-w-[200px] truncate">{adj.reason || '—'}</td>
+                            <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{adj.reason || '—'}</td>
                             <td className="table-cell">
                               <span className={adj.status === 'APPROVED' ? 'badge-success' : adj.status === 'PENDING' ? 'badge-warning' : 'badge'}>{adj.status}</span>
                             </td>
-                            <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
+                            <td className="table-cell text-sm text-app-fg-muted">
                               {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                             </td>
                           </tr>
@@ -743,7 +749,7 @@ export function UserDetailPage({
                     </table>
                   </div>
                 ) : (
-                  <div className="px-4 py-12 text-center text-surface-500">No adjustments found</div>
+                  <div className="px-4 py-12 text-center text-app-fg-muted">No adjustments found</div>
                 )}
               </div>
             )}
@@ -756,12 +762,12 @@ export function UserDetailPage({
         <DeferredSection resolve={stockMovements} skeleton="table">
           {(data) => (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                <h2 className="text-sm font-semibold text-surface-900 dark:text-white">
+              <div className="px-4 py-3 border-b border-app-border">
+                <h2 className="text-sm font-semibold text-app-fg">
                   Stock Activity
-                  <span className="text-surface-500 dark:text-surface-200 font-normal ml-2">({data.total})</span>
+                  <span className="text-app-fg-muted font-normal ml-2">({data.total})</span>
                 </h2>
-                <p className="text-xs text-surface-500 dark:text-surface-600 mt-0.5">
+                <p className="text-xs text-app-fg-muted mt-0.5">
                   Intakes, transfers, adjustments, and reconciliations performed by this user
                 </p>
               </div>
@@ -784,13 +790,13 @@ export function UserDetailPage({
                             <span className="badge">{MOVEMENT_TYPE_LABELS[m.movementType] ?? m.movementType}</span>
                           </td>
                           <td className="table-cell text-right text-sm font-medium">{m.quantity > 0 ? `+${m.quantity}` : m.quantity}</td>
-                          <td className="table-cell text-xs text-surface-600 dark:text-surface-200">
+                          <td className="table-cell text-xs text-app-fg-muted">
                             {m.fromLocationId ? m.fromLocationId.slice(0, 8) : '—'}
                             {' → '}
                             {m.toLocationId ? m.toLocationId.slice(0, 8) : '—'}
                           </td>
-                          <td className="table-cell text-sm text-surface-700 dark:text-surface-300 max-w-[200px] truncate">{m.reason ?? '—'}</td>
-                          <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
+                          <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{m.reason ?? '—'}</td>
+                          <td className="table-cell text-sm text-app-fg-muted">
                             {new Date(m.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </td>
                         </tr>
@@ -799,7 +805,7 @@ export function UserDetailPage({
                   </table>
                 </div>
               ) : (
-                <div className="px-4 py-12 text-center text-surface-500">No stock movements found</div>
+                <div className="px-4 py-12 text-center text-app-fg-muted">No stock movements found</div>
               )}
             </div>
           )}
@@ -811,12 +817,12 @@ export function UserDetailPage({
         <DeferredSection resolve={financeActivity} skeleton="table">
           {(data) => (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-                <h2 className="text-sm font-semibold text-surface-900 dark:text-white">
+              <div className="px-4 py-3 border-b border-app-border">
+                <h2 className="text-sm font-semibold text-app-fg">
                   Approvals Processed
-                  <span className="text-surface-500 dark:text-surface-200 font-normal ml-2">({data.total})</span>
+                  <span className="text-app-fg-muted font-normal ml-2">({data.total})</span>
                 </h2>
-                <p className="text-xs text-surface-500 dark:text-surface-600 mt-0.5">
+                <p className="text-xs text-app-fg-muted mt-0.5">
                   Approval requests processed by this Finance Officer
                 </p>
               </div>
@@ -839,11 +845,11 @@ export function UserDetailPage({
                             <span className="badge">{a.type.replace(/_/g, ' ')}</span>
                           </td>
                           <td className="table-cell text-right text-sm font-medium">{formatNaira(Number(a.amount))}</td>
-                          <td className="table-cell text-sm text-surface-700 dark:text-surface-300 max-w-[200px] truncate">{a.description}</td>
+                          <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{a.description}</td>
                           <td className="table-cell">
                             <span className={a.status === 'APPROVED' ? 'badge-success' : a.status === 'REJECTED' ? 'badge-danger' : 'badge'}>{a.status}</span>
                           </td>
-                          <td className="table-cell text-sm text-surface-600 dark:text-surface-200">
+                          <td className="table-cell text-sm text-app-fg-muted">
                             {a.approvedAt
                               ? new Date(a.approvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                               : new Date(a.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
@@ -854,7 +860,7 @@ export function UserDetailPage({
                   </table>
                 </div>
               ) : (
-                <div className="px-4 py-12 text-center text-surface-500">No approvals processed yet</div>
+                <div className="px-4 py-12 text-center text-app-fg-muted">No approvals processed yet</div>
               )}
             </div>
           )}
@@ -867,8 +873,8 @@ export function UserDetailPage({
           {(entries) => (
             <div className="card space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Activity</h3>
-                <span className="text-xs text-surface-500 dark:text-surface-600">{entries.length} entries</span>
+                <h3 className="text-sm font-semibold text-app-fg">Activity</h3>
+                <span className="text-xs text-app-fg-muted">{entries.length} entries</span>
               </div>
               {entries.length > 0 ? (
                 <div className="space-y-2">
@@ -876,10 +882,10 @@ export function UserDetailPage({
                     <div key={entry.id} className="flex items-start gap-2 text-xs">
                       <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <p className="text-surface-900 dark:text-surface-200 truncate">
+                        <p className="text-app-fg truncate">
                           {formatActivityDescription(entry)}
                         </p>
-                        <p className="text-surface-500 dark:text-surface-600 text-[11px] mt-0.5">
+                        <p className="text-app-fg-muted text-[11px] mt-0.5">
                           {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
@@ -887,7 +893,7 @@ export function UserDetailPage({
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-surface-500">No activity recorded yet</p>
+                <p className="text-xs text-app-fg-muted">No activity recorded yet</p>
               )}
             </div>
           )}
@@ -904,10 +910,10 @@ export function UserDetailPage({
 
           {/* Account Details */}
           <div className="card space-y-4">
-            <h2 className="text-base font-semibold text-surface-900 dark:text-white">Account Details</h2>
+            <h2 className="text-base font-semibold text-app-fg">Account Details</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <label htmlFor="role" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Role</label>
+                <label htmlFor="role" className="block text-sm font-medium text-app-fg-muted mb-1.5">Role</label>
                 <select id="role" name="role" className="input" value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)}>
                   {ROLES.map((role) => (
                     <option key={role.value} value={role.value}>{role.label}</option>
@@ -915,33 +921,33 @@ export function UserDetailPage({
                 </select>
               </div>
               <div>
-                <label htmlFor="name" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Full Name</label>
+                <label htmlFor="name" className="block text-sm font-medium text-app-fg-muted mb-1.5">Full Name</label>
                 <input id="name" name="name" type="text" defaultValue={user.name} className="input" />
               </div>
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Email Address</label>
+                <label htmlFor="email" className="block text-sm font-medium text-app-fg-muted mb-1.5">Email Address</label>
                 <input id="email" name="email" type="email" defaultValue={user.email} className="input" />
                 <p className="text-xs text-warning-600 dark:text-warning-400 mt-1">Email changes require SuperAdmin approval before taking effect.</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Status</label>
+                <label className="block text-sm font-medium text-app-fg-muted mb-1.5">Status</label>
                 {user.status === 'DEACTIVATED' ? (
-                  <p className="text-sm text-surface-600 dark:text-surface-400">Deactivated accounts cannot be reactivated. Re-invite to create a new account.</p>
+                  <p className="text-sm text-app-fg-muted">Deactivated accounts cannot be reactivated. Re-invite to create a new account.</p>
                 ) : (
                   <div className="flex flex-wrap items-center gap-4 mt-2">
                     {(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED'] as const).map((s) => (
                       <label key={s} className="flex items-center gap-2 cursor-pointer">
                         <input type="radio" name="status" value={s} defaultChecked={user.status === s} className="text-brand-500 focus:ring-brand-500" />
-                        <span className="text-sm text-surface-700 dark:text-surface-300">{s.charAt(0) + s.slice(1).toLowerCase()}</span>
+                        <span className="text-sm text-app-fg-muted">{s.charAt(0) + s.slice(1).toLowerCase()}</span>
                       </label>
                     ))}
                   </div>
                 )}
               </div>
               <div>
-                <label htmlFor="phone" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Phone</label>
+                <label htmlFor="phone" className="block text-sm font-medium text-app-fg-muted mb-1.5">Phone</label>
                 <input id="phone" name="phone" type="tel" defaultValue="" placeholder="Enter new phone (current is masked)" className="input" />
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">Current: {user.phone ?? 'Not set'}. Leave blank to keep unchanged.</p>
+                <p className="text-xs text-app-fg-muted mt-1">Current: {user.phone ?? 'Not set'}. Leave blank to keep unchanged.</p>
               </div>
             </div>
           </div>
@@ -949,11 +955,11 @@ export function UserDetailPage({
           {/* Role Settings */}
           {(showCapacity || showLogisticsLocation || showProductAssignment) && (
             <div className="card space-y-4">
-              <h2 className="text-base font-semibold text-surface-900 dark:text-white">Role Settings</h2>
+              <h2 className="text-base font-semibold text-app-fg">Role Settings</h2>
 
               {showCapacity && (
                 <div>
-                  <label htmlFor="capacity" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Order Capacity</label>
+                  <label htmlFor="capacity" className="block text-sm font-medium text-app-fg-muted mb-1.5">Order Capacity</label>
                   <input id="capacity" name="capacity" type="number" min={1} max={100} defaultValue={user.capacity} className="input w-full sm:w-32" />
                 </div>
               )}
@@ -962,7 +968,7 @@ export function UserDetailPage({
                 <DeferredSection resolve={locations} skeleton="inline">
                   {(locs) => (
                     <div>
-                      <label htmlFor="logisticsLocationId" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Logistics Location</label>
+                      <label htmlFor="logisticsLocationId" className="block text-sm font-medium text-app-fg-muted mb-1.5">Logistics Location</label>
                       <select id="logisticsLocationId" name="logisticsLocationId" className="input" defaultValue={user.logisticsLocationId ?? ''}>
                         <option value="">Select location</option>
                         {locs.map((loc: UserCreateLocation) => (
@@ -986,23 +992,23 @@ export function UserDetailPage({
                 <DeferredSection resolve={products} skeleton="table">
                   {(prods) => (
                     <div>
-                      <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Assign Products</label>
-                      <p className="text-xs text-surface-700 dark:text-surface-300 mb-2">Leave blank to assign all products.</p>
+                      <label className="block text-sm font-medium text-app-fg-muted mb-1.5">Assign Products</label>
+                      <p className="text-xs text-app-fg-muted mb-2">Leave blank to assign all products.</p>
                       {prods.length > 0 ? (
-                        <div className="border border-surface-200 dark:border-surface-700 rounded-lg max-h-48 overflow-y-auto">
+                        <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
                           {prods.map((product: UserCreateProduct) => (
-                            <label key={product.id} className="flex items-center gap-3 px-3 py-2 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer border-b border-surface-100 dark:border-surface-800 last:border-b-0">
+                            <label key={product.id} className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0">
                               <Checkbox
                                 checked={selectedProductIds.includes(product.id)}
                                 onChange={() => toggleProduct(product.id)}
                               />
-                              <span className="text-sm text-surface-900 dark:text-surface-100">{product.name}</span>
-                              <span className="text-xs text-surface-700 dark:text-surface-300 ml-auto">{product.category ?? ''}</span>
+                              <span className="text-sm text-app-fg">{product.name}</span>
+                              <span className="text-xs text-app-fg-muted ml-auto">{product.category ?? ''}</span>
                             </label>
                           ))}
                         </div>
                       ) : (
-                        <p className="text-xs text-surface-700">No products found.</p>
+                        <p className="text-xs text-app-fg-muted">No products found.</p>
                       )}
                       {selectedProductIds.length > 0 && (
                         <div className="mt-3">
@@ -1012,7 +1018,7 @@ export function UserDetailPage({
                               value="true"
                               defaultChecked={user.restrictProductAccess}
                             />
-                            <span className="text-sm text-surface-700 dark:text-surface-300">Restrict access to only assigned products</span>
+                            <span className="text-sm text-app-fg-muted">Restrict access to only assigned products</span>
                           </label>
                         </div>
                       )}
@@ -1035,15 +1041,15 @@ export function UserDetailPage({
       {/* ─── Reset Password Modal ────────────────────────── */}
       {showResetPassword && (
         <Modal open onClose={() => setShowResetPassword(false)} maxWidth="max-w-md" contentClassName="p-6 space-y-4">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Reset Password</h3>
-            <p className="text-sm text-surface-700 dark:text-surface-200">
+            <h3 className="text-lg font-semibold text-app-fg">Reset Password</h3>
+            <p className="text-sm text-app-fg-muted">
               Set a new password for <strong>{user.name}</strong>. This will log them out of all sessions.
             </p>
             <Form method="post">
               <input type="hidden" name="intent" value="resetPassword" />
               <div className="space-y-4">
                 <div>
-                  <label htmlFor="newPassword" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">New Password</label>
+                  <label htmlFor="newPassword" className="block text-sm font-medium text-app-fg-muted mb-1.5">New Password</label>
                   <input id="newPassword" name="newPassword" type="password" required minLength={8} className="input" placeholder="Minimum 8 characters" />
                 </div>
                 <div className="flex items-center justify-end gap-3">
@@ -1060,10 +1066,10 @@ export function UserDetailPage({
       {/* ─── Email Change Approval Modal ─────────────────── */}
       {showEmailChangeModal && (
         <Modal open onClose={() => { setShowEmailChangeModal(null); setEmailChangeReason(''); }} maxWidth="max-w-md" contentClassName="p-6 space-y-4">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
+            <h3 className="text-lg font-semibold text-app-fg">
               {showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'} Email Change
             </h3>
-            <p className="text-sm text-surface-700 dark:text-surface-200">
+            <p className="text-sm text-app-fg-muted">
               {showEmailChangeModal.action === 'APPROVED'
                 ? 'This will update the user\'s email address. Please provide a reason for the approval.'
                 : 'This will reject the pending email change. Please provide a reason.'}
@@ -1074,7 +1080,7 @@ export function UserDetailPage({
               <input type="hidden" name="action" value={showEmailChangeModal.action} />
               <div className="space-y-4">
                 <div>
-                  <label htmlFor="emailChangeReason" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Reason (min 10 characters)</label>
+                  <label htmlFor="emailChangeReason" className="block text-sm font-medium text-app-fg-muted mb-1.5">Reason (min 10 characters)</label>
                   <textarea
                     id="emailChangeReason"
                     name="reason"
@@ -1116,7 +1122,7 @@ export function UserDetailPage({
                 Deactivate user permanently
               </h3>
             </div>
-            <p id="deactivate-modal-desc" className="text-sm text-surface-700 dark:text-surface-200">
+            <p id="deactivate-modal-desc" className="text-sm text-app-fg-muted">
               You are about to deactivate <strong>{user.name}</strong> ({user.email}). This action is <strong>irreversible</strong> for this account.
             </p>
             <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 p-4 space-y-2">
@@ -1128,7 +1134,7 @@ export function UserDetailPage({
                 <li>Existing audit trail and historical data (orders, payouts, etc.) remain tied to this user for compliance.</li>
               </ul>
             </div>
-            <p className="text-xs text-surface-600 dark:text-surface-400">
+            <p className="text-xs text-app-fg-muted">
               Only Super Admins can deactivate users. If you need to temporarily disable access, use <strong>Inactive</strong> or <strong>Archived</strong> instead (those can be reactivated).
             </p>
             {actionData?.error && !dismissedError && (
@@ -1167,10 +1173,10 @@ export function UserDetailPage({
 function InfoField({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
     <div className="flex items-start gap-2.5">
-      {icon && <div className="mt-0.5 text-surface-400 dark:text-surface-600 flex-shrink-0">{icon}</div>}
+      {icon && <div className="mt-0.5 text-app-fg-muted flex-shrink-0">{icon}</div>}
       <div>
-        <p className="text-[11px] font-medium text-surface-500 dark:text-surface-300 uppercase tracking-wider">{label}</p>
-        <p className="text-sm text-surface-900 dark:text-surface-100 mt-0.5">{value}</p>
+        <p className="text-[11px] font-medium text-app-fg-muted uppercase tracking-wider">{label}</p>
+        <p className="text-sm text-app-fg mt-0.5">{value}</p>
       </div>
     </div>
   );
@@ -1180,11 +1186,11 @@ function MetricCard({ label, value, accent }: { label: string; value: string; ac
   const color = accent === 'success' ? 'text-success-600 dark:text-success-400'
     : accent === 'warning' ? 'text-warning-600 dark:text-warning-400'
     : accent === 'danger' ? 'text-danger-600 dark:text-danger-400'
-    : 'text-surface-900 dark:text-white';
+    : 'text-app-fg';
 
   return (
-    <div className="p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
-      <p className="text-[11px] font-medium text-surface-500 dark:text-surface-300 uppercase tracking-wider">{label}</p>
+    <div className="p-3 rounded-lg bg-app-hover">
+      <p className="text-[11px] font-medium text-app-fg-muted uppercase tracking-wider">{label}</p>
       <p className={`text-lg font-bold mt-0.5 ${color}`}>{value}</p>
     </div>
   );

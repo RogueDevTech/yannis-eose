@@ -1,27 +1,22 @@
 import { useEffect } from 'react';
 import { Outlet } from '@remix-run/react';
+import { applyAppTheme, readStoredThemeId } from '~/lib/theme';
 
-/** Restore theme from localStorage (same logic as root THEME_SCRIPT) */
 function restoreTheme() {
   try {
-    const t = localStorage.getItem('yannis_theme');
-    if (t === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    applyAppTheme(readStoredThemeId());
   } catch {
-    document.documentElement.classList.remove('dark');
+    applyAppTheme('system');
   }
 }
 
 /**
  * Auth layout route — wraps /auth and /auth/logout.
- * Forces light mode on auth pages (no theme toggle); restores user preference on leave.
+ * Forces Light theme on auth pages; restores stored theme on leave.
  */
 export default function AuthLayout() {
   useEffect(() => {
-    document.documentElement.classList.remove('dark');
+    applyAppTheme('light');
     return restoreTheme;
   }, []);
 

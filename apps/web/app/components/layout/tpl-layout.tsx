@@ -4,6 +4,8 @@ import { Button } from '~/components/ui/button';
 import { RouteLoader } from '~/components/ui/route-loader';
 import { BottomNav, type BottomNavItem } from './bottom-nav';
 import { SidebarIcons } from './sidebar';
+import { useAppTheme } from '~/hooks/useAppTheme';
+import { APP_THEMES } from '~/lib/theme';
 
 const TPL_NAV = [
   { label: 'Dashboard', href: '/tpl', icon: SidebarIcons.dashboard },
@@ -44,25 +46,23 @@ interface TplLayoutProps {
     }>;
     unreadCount: number;
   }>;
-  darkMode?: boolean;
-  onToggleDarkMode?: () => void;
   children: React.ReactNode;
 }
 
 export function TplLayout({
   user,
   notificationsPromise,
-  darkMode = false,
-  onToggleDarkMode,
   children,
 }: TplLayoutProps) {
   const location = useLocation();
   const navigation = useNavigation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [resolvedDark, setResolvedDark] = useState(darkMode);
+  const { themeId, setTheme, isDarkTheme } = useAppTheme();
   const menuRef = useRef<HTMLDivElement>(null);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
 
   const isNavigatingWithinTpl =
     navigation.state !== 'idle' &&
@@ -82,56 +82,34 @@ export function TplLayout({
   }, [notificationsPromise]);
 
   useEffect(() => {
-    const stored = localStorage.getItem('yannis_theme');
-    if (stored === 'dark') {
-      setResolvedDark(true);
-    } else {
-      setResolvedDark(false);
-    }
-  }, []);
-
-  const toggleDark = () => {
-    const next = !resolvedDark;
-    setResolvedDark(next);
-    if (typeof document !== 'undefined') {
-      if (next) {
-        document.documentElement.classList.add('dark');
-        localStorage.setItem('yannis_theme', 'dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-        localStorage.setItem('yannis_theme', 'light');
-      }
-    }
-    onToggleDarkMode?.();
-  };
-
-  useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const t = e.target as Node;
+      if (menuRef.current && !menuRef.current.contains(t)) {
         setUserMenuOpen(false);
       }
+      if (themeMenuRef.current && !themeMenuRef.current.contains(t)) {
+        setThemeMenuOpen(false);
+      }
     }
-    if (userMenuOpen) document.addEventListener('mousedown', handleClickOutside);
+    if (userMenuOpen || themeMenuOpen) document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [userMenuOpen]);
+  }, [userMenuOpen, themeMenuOpen]);
 
   const closeMobileNav = () => setMobileNavOpen(false);
 
-  const isDark = resolvedDark;
-
   return (
-    <div className="min-h-screen w-full bg-surface-50 dark:bg-surface-950">
+    <div className="min-h-screen w-full bg-app-canvas text-app-fg">
       {/* Constrained content: max 1200px, centered */}
       <div className="mx-auto w-full max-w-tpl min-h-screen flex flex-col">
         {/* Header + nav: fixed on mobile (same as admin), in-flow on md+ */}
         <div className="sticky top-0 z-40 shrink-0 pt-[var(--header-height)] md:pt-0">
-          <header className="fixed md:relative top-0 left-0 right-0 z-30 h-[var(--header-height)] md:h-auto md:py-2 bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between px-4 lg:px-6 transition-colors">
+          <header className="fixed md:relative top-0 left-0 right-0 z-30 h-[var(--header-height)] md:h-auto md:py-2 bg-app-elevated border-b border-app-border flex items-center justify-between px-4 lg:px-6 transition-colors">
             {/* Left: mobile hamburger + logo (same order and style as admin) */}
             <div className="flex items-center gap-3 flex-1 min-w-0 max-w-lg">
               <button
                 type="button"
                 onClick={() => setMobileNavOpen((o) => !o)}
-                className="md:hidden p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
+                className="md:hidden p-1.5 rounded-lg text-app-fg hover:bg-app-hover transition-colors"
                 aria-expanded={mobileNavOpen}
                 aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
               >
@@ -167,11 +145,11 @@ export function TplLayout({
                 aria-label="3PL home"
               >
                 <img
-                  src={isDark ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
+                  src={isDarkTheme ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
                   alt="Yannis"
                   className="h-[1.575rem] w-auto max-w-[108px] md:h-8 md:max-w-none object-contain"
                 />
-                <span className="hidden sm:inline text-sm font-medium text-surface-700 dark:text-surface-300">
+                <span className="hidden sm:inline text-sm font-medium text-app-fg-muted">
                   3PL
                 </span>
               </NavLink>
@@ -187,7 +165,7 @@ export function TplLayout({
                   return `relative p-1.5 rounded-lg transition-colors ${
                     active
                       ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
-                      : 'text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800'
+                      : 'text-app-fg-muted hover:bg-app-hover'
                   }`;
                 }}
                 title="Notifications"
@@ -211,47 +189,55 @@ export function TplLayout({
                   </span>
                 )}
               </NavLink>
-              <button
-                type="button"
-                onClick={toggleDark}
-                className="p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
-                title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                {isDark ? (
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                  >
+              <div className="relative" ref={themeMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setThemeMenuOpen((o) => !o)}
+                  className="p-1.5 rounded-lg text-app-fg hover:bg-app-hover transition-colors"
+                  title="Theme"
+                  aria-expanded={themeMenuOpen}
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"
+                      d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
                     />
                   </svg>
-                ) : (
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"
-                    />
-                  </svg>
+                </button>
+                {themeMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-48 rounded-lg bg-app-elevated border border-app-border shadow-lg py-1 z-50 animate-fade-in">
+                    <p className="px-3 py-1.5 text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
+                      Theme
+                    </p>
+                    {APP_THEMES.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          setTheme(t.id);
+                          setThemeMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-app-fg hover:bg-app-hover transition-colors"
+                      >
+                        {themeId === t.id ? (
+                          <svg className="w-4 h-4 shrink-0 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <span className="w-4 h-4 shrink-0" aria-hidden />
+                        )}
+                        <span className="flex-1 text-left">{t.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 )}
-              </button>
+              </div>
               <div className="relative" ref={menuRef}>
                 <button
                   type="button"
                   onClick={() => setUserMenuOpen((o) => !o)}
-                  className="flex items-center gap-2 pl-2 lg:pl-3 border-l border-surface-200 dark:border-surface-700 hover:opacity-80 transition-opacity"
+                  className="flex items-center gap-2 pl-2 lg:pl-3 border-l border-app-border hover:opacity-80 transition-opacity"
                 >
                   <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center">
                     <span className="text-xs font-semibold text-white">
@@ -259,12 +245,12 @@ export function TplLayout({
                     </span>
                   </div>
                   <div className="hidden md:block min-w-0 text-left">
-                    <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate leading-tight">
+                    <p className="text-sm font-medium text-app-fg truncate leading-tight">
                       {user.name}
                     </p>
                   </div>
                   <svg
-                    className="w-4 h-4 text-surface-700 dark:text-surface-200 hidden md:block transition-transform duration-200"
+                    className="w-4 h-4 text-app-fg-muted hidden md:block transition-transform duration-200"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -279,15 +265,15 @@ export function TplLayout({
                   </svg>
                 </button>
                 {userMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 rounded-lg bg-white dark:bg-surface-800 shadow-lg border border-surface-200 dark:border-surface-700 py-1 animate-fade-in z-50">
-                    <div className="md:hidden px-4 py-3 border-b border-surface-100 dark:border-surface-700">
-                      <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
+                  <div className="absolute right-0 mt-2 w-56 rounded-lg bg-app-elevated shadow-lg border border-app-border py-1 animate-fade-in z-50">
+                    <div className="md:hidden px-4 py-3 border-b border-app-border">
+                      <p className="text-sm font-medium text-app-fg">
                         {user.name}
                       </p>
-                      <p className="text-xs text-surface-500 dark:text-surface-200">{user.email}</p>
+                      <p className="text-xs text-app-fg-muted">{user.email}</p>
                     </div>
-                    <div className="hidden md:block px-4 py-2 border-b border-surface-100 dark:border-surface-700">
-                      <p className="text-xs text-surface-800 dark:text-surface-200 truncate">
+                    <div className="hidden md:block px-4 py-2 border-b border-app-border">
+                      <p className="text-xs text-app-fg-muted truncate">
                         {user.email}
                       </p>
                     </div>
@@ -321,7 +307,7 @@ export function TplLayout({
 
           {/* Nav row: below header, always visible on md+, toggled by menu button on mobile */}
           <nav
-            className={`flex items-center gap-1 overflow-x-auto scrollbar-hide bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800 px-4 py-2 min-h-[2.75rem] ${
+            className={`flex items-center gap-1 overflow-x-auto scrollbar-hide bg-app-elevated border-b border-app-border px-4 py-2 min-h-[2.75rem] ${
               mobileNavOpen ? 'flex' : 'hidden md:flex'
             }`}
             aria-label="Main navigation"
@@ -339,7 +325,7 @@ export function TplLayout({
                     `px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors flex-shrink-0 ${
                       active
                         ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
-                        : 'text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-surface-200'
+                        : 'text-app-fg-muted hover:bg-app-hover hover:text-app-fg'
                     }`
                   }
                 >
@@ -357,7 +343,7 @@ export function TplLayout({
             aria-live="polite"
           >
             {isRouteLoading && (
-              <div className="absolute inset-0 z-20 bg-surface-50 dark:bg-surface-950 p-4 lg:p-6">
+              <div className="absolute inset-0 z-20 bg-app-canvas p-4 lg:p-6">
                 <RouteLoader />
               </div>
             )}

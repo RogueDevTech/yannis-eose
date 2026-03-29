@@ -13,7 +13,7 @@ import { CEODashboardSkeleton } from '~/features/ceo/CEODashboardSkeleton';
 import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
 import type { CEODashboardData, CEODashboardFilters } from '~/features/ceo/types';
 
-const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
+const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
 const defaultProfit: DashboardData['profit'] = { revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0, trueProfit: 0, orderCount: 0, margin: 0 };
 
 const defaultCEOData: CEODashboardData = {
@@ -65,8 +65,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime, topic };
 
   const ceoInput = JSON.stringify({ startDate, endDate });
-  const ordersCountsInput = JSON.stringify({ startDate, endDate });
-  const metricsInput = JSON.stringify({ startDate, endDate });
+  const mediaBuyerIdParam = role === 'MEDIA_BUYER' && user?.id ? { mediaBuyerId: user.id } : {};
+  const ordersCountsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
+  const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 
   // SuperAdmin: CEO Executive Overview — deferred for navigate-first

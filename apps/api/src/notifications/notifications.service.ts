@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { eq, and, desc, count, inArray } from 'drizzle-orm';
+import { eq, and, desc, count, inArray, or, gte, lte } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import sgMail from '@sendgrid/mail';
 import { db as schema } from '@yannis/shared';
@@ -7,6 +7,12 @@ import type {
   ListNotificationsInput,
   MarkNotificationsReadInput,
   CreateNotificationInput,
+  SavePushSubscriptionInput,
+  RemovePushSubscriptionInput,
+  BroadcastPushInput,
+  GetPushDeliveryLogInput,
+  UpdateAutomationRuleInput,
+  CreateAutomationRuleInput,
 } from '@yannis/shared';
 import {
   MANDATORY_EMAIL_TYPES,
@@ -16,11 +22,17 @@ import {
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { SettingsService } from '../settings/settings.service';
+import type webPushType from 'web-push';
+
+// Lazy-loaded web-push — avoids CJS interop issues at startup
+let webpush: typeof webPushType | null = null;
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly sendgridConfigured: boolean;
+  /** Lazily resolves when web-push is loaded and VAPID is applied (or false if disabled / failed). */
+  private webPushReady: Promise<boolean> | null = null;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
@@ -36,7 +48,49 @@ export class NotificationsService {
       this.sendgridConfigured = false;
       this.logger.warn('SENDGRID_API_KEY not set — email sending disabled');
     }
+
+    const vapidPublic = process.env['VAPID_PUBLIC_KEY'];
+    const vapidPrivate = process.env['VAPID_PRIVATE_KEY'];
+    if (!vapidPublic || !vapidPrivate) {
+      this.logger.warn('VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY not set — web push disabled');
+    }
   }
+
+  /**
+   * Ensures web-push is loaded and VAPID configured. Safe to call from every sendPush — deduped.
+   */
+  private getWebPushReady(): Promise<boolean> {
+    if (this.webPushReady) {
+      return this.webPushReady;
+    }
+
+    const vapidPublic = process.env['VAPID_PUBLIC_KEY'];
+    const vapidPrivate = process.env['VAPID_PRIVATE_KEY'];
+    const vapidSubject = process.env['VAPID_SUBJECT'] ?? 'mailto:admin@yannis.com';
+
+    if (!vapidPublic || !vapidPrivate) {
+      this.webPushReady = Promise.resolve(false);
+      return this.webPushReady;
+    }
+
+    this.webPushReady = import('web-push')
+      .then((mod) => {
+        webpush = (mod.default ?? mod) as typeof webPushType;
+        webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
+        this.logger.log('web-push VAPID configured');
+        return true;
+      })
+      .catch((err) => {
+        this.logger.warn(`web-push failed to load — push notifications disabled: ${err}`);
+        return false;
+      });
+
+    return this.webPushReady;
+  }
+
+  // ============================================================
+  // EMAIL METHODS (UNCHANGED)
+  // ============================================================
 
   /**
    * Send an email via SendGrid.
@@ -256,6 +310,10 @@ export class NotificationsService {
 
   /** Map notification type + data to deep link path */
   private getLinkPathForType(type: string, data: Record<string, unknown> | null): string | null {
+    // Account alerts: open notification center (role-agnostic hub)
+    if (type === 'account:updated' || type === 'account:security') {
+      return '/admin/notifications';
+    }
     if (!data) return '/admin';
     if (data['orderId']) return `/admin/orders/${data['orderId']}`;
     if (data['requestId'] && type.includes('approval')) return '/admin/users';
@@ -269,6 +327,7 @@ export class NotificationsService {
   /**
    * Create a notification and push it via Socket.io in real-time.
    * Sends email if configured for this notification type.
+   * Also fires a web push notification (non-blocking, fire-and-forget).
    */
   async create(input: CreateNotificationInput) {
     const rows = await this.db
@@ -319,6 +378,22 @@ export class NotificationsService {
           }
         })
         .catch((err) => this.logger.warn(`Notification email check/send failed: ${err}`));
+
+      // Fire web push (non-blocking — mirror trigger)
+      const appUrl = process.env['APP_URL'] ?? 'http://localhost:4001';
+      const linkPath = this.getLinkPathForType(
+        input.type,
+        (input.data as Record<string, unknown>) ?? null,
+      );
+      this.sendPush(
+        input.userId,
+        {
+          title: input.title,
+          body: input.body ?? '',
+          url: linkPath ? `${appUrl}${linkPath}` : appUrl,
+        },
+        { triggerType: 'MIRROR' },
+      ).catch((err) => this.logger.warn(`Mirror web push failed for user ${input.userId}: ${err}`));
     }
 
     return notification;
@@ -424,5 +499,609 @@ export class NotificationsService {
       );
 
     return { success: true };
+  }
+
+  // ============================================================
+  // PUSH NOTIFICATION METHODS
+  // ============================================================
+
+  /**
+   * Send a web push notification to all active subscriptions for a user.
+   * Inserts a delivery log row per device before send so the payload can include `logId` for SW ack.
+   * @returns Count of subscriptions that received a successful push (not "users").
+   */
+  async sendPush(
+    userId: string,
+    payload: { title: string; body: string; url?: string; tag?: string },
+    meta: {
+      triggerType: 'MIRROR' | 'BROADCAST' | 'AUTOMATION';
+      broadcastId?: string;
+      automationRuleId?: string;
+    },
+  ): Promise<number> {
+    const vapidOk = await this.getWebPushReady();
+    const wp = webpush;
+    if (!vapidOk || !wp) {
+      return 0;
+    }
+
+    const subscriptions = await this.db
+      .select()
+      .from(schema.pushSubscriptions)
+      .where(eq(schema.pushSubscriptions.userId, userId));
+
+    if (subscriptions.length === 0) {
+      return 0;
+    }
+
+    const urlForClient = payload.url ?? '/admin';
+
+    const results = await Promise.all(
+      subscriptions.map(async (sub) => {
+        let logId: string;
+
+        try {
+          const inserted = await this.db
+            .insert(schema.pushDeliveryLog)
+            .values({
+              userId,
+              broadcastId: meta.broadcastId ?? null,
+              automationRuleId: meta.automationRuleId ?? null,
+              title: payload.title,
+              body: payload.body,
+              triggerType: meta.triggerType,
+              status: 'SENT',
+              failureReason: null,
+            })
+            .returning({ id: schema.pushDeliveryLog.id });
+
+          const id = inserted[0]?.id;
+          if (!id) {
+            return 0;
+          }
+          logId = id;
+        } catch (logErr) {
+          this.logger.warn(`Failed to write push delivery log: ${logErr}`);
+          return 0;
+        }
+
+        const pushPayloadStr = JSON.stringify({
+          title: payload.title,
+          body: payload.body,
+          data: { url: urlForClient, logId },
+          tag: payload.tag,
+        });
+
+        try {
+          await wp.sendNotification(
+            {
+              endpoint: sub.endpoint,
+              keys: { auth: sub.auth, p256dh: sub.p256dh },
+            },
+            pushPayloadStr,
+          );
+          return 1;
+        } catch (err: unknown) {
+          const statusCode =
+            err && typeof err === 'object' && 'statusCode' in err
+              ? (err as { statusCode: number }).statusCode
+              : null;
+
+          const failureReason = err instanceof Error ? err.message : String(err);
+
+          await this.db
+            .update(schema.pushDeliveryLog)
+            .set({ status: 'FAILED', failureReason })
+            .where(eq(schema.pushDeliveryLog.id, logId))
+            .catch((e) => this.logger.warn(`Failed to mark push log failed: ${e}`));
+
+          if (statusCode === 410 || statusCode === 404) {
+            await this.db
+              .delete(schema.pushSubscriptions)
+              .where(eq(schema.pushSubscriptions.endpoint, sub.endpoint))
+              .catch((deleteErr) =>
+                this.logger.warn(`Failed to delete stale push subscription: ${deleteErr}`),
+              );
+          }
+
+          return 0;
+        }
+      }),
+    );
+
+    let delivered = 0;
+    for (const n of results) {
+      delivered += n;
+    }
+    return delivered;
+  }
+
+  /**
+   * Save (upsert) a push subscription for a user.
+   * If the endpoint already exists, updates auth/p256dh/userAgent.
+   */
+  async savePushSubscription(
+    userId: string,
+    input: SavePushSubscriptionInput,
+  ): Promise<void> {
+    await this.db
+      .insert(schema.pushSubscriptions)
+      .values({
+        userId,
+        endpoint: input.endpoint,
+        auth: input.auth,
+        p256dh: input.p256dh,
+        userAgent: input.userAgent ?? null,
+      })
+      .onConflictDoUpdate({
+        target: schema.pushSubscriptions.endpoint,
+        set: {
+          userId,
+          auth: input.auth,
+          p256dh: input.p256dh,
+          userAgent: input.userAgent ?? null,
+        },
+      });
+  }
+
+  /**
+   * Remove this device's push subscription for the user. Idempotent if no row matches.
+   */
+  async removePushSubscription(
+    userId: string,
+    input: RemovePushSubscriptionInput,
+  ): Promise<void> {
+    await this.db
+      .delete(schema.pushSubscriptions)
+      .where(
+        and(
+          eq(schema.pushSubscriptions.userId, userId),
+          eq(schema.pushSubscriptions.endpoint, input.endpoint),
+        ),
+      );
+  }
+
+  /**
+   * Broadcast a push notification to a target audience.
+   * Returns the number of users who were sent the notification.
+   */
+  async broadcastPush(
+    actorId: string,
+    branchId: string | null,
+    input: BroadcastPushInput,
+  ): Promise<{ recipientCount: number; pushDeliveryCount: number }> {
+    // Resolve target users
+    let targetUserIds: string[] = [];
+
+    if (input.targetType === 'USER' && input.targetUserId) {
+      targetUserIds = [input.targetUserId];
+    } else if (input.targetType === 'ROLE' && input.targetRole) {
+      const roleRows = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.role, input.targetRole as (typeof schema.users.$inferSelect)['role']),
+            eq(schema.users.status, 'ACTIVE'),
+          ),
+        );
+      targetUserIds = roleRows.map((r) => r.id);
+    } else if (input.targetType === 'ALL') {
+      const allRows = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.status, 'ACTIVE'));
+      targetUserIds = allRows.map((r) => r.id);
+    }
+
+    if (targetUserIds.length === 0) {
+      return { recipientCount: 0, pushDeliveryCount: 0 };
+    }
+
+    // Insert broadcast record
+    const broadcastRows = await this.db
+      .insert(schema.pushBroadcasts)
+      .values({
+        createdBy: actorId,
+        targetType: input.targetType,
+        targetRole: input.targetRole ?? null,
+        targetUserId: input.targetUserId ?? null,
+        title: input.title,
+        body: input.body,
+        branchId: branchId ?? null,
+      })
+      .returning({ id: schema.pushBroadcasts.id });
+
+    const broadcastId = broadcastRows[0]?.id;
+
+    const perUserCounts = await Promise.all(
+      targetUserIds.map((uid) =>
+        this.sendPush(
+          uid,
+          { title: input.title, body: input.body },
+          { triggerType: 'BROADCAST', broadcastId },
+        ).catch((err) => {
+          this.logger.warn(`Broadcast push failed for user ${uid}: ${err}`);
+          return 0;
+        }),
+      ),
+    );
+
+    const pushDeliveryCount = perUserCounts.reduce((a, b) => a + b, 0);
+
+    return { recipientCount: targetUserIds.length, pushDeliveryCount };
+  }
+
+  /**
+   * Get paginated push delivery log with optional filters.
+   */
+  async getDeliveryLog(
+    input: GetPushDeliveryLogInput,
+    actorRole: string,
+    actorId: string,
+  ) {
+    const conditions: Parameters<typeof and>[0][] = [];
+
+    // Non-admin users can only see their own logs
+    if (actorRole !== 'SUPER_ADMIN' && actorRole !== 'BRANCH_ADMIN') {
+      conditions.push(eq(schema.pushDeliveryLog.userId, actorId));
+    } else if (input.userId) {
+      conditions.push(eq(schema.pushDeliveryLog.userId, input.userId));
+    }
+
+    if (input.status) {
+      conditions.push(eq(schema.pushDeliveryLog.status, input.status));
+    }
+    if (input.triggerType) {
+      conditions.push(eq(schema.pushDeliveryLog.triggerType, input.triggerType));
+    }
+    if (input.broadcastId) {
+      conditions.push(eq(schema.pushDeliveryLog.broadcastId, input.broadcastId));
+    }
+    if (input.dateFrom) {
+      conditions.push(gte(schema.pushDeliveryLog.sentAt, new Date(input.dateFrom)));
+    }
+    if (input.dateTo) {
+      conditions.push(lte(schema.pushDeliveryLog.sentAt, new Date(input.dateTo)));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const offset = (input.page - 1) * input.limit;
+
+    const [logs, totalRows] = await Promise.all([
+      this.db
+        .select({
+          id: schema.pushDeliveryLog.id,
+          userId: schema.pushDeliveryLog.userId,
+          broadcastId: schema.pushDeliveryLog.broadcastId,
+          automationRuleId: schema.pushDeliveryLog.automationRuleId,
+          title: schema.pushDeliveryLog.title,
+          body: schema.pushDeliveryLog.body,
+          triggerType: schema.pushDeliveryLog.triggerType,
+          status: schema.pushDeliveryLog.status,
+          failureReason: schema.pushDeliveryLog.failureReason,
+          sentAt: schema.pushDeliveryLog.sentAt,
+          shownAt: schema.pushDeliveryLog.shownAt,
+          clickedAt: schema.pushDeliveryLog.clickedAt,
+          userName: schema.users.name,
+        })
+        .from(schema.pushDeliveryLog)
+        .leftJoin(schema.users, eq(schema.pushDeliveryLog.userId, schema.users.id))
+        .where(whereClause)
+        .orderBy(desc(schema.pushDeliveryLog.sentAt))
+        .limit(input.limit)
+        .offset(offset),
+      this.db
+        .select({ count: count() })
+        .from(schema.pushDeliveryLog)
+        .where(whereClause),
+    ]);
+
+    const total = totalRows[0]?.count ?? 0;
+
+    // Aggregate counts per status for this filter set (useful for dashboard)
+    const aggregateRows = await this.db
+      .select({ status: schema.pushDeliveryLog.status, count: count() })
+      .from(schema.pushDeliveryLog)
+      .where(whereClause)
+      .groupBy(schema.pushDeliveryLog.status);
+
+    const aggregates = Object.fromEntries(
+      aggregateRows.map((r) => [r.status, r.count]),
+    ) as Record<string, number>;
+
+    return {
+      logs,
+      pagination: {
+        page: input.page,
+        limit: input.limit,
+        total,
+        totalPages: Math.ceil(total / input.limit),
+      },
+      aggregates,
+    };
+  }
+
+  /**
+   * Resend a single push delivery — creates a new log row.
+   */
+  async resendPush(logId: string): Promise<void> {
+    const rows = await this.db
+      .select()
+      .from(schema.pushDeliveryLog)
+      .where(eq(schema.pushDeliveryLog.id, logId))
+      .limit(1);
+
+    const log = rows[0];
+    if (!log) return;
+
+    await this.sendPush(
+      log.userId,
+      { title: log.title, body: log.body },
+      {
+        triggerType: log.triggerType,
+        broadcastId: log.broadcastId ?? undefined,
+        automationRuleId: log.automationRuleId ?? undefined,
+      },
+    );
+  }
+
+  /**
+   * Resend multiple push deliveries in bulk.
+   */
+  async bulkResendPush(logIds: string[]): Promise<{ sent: number; failed: number }> {
+    let sent = 0;
+    let failed = 0;
+
+    await Promise.all(
+      logIds.map(async (logId) => {
+        try {
+          await this.resendPush(logId);
+          sent++;
+        } catch {
+          failed++;
+        }
+      }),
+    );
+
+    return { sent, failed };
+  }
+
+  /**
+   * Acknowledge a push notification event (shown or clicked).
+   * Updates the delivery log record.
+   */
+  async ackPush(logId: string, event: 'shown' | 'clicked'): Promise<void> {
+    const now = new Date();
+    if (event === 'shown') {
+      await this.db
+        .update(schema.pushDeliveryLog)
+        .set({ shownAt: now, status: 'SHOWN' })
+        .where(
+          and(
+            eq(schema.pushDeliveryLog.id, logId),
+            // Only update if not already clicked (don't downgrade status)
+            or(
+              eq(schema.pushDeliveryLog.status, 'SENT'),
+              eq(schema.pushDeliveryLog.status, 'SHOWN'),
+            ),
+          ),
+        );
+    } else {
+      await this.db
+        .update(schema.pushDeliveryLog)
+        .set({ clickedAt: now, status: 'CLICKED' })
+        .where(eq(schema.pushDeliveryLog.id, logId));
+    }
+  }
+
+  // ============================================================
+  // PUSH AUTOMATION RULE METHODS
+  // ============================================================
+
+  /**
+   * Get all automation rules.
+   * When branchId is null (SuperAdmin), returns all rules across all branches.
+   */
+  async getAutomationRules(branchId: string | null) {
+    if (branchId === null) {
+      return this.db
+        .select()
+        .from(schema.pushAutomationRules)
+        .orderBy(desc(schema.pushAutomationRules.validFrom));
+    }
+
+    // Non-SuperAdmin sees only their branch's rules
+    return this.db
+      .select()
+      .from(schema.pushAutomationRules)
+      .where(eq(schema.pushAutomationRules.branchId, branchId))
+      .orderBy(desc(schema.pushAutomationRules.validFrom));
+  }
+
+  /**
+   * Create a new push automation rule.
+   */
+  async createAutomationRule(
+    actorId: string,
+    branchId: string | null,
+    input: CreateAutomationRuleInput,
+  ) {
+    const rows = await this.db
+      .insert(schema.pushAutomationRules)
+      .values({
+        name: input.name,
+        triggerType: input.triggerType,
+        cronExpr: input.cronExpr ?? null,
+        eventKey: input.eventKey ?? null,
+        targetType: input.targetType,
+        targetRole: input.targetRole ?? null,
+        targetUserId: input.targetUserId ?? null,
+        titleTemplate: input.titleTemplate,
+        bodyTemplate: input.bodyTemplate,
+        isActive: input.isActive,
+        branchId: branchId ?? null,
+        createdBy: actorId,
+      })
+      .returning();
+
+    return rows[0]!;
+  }
+
+  /**
+   * Update an existing push automation rule.
+   */
+  async updateAutomationRule(actorId: string, input: UpdateAutomationRuleInput) {
+    const { id, ...rest } = input;
+    const updateData: Partial<typeof schema.pushAutomationRules.$inferInsert> = {};
+
+    if (rest.name !== undefined) updateData.name = rest.name;
+    if (rest.triggerType !== undefined) updateData.triggerType = rest.triggerType;
+    if (rest.cronExpr !== undefined) updateData.cronExpr = rest.cronExpr;
+    if (rest.eventKey !== undefined) updateData.eventKey = rest.eventKey;
+    if (rest.targetType !== undefined) updateData.targetType = rest.targetType;
+    if (rest.targetRole !== undefined) updateData.targetRole = rest.targetRole;
+    if (rest.targetUserId !== undefined) updateData.targetUserId = rest.targetUserId;
+    if (rest.titleTemplate !== undefined) updateData.titleTemplate = rest.titleTemplate;
+    if (rest.bodyTemplate !== undefined) updateData.bodyTemplate = rest.bodyTemplate;
+    if (rest.isActive !== undefined) updateData.isActive = rest.isActive;
+    updateData.modifiedBy = actorId;
+
+    const rows = await this.db
+      .update(schema.pushAutomationRules)
+      .set(updateData)
+      .where(eq(schema.pushAutomationRules.id, id))
+      .returning();
+
+    return rows[0]!;
+  }
+
+  /**
+   * Toggle an automation rule active/inactive.
+   */
+  async toggleAutomationRule(id: string, isActive: boolean) {
+    const rows = await this.db
+      .update(schema.pushAutomationRules)
+      .set({ isActive })
+      .where(eq(schema.pushAutomationRules.id, id))
+      .returning();
+
+    return rows[0]!;
+  }
+
+  /**
+   * Delete an automation rule permanently.
+   */
+  async deleteAutomationRule(id: string): Promise<void> {
+    await this.db
+      .delete(schema.pushAutomationRules)
+      .where(eq(schema.pushAutomationRules.id, id));
+  }
+
+  /**
+   * Fire an automation rule — resolve placeholders and send push to target users.
+   * Called by the cron scheduler or event dispatcher.
+   */
+  async fireAutomationRule(ruleId: string): Promise<void> {
+    const ruleRows = await this.db
+      .select()
+      .from(schema.pushAutomationRules)
+      .where(
+        and(
+          eq(schema.pushAutomationRules.id, ruleId),
+          eq(schema.pushAutomationRules.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    const rule = ruleRows[0];
+    if (!rule) {
+      this.logger.warn(`Automation rule ${ruleId} not found or inactive — skipping`);
+      return;
+    }
+
+    // Resolve target users
+    let targetUserIds: string[] = [];
+
+    if (rule.targetType === 'USER' && rule.targetUserId) {
+      targetUserIds = [rule.targetUserId];
+    } else if (rule.targetType === 'ROLE' && rule.targetRole) {
+      const roleRows = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.role, rule.targetRole as (typeof schema.users.$inferSelect)['role']),
+            eq(schema.users.status, 'ACTIVE'),
+          ),
+        );
+      targetUserIds = roleRows.map((r) => r.id);
+    } else if (rule.targetType === 'ALL') {
+      const allRows = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.status, 'ACTIVE'));
+      targetUserIds = allRows.map((r) => r.id);
+    }
+
+    if (targetUserIds.length === 0) {
+      this.logger.log(`Automation rule ${ruleId} fired but no target users found`);
+      return;
+    }
+
+    // For each user, resolve placeholders and send push
+    await Promise.all(
+      targetUserIds.map(async (uid) => {
+        try {
+          // Fetch user context for placeholder resolution
+          const userRows = await this.db
+            .select({ name: schema.users.name })
+            .from(schema.users)
+            .where(eq(schema.users.id, uid))
+            .limit(1);
+
+          const userName = userRows[0]?.name ?? 'Team Member';
+
+          // Fetch pending order count for this user (CS agents context)
+          const orderCountRows = await this.db
+            .select({ count: count() })
+            .from(schema.orders)
+            .where(
+              and(
+                eq(schema.orders.assignedCsId, uid),
+                inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED']),
+              ),
+            );
+          const orderCount = orderCountRows[0]?.count ?? 0;
+
+          const resolvedTitle = rule.titleTemplate
+            .replace(/\{\{user_name\}\}/g, userName)
+            .replace(/\{\{order_count\}\}/g, String(orderCount));
+
+          const resolvedBody = rule.bodyTemplate
+            .replace(/\{\{user_name\}\}/g, userName)
+            .replace(/\{\{order_count\}\}/g, String(orderCount));
+
+          await this.sendPush(
+            uid,
+            { title: resolvedTitle, body: resolvedBody },
+            { triggerType: 'AUTOMATION', automationRuleId: ruleId },
+          );
+        } catch (err) {
+          this.logger.warn(`Automation rule ${ruleId} push failed for user ${uid}: ${err}`);
+        }
+      }),
+    );
+
+    // Stamp lastFiredAt
+    await this.db
+      .update(schema.pushAutomationRules)
+      .set({ lastFiredAt: new Date() })
+      .where(eq(schema.pushAutomationRules.id, ruleId))
+      .catch((err) => this.logger.warn(`Failed to update lastFiredAt for rule ${ruleId}: ${err}`));
+
+    this.logger.log(
+      `Automation rule ${ruleId} fired — sent to ${targetUserIds.length} user(s)`,
+    );
   }
 }

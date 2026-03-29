@@ -5,6 +5,11 @@ import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/l
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
+import { PageHeader } from '~/components/ui/page-header';
+import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
 
 // ── Remove confirmation modal ─────────────────────────────────────────────────
 
@@ -44,11 +49,11 @@ function RemoveModal({
             </svg>
           </div>
           <div>
-            <h3 id="remove-member-title" className="text-base font-semibold text-surface-900 dark:text-white">
+            <h3 id="remove-member-title" className="text-base font-semibold text-app-fg">
               Remove from branch?
             </h3>
-            <p className="text-sm text-surface-600 dark:text-surface-400 mt-1">
-              <span className="font-medium text-surface-800 dark:text-surface-200">{member.name}</span> will lose access to this branch. Their global account will not be affected.
+            <p className="text-sm text-app-fg-muted mt-1">
+              <span className="font-medium text-app-fg-muted">{member.name}</span> will lose access to this branch. Their global account will not be affected.
             </p>
           </div>
         </div>
@@ -60,7 +65,7 @@ function RemoveModal({
         </div>
       )}
 
-      <div className="border-t border-surface-200 dark:border-surface-700 px-5 py-3 flex items-center justify-end gap-2">
+      <div className="border-t border-app-border px-5 py-3 flex items-center justify-end gap-2">
         <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={isSubmitting}>
           Cancel
         </Button>
@@ -263,15 +268,15 @@ function StatCard({
       ? 'text-primary-600 dark:text-primary-400'
       : accent === 'yellow'
       ? 'text-warning-600 dark:text-warning-400'
-      : 'text-surface-900 dark:text-white';
+      : 'text-app-fg';
 
   return (
     <div className="card p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-surface-500 dark:text-surface-400">
+      <p className="text-xs font-medium uppercase tracking-wide text-app-fg-muted">
         {label}
       </p>
       <p className={`text-2xl font-semibold mt-1 ${valueClass}`}>{value}</p>
-      {sub && <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">{sub}</p>}
+      {sub && <p className="text-xs text-app-fg-muted mt-1">{sub}</p>}
     </div>
   );
 }
@@ -292,8 +297,11 @@ function MemberTable({
   if (members.length === 0) {
     return (
       <div className="card p-4">
-        <p className="text-sm font-semibold text-surface-900 dark:text-white mb-1">{title}</p>
-        <p className="text-sm text-surface-500 dark:text-surface-400">No members yet.</p>
+        <p className="text-sm font-semibold text-app-fg mb-3">{title}</p>
+        <EmptyState
+          title="No members yet"
+          variant="inline"
+        />
       </div>
     );
   }
@@ -301,31 +309,31 @@ function MemberTable({
   return (
     <>
       <div className="card overflow-hidden p-0">
-        <div className="px-4 py-3 border-b border-surface-200 dark:border-surface-700">
-          <p className="text-sm font-semibold text-surface-900 dark:text-white">{title}</p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
+        <div className="px-4 py-3 border-b border-app-border">
+          <p className="text-sm font-semibold text-app-fg">{title}</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">
             {members.length} {members.length === 1 ? 'person' : 'people'}
           </p>
         </div>
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-surface-200 dark:border-surface-700">
-              <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">Name</th>
-              <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">Role</th>
-              <th className="px-4 py-2 text-left font-medium text-surface-600 dark:text-surface-400">Primary</th>
-              <th className="px-4 py-2 text-right font-medium text-surface-600 dark:text-surface-400" />
+            <tr className="border-b border-app-border">
+              <th className="px-4 py-2 text-left font-medium text-app-fg-muted">Name</th>
+              <th className="px-4 py-2 text-left font-medium text-app-fg-muted">Role</th>
+              <th className="px-4 py-2 text-left font-medium text-app-fg-muted">Primary</th>
+              <th className="px-4 py-2 text-right font-medium text-app-fg-muted" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
+          <tbody className="divide-y divide-app-border">
             {members.map((m) => (
-              <tr key={m.userId} className="hover:bg-surface-50 dark:hover:bg-surface-800/50">
-                <td className="px-4 py-2 font-medium text-surface-900 dark:text-surface-100">
+              <tr key={m.userId} className="hover:bg-app-hover/50">
+                <td className="px-4 py-2 font-medium text-app-fg">
                   {m.name}
                 </td>
-                <td className="px-4 py-2 font-mono text-xs text-surface-700 dark:text-surface-300">
+                <td className="px-4 py-2 font-mono text-xs text-app-fg-muted">
                   {m.effectiveRole.replace(/_/g, ' ')}
                 </td>
-                <td className="px-4 py-2 text-xs text-surface-600 dark:text-surface-400">
+                <td className="px-4 py-2 text-xs text-app-fg-muted">
                   {m.isPrimary ? (
                     <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 font-medium">
                       <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -438,26 +446,14 @@ export default function BranchOverviewRoute() {
                 {branch.code.slice(0, 2)}
               </span>
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-surface-900 dark:text-white">{branch.name}</h1>
-              <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5 font-mono">
-                {branch.code}
-                <span className="mx-2 not-italic font-sans text-surface-300 dark:text-surface-600">·</span>
-                <span className="not-italic font-sans">
-                  Since {new Date(branch.createdAt).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' })}
-                </span>
-              </p>
-            </div>
+            <PageHeader
+              title={branch.name}
+              description={`${branch.code} · Since ${new Date(branch.createdAt).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' })}`}
+            />
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-              branch.status === 'ACTIVE'
-                ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
-            }`}>
-              {branch.status}
-            </span>
+            <StatusBadge status={branch.status} />
             <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
               Edit
             </Button>
@@ -481,7 +477,7 @@ export default function BranchOverviewRoute() {
       </div>
 
       {/* ── Tab bar ── */}
-      <div className="border-b border-surface-200 dark:border-surface-700">
+      <div className="border-b border-app-border">
         <div className="flex items-center gap-1">
           {(['overview', 'team'] as ActiveTab[]).map((tab) => (
             <button
@@ -491,7 +487,7 @@ export default function BranchOverviewRoute() {
               className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 activeTab === tab
                   ? 'border-primary-600 text-primary-700 dark:text-primary-400'
-                  : 'border-transparent text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-white'
+                  : 'border-transparent text-app-fg-muted hover:text-app-fg'
               }`}
             >
               {tab === 'overview' ? 'Overview' : `Team (${counts.totalMembers})`}
@@ -509,7 +505,7 @@ export default function BranchOverviewRoute() {
 
             {/* Order health */}
             <div className="card p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-surface-500 dark:text-surface-400">
+              <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
                 Order Health
               </p>
               <div className="space-y-2">
@@ -519,21 +515,21 @@ export default function BranchOverviewRoute() {
                   { label: 'Total', value: counts.totalOrders },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex items-center justify-between text-sm">
-                    <span className="text-surface-600 dark:text-surface-400">{label}</span>
-                    <span className="font-semibold text-surface-900 dark:text-white tabular-nums">{value}</span>
+                    <span className="text-app-fg-muted">{label}</span>
+                    <span className="font-semibold text-app-fg tabular-nums">{value}</span>
                   </div>
                 ))}
                 {deliveryRate !== null && (
-                  <div className="pt-2 border-t border-surface-100 dark:border-surface-800">
+                  <div className="pt-2 border-t border-app-border">
                     <div className="flex items-center justify-between text-sm mb-1.5">
-                      <span className="text-surface-600 dark:text-surface-400">Delivery rate</span>
+                      <span className="text-app-fg-muted">Delivery rate</span>
                       <span className={`font-semibold tabular-nums ${
                         deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' :
                         deliveryRate >= 40 ? 'text-warning-600 dark:text-warning-400' :
                         'text-danger-600 dark:text-danger-400'
                       }`}>{deliveryRate}%</span>
                     </div>
-                    <div className="w-full bg-surface-100 dark:bg-surface-800 rounded-full h-1.5">
+                    <div className="w-full bg-app-hover rounded-full h-1.5">
                       <div
                         className={`h-1.5 rounded-full transition-all ${
                           deliveryRate >= 70 ? 'bg-success-500' :
@@ -549,7 +545,7 @@ export default function BranchOverviewRoute() {
 
             {/* Team composition */}
             <div className="card p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-surface-500 dark:text-surface-400">
+              <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
                 Team Composition
               </p>
               <div className="space-y-2">
@@ -560,8 +556,8 @@ export default function BranchOverviewRoute() {
                   { label: 'Total members', value: counts.totalMembers },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex items-center justify-between text-sm">
-                    <span className="text-surface-600 dark:text-surface-400">{label}</span>
-                    <span className="font-semibold text-surface-900 dark:text-white tabular-nums">{value}</span>
+                    <span className="text-app-fg-muted">{label}</span>
+                    <span className="font-semibold text-app-fg tabular-nums">{value}</span>
                   </div>
                 ))}
               </div>
@@ -576,7 +572,7 @@ export default function BranchOverviewRoute() {
 
             {/* Marketing & comms */}
             <div className="card p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-surface-500 dark:text-surface-400">
+              <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
                 Marketing & Comms
               </p>
               <div className="space-y-2">
@@ -585,12 +581,12 @@ export default function BranchOverviewRoute() {
                   { label: 'Message templates', value: counts.messageTemplates },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex items-center justify-between text-sm">
-                    <span className="text-surface-600 dark:text-surface-400">{label}</span>
-                    <span className="font-semibold text-surface-900 dark:text-white tabular-nums">{value}</span>
+                    <span className="text-app-fg-muted">{label}</span>
+                    <span className="font-semibold text-app-fg tabular-nums">{value}</span>
                   </div>
                 ))}
               </div>
-              <div className="pt-2 border-t border-surface-100 dark:border-surface-800 flex flex-col gap-1.5">
+              <div className="pt-2 border-t border-app-border flex flex-col gap-1.5">
                 <Link
                   to={`/admin/cs/message-templates?branchId=${branch.id}`}
                   className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
@@ -626,7 +622,7 @@ export default function BranchOverviewRoute() {
       {activeTab === 'team' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-surface-600 dark:text-surface-400">
+            <p className="text-sm text-app-fg-muted">
               {counts.totalMembers} member{counts.totalMembers !== 1 ? 's' : ''} assigned to this branch.
             </p>
             <Button
@@ -663,12 +659,12 @@ export default function BranchOverviewRoute() {
           aria-labelledby="branch-edit-title"
           contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]"
         >
-          <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+          <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
             <div>
-              <h3 id="branch-edit-title" className="text-lg font-semibold text-surface-900 dark:text-white">
+              <h3 id="branch-edit-title" className="text-lg font-semibold text-app-fg">
                 Edit branch
               </h3>
-              <p className="text-sm text-surface-500 dark:text-surface-400 mt-0.5">
+              <p className="text-sm text-app-fg-muted mt-0.5">
                 <span className="font-mono text-xs">{branch.code}</span> · {branch.name}
               </p>
             </div>
@@ -676,7 +672,7 @@ export default function BranchOverviewRoute() {
               type="button"
               onClick={() => setEditOpen(false)}
               disabled={isSubmitting}
-              className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 shrink-0"
+              className="text-app-fg-muted hover:text-app-fg shrink-0"
               aria-label="Close"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -689,27 +685,30 @@ export default function BranchOverviewRoute() {
             className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]"
           >
             <input type="hidden" name="intent" value="update" />
-            <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1" htmlFor="edit-branch-name">
-                Name
-              </label>
-              <input id="edit-branch-name" name="name" type="text" required defaultValue={branch.name} className="input w-full" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1" htmlFor="edit-branch-status">
-                Status
-              </label>
-              <select id="edit-branch-status" name="status" defaultValue={branch.status} className="input w-full">
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-              </select>
-            </div>
+            <TextInput
+              label="Name"
+              id="edit-branch-name"
+              name="name"
+              type="text"
+              required
+              defaultValue={branch.name}
+            />
+            <FormSelect
+              label="Status"
+              id="edit-branch-status"
+              name="status"
+              defaultValue={branch.status}
+              options={[
+                { value: 'ACTIVE', label: 'Active' },
+                { value: 'INACTIVE', label: 'Inactive' },
+              ]}
+            />
             {fetcher.data?.error && (
               <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 px-3 py-2">
                 <p className="text-sm text-danger-700 dark:text-danger-400">{fetcher.data.error}</p>
               </div>
             )}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface-200 dark:border-surface-700">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
               <Button type="button" variant="secondary" size="sm" onClick={() => setEditOpen(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
@@ -731,12 +730,12 @@ export default function BranchOverviewRoute() {
           aria-labelledby="add-member-title"
           contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]"
         >
-          <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+          <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
             <div>
-              <h3 id="add-member-title" className="text-lg font-semibold text-surface-900 dark:text-white">
+              <h3 id="add-member-title" className="text-lg font-semibold text-app-fg">
                 Add member
               </h3>
-              <p className="text-sm text-surface-500 dark:text-surface-400 mt-0.5">
+              <p className="text-sm text-app-fg-muted mt-0.5">
                 Assign staff to <span className="font-medium">{branch.name}</span>
               </p>
             </div>
@@ -744,7 +743,7 @@ export default function BranchOverviewRoute() {
               type="button"
               onClick={() => setAddMemberOpen(false)}
               disabled={isSubmitting}
-              className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 shrink-0"
+              className="text-app-fg-muted hover:text-app-fg shrink-0"
               aria-label="Close"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -759,43 +758,40 @@ export default function BranchOverviewRoute() {
             <input type="hidden" name="intent" value="assignUser" />
             <input type="hidden" name="isPrimary" value={String(isPrimary)} />
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1" htmlFor="add-member-user">
+              <label className="block text-xs font-medium text-app-fg-muted mb-1" htmlFor="add-member-user">
                 Staff member
               </label>
               {availableUsers.length === 0 ? (
-                <p className="text-sm text-surface-500 dark:text-surface-400">All active staff are already in this branch.</p>
+                <p className="text-sm text-app-fg-muted">All active staff are already in this branch.</p>
               ) : (
-                <select id="add-member-user" name="userId" required className="input w-full">
-                  <option value="">Select a staff member…</option>
-                  {availableUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} — {u.role.replace(/_/g, ' ')}
-                    </option>
-                  ))}
-                </select>
+                <FormSelect
+                  id="add-member-user"
+                  name="userId"
+                  required
+                  placeholder="Select a staff member…"
+                  options={availableUsers.map((u) => ({
+                    value: u.id,
+                    label: `${u.name} — ${u.role.replace(/_/g, ' ')}`,
+                  }))}
+                />
               )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1" htmlFor="add-member-role">
-                Role override{' '}
-                <span className="text-xs font-normal text-surface-500 dark:text-surface-400">(optional)</span>
-              </label>
-              <select id="add-member-role" name="roleInBranch" className="input w-full">
-                <option value="">Use global role</option>
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
-            </div>
+            <FormSelect
+              label="Role override"
+              id="add-member-role"
+              name="roleInBranch"
+              placeholder="Use global role"
+              options={ROLE_OPTIONS}
+            />
             <div className="flex items-center gap-2">
               <input
                 id="add-member-primary"
                 type="checkbox"
                 checked={isPrimary}
                 onChange={(e) => setIsPrimary(e.target.checked)}
-                className="rounded border-surface-300 dark:border-surface-600 text-brand-600"
+                className="rounded border-app-border text-brand-600"
               />
-              <label htmlFor="add-member-primary" className="text-sm text-surface-700 dark:text-surface-300 cursor-pointer">
+              <label htmlFor="add-member-primary" className="text-sm text-app-fg-muted cursor-pointer">
                 Set as primary branch for this user
               </label>
             </div>
@@ -804,7 +800,7 @@ export default function BranchOverviewRoute() {
                 <p className="text-sm text-danger-700 dark:text-danger-400">{fetcher.data.error}</p>
               </div>
             )}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface-200 dark:border-surface-700">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
               <Button type="button" variant="secondary" size="sm" onClick={() => setAddMemberOpen(false)} disabled={isSubmitting}>
                 Cancel
               </Button>

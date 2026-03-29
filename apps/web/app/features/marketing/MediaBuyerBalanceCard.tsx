@@ -28,38 +28,38 @@ export function MediaBuyerBalanceCard({ row, className = '' }: MediaBuyerBalance
           <Link
             to={`/hr/users/${row.userId}`}
             prefetch="intent"
-            className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate block hover:text-brand-600 dark:hover:text-brand-400"
+            className="text-sm font-medium text-app-fg truncate block hover:text-brand-600 dark:hover:text-brand-400"
           >
             {row.name}
           </Link>
-          <p className="text-xs text-surface-800 dark:text-surface-200">Media Buyer</p>
+          <p className="text-xs text-app-fg-muted">Media Buyer</p>
         </div>
       </div>
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
-          <span className="text-surface-700 dark:text-surface-300">Balance</span>
+          <span className="text-app-fg-muted">Balance</span>
           <span className="font-medium text-brand-600 dark:text-brand-400">
             {formatNaira(Number(row.balance))}
           </span>
         </div>
-        <div className="flex justify-between text-surface-500 dark:text-surface-400">
+        <div className="flex justify-between text-app-fg-muted">
           <span>Received</span>
           <span>{formatNaira(Number(row.totalReceived))}</span>
         </div>
-        <div className="flex justify-between text-surface-500 dark:text-surface-400">
+        <div className="flex justify-between text-app-fg-muted">
           <span>Spent</span>
           <span>{formatNaira(Number(row.totalSpend))}</span>
         </div>
         {row.confirmationRate != null && (
-          <div className="flex justify-between text-surface-500 dark:text-surface-400">
+          <div className="flex justify-between text-app-fg-muted">
             <span>Confirmation rate</span>
-            <span className="font-medium text-surface-900 dark:text-surface-100">{Math.round(row.confirmationRate)}%</span>
+            <span className="font-medium text-app-fg">{Math.round(row.confirmationRate)}%</span>
           </div>
         )}
         {row.deliveryRate != null && (
-          <div className="flex justify-between text-surface-500 dark:text-surface-400">
+          <div className="flex justify-between text-app-fg-muted">
             <span>Delivery rate</span>
-            <span className="font-medium text-surface-900 dark:text-surface-100">{Math.round(row.deliveryRate)}%</span>
+            <span className="font-medium text-app-fg">{Math.round(row.deliveryRate)}%</span>
           </div>
         )}
       </div>

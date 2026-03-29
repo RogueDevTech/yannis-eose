@@ -7,12 +7,8 @@ export interface FundingRecord {
   status: string;
   sentAt: string;
   verifiedAt: string | null;
-}
-
-export interface FundingBalance {
-  totalReceived: string;
-  totalSpend: string;
-  balance: string;
+  senderName?: string | null;
+  receiverName?: string | null;
 }
 
 export interface FundingBalanceRow {
@@ -53,6 +49,13 @@ export interface AdSpendRecord {
   status: string;
   approvedAt: string | null;
   approvedBy: string | null;
+}
+
+/** Counts for ad spend log status filter (scoped by date + branch + search + optional product/campaign). */
+export interface AdSpendStatusCounts {
+  PENDING: number;
+  APPROVED: number;
+  ALL: number;
 }
 
 export interface Metrics {
@@ -111,20 +114,6 @@ export interface Campaign {
   status: string;
 }
 
-export interface MarketingPageProps {
-  funding: FundingRecord[];
-  totalFunding: number;
-  adSpend: AdSpendRecord[];
-  totalAdSpend: number;
-  adSpendTotal: string;
-  metrics: Metrics;
-  fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
-  users: User[];
-  products: Product[];
-  campaigns: Campaign[];
-  leaderboard: LeaderboardEntry[];
-}
-
 /** Optional date filter — when provided, DateFilterBar is shown and data is filtered by it */
 export interface MarketingDateFilters {
   startDate: string;
@@ -132,32 +121,77 @@ export interface MarketingDateFilters {
   periodAllTime: boolean;
 }
 
-/** What the loader returns — mix of resolved data + streaming promises */
-export interface MarketingStreamData {
-  // Critical (resolved immediately)
+/** Counts for funding ledger filters (scoped by date + branch + optional receiver). */
+export interface FundingStatusCounts {
+  SENT: number;
+  COMPLETED: number;
+  DISPUTED: number;
+  ALL: number;
+}
+
+/** Counts for funding request filters (scoped by date + branch + requester for media buyers). */
+export interface FundingRequestStatusCounts {
+  PENDING: number;
+  APPROVED: number;
+  REJECTED: number;
+  ALL: number;
+}
+
+export type FundingActivityFeed = 'ledger' | 'requests';
+
+export type FundingRequestStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+/** `/admin/marketing/funding` loader + component props */
+export interface MarketingFundingLoaderData {
   funding: FundingRecord[];
   totalFunding: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  statusFilter?: string;
+  searchFilter?: string;
+  statusCounts: FundingStatusCounts;
   fundingRequests: FundingRequestRecord[];
-  adSpend: AdSpendRecord[];
-  totalAdSpend: number;
-  adSpendTotal: string;
-  campaigns: Campaign[];
+  /** URL feed: transfers vs funding requests (same table shell). */
+  feed: FundingActivityFeed;
+  showFundingRequestsFeed: boolean;
+  requestStatusFilter?: FundingRequestStatusFilter;
+  requestSearchFilter?: string;
+  requestStatusCounts: FundingRequestStatusCounts;
+  totalFundingRequests: number;
+  totalPagesRequests: number;
   metrics: Metrics;
   fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
   leaderboard: LeaderboardEntry[];
   users: User[];
+  leaderboardPeriod: 'this_month' | 'all_time';
+  balancesList?: FundingBalanceRow[];
+  filters: MarketingDateFilters;
+  viewMode: 'admin' | 'media_buyer';
+  canSendFunding: boolean;
+  canRequestFunding: boolean;
+  currentUserId: string;
+}
+
+export type AdSpendStatusFilter = 'PENDING' | 'APPROVED';
+
+/** `/admin/marketing/ad-spend` loader + component props */
+export interface MarketingAdSpendLoaderData {
+  adSpend: AdSpendRecord[];
+  totalAdSpend: number;
+  adSpendTotal: string;
+  page: number;
+  limit: number;
+  totalPages: number;
+  statusFilter?: AdSpendStatusFilter;
+  searchFilter?: string;
+  statusCounts: AdSpendStatusCounts;
+  campaigns: Campaign[];
+  metrics: Metrics;
+  leaderboard: LeaderboardEntry[];
+  users: User[];
   products: Product[];
   leaderboardPeriod: 'this_month' | 'all_time';
-  myBalance?: FundingBalance;
-  balancesList?: FundingBalanceRow[];
-  /** Optional; when set, date filter bar is shown and loader has applied date filtering */
-  filters?: MarketingDateFilters;
-  /** 'media_buyer' = own data + request funds; 'admin' = full overview + send funding */
-  viewMode?: 'admin' | 'media_buyer';
-  /** True for Head of Marketing, SuperAdmin, Finance Officer — can use Send Funding */
-  canSendFunding?: boolean;
-  /** True for Media Buyer or Head of Marketing — can submit a funding request */
-  canRequestFunding?: boolean;
-  /** Current user id — used to show Received/Not Received only for the funding recipient */
-  currentUserId?: string;
+  filters: MarketingDateFilters;
+  viewMode: 'admin' | 'media_buyer';
 }

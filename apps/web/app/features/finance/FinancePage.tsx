@@ -9,29 +9,23 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Spinner } from '~/components/ui/spinner';
 import { Tabs } from '~/components/ui/tabs';
+import { TextInput } from '~/components/ui/text-input';
+import { Textarea } from '~/components/ui/textarea';
+import { NairaPrice } from '~/components/ui/naira-price';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { Pagination } from '~/components/ui/pagination';
 import { formatNaira } from '~/lib/format-amount';
 import type { FinanceStreamData, Invoice, ApprovalRequest } from './types';
 
 const ITEMS_PER_PAGE = 15;
 
-const INVOICE_COLORS: Record<string, string> = {
-  DRAFT: 'badge-warning',
-  SENT: 'badge-info',
-  PAID: 'badge-success',
-  OVERDUE: 'badge-danger',
-  CANCELLED: 'badge-danger',
-};
-
-const APPROVAL_STATUS_COLORS: Record<string, string> = {
-  PENDING: 'badge-warning',
-  APPROVED: 'badge-success',
-  REJECTED: 'badge-danger',
-  QUERIED: 'badge-info',
-};
 
 const APPROVAL_TYPE_LABELS: Record<string, string> = {
   MEDIA_SPEND: 'Media Spend',
@@ -126,53 +120,51 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Finance</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            True profit tracking, invoicing, and financial overview
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          <DateFilterBar
-            startDate={filters.startDate}
-            endDate={filters.endDate}
-            periodAllTime={filters.periodAllTime ?? false}
-          />
-          {isFilterLoading && (
-            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => exportToCsv(
-              invoices.map((inv: Invoice) => ({
-                reference: inv.referenceFormatted ?? `INV-${inv.referenceNumber}`,
-                orderId: inv.orderId ?? '',
-                amount: inv.totalAmount,
-                status: inv.status,
-                dueDate: inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '',
-              })),
-              [
-                { key: 'reference', label: 'Reference' },
-                { key: 'orderId', label: 'Order ID' },
-                { key: 'amount', label: 'Amount' },
-                { key: 'status', label: 'Status' },
-                { key: 'dueDate', label: 'Due Date' },
-              ],
-              `invoices-${new Date().toISOString().split('T')[0]}.csv`,
+      <PageHeader
+        title="Finance"
+        description="True profit tracking, invoicing, and financial overview"
+        actions={
+          <>
+            <PageRefreshButton />
+            <DateFilterBar
+              startDate={filters.startDate}
+              endDate={filters.endDate}
+              periodAllTime={filters.periodAllTime ?? false}
+            />
+            {isFilterLoading && (
+              <span className="flex items-center text-app-fg-muted" aria-hidden>
+                <Spinner size="sm" className="shrink-0" />
+              </span>
             )}
-          >
-            Export CSV
-          </Button>
-          <Button variant="primary" size="sm" onClick={() => { setShowInvoiceForm(!showInvoiceForm); setActiveTab('invoices'); }}>
-            {showInvoiceForm ? 'Close' : '+ Create Invoice'}
-          </Button>
-        </div>
-      </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => exportToCsv(
+                invoices.map((inv: Invoice) => ({
+                  reference: inv.referenceFormatted ?? `INV-${inv.referenceNumber}`,
+                  orderId: inv.orderId ?? '',
+                  amount: inv.totalAmount,
+                  status: inv.status,
+                  dueDate: inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '',
+                })),
+                [
+                  { key: 'reference', label: 'Reference' },
+                  { key: 'orderId', label: 'Order ID' },
+                  { key: 'amount', label: 'Amount' },
+                  { key: 'status', label: 'Status' },
+                  { key: 'dueDate', label: 'Due Date' },
+                ],
+                `invoices-${new Date().toISOString().split('T')[0]}.csv`,
+              )}
+            >
+              Export CSV
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => { setShowInvoiceForm(!showInvoiceForm); setActiveTab('invoices'); }}>
+              {showInvoiceForm ? 'Close' : '+ Create Invoice'}
+            </Button>
+          </>
+        }
+      />
 
       {actionError && !dismissedError && (
         <PageNotification
@@ -183,45 +175,40 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         />
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Revenue</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
-            {formatNaira(Math.round(profit.revenue))}
-          </p>
-          <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
-            {profit.orderCount} delivered orders
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">True Profit</p>
-          <p className={`text-2xl font-bold mt-1 ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
-            {formatNaira(Math.round(profit.trueProfit))}
-          </p>
-          <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
-            After all costs
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Net Margin</p>
-          <p className={`text-2xl font-bold mt-1 ${profit.margin >= 20 ? 'text-success-600 dark:text-success-400' : profit.margin > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'}`}>
-            {profit.margin.toFixed(1)}%
-          </p>
-          <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
-            Profit / Revenue
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Costs</p>
-          <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
-            {formatNaira(Math.round(totalCosts))}
-          </p>
-          <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
-            All cost layers
-          </p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        items={[
+          {
+            label: 'Revenue',
+            value: formatNaira(Math.round(profit.revenue)),
+            valueClassName: 'text-app-fg tabular-nums',
+            title: `${profit.orderCount} delivered orders`,
+          },
+          {
+            label: 'True Profit',
+            value: formatNaira(Math.round(profit.trueProfit)),
+            valueClassName:
+              profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400 tabular-nums' : 'text-danger-600 dark:text-danger-400 tabular-nums',
+            title: 'After all costs',
+          },
+          {
+            label: 'Net Margin',
+            value: <>{profit.margin.toFixed(1)}%</>,
+            valueClassName:
+              profit.margin >= 20
+                ? 'text-success-600 dark:text-success-400 tabular-nums'
+                : profit.margin > 0
+                  ? 'text-warning-600 dark:text-warning-400 tabular-nums'
+                  : 'text-danger-600 dark:text-danger-400 tabular-nums',
+            title: 'Profit / Revenue',
+          },
+          {
+            label: 'Total Costs',
+            value: formatNaira(Math.round(totalCosts)),
+            valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
+            title: 'All cost layers',
+          },
+        ]}
+      />
 
       <Tabs
         value={activeTab}
@@ -251,20 +238,20 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Cost Waterfall */}
           <div className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Waterfall</h3>
-            <p className="text-xs text-surface-700 dark:text-surface-300 mb-4">
+            <h3 className="text-lg font-semibold text-app-fg mb-4">Cost Waterfall</h3>
+            <p className="text-xs text-app-fg-muted mb-4">
               Revenue - (COGS + Delivery + Ads + Commission + Fulfillment + Loss) = True Profit
             </p>
             <div className="space-y-3">
               {costWaterfall.map((item) => (
                 <div key={item.label}>
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm text-surface-800 dark:text-surface-200">{item.label}</span>
-                    <span className={`text-sm font-medium ${item.type === 'revenue' ? 'text-surface-900 dark:text-white' : 'text-danger-600 dark:text-danger-400'}`}>
+                    <span className="text-sm text-app-fg-muted">{item.label}</span>
+                    <span className={`text-sm font-medium ${item.type === 'revenue' ? 'text-app-fg' : 'text-danger-600 dark:text-danger-400'}`}>
                       {item.type === 'cost' ? formatNaira(-Math.round(item.value)) : formatNaira(Math.round(item.value))}
                     </span>
                   </div>
-                  <div className="w-full bg-surface-100 dark:bg-surface-800 rounded-full h-2.5">
+                  <div className="w-full bg-app-hover rounded-full h-2.5">
                     <div
                       className={`h-2.5 rounded-full transition-all ${item.type === 'revenue' ? 'bg-brand-500' : 'bg-danger-400 dark:bg-danger-500'}`}
                       style={{ width: `${getBarWidth(item.value)}%` }}
@@ -272,14 +259,14 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   </div>
                 </div>
               ))}
-              <div className="pt-3 border-t-2 border-surface-200 dark:border-surface-700">
+              <div className="pt-3 border-t-2 border-app-border">
                 <div className="flex justify-between items-center mb-1">
-                  <span className="text-sm font-semibold text-surface-900 dark:text-white">True Profit</span>
+                  <span className="text-sm font-semibold text-app-fg">True Profit</span>
                   <span className={`text-lg font-bold ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
                     {formatNaira(Math.round(profit.trueProfit))}
                   </span>
                 </div>
-                <div className="w-full bg-surface-100 dark:bg-surface-800 rounded-full h-2.5">
+                <div className="w-full bg-app-hover rounded-full h-2.5">
                   <div
                     className={`h-2.5 rounded-full transition-all ${profit.trueProfit >= 0 ? 'bg-success-500' : 'bg-danger-500'}`}
                     style={{ width: `${Math.abs(getBarWidth(profit.trueProfit))}%` }}
@@ -293,7 +280,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
           <div className="space-y-4">
             {/* Cost Distribution */}
             <div className="card">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Distribution</h3>
+              <h3 className="text-lg font-semibold text-app-fg mb-4">Cost Distribution</h3>
               <div className="space-y-3">
                 {totalCosts > 0 ? (
                   <>
@@ -308,11 +295,11 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                       <div key={item.label} className="flex items-center justify-between py-1.5">
                         <div className="flex items-center gap-2">
                           <div className={`w-3 h-3 rounded-sm ${item.color}`} />
-                          <span className="text-sm text-surface-800 dark:text-surface-200">{item.label}</span>
+                          <span className="text-sm text-app-fg-muted">{item.label}</span>
                         </div>
                         <div className="text-right">
-                          <span className="text-sm font-medium text-surface-900 dark:text-white">{formatNaira(Math.round(item.value))}</span>
-                          <span className="text-xs text-surface-700 dark:text-surface-300 ml-2">({item.pct.toFixed(1)}%)</span>
+                          <span className="text-sm font-medium text-app-fg">{formatNaira(Math.round(item.value))}</span>
+                          <span className="text-xs text-app-fg-muted ml-2">({item.pct.toFixed(1)}%)</span>
                         </div>
                       </div>
                     ))}
@@ -327,7 +314,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     </div>
                   </>
                 ) : (
-                  <p className="text-sm text-surface-700 dark:text-surface-300">No cost data available</p>
+                  <p className="text-sm text-app-fg-muted">No cost data available</p>
                 )}
               </div>
             </div>
@@ -343,28 +330,28 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
                 return (
                   <div className="card">
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Invoice Summary</h3>
+                    <h3 className="text-lg font-semibold text-app-fg mb-4">Invoice Summary</h3>
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-surface-800 dark:text-surface-200">Draft</span>
-                        <span className="text-sm font-medium text-surface-800 dark:text-surface-200">
+                        <span className="text-sm text-app-fg-muted">Draft</span>
+                        <span className="text-sm font-medium text-app-fg-muted">
                           {formatNaira(draftTotal)} ({summary['DRAFT']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-surface-800 dark:text-surface-200">Paid</span>
+                        <span className="text-sm text-app-fg-muted">Paid</span>
                         <span className="text-sm font-medium text-success-600 dark:text-success-400">
                           {formatNaira(paidTotal)} ({summary['PAID']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-surface-800 dark:text-surface-200">Outstanding</span>
+                        <span className="text-sm text-app-fg-muted">Outstanding</span>
                         <span className="text-sm font-medium text-warning-600 dark:text-warning-400">
                           {formatNaira(outstandingTotal)} ({summary['SENT']?.count ?? 0})
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-surface-800 dark:text-surface-200">Overdue</span>
+                        <span className="text-sm text-app-fg-muted">Overdue</span>
                         <span className="text-sm font-medium text-danger-600 dark:text-danger-400">
                           {formatNaira(overdueTotal)} ({summary['OVERDUE']?.count ?? 0})
                         </span>
@@ -384,8 +371,8 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
           <ResponsiveFormPanel open={showInvoiceForm} onClose={() => setShowInvoiceForm(false)}>
             <fetcher.Form method="post" className="card space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Create Invoice</h3>
-                <button type="button" onClick={() => setShowInvoiceForm(false)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
+                <h3 className="text-lg font-semibold text-app-fg">Create Invoice</h3>
+                <button type="button" onClick={() => setShowInvoiceForm(false)} className="text-app-fg-muted hover:text-app-fg">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
@@ -394,27 +381,18 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
               {/* Recipient Info */}
               <div>
-                <p className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-2">Recipient</p>
+                <p className="text-sm font-medium text-app-fg-muted mb-2">Recipient</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Name *</label>
-                    <input name="recipientName" required className="input" placeholder="Customer name" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Email</label>
-                    <input name="recipientEmail" type="email" className="input" placeholder="email@example.com" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Address</label>
-                    <input name="recipientAddress" className="input" placeholder="Address" />
-                  </div>
+                  <TextInput label="Name" name="recipientName" required placeholder="Customer name" />
+                  <TextInput label="Email" name="recipientEmail" type="email" placeholder="email@example.com" />
+                  <TextInput label="Address" name="recipientAddress" placeholder="Address" />
                 </div>
               </div>
 
               {/* Line Items */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-surface-700 dark:text-surface-300">Line Items</p>
+                  <p className="text-sm font-medium text-app-fg-muted">Line Items</p>
                   <Button type="button" variant="secondary" size="sm" className="text-xs" onClick={addLineItem}>
                     + Add Item
                   </Button>
@@ -423,26 +401,24 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   {lineItems.map((item, idx) => (
                     <div key={idx} className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-5">
-                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Description</label>}
-                        <input
+                        <TextInput
+                          label={idx === 0 ? 'Description' : undefined}
                           value={item.description}
                           onChange={(e) => updateLineItem(idx, 'description', e.target.value)}
-                          className="input"
                           placeholder="Item description"
                         />
                       </div>
                       <div className="col-span-2">
-                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Qty</label>}
-                        <input
+                        <TextInput
+                          label={idx === 0 ? 'Qty' : undefined}
                           type="number"
                           min={1}
                           value={item.quantity}
                           onChange={(e) => updateLineItem(idx, 'quantity', parseInt(e.target.value) || 1)}
-                          className="input"
                         />
                       </div>
                       <div className="col-span-3">
-                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Unit Price</label>}
+                        {idx === 0 && <label className="block text-xs text-app-fg-muted mb-1">Unit Price</label>}
                         <AmountInput
                           value={item.unitPrice}
                           onChange={(v) => updateLineItem(idx, 'unitPrice', v)}
@@ -451,8 +427,8 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                         />
                       </div>
                       <div className="col-span-2 flex items-center justify-between">
-                        {idx === 0 && <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1 invisible">Del</label>}
-                        <span className="text-xs font-medium text-surface-800 dark:text-surface-200">
+                        {idx === 0 && <label className="block text-xs text-app-fg-muted mb-1 invisible">Del</label>}
+                        <span className="text-xs font-medium text-app-fg-muted">
                           {formatNaira(item.quantity * Number(item.unitPrice || 0))}
                         </span>
                         {lineItems.length > 1 && (
@@ -465,7 +441,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                   ))}
                 </div>
                 <div className="flex justify-end mt-2">
-                  <p className="text-sm font-medium text-surface-900 dark:text-white">
+                  <p className="text-sm font-medium text-app-fg">
                     Subtotal: {formatNaira(invoiceSubtotal)}
                   </p>
                 </div>
@@ -473,18 +449,9 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
               {/* Tax & Due Date */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Tax Rate (decimal)</label>
-                  <input name="taxRate" className="input" placeholder="e.g. 0.075 for 7.5%" pattern="^\d+(\.\d{1,4})?$" />
-                </div>
-                <div>
-                  <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Due Date</label>
-                  <input name="dueDate" type="date" className="input" />
-                </div>
-                <div>
-                  <label className="block text-xs text-surface-800 dark:text-surface-200 mb-1">Order ID (optional)</label>
-                  <input name="orderId" className="input" placeholder="Link to order..." />
-                </div>
+                <TextInput label="Tax Rate (decimal)" name="taxRate" placeholder="e.g. 0.075 for 7.5%" pattern="^\d+(\.\d{1,4})?$" />
+                <TextInput label="Due Date" name="dueDate" type="date" />
+                <TextInput label="Order ID (optional)" name="orderId" placeholder="Link to order..." />
               </div>
 
               <div className="flex gap-2">
@@ -516,25 +483,25 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                 <tbody>
                   {paginatedInvoices.map((inv: Invoice) => (
                     <tr key={inv.id} className="table-row">
-                      <td className="table-cell font-mono font-medium text-surface-900 dark:text-surface-100 text-sm">{inv.referenceFormatted}</td>
-                      <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
+                      <td className="table-cell font-mono font-medium text-app-fg text-sm">{inv.referenceFormatted}</td>
+                      <td className="table-cell text-sm text-app-fg-muted">
                         {inv.recipientInfo?.name ?? '\u2014'}
                       </td>
-                      <td className="table-cell text-right font-medium">{formatNaira(Number(inv.totalAmount))}</td>
+                      <td className="table-cell text-right font-medium"><NairaPrice amount={Number(inv.totalAmount)} /></td>
                       <td className="table-cell">
-                        <span className={INVOICE_COLORS[inv.status] ?? 'badge'}>{inv.status}</span>
+                        <StatusBadge status={inv.status} />
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                      <td className="table-cell text-app-fg-muted text-sm">
                         {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '\u2014'}
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                      <td className="table-cell text-app-fg-muted text-sm">
                         {new Date(inv.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                       </td>
                       <td className="table-cell">
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => generateInvoicePdf(inv)}
-                            className="p-1 rounded text-surface-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
+                            className="p-1 rounded text-app-fg-muted hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
                             title="Download PDF"
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -586,7 +553,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     </tr>
                   ))}
                   {paginatedInvoices.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No invoices yet</td></tr>
+                    <tr><td colSpan={7}><EmptyState title="No invoices yet" /></td></tr>
                   )}
                 </tbody>
               </table>
@@ -595,25 +562,25 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             {/* Mobile */}
             <div className="md:hidden space-y-3 px-1">
               {paginatedInvoices.map((inv: Invoice) => (
-                <div key={inv.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                <div key={inv.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-mono font-medium text-surface-900 dark:text-white text-sm">{inv.referenceFormatted}</span>
+                    <span className="font-mono font-medium text-app-fg text-sm">{inv.referenceFormatted}</span>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => generateInvoicePdf(inv)}
-                        className="p-1 rounded text-surface-400 hover:text-brand-500 transition-colors"
+                        className="p-1 rounded text-app-fg-muted hover:text-brand-500 transition-colors"
                         title="Download PDF"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
                         </svg>
                       </button>
-                      <span className={INVOICE_COLORS[inv.status] ?? 'badge'}>{inv.status}</span>
+                      <StatusBadge status={inv.status} />
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-surface-800 dark:text-surface-200">{inv.recipientInfo?.name ?? '\u2014'}</span>
-                    <span className="font-medium text-surface-900 dark:text-white">{formatNaira(Number(inv.totalAmount))}</span>
+                    <span className="text-sm text-app-fg-muted">{inv.recipientInfo?.name ?? '\u2014'}</span>
+                    <NairaPrice amount={Number(inv.totalAmount)} className="font-medium text-app-fg" />
                   </div>
                   {inv.status === 'DRAFT' && (
                     <fetcher.Form method="post" className="pt-1">
@@ -642,36 +609,18 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                 </div>
               ))}
               {paginatedInvoices.length === 0 && (
-                <div className="p-8 text-center text-surface-700 dark:text-surface-300">No invoices yet</div>
+                <EmptyState title="No invoices yet" />
               )}
             </div>
 
             {/* Pagination */}
             {invoiceTotalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-surface-100 dark:border-surface-800">
-                <p className="text-xs text-surface-700 dark:text-surface-300">
-                  Showing {((invoicePage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(invoicePage * ITEMS_PER_PAGE, invoices.length)} of {invoices.length}
-                </p>
-                <div className="flex gap-1">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="text-xs"
-                    disabled={invoicePage <= 1}
-                    onClick={() => setInvoicePage((p) => Math.max(1, p - 1))}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="text-xs"
-                    disabled={invoicePage >= invoiceTotalPages}
-                    onClick={() => setInvoicePage((p) => Math.min(invoiceTotalPages, p + 1))}
-                  >
-                    Next
-                  </Button>
-                </div>
+              <div className="px-4 py-3 border-t border-app-border">
+                <Pagination
+                  page={invoicePage}
+                  totalPages={invoiceTotalPages}
+                  onPageChange={setInvoicePage}
+                />
               </div>
             )}
           </div>
@@ -696,19 +645,17 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
       {/* Approval Modal + rest */}
       {approvalModal && (
-        <Modal open onClose={() => setApprovalModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white shrink-0">
+        <Modal open onClose={() => setApprovalModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-app-border bg-app-elevated">
+              <h3 className="text-lg font-semibold text-app-fg shrink-0">
                 {approvalModal.action === 'APPROVED' ? 'Approve Request' : approvalModal.action === 'REJECTED' ? 'Reject Request' : 'Query Request'}
               </h3>
               <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                    Reason <span className="text-surface-700">(min 5 characters)</span>
-                  </label>
-                  <textarea
+                  <Textarea
+                    label="Reason (min 5 characters)"
                     value={approvalReason}
                     onChange={(e) => setApprovalReason(e.target.value)}
-                    className="input min-h-[80px]"
+                    rows={3}
                     placeholder={
                       approvalModal.action === 'APPROVED' ? 'Reason for approval...'
                       : approvalModal.action === 'REJECTED' ? 'Reason for rejection...'
@@ -785,7 +732,7 @@ function ApprovalsTab({
             className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
               filters.approvalStatus === status
                 ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-400'
-                : 'bg-white dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-800 dark:text-surface-200 hover:border-surface-300 dark:hover:border-surface-600'
+                : 'bg-app-elevated border-app-border text-app-fg-muted hover:border-app-border'
             }`}
           >
             {status || 'All'}
@@ -811,20 +758,20 @@ function ApprovalsTab({
               {paginated.map((req) => (
                 <tr key={req.id} className="table-row">
                   <td className="table-cell">
-                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-app-hover text-app-fg-muted">
                       {APPROVAL_TYPE_LABELS[req.type] ?? req.type}
                     </span>
                   </td>
-                  <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-xs truncate">
+                  <td className="table-cell text-sm text-app-fg-muted max-w-xs truncate">
                     {req.description}
                   </td>
-                  <td className="table-cell text-right font-medium text-surface-900 dark:text-white">
-                    {formatNaira(Number(req.amount))}
+                  <td className="table-cell text-right font-medium text-app-fg">
+                    <NairaPrice amount={Number(req.amount)} />
                   </td>
                   <td className="table-cell">
-                    <span className={APPROVAL_STATUS_COLORS[req.status] ?? 'badge'}>{req.status}</span>
+                    <StatusBadge status={req.status} />
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                  <td className="table-cell text-app-fg-muted text-sm">
                     {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                   </td>
                   <td className="table-cell">
@@ -845,7 +792,7 @@ function ApprovalsTab({
                       </div>
                     )}
                     {req.status === 'APPROVED' && req.approvalReason && (
-                      <span className="text-xs text-surface-700 dark:text-surface-300 italic truncate max-w-[150px] block">{req.approvalReason}</span>
+                      <span className="text-xs text-app-fg-muted italic truncate max-w-[150px] block">{req.approvalReason}</span>
                     )}
                     {req.status === 'REJECTED' && req.approvalReason && (
                       <span className="text-xs text-danger-500 dark:text-danger-400 italic truncate max-w-[150px] block">{req.approvalReason}</span>
@@ -854,7 +801,7 @@ function ApprovalsTab({
                 </tr>
               ))}
               {paginated.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No approval requests</td></tr>
+                <tr><td colSpan={6}><EmptyState title="No approval requests" /></td></tr>
               )}
             </tbody>
           </table>
@@ -863,19 +810,19 @@ function ApprovalsTab({
         {/* Mobile */}
         <div className="md:hidden space-y-3 px-1">
           {paginated.map((req) => (
-            <div key={req.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+            <div key={req.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium px-2 py-0.5 rounded bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">
+                <span className="text-xs font-medium px-2 py-0.5 rounded bg-app-hover text-app-fg-muted">
                   {APPROVAL_TYPE_LABELS[req.type] ?? req.type}
                 </span>
-                <span className={APPROVAL_STATUS_COLORS[req.status] ?? 'badge'}>{req.status}</span>
+                <StatusBadge status={req.status} />
               </div>
-              <p className="text-sm text-surface-800 dark:text-surface-200">{req.description}</p>
+              <p className="text-sm text-app-fg-muted">{req.description}</p>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-surface-700 dark:text-surface-300">
+                <span className="text-xs text-app-fg-muted">
                   {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                 </span>
-                <span className="font-medium text-surface-900 dark:text-white">{formatNaira(Number(req.amount))}</span>
+                <NairaPrice amount={Number(req.amount)} className="font-medium text-app-fg" />
               </div>
               {(req.status === 'PENDING' || req.status === 'QUERIED') && (
                 <div className="flex gap-2 pt-1">
@@ -896,26 +843,18 @@ function ApprovalsTab({
             </div>
           ))}
           {paginated.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-300">No approval requests</div>
+            <EmptyState title="No approval requests" />
           )}
         </div>
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-surface-100 dark:border-surface-800">
-            <p className="text-xs text-surface-700 dark:text-surface-300">
-              Showing {((page - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(page * ITEMS_PER_PAGE, approvals.length)} of {approvals.length}
-            </p>
-            <div className="flex gap-1">
-              <Button variant="secondary" size="sm" className="text-xs" disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                Previous
-              </Button>
-              <Button variant="secondary" size="sm" className="text-xs" disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-                Next
-              </Button>
-            </div>
+          <div className="px-4 py-3 border-t border-app-border">
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+            />
           </div>
         )}
       </div>

@@ -73,13 +73,22 @@ export class EventsService {
 
   /**
    * New order created — notify CS dispatch, admin, and marketing.
+   * Media buyers only join `marketing-${userId}` (not marketing-all), so fan-out to that room too.
    */
-  emitNewOrder(data: { orderId: string; productName: string; branchId?: string | null }) {
+  emitNewOrder(data: {
+    orderId: string;
+    productName: string;
+    branchId?: string | null;
+    mediaBuyerId?: string | null;
+  }) {
     const event = 'order:new';
     const payload = { ...data, timestamp: new Date().toISOString() };
     this.safeEmit('admin', event, payload, data.branchId);
     this.safeEmit('cs-all', event, payload, data.branchId);
     this.safeEmit('marketing-all', event, payload, data.branchId);
+    if (data.mediaBuyerId) {
+      this.safeEmit(`marketing-${data.mediaBuyerId}`, event, payload);
+    }
   }
 
   /**

@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Spinner } from '~/components/ui/spinner';
+import { PageHeader } from '~/components/ui/page-header';
+import { FormSelect } from '~/components/ui/form-select';
+import { StatusBadge } from '~/components/ui/status-badge';
 import { formatNaira } from '~/lib/format-amount';
 import { STATUS_HEX, STATUS_LABELS, STATUS_TEXT_CLASS } from '~/features/shared/order-status';
 import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
@@ -121,27 +125,25 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
   return (
     <div className="space-y-6">
       {/* Page header: title and subtitle first, then filters/actions below */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Executive Overview</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
-            Real-time business intelligence across all departments.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setShowChartView((v) => !v)}
-            className="btn-secondary btn-sm"
-          >
-            {showChartView ? 'View as data' : 'View data in chart'}
-          </button>
-          <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} />
-          {showBackToDashboard && (
-            <Link to="/admin" className="btn-secondary btn-sm">Back to Dashboard</Link>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Executive Overview"
+        description="Real-time business intelligence across all departments."
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowChartView((v) => !v)}
+              className="btn-secondary btn-sm"
+            >
+              {showChartView ? 'View as data' : 'View data in chart'}
+            </button>
+            <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} />
+            {showBackToDashboard && (
+              <Link to="/admin" className="btn-secondary btn-sm">Back to Dashboard</Link>
+            )}
+          </div>
+        }
+      />
 
       {/* ── Chart view: all charts (Revenue & orders over time, pipeline, topic, cost, etc.) ───────────────── */}
       {showChartView && (
@@ -149,20 +151,20 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
       {isChartLoading ? (
         <div className="card flex flex-col items-center justify-center gap-4 py-20">
           <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
-          <p className="text-sm font-medium text-surface-700 dark:text-surface-300">Loading charts...</p>
+          <p className="text-sm font-medium text-app-fg-muted">Loading charts...</p>
         </div>
       ) : (
       <div>
-        <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Revenue & orders over time
         </h2>
         <div className="card">
-          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+          <p className="text-sm text-app-fg-muted mb-4">
             <strong>Revenue</strong> and <strong>Orders delivered</strong> are by delivery date. <strong>Orders created</strong> shows daily order volume (any status) so the chart has data even before deliveries.
           </p>
           {chartDisplayData.timeSeries && chartDisplayData.timeSeries.length > 0 ? (
             <div className="h-72 min-h-[288px] w-full min-w-0">
-              <ClientOnly fallback={<div className="h-72 min-h-[288px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <ClientOnly fallback={<div className="h-72 min-h-[288px] w-full animate-pulse rounded bg-app-hover" />}>
               <div className="h-full min-h-[288px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={chartDisplayData.timeSeries} margin={{ top: 8, right: 32, left: 8, bottom: 8 }}>
@@ -218,7 +220,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
               </ClientOnly>
             </div>
           ) : (
-            <div className="h-72 min-h-[288px] flex flex-col items-center justify-center gap-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm text-center px-4">
+            <div className="h-72 min-h-[288px] flex flex-col items-center justify-center gap-2 rounded-lg bg-app-hover text-app-fg-muted text-sm text-center px-4">
               <p className="font-medium">No orders in this period.</p>
               <p className="text-xs max-w-md">
                 Revenue and &quot;Orders delivered&quot; appear when orders are marked Delivered. &quot;Orders created&quot; shows daily volume (any status). Try &quot;All time&quot; or a wider date range.
@@ -236,41 +238,42 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         <>
       {/* ── Section 1: Revenue & Profit KPIs ────────────────── */}
       <div>
-        <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Revenue & Profit
         </h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <KPICard label="Revenue" value={fmt(revenue)} icon="revenue" />
-          <KPICard
-            label="True Profit"
-            value={fmt(trueProfit)}
-            icon="profit"
-            highlight={trueProfit >= 0 ? 'success' : 'danger'}
-          />
-          <KPICard
-            label="Net Margin"
-            value={pct(margin)}
-            icon="margin"
-            highlight={margin >= 20 ? 'success' : margin > 0 ? 'warning' : 'danger'}
-          />
-          <KPICard
-            label="Total Costs"
-            value={fmt(totalCosts)}
-            icon="costs"
-            highlight="danger"
-          />
-        </div>
+        <OverviewStatStrip
+          items={[
+            { label: 'Revenue', value: fmt(revenue), valueClassName: 'text-app-fg tabular-nums' },
+            {
+              label: 'True Profit',
+              value: fmt(trueProfit),
+              valueClassName:
+                trueProfit >= 0 ? 'text-success-600 dark:text-success-400 tabular-nums' : 'text-danger-600 dark:text-danger-400 tabular-nums',
+            },
+            {
+              label: 'Net Margin',
+              value: pct(margin),
+              valueClassName:
+                margin >= 20
+                  ? 'text-success-600 dark:text-success-400 tabular-nums'
+                  : margin > 0
+                    ? 'text-warning-600 dark:text-warning-400 tabular-nums'
+                    : 'text-danger-600 dark:text-danger-400 tabular-nums',
+            },
+            { label: 'Total Costs', value: fmt(totalCosts), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
+          ]}
+        />
       </div>
 
       {/* ── Section 2: Cost Breakdown + Profit Waterfall ───── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">
+          <h2 className="text-lg font-semibold text-app-fg mb-4">
             Cost Breakdown
           </h2>
           {showChartView && !isChartLoading && (
           <div className="mb-4 h-48 min-h-[192px] w-full">
-            <ClientOnly fallback={<div className="h-full min-h-[192px] animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <ClientOnly fallback={<div className="h-full min-h-[192px] animate-pulse rounded bg-app-hover" />}>
             <div className="h-full min-h-[192px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -329,9 +332,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             <CostRow label="Commission" value={costBreakdown.commission} total={totalCosts} />
             <CostRow label="Fulfillment" value={costBreakdown.fulfillmentCost} total={totalCosts} />
             <CostRow label="Operational Loss" value={costBreakdown.operationalLoss} total={totalCosts} />
-            <div className="pt-3 border-t border-surface-200 dark:border-surface-700">
+            <div className="pt-3 border-t border-app-border">
               <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-surface-900 dark:text-white">Total Costs</span>
+                <span className="text-sm font-semibold text-app-fg">Total Costs</span>
                 <span className="text-sm font-bold text-danger-600 dark:text-danger-400">{fmt(totalCosts)}</span>
               </div>
             </div>
@@ -339,7 +342,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         </div>
 
         <div className="card">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">
+          <h2 className="text-lg font-semibold text-app-fg mb-4">
             Profit Waterfall
           </h2>
           <div className="space-y-2">
@@ -350,7 +353,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             <WaterfallRow label="Commission" value={-costBreakdown.commission} type="neutral" />
             <WaterfallRow label="Fulfillment" value={-costBreakdown.fulfillmentCost} type="neutral" />
             <WaterfallRow label="Op. Loss" value={-costBreakdown.operationalLoss} type="neutral" />
-            <div className="pt-3 border-t-2 border-surface-300 dark:border-surface-600">
+            <div className="pt-3 border-t-2 border-app-border">
               <WaterfallRow
                 label="True Profit"
                 value={trueProfit}
@@ -364,19 +367,19 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
       {/* ── Section 3: Order Pipeline ─────────────────────── */}
       <div>
-        <h2 className="text-xs font-semibold text-surface-700 dark:text-surface-300 uppercase tracking-wider mb-3">
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Order Pipeline
         </h2>
 
         {/* Order pipeline chart: Volume → CS Engaged → Confirmed → Logistics distributed → Delivered (chart view only) */}
         {showChartView && !isChartLoading && (
         <div className="card mb-4">
-          <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-2">Order funnel</h3>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+          <h3 className="text-base font-semibold text-app-fg mb-2">Order funnel</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
             Volume, CS engaged, Confirmed, Logistics distributed, and Delivered for the selected period.
           </p>
           <div className="h-64 min-h-[256px] w-full">
-            <ClientOnly fallback={<div className="h-full min-h-[256px] animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <ClientOnly fallback={<div className="h-full min-h-[256px] animate-pulse rounded bg-app-hover" />}>
             <div className="h-full min-h-[256px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -412,10 +415,10 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         )}
 
         <div className="card">
-          <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Status Distribution</h3>
+          <h3 className="text-sm font-semibold text-app-fg mb-3">Status Distribution</h3>
           {showChartView && !isChartLoading && (
           <div className="mb-4 h-52 min-h-[208px] w-full">
-            <ClientOnly fallback={<div className="h-full min-h-[208px] animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <ClientOnly fallback={<div className="h-full min-h-[208px] animate-pulse rounded bg-app-hover" />}>
             <div className="h-full min-h-[208px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -460,21 +463,21 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             </ClientOnly>
           </div>
           )}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            {Object.entries(orderPipeline.statusCounts)
+          <OverviewStatStrip
+            embedded
+            showScrollControls={
+              Object.entries(orderPipeline.statusCounts).filter(([s, c]) => s !== 'COMPLETED' && c > 0).length > 4
+            }
+            tileClassName="min-w-[5.5rem]"
+            items={Object.entries(orderPipeline.statusCounts)
               .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
               .sort(([, a], [, b]) => b - a)
-              .map(([status, count]) => (
-                <div key={status} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
-                  <p className={`text-2xl font-bold ${STATUS_TEXT_CLASS[status] ?? 'text-surface-900 dark:text-white'}`}>
-                    {count}
-                  </p>
-                  <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
-                    {STATUS_LABELS[status] ?? status.replace(/_/g, ' ')}
-                  </p>
-                </div>
-              ))}
-          </div>
+              .map(([status, count]) => ({
+                label: STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? status.replace(/_/g, ' '),
+                value: count,
+                valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
+              }))}
+          />
         </div>
       </div>
 
@@ -482,9 +485,15 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Marketing */}
         <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Marketing</h2>
-            <Link to="/admin/marketing/funding" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
+          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+            <h2 className="text-lg font-semibold text-app-fg">Marketing</h2>
+            <div className="flex items-center gap-2 text-xs font-medium">
+              <Link to="/admin/marketing/funding" className="text-brand-500 hover:text-brand-600">Funding</Link>
+              <span className="text-app-fg-muted" aria-hidden>
+                ·
+              </span>
+              <Link to="/admin/marketing/ad-spend" className="text-brand-500 hover:text-brand-600">Ad spend</Link>
+            </div>
           </div>
           <div className="space-y-3">
             <MetricRow label="Total Ad Spend" value={fmt(marketingSafe.totalSpend)} />
@@ -509,7 +518,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         {/* CS Team */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">CS Team</h2>
+            <h2 className="text-lg font-semibold text-app-fg">CS Team</h2>
             <Link to="/admin/cs/queue" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
@@ -536,7 +545,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         {/* Payroll */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Payroll</h2>
+            <h2 className="text-lg font-semibold text-app-fg">Payroll</h2>
             <Link to="/hr/payroll" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
@@ -557,12 +566,13 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
       {/* ── Section 5: Quick Links ────────────────────────── */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Quick Navigation</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <h2 className="text-lg font-semibold text-app-fg mb-4">Quick Navigation</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
           {[
             { href: '/admin/cs/orders', label: 'Orders', icon: 'orders' },
             { href: '/admin/finance/overview', label: 'Finance', icon: 'finance' },
-            { href: '/admin/marketing/funding', label: 'Marketing', icon: 'marketing' },
+            { href: '/admin/marketing/funding', label: 'Funding', icon: 'marketing' },
+            { href: '/admin/marketing/ad-spend', label: 'Ad spend', icon: 'marketing' },
             { href: '/admin/inventory', label: 'Inventory', icon: 'inventory' },
             { href: '/hr/payroll', label: 'HR & Payroll', icon: 'hr' },
             { href: '/admin/analytics/audit', label: 'Audit Trail', icon: 'audit' },
@@ -570,12 +580,12 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             <Link
               key={item.href}
               to={item.href}
-              className="flex flex-col items-center gap-2 p-4 rounded-lg bg-surface-50 dark:bg-surface-800/50 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+              className="flex flex-col items-center gap-2 p-4 rounded-lg bg-app-hover hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
             >
               <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
                 <QuickNavIcon type={item.icon} />
               </div>
-              <span className="text-xs font-medium text-surface-700 dark:text-surface-300">{item.label}</span>
+              <span className="text-xs font-medium text-app-fg-muted">{item.label}</span>
             </Link>
           ))}
         </div>
@@ -588,9 +598,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
       <>
         {/* Topic filter: only visible in chart section */}
         <div className="flex items-center gap-3 flex-wrap">
-          <label htmlFor="chart-topic" className="text-sm font-medium text-surface-700 dark:text-surface-300">Chart topic</label>
+          <label htmlFor="chart-topic" className="text-sm font-medium text-app-fg-muted">Chart topic</label>
           <div className="flex items-center gap-2">
-            <select
+            <FormSelect
               id="chart-topic"
               value={topic}
               onChange={(e) => setSearchParams((prev) => {
@@ -599,15 +609,15 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                 return next;
               })}
               disabled={isLoadingTopic}
-              className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 text-surface-900 dark:text-white text-sm py-2 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60"
-            >
-              <option value="orders">Orders</option>
-              <option value="media_buyers">Media buyers</option>
-              <option value="cs">CS</option>
-            </select>
+              options={[
+                { value: 'orders', label: 'Orders' },
+                { value: 'media_buyers', label: 'Media buyers' },
+                { value: 'cs', label: 'CS' },
+              ]}
+            />
             {isLoadingTopic && (
               <span
-                className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-surface-300 border-t-brand-500"
+                className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-app-border border-t-brand-500"
                 aria-hidden
               />
             )}
@@ -619,9 +629,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
         {/* Cost Breakdown + Status Distribution (chart always shown above) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="card">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Breakdown</h2>
+            <h2 className="text-lg font-semibold text-app-fg mb-4">Cost Breakdown</h2>
             <div className="h-48 min-h-[192px] w-full min-w-0">
-              <ClientOnly fallback={<div className="h-48 min-h-[192px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <ClientOnly fallback={<div className="h-48 min-h-[192px] w-full animate-pulse rounded bg-app-hover" />}>
               <div className="h-full min-h-[192px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -668,9 +678,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             </div>
           </div>
           <div className="card">
-            <h3 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Status Distribution</h3>
+            <h3 className="text-sm font-semibold text-app-fg mb-3">Status Distribution</h3>
             <div className="h-52 min-h-[208px] w-full min-w-0">
-              <ClientOnly fallback={<div className="h-52 min-h-[208px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <ClientOnly fallback={<div className="h-52 min-h-[208px] w-full animate-pulse rounded bg-app-hover" />}>
               <div className="h-full min-h-[208px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -716,12 +726,12 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
         {/* Third row: Order funnel full width */}
         <div className="card">
-          <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-2">Order funnel</h3>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+          <h3 className="text-base font-semibold text-app-fg mb-2">Order funnel</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
             Volume, CS engaged, Confirmed, Logistics distributed, and Delivered for the selected period.
           </p>
           <div className="h-64 min-h-[256px] w-full min-w-0">
-            <ClientOnly fallback={<div className="h-64 min-h-[256px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+            <ClientOnly fallback={<div className="h-64 min-h-[256px] w-full animate-pulse rounded bg-app-hover" />}>
             <div className="h-full min-h-[256px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -755,13 +765,13 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
         {topic === 'media_buyers' && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Media buyer performance</h2>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+          <h2 className="text-lg font-semibold text-app-fg mb-4">Media buyer performance</h2>
+          <p className="text-sm text-app-fg-muted mb-4">
             Ad spend, delivered orders, and True ROAS by media buyer for the selected period.
           </p>
           {chartDisplayData.chartTopicData?.mediaBuyerLeaderboard && chartDisplayData.chartTopicData.mediaBuyerLeaderboard.length > 0 ? (
             <div className="h-96 min-h-[320px] w-full min-w-0">
-              <ClientOnly fallback={<div className="h-96 min-h-[320px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <ClientOnly fallback={<div className="h-96 min-h-[320px] w-full animate-pulse rounded bg-app-hover" />}>
               <div className="h-full min-h-[320px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
@@ -784,8 +794,8 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
                       if (!active || !payload?.length) return null;
                       const p = payload[0].payload;
                       return (
-                        <div className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 p-3 shadow-lg text-sm">
-                          <p className="font-semibold text-surface-900 dark:text-white mb-2">{p.name}</p>
+                        <div className="rounded-lg border border-app-border bg-app-elevated p-3 shadow-lg text-sm">
+                          <p className="font-semibold text-app-fg mb-2">{p.name}</p>
                           <p>Ad spend: {fmt(p.spend)}</p>
                           <p>Delivered: {p.orders}</p>
                           <p>Confirmed: {p.confirmed}</p>
@@ -804,7 +814,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
               </ClientOnly>
             </div>
           ) : (
-            <div className="h-64 flex items-center justify-center rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm">
+            <div className="h-64 flex items-center justify-center rounded-lg bg-app-hover text-app-fg-muted text-sm">
               No media buyer data for this period. Try a different date range or ensure ad spend is logged.
             </div>
           )}
@@ -813,13 +823,13 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
 
         {topic === 'cs' && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">CS agent workload</h2>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+          <h2 className="text-lg font-semibold text-app-fg mb-4">CS agent workload</h2>
+          <p className="text-sm text-app-fg-muted mb-4">
             Pending orders per agent (Unprocessed, CS Assigned, CS Engaged).
           </p>
           {chartDisplayData.chartTopicData?.csWorkloads && chartDisplayData.chartTopicData.csWorkloads.length > 0 ? (
             <div className="h-80 min-h-[280px] w-full min-w-0">
-              <ClientOnly fallback={<div className="h-80 min-h-[280px] w-full animate-pulse rounded bg-surface-100 dark:bg-surface-800" />}>
+              <ClientOnly fallback={<div className="h-80 min-h-[280px] w-full animate-pulse rounded bg-app-hover" />}>
               <div className="h-full min-h-[280px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
@@ -847,7 +857,7 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
               </ClientOnly>
             </div>
           ) : (
-            <div className="h-64 flex items-center justify-center rounded-lg bg-surface-50 dark:bg-surface-800/50 text-surface-600 dark:text-surface-400 text-sm">
+            <div className="h-64 flex items-center justify-center rounded-lg bg-app-hover text-app-fg-muted text-sm">
               No CS agents or workload data available.
             </div>
           )}
@@ -859,51 +869,48 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
       {/* Branch Breakdown — only shown when system has multiple branches */}
       {branchBreakdown && branchBreakdown.length > 1 && (
         <div className="card overflow-hidden p-0">
-          <div className="px-4 py-3 border-b border-surface-200 dark:border-surface-700 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Branch Breakdown</h2>
-            <span className="text-xs text-surface-500 dark:text-surface-400">All branches</span>
+          <div className="px-4 py-3 border-b border-app-border flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-app-fg">Branch Breakdown</h2>
+            <span className="text-xs text-app-fg-muted">All branches</span>
           </div>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50">
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Branch</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Total Orders</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Active</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Delivered</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">Delivery Rate</th>
+              <tr className="border-b border-app-border bg-app-hover">
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-app-fg-muted uppercase tracking-wider">Branch</th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-app-fg-muted uppercase tracking-wider">Total Orders</th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-app-fg-muted uppercase tracking-wider">Active</th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-app-fg-muted uppercase tracking-wider">Delivered</th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-app-fg-muted uppercase tracking-wider">Delivery Rate</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
+            <tbody className="divide-y divide-app-border">
               {branchBreakdown.map((branch) => {
                 const deliveryRate = branch.totalOrders > 0
                   ? Math.round((branch.deliveredOrders / branch.totalOrders) * 100)
                   : 0;
                 return (
-                  <tr key={branch.branchId} className="hover:bg-surface-50 dark:hover:bg-surface-800/30 transition-colors duration-100">
+                  <tr key={branch.branchId} className="hover:bg-app-hover/30 transition-colors duration-100">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 text-[10px] font-bold flex-shrink-0">
                           {branch.branchCode.slice(0, 2)}
                         </span>
                         <div>
-                          <p className="font-medium text-surface-900 dark:text-white">{branch.branchName}</p>
-                          <p className="text-[10px] text-surface-500 dark:text-surface-400">{branch.branchCode}</p>
+                          <p className="font-medium text-app-fg">{branch.branchName}</p>
+                          <p className="text-[10px] text-app-fg-muted">{branch.branchCode}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right font-medium text-surface-900 dark:text-white">{branch.totalOrders.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right text-surface-700 dark:text-surface-300">{branch.activeOrders.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right font-medium text-app-fg">{branch.totalOrders.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-app-fg-muted">{branch.activeOrders.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right text-success-700 dark:text-success-300 font-medium">{branch.deliveredOrders.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right">
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${
-                        deliveryRate >= 70
-                          ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                          : deliveryRate >= 40
-                            ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-300'
-                            : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
-                      }`}>
-                        {deliveryRate}%
-                      </span>
+                      <StatusBadge
+                        status="delivery_rate"
+                        variant={deliveryRate >= 70 ? 'success' : deliveryRate >= 40 ? 'warning' : 'neutral'}
+                        label={`${deliveryRate}%`}
+                        size="sm"
+                      />
                     </td>
                   </tr>
                 );
@@ -932,7 +939,7 @@ function KPICard({
 }) {
   const valueColor = highlight
     ? { warning: 'text-warning-600 dark:text-warning-400', success: 'text-success-600 dark:text-success-400', danger: 'text-danger-600 dark:text-danger-400' }[highlight]
-    : 'text-surface-900 dark:text-white';
+    : 'text-app-fg';
 
   const iconBg = highlight
     ? { warning: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400', success: 'bg-success-50 dark:bg-success-700/20 text-success-600 dark:text-success-400', danger: 'bg-danger-50 dark:bg-danger-700/20 text-danger-600 dark:text-danger-400' }[highlight]
@@ -941,13 +948,13 @@ function KPICard({
   return (
     <div className="card">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">{label}</p>
+        <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">{label}</p>
         <div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}>
           <KPIIcon type={icon} />
         </div>
       </div>
       <p className={`text-2xl font-bold mt-2 ${valueColor}`}>{value}</p>
-      {subtitle && <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{subtitle}</p>}
+      {subtitle && <p className="text-xs text-app-fg-muted mt-0.5">{subtitle}</p>}
     </div>
   );
 }
@@ -957,15 +964,15 @@ function CostRow({ label, value, total }: { label: string; value: number; total:
   return (
     <div>
       <div className="flex justify-between mb-1">
-        <span className="text-sm text-surface-800 dark:text-surface-200">{label}</span>
+        <span className="text-sm text-app-fg-muted">{label}</span>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-surface-700 dark:text-surface-300">{pctOfTotal.toFixed(0)}%</span>
-          <span className="text-sm font-medium text-surface-900 dark:text-white">{fmt(value)}</span>
+          <span className="text-xs text-app-fg-muted">{pctOfTotal.toFixed(0)}%</span>
+          <span className="text-sm font-medium text-app-fg">{fmt(value)}</span>
         </div>
       </div>
-      <div className="w-full h-1.5 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
+      <div className="w-full h-1.5 bg-app-hover rounded-full overflow-hidden">
         <div
-          className="h-full bg-surface-400 dark:bg-surface-500 rounded-full transition-all duration-500"
+          className="h-full bg-app-border rounded-full transition-all duration-500"
           style={{ width: `${Math.min(pctOfTotal, 100)}%` }}
         />
       </div>
@@ -989,12 +996,12 @@ function WaterfallRow({
       ? 'text-success-600 dark:text-success-400'
       : type === 'negative'
         ? 'text-danger-600 dark:text-danger-400'
-        : 'text-surface-900 dark:text-white';
+        : 'text-app-fg';
   const prefix = type !== 'neutral' && value >= 0 ? '+' : '';
 
   return (
     <div className="flex justify-between items-center">
-      <span className={`text-sm ${bold ? 'font-semibold text-surface-900 dark:text-white' : 'text-surface-800 dark:text-surface-200'}`}>
+      <span className={`text-sm ${bold ? 'font-semibold text-app-fg' : 'text-app-fg-muted'}`}>
         {label}
       </span>
       <span className={`text-sm ${bold ? 'font-bold' : 'font-medium'} ${color}`}>
@@ -1015,11 +1022,11 @@ function MetricRow({
 }) {
   const valueColor = highlight
     ? { warning: 'text-warning-600 dark:text-warning-400', success: 'text-success-600 dark:text-success-400', danger: 'text-danger-600 dark:text-danger-400' }[highlight]
-    : 'text-surface-900 dark:text-white';
+    : 'text-app-fg';
 
   return (
     <div className="flex justify-between items-center">
-      <span className="text-sm text-surface-800 dark:text-surface-200">{label}</span>
+      <span className="text-sm text-app-fg-muted">{label}</span>
       <span className={`text-sm font-medium ${valueColor}`}>{value}</span>
     </div>
   );

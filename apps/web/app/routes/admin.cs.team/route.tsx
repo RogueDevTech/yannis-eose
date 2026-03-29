@@ -122,7 +122,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent !== 'redistribute') return json({ error: 'Unknown action' }, { status: 400 });
 
   const agentId = formData.get('agentId')?.toString() ?? '';
-  if (!agentId) return json({ error: 'Agent ID required' }, { status: 400 });
+  if (!agentId) return json({ error: 'Closer selection required' }, { status: 400 });
 
   const res = await apiRequest<{ result?: { data?: { redistributed: number } } }>(
     '/trpc/orders.redistributeOrdersFromAgent',

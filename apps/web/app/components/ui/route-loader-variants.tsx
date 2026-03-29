@@ -9,8 +9,8 @@ const ROTATING_MESSAGES = ['Loading…', 'Almost there…', 'Getting your data�
 
 export function RouteLoaderVariants() {
   return (
-    <div className="rounded-xl bg-white dark:bg-surface-800 shadow-xl border border-surface-200 dark:border-surface-700 p-6 max-w-4xl">
-      <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider mb-4 text-center">
+    <div className="rounded-xl bg-app-elevated shadow-xl border border-app-border p-6 max-w-4xl">
+      <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-4 text-center">
         Pick a loading style
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
@@ -19,7 +19,7 @@ export function RouteLoaderVariants() {
           <div className="w-12 h-12 flex items-center justify-center">
             <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
           </div>
-          <span className="text-xs text-surface-600 dark:text-surface-300">Spinner</span>
+          <span className="text-xs text-app-fg-muted">Spinner</span>
         </div>
 
         {/* 2. Logo pulse */}
@@ -31,7 +31,7 @@ export function RouteLoaderVariants() {
               className="h-8 w-auto object-contain animate-pulse opacity-90"
             />
           </div>
-          <span className="text-xs text-surface-600 dark:text-surface-300">Logo pulse</span>
+          <span className="text-xs text-app-fg-muted">Logo pulse</span>
         </div>
 
         {/* 3. Orbit dots */}
@@ -52,7 +52,7 @@ export function RouteLoaderVariants() {
               />
             </div>
           </div>
-          <span className="text-xs text-surface-600 dark:text-surface-300">Orbit</span>
+          <span className="text-xs text-app-fg-muted">Orbit</span>
         </div>
 
         {/* 4. Gradient stroke spinner */}
@@ -77,7 +77,7 @@ export function RouteLoaderVariants() {
               />
             </svg>
           </div>
-          <span className="text-xs text-surface-600 dark:text-surface-300">Gradient</span>
+          <span className="text-xs text-app-fg-muted">Gradient</span>
         </div>
 
         {/* 5. Progress arc */}
@@ -90,7 +90,7 @@ export function RouteLoaderVariants() {
                 r="10"
                 stroke="currentColor"
                 strokeWidth="2"
-                className="text-surface-200 dark:text-surface-700"
+                className="text-app-border"
                 fill="none"
               />
               <circle
@@ -107,7 +107,7 @@ export function RouteLoaderVariants() {
               />
             </svg>
           </div>
-          <span className="text-xs text-surface-600 dark:text-surface-300">Arc</span>
+          <span className="text-xs text-app-fg-muted">Arc</span>
         </div>
 
         {/* 6. Bouncing dots */}
@@ -117,13 +117,13 @@ export function RouteLoaderVariants() {
             <span className="w-2 h-2 rounded-full bg-brand-500 dark:bg-brand-400 animate-bounce [animation-delay:150ms]" />
             <span className="w-2 h-2 rounded-full bg-brand-500 dark:bg-brand-400 animate-bounce [animation-delay:300ms]" />
           </div>
-          <span className="text-xs text-surface-600 dark:text-surface-300">Dots</span>
+          <span className="text-xs text-app-fg-muted">Dots</span>
         </div>
 
         {/* 7. Rotating text */}
         <div className="flex flex-col items-center gap-2 col-span-2 sm:col-span-3 md:col-span-4 lg:col-span-6">
           <RotatingMessage />
-          <span className="text-xs text-surface-600 dark:text-surface-300">Rotating text</span>
+          <span className="text-xs text-app-fg-muted">Rotating text</span>
         </div>
       </div>
     </div>
@@ -142,7 +142,7 @@ function RotatingMessage() {
 
   return (
     <div className="h-6 flex items-center justify-center min-w-[160px]">
-      <span className="text-sm font-medium text-surface-700 dark:text-surface-200 transition-opacity duration-300">
+      <span className="text-sm font-medium text-app-fg-muted transition-opacity duration-300">
         {ROTATING_MESSAGES[index]}
       </span>
     </div>

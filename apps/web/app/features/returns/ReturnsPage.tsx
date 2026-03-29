@@ -5,8 +5,15 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Tabs } from '~/components/ui/tabs';
+import { PageHeader } from '~/components/ui/page-header';
+import { FormSelect } from '~/components/ui/form-select';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { Textarea } from '~/components/ui/textarea';
+import { TextInput } from '~/components/ui/text-input';
 import type {
   ReturnsStreamData,
   ReturnedOrder,
@@ -17,12 +24,6 @@ import type {
 } from './types';
 
 // ─── Constants ──────────────────────────────────────────
-
-const RECON_STATUS_BADGE: Record<string, string> = {
-  PENDING: 'badge-warning',
-  APPROVED: 'badge-success',
-  REJECTED: 'badge-danger',
-};
 
 const REASON_LABELS: Record<string, string> = {
   DAMAGED: 'Damaged',
@@ -69,17 +70,15 @@ export function ReturnsPage({
   return (
     <div className="space-y-4">
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Returns & Restock</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Process returned items and manage stock reconciliation
-          </p>
-        </div>
-        <Button variant="secondary" size="sm" onClick={() => { setShowReconciliationForm(!showReconciliationForm); setActiveTab('reconciliation'); }}>
-          {showReconciliationForm ? 'Close' : '+ Stock Reconciliation'}
-        </Button>
-      </div>
+      <PageHeader
+        title="Returns & Restock"
+        description="Process returned items and manage stock reconciliation"
+        actions={
+          <Button variant="secondary" size="sm" onClick={() => { setShowReconciliationForm(!showReconciliationForm); setActiveTab('reconciliation'); }}>
+            {showReconciliationForm ? 'Close' : '+ Stock Reconciliation'}
+          </Button>
+        }
+      />
 
       {actionError && !dismissedError && (
         <PageNotification
@@ -106,35 +105,34 @@ export function ReturnsPage({
         </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Returns Queue</p>
-          <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{returnedOrders.length}</p>
-        </div>
-        <DeferredSection resolve={reconciliations} skeleton="stat">
-          {(resolvedReconciliations) => (
-            <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Pending Recon.</p>
-              <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
-                {resolvedReconciliations.filter((r: Reconciliation) => r.reconciliationStatus === 'PENDING').length}
-              </p>
-            </div>
-          )}
-        </DeferredSection>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Locked Locations</p>
-          <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">{lockedLocations.length}</p>
-        </div>
-        <DeferredSection resolve={reconciliations} skeleton="stat">
-          {(resolvedReconciliations) => (
-            <div className="card">
-              <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Recon.</p>
-              <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{resolvedReconciliations.length}</p>
-            </div>
-          )}
-        </DeferredSection>
-      </div>
+      <DeferredSection resolve={reconciliations} fallback={<OverviewStatStripSkeleton count={4} />}>
+        {(resolvedReconciliations) => (
+          <OverviewStatStrip
+            items={[
+              {
+                label: 'Returns Queue',
+                value: returnedOrders.length,
+                valueClassName: 'text-warning-600 dark:text-warning-400',
+              },
+              {
+                label: 'Pending Recon.',
+                value: resolvedReconciliations.filter((r: Reconciliation) => r.reconciliationStatus === 'PENDING').length,
+                valueClassName: 'text-danger-600 dark:text-danger-400',
+              },
+              {
+                label: 'Locked Locations',
+                value: lockedLocations.length,
+                valueClassName: 'text-danger-600 dark:text-danger-400',
+              },
+              {
+                label: 'Total Recon.',
+                value: resolvedReconciliations.length,
+                valueClassName: 'text-app-fg',
+              },
+            ]}
+          />
+        )}
+      </DeferredSection>
 
       <Tabs
         value={activeTab}
@@ -149,27 +147,22 @@ export function ReturnsPage({
         <>
           {/* Write-off modal */}
           {writeOffOrderId && (
-            <Modal open onClose={() => setWriteOffOrderId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
-                <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Write Off — Damaged Item</h3>
-                <p className="text-sm text-surface-800 dark:text-surface-200">
+            <Modal open onClose={() => setWriteOffOrderId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
+                <h3 className="text-lg font-semibold text-app-fg">Write Off — Damaged Item</h3>
+                <p className="text-sm text-app-fg-muted">
                   This will permanently mark the item as damaged and log it as an Operational Loss.
                 </p>
                 <fetcher.Form method="post" className="space-y-3">
                   <input type="hidden" name="intent" value="writeOff" />
                   <input type="hidden" name="orderId" value={writeOffOrderId} />
-                  <div>
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                      Damage Note <span className="text-danger-500">*</span>
-                    </label>
-                    <textarea
-                      name="reason"
-                      required
-                      minLength={10}
-                      rows={3}
-                      placeholder="Describe the damage (min 10 characters)..."
-                      className="input"
-                    />
-                  </div>
+                  <Textarea
+                    name="reason"
+                    label="Damage Note"
+                    required
+                    minLength={10}
+                    rows={3}
+                    placeholder="Describe the damage (min 10 characters)..."
+                  />
                   <div className="flex gap-2">
                     <Button type="submit" variant="danger" size="sm" loading={fetcher.state === 'submitting'} loadingText="Writing off...">
                       Write Off
@@ -200,16 +193,16 @@ export function ReturnsPage({
                   {returnedOrders.map((order: ReturnedOrder) => (
                     <tr key={order.id} className="table-row">
                       <td className="table-cell font-mono text-sm">{order.id.slice(0, 8)}...</td>
-                      <td className="table-cell font-medium text-surface-900 dark:text-surface-100">
+                      <td className="table-cell font-medium text-app-fg">
                         {order.customerName}
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-200">
+                      <td className="table-cell text-app-fg-muted">
                         {getLocationName(order.logisticsLocationId)}
                       </td>
-                      <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-[200px] truncate">
+                      <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">
                         {order.deliveryNotes ?? '\u2014'}
                       </td>
-                      <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                      <td className="table-cell text-app-fg-muted text-sm">
                         {new Date(order.updatedAt).toLocaleDateString('en-NG', {
                           month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                         })}
@@ -247,8 +240,11 @@ export function ReturnsPage({
                   ))}
                   {returnedOrders.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                        No returned items pending assessment
+                      <td colSpan={6} className="px-4 py-12 text-center">
+                        <EmptyState
+                          title="No returned items"
+                          description="No returned items pending assessment"
+                        />
                       </td>
                     </tr>
                   )}
@@ -259,14 +255,14 @@ export function ReturnsPage({
             {/* Mobile */}
             <div className="md:hidden space-y-3 px-1">
               {returnedOrders.map((order: ReturnedOrder) => (
-                <div key={order.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                <div key={order.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-medium text-surface-900 dark:text-white text-sm">
+                    <span className="font-medium text-app-fg text-sm">
                       {order.customerName}
                     </span>
-                    <span className="badge-warning">RETURNED</span>
+                    <StatusBadge status="RETURNED" />
                   </div>
-                  <p className="text-sm text-surface-700 dark:text-surface-300">
+                  <p className="text-sm text-app-fg-muted">
                     {getLocationName(order.logisticsLocationId)} · {new Date(order.updatedAt).toLocaleDateString('en-NG', {
                       month: 'short', day: 'numeric',
                     })}
@@ -286,9 +282,10 @@ export function ReturnsPage({
                 </div>
               ))}
               {returnedOrders.length === 0 && (
-                <div className="p-8 text-center text-surface-700 dark:text-surface-300">
-                  No returned items pending assessment
-                </div>
+                <EmptyState
+                  title="No returned items"
+                  description="No returned items pending assessment"
+                />
               )}
             </div>
           </div>
@@ -301,8 +298,8 @@ export function ReturnsPage({
               {(resolvedProducts) => (
                 <fetcher.Form method="post" className="card space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Stock Reconciliation Report</h3>
-                    <button type="button" onClick={() => setShowReconciliationForm(false)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
+                    <h3 className="text-lg font-semibold text-app-fg">Stock Reconciliation Report</h3>
+                    <button type="button" onClick={() => setShowReconciliationForm(false)} className="text-app-fg-muted hover:text-app-fg">
                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
@@ -312,54 +309,63 @@ export function ReturnsPage({
                   <input type="hidden" name="intent" value="createReconciliation" />
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Location</label>
-                      <select name="locationId" required className="input">
-                        <option value="">Select location...</option>
-                        {locations.filter((l: Location) => l.status === 'ACTIVE').map((l: Location) => (
-                          <option key={l.id} value={l.id}>
-                            {l.name} {l.dispatchLocked ? '(LOCKED)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <FormSelect
+                      name="locationId"
+                      label="Location"
+                      required
+                      options={[
+                        { value: '', label: 'Select location...' },
+                        ...locations.filter((l: Location) => l.status === 'ACTIVE').map((l: Location) => ({
+                          value: l.id,
+                          label: `${l.name}${l.dispatchLocked ? ' (LOCKED)' : ''}`,
+                        })),
+                      ]}
+                    />
 
-                    <div>
-                      <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Product</label>
-                      <select name="productId" required className="input">
-                        <option value="">Select product...</option>
-                        {resolvedProducts.filter((p: Product) => p.status === 'ACTIVE').map((p: Product) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
-                    </div>
+                    <FormSelect
+                      name="productId"
+                      label="Product"
+                      required
+                      options={[
+                        { value: '', label: 'Select product...' },
+                        ...resolvedProducts.filter((p: Product) => p.status === 'ACTIVE').map((p: Product) => ({
+                          value: p.id,
+                          label: p.name,
+                        })),
+                      ]}
+                    />
 
-                    <div>
-                      <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                        Physical Count (actual units on shelf)
-                      </label>
-                      <input name="physicalCount" type="number" min={0} required placeholder="Actual count" className="input" />
-                    </div>
+                    <TextInput
+                      name="physicalCount"
+                      type="number"
+                      label="Physical Count (actual units on shelf)"
+                      min={0}
+                      required
+                      placeholder="Actual count"
+                    />
 
-                    <div>
-                      <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Reason Code</label>
-                      <select name="reasonCode" required className="input">
-                        <option value="DAMAGED">Damaged</option>
-                        <option value="LOST">Lost</option>
-                        <option value="EXPIRED">Expired</option>
-                        <option value="THEFT">Suspected Theft</option>
-                        <option value="COUNTING_ERROR">Counting Error</option>
-                        <option value="OTHER">Other</option>
-                      </select>
-                    </div>
+                    <FormSelect
+                      name="reasonCode"
+                      label="Reason Code"
+                      required
+                      options={[
+                        { value: 'DAMAGED', label: 'Damaged' },
+                        { value: 'LOST', label: 'Lost' },
+                        { value: 'EXPIRED', label: 'Expired' },
+                        { value: 'THEFT', label: 'Suspected Theft' },
+                        { value: 'COUNTING_ERROR', label: 'Counting Error' },
+                        { value: 'OTHER', label: 'Other' },
+                      ]}
+                    />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                      Notes <span className="text-surface-700 font-normal">(min 10 characters)</span>
-                    </label>
-                    <textarea name="notes" rows={2} minLength={10} placeholder="Describe the discrepancy..." className="input" />
-                  </div>
+                  <Textarea
+                    name="notes"
+                    label="Notes (min 10 characters)"
+                    rows={2}
+                    minLength={10}
+                    placeholder="Describe the discrepancy..."
+                  />
 
                   <div className="bg-warning-50 dark:bg-warning-700/10 border border-warning-200 dark:border-warning-700/30 rounded-lg px-3 py-2">
                     <p className="text-xs text-warning-700 dark:text-warning-400">
@@ -435,10 +441,10 @@ function ReconciliationTable({
           <tbody>
             {reconciliations.map((r: Reconciliation) => (
               <tr key={r.id} className="table-row">
-                <td className="table-cell font-medium text-surface-900 dark:text-surface-100">
+                <td className="table-cell font-medium text-app-fg">
                   {getLocationName(r.locationId)}
                 </td>
-                <td className="table-cell text-surface-800 dark:text-surface-200">
+                <td className="table-cell text-app-fg-muted">
                   <DeferredSection resolve={products} skeleton="inline">
                     {(resolvedProducts) => {
                       const prod = (resolvedProducts as Product[]).find((p: Product) => p.id === r.productId);
@@ -457,11 +463,9 @@ function ReconciliationTable({
                   {REASON_LABELS[r.reasonCode] ?? r.reasonCode}
                 </td>
                 <td className="table-cell">
-                  <span className={RECON_STATUS_BADGE[r.reconciliationStatus] ?? 'badge'}>
-                    {r.reconciliationStatus}
-                  </span>
+                  <StatusBadge status={r.reconciliationStatus} />
                 </td>
-                <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                <td className="table-cell text-app-fg-muted text-sm">
                   {new Date(r.createdAt).toLocaleDateString('en-NG', {
                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                   })}
@@ -492,8 +496,11 @@ function ReconciliationTable({
             ))}
             {reconciliations.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                  No reconciliation records. Submit a report when physical stock differs from system records.
+                <td colSpan={9} className="px-4 py-12 text-center">
+                  <EmptyState
+                    title="No reconciliation records"
+                    description="Submit a report when physical stock differs from system records."
+                  />
                 </td>
               </tr>
             )}
@@ -504,16 +511,14 @@ function ReconciliationTable({
       {/* Mobile */}
       <div className="md:hidden space-y-3 px-1">
         {reconciliations.map((r: Reconciliation) => (
-          <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+          <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-surface-900 dark:text-white text-sm">
+              <span className="font-medium text-app-fg text-sm">
                 {getLocationName(r.locationId)}
               </span>
-              <span className={RECON_STATUS_BADGE[r.reconciliationStatus] ?? 'badge'}>
-                {r.reconciliationStatus}
-              </span>
+              <StatusBadge status={r.reconciliationStatus} />
             </div>
-            <p className="text-sm text-surface-800 dark:text-surface-200">
+            <p className="text-sm text-app-fg-muted">
               <DeferredSection resolve={products} skeleton="inline">
                 {(resolvedProducts) => {
                   const prod = (resolvedProducts as Product[]).find((p: Product) => p.id === r.productId);
@@ -548,9 +553,10 @@ function ReconciliationTable({
           </div>
         ))}
         {reconciliations.length === 0 && (
-          <div className="p-8 text-center text-surface-700 dark:text-surface-300">
-            No reconciliation records
-          </div>
+          <EmptyState
+            title="No reconciliation records"
+            description="Submit a report when physical stock differs from system records."
+          />
         )}
       </div>
     </div>

@@ -28,6 +28,8 @@ export const users = pgTable('users', {
   lastActionAt: timestamp('last_action_at', { withTimezone: true }),
   /** Default branch for this user. NULL for SuperAdmin (bypasses branch RLS). */
   primaryBranchId: text('primary_branch_id'),
+  /** Explicit appearance theme; NULL = use org default from `client_ui_config`. */
+  appTheme: text('app_theme'),
   ...temporalColumns,
   ...timestampColumns,
 });

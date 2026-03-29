@@ -150,6 +150,15 @@ export const listUsersSchema = z.object({
 
 export type ListUsersInput = z.infer<typeof listUsersSchema>;
 
+/** Active-user name/email search for push broadcast recipient picker (narrow permission). */
+export const searchUsersForPushTargetSchema = z.object({
+  q: z.string().max(120).optional().default(''),
+  limit: z.number().int().min(1).max(25).default(20),
+  offset: z.number().int().min(0).default(0),
+});
+
+export type SearchUsersForPushTargetInput = z.infer<typeof searchUsersForPushTargetSchema>;
+
 // ============================================
 // Reset Password — admin resets a user's password
 // ============================================

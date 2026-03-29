@@ -13,7 +13,7 @@ export interface ActionDropdownItem {
 }
 
 const VARIANT_CLASSES: Record<string, string> = {
-  default: 'text-surface-700 dark:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-700',
+  default: 'text-app-fg-muted hover:bg-app-hover',
   success: 'text-success-600 dark:text-success-400 hover:bg-success-50 dark:hover:bg-success-900/20',
   warning: 'text-warning-600 dark:text-warning-400 hover:bg-warning-50 dark:hover:bg-warning-900/20',
   danger: 'text-danger-600 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20',
@@ -99,7 +99,7 @@ export function ActionDropdown({
   const menuContent = (
     <div
       ref={menuRef}
-      className="fixed z-[9999] w-48 min-w-[160px] bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg shadow-lg py-1 animate-fade-in"
+      className="fixed z-[9999] w-48 min-w-[160px] bg-app-elevated border border-app-border rounded-lg shadow-lg py-1 animate-fade-in"
       style={menuStyle}
     >
       {items.map((item) => {
@@ -144,8 +144,8 @@ export function ActionDropdown({
         onClick={() => setOpenMenuId(isOpen ? null : id)}
         className={
           trigger === 'actions'
-            ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-surface-700 dark:text-surface-300 bg-surface-100 dark:bg-surface-800 hover:bg-surface-200 dark:hover:bg-surface-700 border border-surface-200 dark:border-surface-600 transition-colors'
-            : 'w-8 h-8 flex items-center justify-center rounded-full bg-surface-100 text-surface-600 hover:bg-surface-200 hover:text-surface-800 dark:bg-surface-700 dark:text-surface-300 dark:hover:bg-surface-600 dark:hover:text-white transition-colors'
+            ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-app-fg-muted bg-app-hover hover:brightness-95 dark:hover:brightness-110 border border-app-border transition-colors'
+            : 'w-8 h-8 flex items-center justify-center rounded-full bg-app-hover text-app-fg-muted hover:bg-app-elevated border border-transparent hover:border-app-border hover:text-app-fg transition-colors'
         }
         aria-expanded={isOpen}
         aria-haspopup="true"

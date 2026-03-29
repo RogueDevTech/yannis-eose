@@ -12,7 +12,7 @@ export function LiveIndicator({ isConnected, showGreen }: LiveIndicatorProps) {
 
   return (
     <span
-      className="inline-flex min-h-[2rem] items-center gap-1.5 rounded-full bg-white/70 dark:bg-surface-800/90 backdrop-blur-md px-2 py-0.5 text-xs font-semibold text-surface-900 dark:text-surface-100 shadow-sm"
+      className="inline-flex min-h-[2rem] items-center gap-1.5 rounded-full bg-app-elevated/90 backdrop-blur-md border border-app-border px-2 py-0.5 text-xs font-semibold text-app-fg shadow-sm"
       aria-live="polite"
       title={title}
     >

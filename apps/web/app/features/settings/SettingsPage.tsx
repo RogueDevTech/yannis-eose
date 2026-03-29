@@ -1,10 +1,26 @@
-import { useState, useEffect } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useFetcher, useLocation, useSearchParams } from '@remix-run/react';
+import { APP_THEME_IDS, CLIENT_UI_CONFIG_KEY } from '@yannis/shared';
 import { Button } from '~/components/ui/button';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Tabs } from '~/components/ui/tabs';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { ROLE_LABELS } from './types';
+import { useAppTheme } from '~/hooks/useAppTheme';
+import { APP_THEMES, previewRgb, THEME_PREVIEW_BRAND_HEX, THEME_PREVIEW_RGB } from '~/lib/theme';
+import { SettingsPushPanel } from './SettingsPushPanel';
+import { PageHeader } from '~/components/ui/page-header';
+import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
+
+type OrgDefaultTheme = (typeof APP_THEME_IDS)[number];
+
+function parseOrgDefaultTheme(raw: unknown): OrgDefaultTheme {
+  if (typeof raw === 'string' && (APP_THEME_IDS as readonly string[]).includes(raw)) {
+    return raw as OrgDefaultTheme;
+  }
+  return 'system';
+}
 
 interface SettingsUser {
   name: string;
@@ -39,30 +55,187 @@ interface SettingsPageProps {
   notificationEmailConfig?: NotificationEmailConfig | null;
 }
 
+export type SettingsTabId = 'profile' | 'security' | 'push' | 'system' | 'orgEmails';
+
+const BASE_SETTINGS_TABS: SettingsTabId[] = ['profile', 'security', 'push'];
+
+function ThemeAppearanceOption({
+  theme: t,
+  selected,
+  onSelect,
+}: {
+  theme: (typeof APP_THEMES)[number];
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const p = t.preview;
+  const preview =
+    t.id === 'system' ? (
+      <div
+        className="mb-2 h-[4.75rem] w-full overflow-hidden rounded-lg shadow-sm ring-1 ring-black/[0.06] dark:ring-white/[0.08] flex flex-col"
+        aria-hidden
+      >
+        <div className="flex h-2.5 w-full shrink-0">
+          <div
+            className="h-full w-1/2 border-b border-r border-black/[0.06]"
+            style={{
+              backgroundColor: previewRgb(THEME_PREVIEW_RGB.light.logoStrip),
+              borderBottomColor: previewRgb(THEME_PREVIEW_RGB.light.border),
+            }}
+          />
+          <div
+            className="h-full w-1/2 border-b"
+            style={{
+              backgroundColor: previewRgb(THEME_PREVIEW_RGB.ink.logoStrip),
+              borderBottomColor: previewRgb(THEME_PREVIEW_RGB.ink.border),
+            }}
+          />
+        </div>
+        <div className="flex min-h-0 flex-1 min-w-0">
+          {([THEME_PREVIEW_RGB.light, THEME_PREVIEW_RGB.ink] as const).map((side, i) => (
+            <div
+              key={i}
+              className={`flex w-1/2 gap-0.5 p-0.5 ${i === 0 ? 'border-r border-black/[0.06]' : ''}`}
+              style={{ backgroundColor: previewRgb(side.canvas) }}
+            >
+              <div
+                className="w-[22%] shrink-0 rounded-sm"
+                style={{
+                  backgroundColor: previewRgb(side.elevated),
+                  boxShadow: `inset 0 0 0 1px ${previewRgb(side.border)}`,
+                }}
+              />
+              <div
+                className="relative min-w-0 flex-1 rounded-sm"
+                style={{
+                  backgroundColor: previewRgb(side.elevated),
+                  boxShadow: `inset 0 0 0 1px ${previewRgb(side.border)}`,
+                }}
+              >
+                <div
+                  className="absolute left-1 top-1 h-0.5 w-6 max-w-[55%] rounded-full opacity-35"
+                  style={{ backgroundColor: previewRgb(side.fg) }}
+                />
+                <div
+                  className="absolute bottom-1 right-1 h-1.5 w-6 rounded-full"
+                  style={{ backgroundColor: THEME_PREVIEW_BRAND_HEX }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : (
+      <div
+        className="mb-2 h-[4.75rem] w-full overflow-hidden rounded-lg shadow-sm ring-1 ring-black/[0.06] dark:ring-white/[0.08]"
+        aria-hidden
+      >
+        <div className="h-2.5 w-full border-b" style={{ backgroundColor: previewRgb(p.logoStrip), borderColor: previewRgb(p.border) }} />
+        <div className="flex h-[calc(100%-0.625rem)] gap-1 p-1" style={{ backgroundColor: previewRgb(p.canvas) }}>
+          <div
+            className="w-[24%] shrink-0 rounded-sm"
+            style={{
+              backgroundColor: previewRgb(p.elevated),
+              boxShadow: `inset 0 0 0 1px ${previewRgb(p.border)}`,
+            }}
+          />
+          <div
+            className="relative min-w-0 flex-1 rounded-sm"
+            style={{
+              backgroundColor: previewRgb(p.elevated),
+              boxShadow: `inset 0 0 0 1px ${previewRgb(p.border)}`,
+            }}
+          >
+            <div
+              className="absolute left-1.5 top-1.5 h-1 w-9 max-w-[55%] rounded-full opacity-35"
+              style={{ backgroundColor: previewRgb(p.fg) }}
+            />
+            <div
+              className="absolute bottom-1.5 right-1.5 h-2 w-8 rounded-full"
+              style={{ backgroundColor: THEME_PREVIEW_BRAND_HEX }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      aria-label={`${t.label} theme`}
+      className={`rounded-xl border p-2.5 text-left transition-colors ${
+        selected
+          ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30 ring-1 ring-brand-500/30'
+          : 'border-app-border hover:bg-app-hover/50'
+      }`}
+    >
+      {preview}
+      <span
+        className={`text-sm font-medium ${
+          selected ? 'text-brand-800 dark:text-brand-200' : 'text-app-fg-muted'
+        }`}
+      >
+        {t.label}
+      </span>
+    </button>
+  );
+}
+
+function tabLabel(tab: SettingsTabId): string {
+  switch (tab) {
+    case 'profile':
+      return 'Profile';
+    case 'security':
+      return 'Security';
+    case 'push':
+      return 'Push';
+    case 'system':
+      return 'System';
+    case 'orgEmails':
+      return 'Org email';
+    default:
+      return tab;
+  }
+}
+
 export function SettingsPage({ user, systemSettings = [], notificationEmailConfig }: SettingsPageProps) {
   const fetcher = useFetcher();
-  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'system' | 'notifications'>('profile');
-  const [profileName, setProfileName] = useState(user?.name ?? '');
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const { canInstall, install, canPromptInstall, isIosSafariLike } = usePwaInstall();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const installAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+
+  const allowedTabs = useMemo((): SettingsTabId[] => {
+    return isSuperAdmin ? [...BASE_SETTINGS_TABS, 'system', 'orgEmails'] : BASE_SETTINGS_TABS;
+  }, [isSuperAdmin]);
+
+  const resolveTab = useCallback(
+    (raw: string | null): SettingsTabId => {
+      if (raw && allowedTabs.includes(raw as SettingsTabId)) return raw as SettingsTabId;
+      return 'profile';
+    },
+    [allowedTabs],
+  );
+
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(() => resolveTab(searchParams.get('tab')));
 
   useEffect(() => {
-    const stored = localStorage.getItem('yannis_theme');
-    const dark = stored === 'dark';
-    setIsDarkMode(dark);
-  }, []);
+    setActiveTab(resolveTab(searchParams.get('tab')));
+  }, [searchParams, resolveTab]);
 
-  const toggleTheme = () => {
-    const next = !isDarkMode;
-    setIsDarkMode(next);
-    if (next) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('yannis_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('yannis_theme', 'light');
-    }
-  };
+  const handleTabChange = useCallback(
+    (value: string) => {
+      const next = resolveTab(value);
+      setActiveTab(next);
+      setSearchParams({ tab: next }, { replace: true });
+    },
+    [resolveTab, setSearchParams],
+  );
+  const [profileName, setProfileName] = useState(user?.name ?? '');
+  const { themeId, setTheme, activeTheme } = useAppTheme();
+  const { canInstall, install, canPromptInstall, isIosManualInstall } = usePwaInstall();
 
   // CS dispatch strategy: derived from settings, local state for form selection
   const csDispatchSetting = systemSettings.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
@@ -112,31 +285,46 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
     setLocalClaimCap(claimCapFromSettings);
   }, [claimCapFromSettings]);
 
+  const orgDefaultSaved = useMemo(
+    () =>
+      parseOrgDefaultTheme(
+        systemSettings.find((s) => s.key === CLIENT_UI_CONFIG_KEY)?.value?.defaultAppTheme,
+      ),
+    [systemSettings],
+  );
+  const [orgDefaultAppTheme, setOrgDefaultAppTheme] = useState<OrgDefaultTheme>(orgDefaultSaved);
+  useEffect(() => {
+    setOrgDefaultAppTheme(orgDefaultSaved);
+  }, [orgDefaultSaved]);
+
+  useEffect(() => {
+    if (location.hash !== '#install-app') return;
+    setActiveTab('profile');
+    setSearchParams({ tab: 'profile' }, { replace: true });
+    requestAnimationFrame(() => {
+      installAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [location.hash, location.pathname, setSearchParams]);
+
   const hasSystemChanges =
     localVoipEnabled !== isVoipEnabled ||
     selectedDispatchStrategy !== dispatchStrategyFromSettings ||
-    localClaimCap !== claimCapFromSettings;
-
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+    localClaimCap !== claimCapFromSettings ||
+    orgDefaultAppTheme !== orgDefaultSaved;
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Settings</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-          Manage your account and system preferences
-        </p>
-      </div>
+      <PageHeader
+        title="Settings"
+        description="Manage your account and system preferences"
+      />
 
       <Tabs
         value={activeTab}
-        onChange={(v) => setActiveTab(v as typeof activeTab)}
-        tabs={(isSuperAdmin
-          ? (['profile', 'security', 'system', 'notifications'] as const)
-          : (['profile', 'security'] as const)
-        ).map((tab) => ({
+        onChange={handleTabChange}
+        tabs={allowedTabs.map((tab) => ({
           value: tab,
-          label: tab === 'profile' ? 'Profile' : tab === 'security' ? 'Security' : tab === 'system' ? 'System' : 'Notifications',
+          label: tabLabel(tab),
         }))}
       />
 
@@ -161,7 +349,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
       {activeTab === 'profile' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Account Information</h3>
+            <h3 className="text-lg font-semibold text-app-fg mb-4">Account Information</h3>
             <div className="space-y-4">
               <div className="flex items-center gap-4 mb-6">
                 <div className="w-16 h-16 rounded-full bg-brand-100 dark:bg-brand-700/30 flex items-center justify-center">
@@ -170,38 +358,35 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   </span>
                 </div>
                 <div>
-                  <p className="text-lg font-semibold text-surface-900 dark:text-white">{user?.name ?? 'Unknown'}</p>
-                  <p className="text-sm text-surface-800 dark:text-surface-200">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</p>
+                  <p className="text-lg font-semibold text-app-fg">{user?.name ?? 'Unknown'}</p>
+                  <p className="text-sm text-app-fg-muted">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</p>
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Email</label>
-                <p className="text-sm text-surface-900 dark:text-surface-100 mt-1">{user?.email ?? '—'}</p>
+                <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Email</label>
+                <p className="text-sm text-app-fg mt-1">{user?.email ?? '—'}</p>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Role</label>
-                <p className="text-sm text-surface-900 dark:text-surface-100 mt-1">{ROLE_LABELS[user?.role ?? ''] ?? user?.role ?? '—'}</p>
+                <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Role</label>
+                <p className="text-sm text-app-fg mt-1">{ROLE_LABELS[user?.role ?? ''] ?? user?.role ?? '—'}</p>
               </div>
             </div>
           </div>
 
           <fetcher.Form method="post" className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Edit Profile</h3>
+            <h3 className="text-lg font-semibold text-app-fg mb-4">Edit Profile</h3>
             <input type="hidden" name="intent" value="updateProfile" />
             <div className="space-y-4">
               <div>
-                <label htmlFor="name" className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-                  Display Name
-                </label>
-                <input
+                <TextInput
                   id="name"
                   name="name"
+                  label="Display Name"
                   type="text"
                   value={profileName}
                   onChange={(e) => setProfileName(e.target.value)}
-                  className="input mt-1"
                   required
                 />
               </div>
@@ -211,39 +396,54 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             </div>
           </fetcher.Form>
 
-          <div className="card lg:col-span-2 hidden md:block">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Appearance</h3>
-            <div className="flex items-center justify-between rounded-lg border border-surface-200 dark:border-surface-700 px-4 py-3">
-              <div>
-                <p className="text-sm font-medium text-surface-900 dark:text-white">Theme</p>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
-                  {isDarkMode ? 'Dark mode is active' : 'Light mode is active'}
-                </p>
-              </div>
-              <Button type="button" variant="secondary" size="sm" onClick={toggleTheme}>
-                {isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-              </Button>
+          <div className="card lg:col-span-2">
+            <h3 className="text-lg font-semibold text-app-fg mb-4">Appearance</h3>
+            <p className="text-xs text-app-fg-muted mb-3">
+              Current: <span className="font-medium text-app-fg">{activeTheme.label}</span>
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {APP_THEMES.map((t) => (
+                <ThemeAppearanceOption
+                  key={t.id}
+                  theme={t}
+                  selected={themeId === t.id}
+                  onSelect={() => setTheme(t.id)}
+                />
+              ))}
             </div>
-            <div className="mt-3 flex items-center justify-between rounded-lg border border-surface-200 dark:border-surface-700 px-4 py-3">
-              <div>
-                <p className="text-sm font-medium text-surface-900 dark:text-white">Install App</p>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
-                  {isIosSafariLike
-                    ? 'On iPhone/iPad Safari, use Share > Add to Home Screen.'
+          </div>
+
+          <div ref={installAnchorRef} id="install-app" className="card lg:col-span-2 scroll-mt-24">
+            <h3 className="text-lg font-semibold text-app-fg mb-4">Install app</h3>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between rounded-lg border border-app-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-app-fg">Add to home screen</p>
+                <p className="text-xs text-app-fg-muted mt-0.5">
+                  {isIosManualInstall
+                    ? 'On iPhone or iPad (Safari or Chrome), use Share, then Add to Home Screen.'
                     : 'Install Yannis for faster launch and better offline behavior.'}
                 </p>
+                {isIosManualInstall ? (
+                  <details className="mt-2 rounded-lg border border-app-border bg-app-hover px-2.5 py-2">
+                    <summary className="cursor-pointer text-xs font-semibold text-app-fg-muted">
+                      Show steps
+                    </summary>
+                    <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-app-fg-muted">
+                      <li>Tap Share in the browser toolbar (often at the bottom on iPhone).</li>
+                      <li>Tap Add to Home Screen.</li>
+                      <li>Tap Add to finish.</li>
+                    </ol>
+                  </details>
+                ) : null}
               </div>
-              {isIosSafariLike ? (
-                <Button type="button" variant="secondary" size="sm" disabled>
-                  Use Safari Share
-                </Button>
-              ) : (
+              {isIosManualInstall ? null : (
                 <Button
                   type="button"
                   variant="primary"
                   size="sm"
+                  className="shrink-0 self-end sm:self-start"
                   disabled={!canInstall && !canPromptInstall}
-                  onClick={install}
+                  onClick={() => void install()}
                 >
                   Install App
                 </Button>
@@ -257,27 +457,35 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
       {activeTab === 'security' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <fetcher.Form method="post" className="card">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Change Password</h3>
+            <h3 className="text-lg font-semibold text-app-fg mb-4">Change Password</h3>
             <input type="hidden" name="intent" value="changePassword" />
             <div className="space-y-4">
-              <div>
-                <label htmlFor="currentPassword" className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-                  Current Password
-                </label>
-                <input id="currentPassword" name="currentPassword" type="password" className="input mt-1" required autoComplete="current-password" />
-              </div>
-              <div>
-                <label htmlFor="newPassword" className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-                  New Password
-                </label>
-                <input id="newPassword" name="newPassword" type="password" className="input mt-1" required minLength={8} autoComplete="new-password" />
-              </div>
-              <div>
-                <label htmlFor="confirmPassword" className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-                  Confirm New Password
-                </label>
-                <input id="confirmPassword" name="confirmPassword" type="password" className="input mt-1" required minLength={8} autoComplete="new-password" />
-              </div>
+              <TextInput
+                id="currentPassword"
+                name="currentPassword"
+                label="Current Password"
+                type="password"
+                required
+                autoComplete="current-password"
+              />
+              <TextInput
+                id="newPassword"
+                name="newPassword"
+                label="New Password"
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+              />
+              <TextInput
+                id="confirmPassword"
+                name="confirmPassword"
+                label="Confirm New Password"
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+              />
               <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Updating...">
                 Change Password
               </Button>
@@ -286,6 +494,8 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
 
         </div>
       )}
+
+      {activeTab === 'push' && <SettingsPushPanel />}
 
       {/* System Tab — grouped form: toggle VOIP, CS distribution then submit once */}
       {activeTab === 'system' && (
@@ -296,6 +506,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
               <input type="hidden" name="voipEnabled" value={localVoipEnabled ? 'true' : 'false'} />
               <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
               <input type="hidden" name="claimCap" value={String(localClaimCap)} />
+              <input type="hidden" name="defaultAppTheme" value={orgDefaultAppTheme} />
 
               {/* VOIP Integration */}
               <div className="card lg:col-span-2">
@@ -306,26 +517,26 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">VOIP Integration</h3>
-                    <p className="text-sm text-surface-800 dark:text-surface-200">Twilio-powered voice calls for CS agents</p>
+                    <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
+                    <p className="text-sm text-app-fg-muted">Twilio-powered voice calls for CS agents</p>
                   </div>
                 </div>
-                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                <div className="rounded-lg border border-app-border p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-1">
-                        <p className="text-sm font-semibold text-surface-900 dark:text-white">VOIP Calling (Twilio)</p>
+                        <p className="text-sm font-semibold text-app-fg">VOIP Calling (Twilio)</p>
                         {localVoipEnabled ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
                             <span className="w-1.5 h-1.5 rounded-full bg-success-500" /> Enabled
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-surface-100 dark:bg-surface-800 px-2.5 py-0.5 text-xs font-medium text-surface-600 dark:text-surface-200">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-app-hover px-2.5 py-0.5 text-xs font-medium text-app-fg-muted">
                             <span className="w-1.5 h-1.5 rounded-full bg-surface-400" /> Disabled
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-surface-800 dark:text-surface-200 leading-relaxed">
+                      <p className="text-xs text-app-fg-muted leading-relaxed">
                         {localVoipEnabled
                           ? 'Agents use Twilio WebRTC to call customers. Calls are tracked, recorded, and the 15-second confirm gate is enforced. Orders are locked for 15 minutes during calls.'
                           : 'VOIP is off. Agents will log manual calls. Less control over the call process.'}
@@ -335,7 +546,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                       type="button"
                       onClick={() => setLocalVoipEnabled(!localVoipEnabled)}
                       className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
-                        localVoipEnabled ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
+                        localVoipEnabled ? 'bg-brand-600' : 'bg-app-border'
                       }`}
                       disabled={fetcher.state === 'submitting'}
                       role="switch"
@@ -361,56 +572,56 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">CS order distribution</h3>
-                    <p className="text-sm text-surface-800 dark:text-surface-200">How new orders are assigned to CS agents when they come in</p>
+                    <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
+                    <p className="text-sm text-app-fg-muted">How new orders are assigned to CS agents when they come in</p>
                   </div>
                 </div>
-                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                <div className="rounded-lg border border-app-border p-4">
                   <div className="space-y-3">
-                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-surface-200 dark:border-surface-700 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
+                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-app-border p-4 hover:bg-app-hover/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
                       <input
                         type="radio"
                         name="strategy"
                         value="load_balanced"
                         checked={selectedDispatchStrategy === 'load_balanced'}
                         onChange={() => setSelectedDispatchStrategy('load_balanced')}
-                        className="mt-1 text-brand-600 border-surface-300 focus:ring-brand-500"
+                        className="mt-1 text-brand-600 border-app-border focus:ring-brand-500"
                       />
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Load balanced</p>
-                        <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
+                        <p className="text-sm font-medium text-app-fg">Load balanced</p>
+                        <p className="text-xs text-app-fg-muted mt-0.5">
                           Distribute by current workload: agents with fewer pending orders get new orders first. Tie-break: most idle.
                         </p>
                       </div>
                     </label>
-                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-surface-200 dark:border-surface-700 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
+                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-app-border p-4 hover:bg-app-hover/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
                       <input
                         type="radio"
                         name="strategy"
                         value="performance"
                         checked={selectedDispatchStrategy === 'performance'}
                         onChange={() => setSelectedDispatchStrategy('performance')}
-                        className="mt-1 text-brand-600 border-surface-300 focus:ring-brand-500"
+                        className="mt-1 text-brand-600 border-app-border focus:ring-brand-500"
                       />
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Performance</p>
-                        <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
+                        <p className="text-sm font-medium text-app-fg">Performance</p>
+                        <p className="text-xs text-app-fg-muted mt-0.5">
                           Prioritise higher performers: agents with better delivery rate and confirmation rate get more orders, even if they already have more pending. Capacity limit still applies.
                         </p>
                       </div>
                     </label>
-                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-surface-200 dark:border-surface-700 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
+                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-app-border p-4 hover:bg-app-hover/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
                       <input
                         type="radio"
                         name="strategy"
                         value="claim"
                         checked={selectedDispatchStrategy === 'claim'}
                         onChange={() => setSelectedDispatchStrategy('claim')}
-                        className="mt-1 text-brand-600 border-surface-300 focus:ring-brand-500"
+                        className="mt-1 text-brand-600 border-app-border focus:ring-brand-500"
                       />
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Claim mode</p>
-                        <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5">
+                        <p className="text-sm font-medium text-app-fg">Claim mode</p>
+                        <p className="text-xs text-app-fg-muted mt-0.5">
                           Orders are not auto-assigned. They appear in a shared Claim Queue visible to all available agents. First agent to click "Claim" takes the order. Atomic lock prevents double-claiming.
                         </p>
                       </div>
@@ -419,36 +630,54 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
 
                   {/* Claim cap — only shown when claim mode is selected */}
                   {selectedDispatchStrategy === 'claim' && (
-                    <div className="mt-4 p-4 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700">
-                      <label htmlFor="claim-cap-input" className="text-xs font-medium text-surface-700 dark:text-surface-300 uppercase tracking-wider">
+                    <div className="mt-4 p-4 rounded-lg bg-app-hover border border-app-border">
+                      <label htmlFor="claim-cap-input" className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
                         Claim cap (max orders per agent)
                       </label>
-                      <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5 mb-2">
+                      <p className="text-xs text-app-fg-muted mt-0.5 mb-2">
                         An agent cannot claim new orders if they already have this many unconfirmed orders. Enforced server-side.
                       </p>
                       <div className="flex items-center gap-3">
-                        <input
+                        <TextInput
                           id="claim-cap-input"
                           type="number"
                           min={1}
                           max={20}
                           value={localClaimCap}
                           onChange={(e) => setLocalClaimCap(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 2)))}
-                          className="input w-24"
+                          wrapperClassName="w-24"
                         />
-                        <span className="text-xs text-surface-500 dark:text-surface-400">orders (1–20)</span>
+                        <span className="text-xs text-app-fg-muted">orders (1–20)</span>
                       </div>
                     </div>
                   )}
 
-                  <p className="text-xs text-surface-600 dark:text-surface-400 mt-3">
+                  <p className="text-xs text-app-fg-muted mt-3">
                     Saved: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : dispatchStrategyFromSettings === 'claim' ? `Claim (cap: ${claimCapFromSettings})` : 'Load balanced'}</strong>
                     {hasSystemChanges && ' — you have unsaved changes'}
                   </p>
                 </div>
               </div>
 
-              <div className="card lg:col-span-2 pt-4 border-t border-surface-200 dark:border-surface-700">
+              <div className="card lg:col-span-2">
+                <h3 className="text-lg font-semibold text-app-fg mb-1">Default appearance</h3>
+                <p className="text-sm text-app-fg-muted mb-3">
+                  Theme for users who have not set a personal preference. Personal choices in Profile still override this.
+                </p>
+                <FormSelect
+                  id="org-default-theme"
+                  label="Workspace default theme"
+                  value={orgDefaultAppTheme}
+                  onChange={(e) => setOrgDefaultAppTheme(parseOrgDefaultTheme(e.target.value))}
+                  wrapperClassName="mt-1 max-w-md"
+                  options={APP_THEMES.map((t) => ({ value: t.id, label: t.label }))}
+                />
+                <p className="text-xs text-app-fg-muted mt-2">
+                  Saved default: <strong>{APP_THEMES.find((t) => t.id === orgDefaultSaved)?.label ?? 'System'}</strong>
+                </p>
+              </div>
+
+              <div className="card lg:col-span-2 pt-4 border-t border-app-border">
                 <Button
                   type="submit"
                   variant="primary"
@@ -472,19 +701,19 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">VOIP Integration</h3>
-                    <p className="text-sm text-surface-800 dark:text-surface-200">Twilio-powered voice calls for CS agents</p>
+                    <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
+                    <p className="text-sm text-app-fg-muted">Twilio-powered voice calls for CS agents</p>
                   </div>
                 </div>
-                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
+                <div className="rounded-lg border border-app-border p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1">
-                      <p className="text-sm font-semibold text-surface-900 dark:text-white">VOIP Calling (Twilio)</p>
-                      <p className="text-xs text-surface-800 dark:text-surface-200 mt-1">{isVoipEnabled ? 'Enabled' : 'Disabled'}</p>
+                      <p className="text-sm font-semibold text-app-fg">VOIP Calling (Twilio)</p>
+                      <p className="text-xs text-app-fg-muted mt-1">{isVoipEnabled ? 'Enabled' : 'Disabled'}</p>
                     </div>
                     <div
                       className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent opacity-50 cursor-not-allowed ${
-                        isVoipEnabled ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
+                        isVoipEnabled ? 'bg-brand-600' : 'bg-app-border'
                       }`}
                       title="Only Super Admin can change this"
                     >
@@ -501,12 +730,12 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">CS order distribution</h3>
-                    <p className="text-sm text-surface-800 dark:text-surface-200">How new orders are assigned to CS agents when they come in</p>
+                    <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
+                    <p className="text-sm text-app-fg-muted">How new orders are assigned to CS agents when they come in</p>
                   </div>
                 </div>
-                <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4">
-                  <p className="text-sm text-surface-800 dark:text-surface-200">
+                <div className="rounded-lg border border-app-border p-4">
+                  <p className="text-sm text-app-fg-muted">
                     Only Super Admin can configure CS order distribution. Current: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : dispatchStrategyFromSettings === 'claim' ? `Claim (cap: ${claimCapFromSettings})` : 'Load balanced'}</strong>.
                   </p>
                 </div>
@@ -516,16 +745,10 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
         </div>
       )}
 
-      {/* Notifications Tab — SuperAdmin only */}
-      {activeTab === 'notifications' && (
+      {/* Org-wide notification email routing — SuperAdmin only */}
+      {activeTab === 'orgEmails' && (
         <div className="space-y-6">
-          {!isSuperAdmin ? (
-            <div className="card">
-              <p className="text-sm text-surface-800 dark:text-surface-200">
-                Only Super Admin can configure notification email settings.
-              </p>
-            </div>
-          ) : notificationEmailConfig ? (
+          {notificationEmailConfig ? (
             <fetcher.Form method="post" className="space-y-6">
               <input type="hidden" name="intent" value="updateNotificationEmailConfig" />
               <input type="hidden" name="enabledTypes" value={JSON.stringify(enabledTypes)} />
@@ -538,8 +761,8 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Notification Emails</h3>
-                    <p className="text-sm text-surface-800 dark:text-surface-200">
+                    <h3 className="text-lg font-semibold text-app-fg">Notification Emails</h3>
+                    <p className="text-sm text-app-fg-muted">
                       Choose which notification types also send email. Mandatory types always send email.
                     </p>
                   </div>
@@ -547,16 +770,16 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
 
                 {/* Mandatory — always on, no toggle */}
                 <div className="mb-6">
-                  <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300 mb-3">Always send email (action required)</h4>
+                  <h4 className="text-sm font-medium text-app-fg-muted mb-3">Always send email (action required)</h4>
                   <div className="space-y-3">
                     {notificationEmailConfig.mandatory.map((item) => (
                       <div
                         key={item.type}
-                        className="flex items-center justify-between py-3 px-4 rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50"
+                        className="flex items-center justify-between py-3 px-4 rounded-lg border border-app-border bg-app-hover"
                       >
                         <div>
-                          <p className="text-sm font-medium text-surface-900 dark:text-white">{item.label}</p>
-                          <p className="text-xs text-surface-600 dark:text-surface-200 mt-0.5">{item.description}</p>
+                          <p className="text-sm font-medium text-app-fg">{item.label}</p>
+                          <p className="text-xs text-app-fg-muted mt-0.5">{item.description}</p>
                         </div>
                         <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
                           Always on
@@ -569,9 +792,9 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                 {/* Configurable — toggles */}
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-medium text-surface-700 dark:text-surface-300">Configurable (toggle to enable/disable email)</h4>
+                    <h4 className="text-sm font-medium text-app-fg-muted">Configurable (toggle to enable/disable email)</h4>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-surface-500 dark:text-surface-400">Toggle all:</span>
+                      <span className="text-xs text-app-fg-muted">Toggle all:</span>
                       <Button
                         type="button"
                         variant="secondary"
@@ -602,11 +825,11 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                     {notificationEmailConfig.configurable.map((item) => (
                       <div
                         key={item.type}
-                        className="flex items-center justify-between py-3 px-4 rounded-lg border border-surface-200 dark:border-surface-700"
+                        className="flex items-center justify-between py-3 px-4 rounded-lg border border-app-border"
                       >
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-surface-900 dark:text-white">{item.label}</p>
-                          <p className="text-xs text-surface-600 dark:text-surface-200 mt-0.5">{item.description}</p>
+                          <p className="text-sm font-medium text-app-fg">{item.label}</p>
+                          <p className="text-xs text-app-fg-muted mt-0.5">{item.description}</p>
                         </div>
                         <button
                           type="button"
@@ -617,7 +840,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                             }))
                           }
                           className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
-                            enabledTypes[item.type] ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
+                            enabledTypes[item.type] ? 'bg-brand-600' : 'bg-app-border'
                           }`}
                           role="switch"
                           aria-checked={enabledTypes[item.type]}
@@ -634,7 +857,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   </div>
                 </div>
 
-                <div className="mt-6 pt-4 border-t border-surface-200 dark:border-surface-700">
+                <div className="mt-6 pt-4 border-t border-app-border">
                   <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
                     Save notification email settings
                   </Button>
@@ -643,7 +866,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             </fetcher.Form>
           ) : (
             <div className="card">
-              <p className="text-sm text-surface-800 dark:text-surface-200">
+              <p className="text-sm text-app-fg-muted">
                 Loading notification settings...
               </p>
             </div>

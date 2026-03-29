@@ -1,6 +1,7 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { APP_THEME_IDS } from '@yannis/shared';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { SettingsPage } from '~/features/settings/SettingsPage';
 
@@ -147,6 +148,23 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!capRes.ok) {
       const errorData = capRes.data as { error?: { message?: string } };
       return json({ error: errorData?.error?.message ?? 'Failed to update claim cap' }, { status: safeStatus(capRes.status) });
+    }
+
+    const defaultAppTheme = formData.get('defaultAppTheme')?.toString() ?? 'system';
+    if (!(APP_THEME_IDS as readonly string[]).includes(defaultAppTheme)) {
+      return json({ error: 'Invalid default theme' }, { status: 400 });
+    }
+    const uiRes = await apiRequest<unknown>('/trpc/settings.updateClientUiConfig', {
+      method: 'POST',
+      cookie,
+      body: { defaultAppTheme },
+    });
+    if (!uiRes.ok) {
+      const errorData = uiRes.data as { error?: { message?: string } };
+      return json(
+        { error: errorData?.error?.message ?? 'Failed to update default appearance' },
+        { status: safeStatus(uiRes.status) },
+      );
     }
 
     return json({ success: true, message: 'System settings saved' });

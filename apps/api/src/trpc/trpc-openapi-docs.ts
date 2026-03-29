@@ -63,7 +63,14 @@ const ENDPOINTS: TrpcEndpoint[] = [
 
   // Users
   { procedure: 'users.list', method: 'GET', summary: 'List users with filters', tag: 'Users' },
+  {
+    procedure: 'users.searchForPushTarget',
+    method: 'GET',
+    summary: 'Search users for push broadcast picker',
+    tag: 'Users',
+  },
   { procedure: 'users.getById', method: 'GET', summary: 'Get user by ID', tag: 'Users' },
+  { procedure: 'users.updateMyAppTheme', method: 'POST', summary: 'Update current user appearance theme', tag: 'Users' },
   { procedure: 'users.create', method: 'POST', summary: 'Create staff member', tag: 'Users' },
   { procedure: 'users.update', method: 'POST', summary: 'Update staff member', tag: 'Users' },
   { procedure: 'users.deactivate', method: 'POST', summary: 'Deactivate staff member', tag: 'Users' },
@@ -125,6 +132,7 @@ const ENDPOINTS: TrpcEndpoint[] = [
   { procedure: 'marketing.fundingSummary', method: 'GET', summary: 'Funding summary', tag: 'Marketing' },
   { procedure: 'marketing.createAdSpend', method: 'POST', summary: 'Create ad spend entry', tag: 'Marketing' },
   { procedure: 'marketing.listAdSpend', method: 'GET', summary: 'List ad spend', tag: 'Marketing' },
+  { procedure: 'marketing.adSpendStatusCounts', method: 'GET', summary: 'Ad spend status counts', tag: 'Marketing' },
   { procedure: 'marketing.metrics', method: 'GET', summary: 'Marketing performance metrics', tag: 'Marketing' },
   { procedure: 'marketing.leaderboard', method: 'GET', summary: 'Media buyer leaderboard', tag: 'Marketing' },
   { procedure: 'marketing.checkHighCpa', method: 'GET', summary: 'Check high CPA warning', tag: 'Marketing' },
@@ -194,6 +202,8 @@ const ENDPOINTS: TrpcEndpoint[] = [
   { procedure: 'dashboard.orderPipelineChart', method: 'GET', summary: 'Order pipeline chart (Volume, CS Engaged, Confirmed, Logistics, Delivered)', tag: 'Dashboard' },
 
   // Settings
+  { procedure: 'settings.getClientConfig', method: 'GET', summary: 'Get client UI config and effective theme', tag: 'Settings' },
+  { procedure: 'settings.updateClientUiConfig', method: 'POST', summary: 'Update org default UI config', tag: 'Settings' },
   { procedure: 'settings.getSystemSettings', method: 'GET', summary: 'Get system settings', tag: 'Settings' },
   { procedure: 'settings.getNotificationEmailConfig', method: 'GET', summary: 'Get notification email config', tag: 'Settings' },
   { procedure: 'settings.updateNotificationEmailConfig', method: 'POST', summary: 'Update notification email config', tag: 'Settings' },

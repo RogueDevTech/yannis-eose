@@ -237,6 +237,47 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 - The Virtual Buffer means the Sales Module sees 10% less stock than actually exists, preventing overselling during high-traffic bursts
 - Ghost Stock prevention: if a 3PL physical count does not match the digital record, the Dispatch button for that location is LOCKED until a Stock Reconciliation form is submitted with mandatory reason codes (Damaged, Lost, Expired, Theft)
 
+### When Building the App Theme System
+- 6 theme IDs: `system`, `light`, `dark`, `dim`, `ink`, `soft`
+- `users.app_theme` is nullable — `null` means follow org default (`system_settings.client_ui_config.defaultTheme`)
+- Always inline `getThemeBootScript()` in `root.tsx` BEFORE `<style>` tags to prevent theme flash on load
+- `applyAppTheme(id)` sets `data-app-theme` attribute on `<html>` + adds/removes `dark` class
+- `useAppTheme()` hook dispatches a custom `app-theme-change` event for cross-component sync
+- Legacy migration: map `'neutral'` → `'dim'` and `'contrast'` → `'light'` on any read from localStorage
+- Server persistence: call `users.updateMyAppTheme(appTheme)` via `trpc-browser.ts` (session-less fetch)
+
+### When Building the Push Notification Center
+The push system has four layers — all must be consistent:
+
+**1. Mirror In-App → Push**
+- In `notifications.service.ts`, after every `db.insert(notifications)`, call `sendPush(userId, { title, body, data: { url }, tag })`.
+- Never fire push without also saving the in-app notification row first.
+
+**2. Broadcast (`/admin/notifications/broadcast`)**
+- Insert one `push_broadcasts` row, then fan out to all target users' subscriptions as `push_delivery_log` rows with status `SENT`.
+- Role scope enforcement server-side: HoCS→CS_AGENT only, HoM→MEDIA_BUYER only, HoLogistics→RIDER+LOGISTICS_MANAGER only, SuperAdmin→all.
+- The broadcast tRPC procedure must reject out-of-scope targets even if the client sends them.
+
+**3. Automation Rules (`push_automation_rules` table)**
+- `CRON` rules: registered with `@nestjs/schedule` `@Cron()` dynamically from DB at startup + on rule create/update/toggle.
+- `EVENT` rules: checked inline in the relevant service method when the event fires (e.g. `ordersService` checks for `order_stuck` rules after status check).
+- Placeholders in `title_template`/`body_template` resolved before send: `{{user_name}}`, `{{order_count}}`, `{{product_name}}`, etc.
+- Active toggle: disabling a rule must unregister its cron job. Enabling must re-register it.
+
+**4. Delivery Log + Ack**
+- Every `sendPush()` call writes to `push_delivery_log` with status `SENT` or `FAILED` (on VAPID error).
+- `POST /api/push/ack { logId, event: 'shown' | 'clicked' }` — called from service worker. No session auth, but validate `logId` exists. Updates `shown_at` / `clicked_at` and advances status.
+- Stale `410 Gone` VAPID errors → delete the `push_subscriptions` row immediately.
+- Resend: re-calls `sendPush()` with the same payload and creates a NEW `push_delivery_log` row (do not mutate the original failed row).
+
+**Platform rules (always apply):**
+- Android PWA installed + permission granted → lock screen delivery works.
+- iOS 16.4+: MUST be added to Home Screen. Show install banner when `isIOS && !navigator.standalone`. Request notification permission only after banner interaction.
+- Every push payload: `{ title, body, icon: '/icon-192.png', badge: '/badge-72.png', data: { url, logId }, tag }`.
+- SW `push` handler: always call `self.registration.showNotification()` — never skip even if app is open.
+- SW `notificationclick` handler: `clients.openWindow(data.url)` + POST to `/api/push/ack` with `clicked`.
+- SW `push` handler: after `showNotification()`, POST to `/api/push/ack` with `shown`.
+
 ### When Building the Third-Party Logistics Module
 - Third-Party Logistics partners get their OWN login and simplified dashboard (not the full internal UI)
 - Dual-Entry Transfer: when Main Warehouse sends 100 units, those units are IN_TRANSIT — NOT available at the 3PL until the 3PL manager clicks Verify and Receive and inputs the actual received quantity
@@ -251,6 +292,12 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 - CPA = Total Ad Spend / Total Orders Created (all statuses)
 - True ROAS = Total Revenue from DELIVERED orders only / Total Ad Spend
 - If a Media Buyer logged spend vs actual leads exceeds a configurable threshold, auto-alert the Head of Marketing (High CPA Warning)
+
+**Funding Request Notification Rules (never change these):**
+- **Media Buyer requests funding** → notify `HEAD_OF_MARKETING` only. HoM is the one who funds them — SuperAdmin and Finance do NOT get this notification.
+- **Head of Marketing requests funding** → notify `SUPER_ADMIN` + `FINANCE_OFFICER` only. This is a disbursement request that Finance must act on.
+- **Funding disputed** (Media Buyer marks Not Received) → notify `SUPER_ADMIN` + `HEAD_OF_MARKETING`.
+- Implemented in `marketing.service.ts` → `createFundingRequest()`. The `if (requesterRole === 'HEAD_OF_MARKETING')` branch handles HoM; the `else` branch handles Media Buyers. Do NOT collapse these or add SuperAdmin/Finance to the Media Buyer branch.
 
 ### When Building the Finance Module
 - The True Profit formula: Revenue - (Landed COGS + Ad Spend + 3PL Fee + Delivery Fee + Commission)
@@ -285,6 +332,66 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 | 3PL Rider | Own assigned deliveries only | No | No (masked) | No | No |
 | Warehouse Manager | Inventory, stock movements, procurement | No | No | No | No |
 | HR Manager | All staff payouts, commission configs | No | No | No | Yes |
+
+---
+
+## UI Component Reuse Rules (Non-Negotiable)
+
+**The Platform has a shared component library. Every UI element must use it.**
+
+### Component-First Rule
+If a UI pattern appears in **2 or more places**, it must be a shared component in `apps/web/app/components/ui/`. Never duplicate raw Tailwind patterns across feature pages.
+
+### When building new UI, always reach for these components first:
+
+| Need | Use |
+|---|---|
+| Text input (any type) | `<TextInput />` |
+| Multiline text | `<Textarea />` |
+| Dropdown select | `<FormSelect />` |
+| Amount / currency input | `<AmountInput />` |
+| Search bar | `<SearchInput />` |
+| Label + input + error wrapper | `<FormField />` (when using custom inputs) |
+| Radio buttons | `<RadioGroup />` |
+| Checkbox | `<Checkbox />` |
+| Button | `<Button />` |
+| Modal / dialog | `<Modal />` |
+| Confirmation dialog | `<ConfirmActionModal />` |
+| Tab navigation | `<Tabs />` |
+| Page header (title + actions) | `<PageHeader />` |
+| Stat card (KPI) | `<StatCard />` from `card.tsx` |
+| Card / panel surface | `<Card />`, `<CardHeader />`, `<CardBody />`, `<CardFooter />` |
+| Financial P&L rows | `<StatRow />`, `<StatRowGroup />` |
+| Table with sticky header | `<DataTable />` |
+| Empty list state | `<EmptyState />` |
+| Pagination | `<Pagination />` |
+| Status badge (generic) | `<StatusBadge />` |
+| Order status badge | `<OrderStatusBadge />` |
+| ₦ price display | `<NairaPrice />` |
+| Filter pills / toggle group | `<FilterPills />` |
+| Key/value detail rows | `<DescriptionList />` |
+| Breadcrumb trail | `<Breadcrumb />` |
+| Collapsible section | `<Collapsible />` |
+| Accordion | `<Accordion />` |
+| Toast notifications | `<ToastProvider />` + `useToast()` |
+| File upload | `<FileUpload />` |
+| Date range filter | `<DateFilterBar />` |
+| Dropdown actions menu | `<ActionDropdown />` |
+| Loading spinner | `<Spinner />` |
+
+### When a new component IS needed
+If you need a UI pattern that isn't in the list above **and** it will appear in 2+ places:
+1. Create the component in `apps/web/app/components/ui/`
+2. Add it to the table above in this CLAUDE.md
+3. Use it immediately in all places it's needed
+
+### Never do this
+- Raw `<input className="border rounded...">` — use `<TextInput />`
+- Raw `<select className="...">` — use `<FormSelect />`
+- Inline `₦{value.toLocaleString()}` — use `<NairaPrice />`
+- Manual `<div className="flex justify-between"><span>Label</span><span>Value</span></div>` rows — use `<StatRow />`
+- Manual empty state divs with dashed borders — use `<EmptyState />`
+- Manual pagination controls — use `<Pagination />`
 
 ---
 
@@ -360,6 +467,11 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT send raw phone numbers via SMS or WhatsApp — always route through the platform bridge
 - Do NOT write `order_timeline_events` rows outside of the same database transaction as the triggering mutation — timeline events must be atomic with their state change
 - Do NOT render the Mirror View with any interactive action buttons — it is read-only, always
+- Do NOT fire a Web Push without first inserting the in-app notification row — push is always the mirror layer, not a standalone channel
+- Do NOT send push from an automation EVENT rule outside the triggering service method's transaction — inline check only
+- Do NOT delete a `push_delivery_log` row on failure — mark as `FAILED` and use resend flow
+- Do NOT apply app theme changes only on the client — always sync to server via `users.updateMyAppTheme` so the preference survives session restoration
+- Do NOT inline theme script AFTER stylesheets — it must be the first `<script>` in `<head>` to prevent flash of wrong theme
 
 ---
 
@@ -382,27 +494,72 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 The system is **97%+ complete**. All 7 core modules are fully built with backend services, tRPC routers, and frontend dashboards.
 
 ### What Is Built
-- **21 NestJS modules** (auth, orders, finance, hr, inventory, logistics, marketing, products, voip, payments, cart, settings, notifications, events, audit, users, permission-requests, permissions, database, common, trpc)
-- **18 tRPC routers** (audit, cart, dashboard, finance, health, hr, inventory, logistics, marketing, notifications, orders, permission-requests, product-categories, products, settings, users, voip + root index)
+- **22 NestJS modules** (auth, orders, finance, hr, inventory, logistics, marketing, products, voip, payments, cart, settings, notifications, events, audit, users, permission-requests, permissions, database, common, trpc, branches)
+- **19 tRPC routers** (audit, branches, cart, dashboard, finance, health, hr, inventory, logistics, marketing, notifications, orders, permission-requests, product-categories, products, settings, users, voip + root index)
 - **65+ Remix routes** across admin, auth, hr, rider, tpl, payment route groups
-- **29 feature modules** in `apps/web/app/features/`
-- **18 schema files** and **14 validator files** in `packages/shared`
-- **40+ SQL migrations** including temporal triggers, RLS, history tables
+- **32 feature modules** in `apps/web/app/features/`
+- **20 schema files** and **16 validator files** in `packages/shared`
+- **55 SQL migrations** including temporal triggers, RLS, history tables, push notification tables, multi-branch schema
 - **7 Playwright E2E specs** covering all critical user flows
 - **CI/CD pipeline** (.github/workflows/ci.yml + deploy-dev.yml)
 - **3 documentation guides** (Developer Guide, Runbook, ADRs)
 
-### What Remains (Infrastructure + Feature Batch 2)
+### What Remains (Infrastructure Only)
 - Task 6.1: Multi-CDN DNS Failover (requires DNS provider setup)
 - Task 6.3: Load Testing (requires production-scale data)
 - Edge Worker KV namespace provisioning (Cloudflare account setup)
 - Twilio credential configuration (works in mock mode without)
-- **Task 8.x: Order Lifecycle Timeline** — `order_timeline_events` table, event writer, tRPC procedure, `OrderTimeline` UI component
-- **Task 9.x: Multi-Branch Architecture** — `branches` + `user_branches` schema, RLS updates, branch session context, branch switcher UI, cross-branch reporting
-- **Task 10.1: Remove Agent Order Transfer** — drop `order_transfer_requests` table + procedures + UI
-- **Task 11.x: CS Communication Panel** — `message_templates` + `outbound_messages` schema, `messaging.service.ts`, template management UI, comms panel UI
-- **Task 12.x: Supervisor Mirror View** — agent state Socket.io broadcasting, mirror view backend/UI, Team Live View
-- **Task 13.x: Claim-Based Dispatch Mode** — claim mode logic, `claimOrder()` with atomic lock, Claim Queue UI, dispatch mode config
+
+### Phase 8 — Feature Batch 2 (COMPLETE as of March 2026)
+- **Task 8.x: Order Lifecycle Timeline** ✅ — `order_timeline_events` table, `writeTimelineEvent()` helper, `orders.getTimeline` tRPC, `OrderTimeline` UI component
+- **Task 9.x: Multi-Branch Architecture** ✅ — `branches` + `user_branches` schema, RLS updates with `yannis.current_branch_id`, branch session context, branch switcher UI, cross-branch reporting, `BRANCH_ADMIN` role
+- **Task 10.1: Remove Agent Order Transfer** ✅ — `order_transfer_requests` table + procedures + UI removed
+- **Task 11.x: CS Communication Panel** ✅ — `message_templates` + `outbound_messages` schema, `messaging.service.ts`, template management UI, unified call/SMS/WhatsApp comms panel
+- **Task 12.x: Supervisor Mirror View** ✅ — `agent:state_update` Socket.io broadcasting, mirror view backend/UI, Team Live View, "Being Observed" indicator for agents
+- **Task 13.x: Claim-Based Dispatch Mode** ✅ — `claimOrder()` with atomic Redis/Postgres lock, claim cap enforcement, Claim Queue UI, dispatch mode config in system settings
+
+### Phase 14 — Push Notification Center (COMPLETE as of March 2026)
+All 4 layers of the push system are fully operational:
+
+**Schema (4 new tables):**
+- `push_subscriptions` — browser VAPID device tokens per user
+- `push_broadcasts` — admin-triggered audience broadcasts (branch-scoped optional)
+- `push_automation_rules` — CRON/EVENT-based rules (temporal, toggleable, branch-scoped)
+- `push_delivery_log` — per-attempt delivery tracking with SENT/SHOWN/CLICKED/FAILED status
+
+**Backend:**
+- `NotificationsService` extended with 20+ push methods: `savePushSubscription`, `sendPush`, `broadcastPush`, `fireAutomationRule`, `ackPush`, `resendPush`, `getDeliveryLog`, etc.
+- `PushSchedulerService` (`apps/api/src/notifications/push-scheduler.service.ts`) — dynamic CRON job registry using `SchedulerRegistry`; loads all active CRON rules on module init, registers/unregisters jobs on toggle
+- `PushController` (`apps/api/src/notifications/push.controller.ts`) — public `POST /push/ack` endpoint (no auth required, called from service worker); validates `logId`, updates `shown_at`/`clicked_at`
+- Role-scoped broadcast enforcement: HoCS→CS_AGENT only, HoM→MEDIA_BUYER only, SuperAdmin→all
+
+**Frontend:**
+- `usePushSubscription()` hook — browser push register/unsubscribe, VAPID key conversion, calls `notifications.savePushSubscription` tRPC
+- `PushPermissionModal` — non-dismissible blocking modal when push permission not granted (iOS gate)
+- `IosInstallBanner` — educates iOS users to add PWA to home screen (required for lock-screen push on iOS 16.4+); dismisses up to 3× per session
+- Notification panels: `NotificationsBroadcastPanel`, `NotificationsAutomationsPanel`, `NotificationsDeliveryLogPanel` (in `apps/web/app/features/notifications/panels/`)
+- `SettingsPushPanel` — push preferences tab in Settings page
+
+**Service Worker (`apps/web/public/sw.js` extended):**
+- `push` event: always calls `showNotification()` even when app is open; POSTs `/push/ack` with `shown`
+- `notificationclick` event: `clients.openWindow(data.url)` + POST `/push/ack` with `clicked`
+- Push payload structure: `{ title, body, icon: '/icon-192.png', badge: '/badge-72.png', data: { url, logId }, tag }`
+
+**Routes:**
+- `/admin/notifications` — tabbed notification center (broadcast / automations / log)
+- `/admin/notifications/broadcast`, `/admin/notifications/automations`, `/admin/notifications/log` — redirect helpers to tabs
+- `/push/ack` — public service worker ack endpoint
+
+### Phase 14 Supplement — Per-User App Theme (COMPLETE)
+- 6 themes supported: system, light, dark, dim, ink, soft
+- `users.app_theme` column (nullable — null follows org default from `system_settings.client_ui_config`)
+- `migration 0055_users_app_theme.sql` adds column to `users` + `users_history`
+- `theme.ts` library: `APP_THEMES`, `applyAppTheme()`, `persistAndApplyTheme()`, `getThemeBootScript()` (before-paint inline script to prevent flash)
+- `useAppTheme()` hook: manage state + localStorage + server sync via `users.updateMyAppTheme`
+- `useServerAppThemeSync.ts` hook: initial sync of server preference to client
+- Boot script inlined in `root.tsx` before `<style>` to apply theme before first paint
+- Legacy theme migration: `'neutral'` → `'dim'`, `'contrast'` → `'light'` on read
+- `trpc-browser.ts` — browser-callable tRPC without session: `fetchClientConfig()`, `postUpdateMyAppTheme()`
 
 ### Additional Modules Beyond Original PRD
 - **Payments module** (`apps/api/src/payments/`) — Paystack integration for online payments
@@ -410,6 +567,8 @@ The system is **97%+ complete**. All 7 core modules are fully built with backend
 - **TPL dashboard** (`apps/web/app/routes/tpl.*`) — Dedicated 3PL partner portal with inventory, orders, remittances, notifications, settings
 - **Delivery remittances** — 3PL delivery fee tracking and settlement
 - **Delivery confirmation requests** — OTP/GPS verification system
+- **Branches module** (`apps/api/src/branches/`) — Multi-branch management, user-branch assignments, switcher
+- **Push Notification Center** — Full VAPID send path, automation rules engine, delivery log, service worker ack
 
 ---
 

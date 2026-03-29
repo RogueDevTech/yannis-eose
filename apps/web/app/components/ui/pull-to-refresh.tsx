@@ -165,7 +165,7 @@ export function PullToRefresh({ children, disabled = false }: PullToRefreshProps
       {/* Pull indicator — fixed at top, refresh icon visible and rotating during drag */}
       {showIndicator && (
         <div
-          className="fixed left-0 right-0 top-0 z-40 flex items-center justify-center overflow-hidden bg-surface-100 dark:bg-surface-900 text-surface-600 dark:text-surface-400 shadow-sm ease-out"
+          className="fixed left-0 right-0 top-0 z-40 flex items-center justify-center overflow-hidden bg-app-elevated text-app-fg-muted shadow-sm ease-out"
           style={{
             height: indicatorHeight,
             transition: `height ${RELEASE_TRANSITION_MS}ms ease-out`,

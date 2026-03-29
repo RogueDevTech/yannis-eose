@@ -5,10 +5,15 @@ import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Tabs } from '~/components/ui/tabs';
+import { PageHeader } from '~/components/ui/page-header';
+import { FormSelect } from '~/components/ui/form-select';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { TextInput } from '~/components/ui/text-input';
 import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from './types';
-import { STATUS_BADGE } from './types';
 
 export function TransfersPage({ transfers, locations, products, levels, canInitiate = true }: TransfersStreamData) {
   const fetcher = useFetcher();
@@ -55,19 +60,17 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
   return (
     <div className="space-y-4">
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Stock Transfers</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Dual-entry stock transfers between warehouse and 3PL locations
-          </p>
-        </div>
-        {canInitiate && (
-          <Button variant="primary" size="sm" onClick={() => setShowInitiateForm(!showInitiateForm)}>
-            {showInitiateForm ? 'Close' : '+ Initiate Transfer'}
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Stock Transfers"
+        description="Dual-entry stock transfers between warehouse and 3PL locations"
+        actions={
+          canInitiate ? (
+            <Button variant="primary" size="sm" onClick={() => setShowInitiateForm(!showInitiateForm)}>
+              {showInitiateForm ? 'Close' : '+ Initiate Transfer'}
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Error banner */}
       {actionError && !dismissedError && (
@@ -79,29 +82,26 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
         />
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Transfers</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{transfers.length}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">In Transit</p>
-          <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{inTransitCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Received</p>
-          <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{receivedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-            Disputed / Shrinkage
-          </p>
-          <p className="text-2xl font-bold text-danger-600 dark:text-danger-400 mt-1">
-            {disputedCount}{totalShrinkage > 0 && <span className="text-sm font-normal ml-1">({totalShrinkage} units)</span>}
-          </p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        items={[
+          { label: 'Total Transfers', value: transfers.length, valueClassName: 'text-app-fg' },
+          { label: 'In Transit', value: inTransitCount, valueClassName: 'text-warning-600 dark:text-warning-400' },
+          { label: 'Received', value: receivedCount, valueClassName: 'text-success-600 dark:text-success-400' },
+          {
+            label: 'Disputed / Shrinkage',
+            value: (
+              <>
+                {disputedCount}
+                {totalShrinkage > 0 && (
+                  <span className="text-sm font-normal ml-1">({totalShrinkage} units)</span>
+                )}
+              </>
+            ),
+            valueClassName: 'text-danger-600 dark:text-danger-400',
+            title: totalShrinkage > 0 ? `${totalShrinkage} units shrinkage` : undefined,
+          },
+        ]}
+      />
 
       {/* Initiate Transfer Form — only when canInitiate (admin); TPL only verifies receipt */}
       {canInitiate && (
@@ -120,8 +120,8 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 return (
                   <fetcher.Form method="post" className="card space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Initiate Stock Transfer</h3>
-                      <button type="button" onClick={() => setShowInitiateForm(false)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
+                      <h3 className="text-lg font-semibold text-app-fg">Initiate Stock Transfer</h3>
+                      <button type="button" onClick={() => setShowInitiateForm(false)} className="text-app-fg-muted hover:text-app-fg">
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                         </svg>
@@ -131,84 +131,76 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                     <input type="hidden" name="intent" value="initiateTransfer" />
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Product</label>
-                        <select
-                          name="productId"
-                          required
-                          className="input"
-                          value={selectedProductId}
-                          onChange={(e) => setSelectedProductId(e.target.value)}
-                        >
-                          <option value="">Select product...</option>
-                          {activeProducts.map((p: Product) => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
-                      </div>
+                      <FormSelect
+                        name="productId"
+                        label="Product"
+                        required
+                        value={selectedProductId}
+                        onChange={(e) => setSelectedProductId(e.target.value)}
+                        options={[
+                          { value: '', label: 'Select product...' },
+                          ...activeProducts.map((p: Product) => ({
+                            value: p.id,
+                            label: p.name,
+                          })),
+                        ]}
+                      />
 
-                      <div>
-                        <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">From Location</label>
-                        <select
-                          name="fromLocationId"
-                          required
-                          className="input"
-                          value={selectedFromLocation}
-                          onChange={(e) => setSelectedFromLocation(e.target.value)}
-                        >
-                          <option value="">Select source...</option>
-                          {activeLocations.map((l: Location) => (
-                            <option key={l.id} value={l.id}>
-                              {l.name}
-                              {selectedProductId && ` (${getAvailableStock(selectedProductId, l.id)} avail.)`}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                      <FormSelect
+                        name="fromLocationId"
+                        label="From Location"
+                        required
+                        value={selectedFromLocation}
+                        onChange={(e) => setSelectedFromLocation(e.target.value)}
+                        options={[
+                          { value: '', label: 'Select source...' },
+                          ...activeLocations.map((l: Location) => ({
+                            value: l.id,
+                            label: `${l.name}${selectedProductId ? ` (${getAvailableStock(selectedProductId, l.id)} avail.)` : ''}`,
+                          })),
+                        ]}
+                      />
 
-                      <div>
-                        <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">To Location</label>
-                        <select name="toLocationId" required className="input">
-                          <option value="">Select destination...</option>
-                          {activeLocations
+                      <FormSelect
+                        name="toLocationId"
+                        label="To Location"
+                        required
+                        options={[
+                          { value: '', label: 'Select destination...' },
+                          ...activeLocations
                             .filter((l: Location) => l.id !== selectedFromLocation)
-                            .map((l: Location) => (
-                              <option key={l.id} value={l.id}>{l.name}</option>
-                            ))}
-                        </select>
-                      </div>
+                            .map((l: Location) => ({
+                              value: l.id,
+                              label: l.name,
+                            })),
+                        ]}
+                      />
 
-                      <div>
-                        <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                          Quantity
-                          {selectedProductId && selectedFromLocation && (
-                            <span className="text-surface-700 dark:text-surface-300 font-normal ml-1">
-                              (max: {getAvailableStock(selectedProductId, selectedFromLocation)})
-                            </span>
-                          )}
-                        </label>
-                        <input
-                          name="quantity"
-                          type="number"
-                          min={1}
-                          max={selectedProductId && selectedFromLocation ? getAvailableStock(selectedProductId, selectedFromLocation) : undefined}
-                          required
-                          placeholder="Units to transfer"
-                          className="input"
-                        />
-                      </div>
+                      <TextInput
+                        name="quantity"
+                        type="number"
+                        label={
+                          selectedProductId && selectedFromLocation
+                            ? `Quantity (max: ${getAvailableStock(selectedProductId, selectedFromLocation)})`
+                            : 'Quantity'
+                        }
+                        min={1}
+                        max={selectedProductId && selectedFromLocation ? getAvailableStock(selectedProductId, selectedFromLocation) : undefined}
+                        required
+                        placeholder="Units to transfer"
+                      />
                     </div>
 
                     {/* Visual transfer flow */}
                     {selectedProductId && selectedFromLocation && (
-                      <div className="flex items-center justify-center gap-3 py-2 text-sm text-surface-800 dark:text-surface-200">
-                        <span className="font-medium text-surface-700 dark:text-surface-200">
+                      <div className="flex items-center justify-center gap-3 py-2 text-sm text-app-fg-muted">
+                        <span className="font-medium text-app-fg-muted">
                           {getLocationName(selectedFromLocation)}
                         </span>
                         <svg className="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                         </svg>
-                        <span className="text-surface-700 dark:text-surface-300">3PL Location</span>
+                        <span className="text-app-fg-muted">3PL Location</span>
                       </div>
                     )}
 
@@ -238,10 +230,10 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
       {/* Verify Transfer Modal */}
       {verifyingTransfer && (
-        <Modal open onClose={() => setVerifyingTransfer(null)} maxWidth="max-w-lg" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
+        <Modal open onClose={() => setVerifyingTransfer(null)} maxWidth="max-w-lg" contentClassName="p-6 space-y-4 bg-app-elevated">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Verify Transfer Receipt</h3>
-              <button onClick={() => setVerifyingTransfer(null)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
+              <h3 className="text-lg font-semibold text-app-fg">Verify Transfer Receipt</h3>
+              <button onClick={() => setVerifyingTransfer(null)} className="text-app-fg-muted hover:text-app-fg">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -249,10 +241,10 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
             </div>
 
             {/* Transfer details — product name deferred */}
-            <div className="bg-surface-50 dark:bg-surface-700/50 rounded-lg p-3 space-y-2">
+            <div className="bg-app-hover rounded-lg p-3 space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-surface-800 dark:text-surface-200">Product</span>
-                <span className="font-medium text-surface-900 dark:text-white">
+                <span className="text-app-fg-muted">Product</span>
+                <span className="font-medium text-app-fg">
                   <DeferredSection resolve={products} skeleton="inline">
                     {(resolvedProducts) => {
                       const prod = resolvedProducts.find((p: Product) => p.id === verifyingTransfer.productId);
@@ -262,20 +254,20 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-surface-800 dark:text-surface-200">From</span>
-                <span className="font-medium text-surface-900 dark:text-white">
+                <span className="text-app-fg-muted">From</span>
+                <span className="font-medium text-app-fg">
                   {getLocationName(verifyingTransfer.fromLocationId)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-surface-800 dark:text-surface-200">To</span>
-                <span className="font-medium text-surface-900 dark:text-white">
+                <span className="text-app-fg-muted">To</span>
+                <span className="font-medium text-app-fg">
                   {getLocationName(verifyingTransfer.toLocationId)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-surface-800 dark:text-surface-200">Quantity Sent</span>
-                <span className="font-bold text-surface-900 dark:text-white">{verifyingTransfer.quantitySent} units</span>
+                <span className="text-app-fg-muted">Quantity Sent</span>
+                <span className="font-bold text-app-fg">{verifyingTransfer.quantitySent} units</span>
               </div>
             </div>
 
@@ -284,37 +276,33 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
               <input type="hidden" name="transferId" value={verifyingTransfer.id} />
 
               <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                  Quantity Actually Received
-                </label>
-                <input
+                <TextInput
                   name="quantityReceived"
                   type="number"
+                  label="Quantity Actually Received"
                   min={0}
                   max={verifyingTransfer.quantitySent}
                   required
-                  defaultValue={verifyingTransfer.quantitySent}
-                  className="input"
+                  defaultValue={String(verifyingTransfer.quantitySent)}
                 />
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                <p className="text-xs text-app-fg-muted mt-1">
                   If less than {verifyingTransfer.quantitySent}, a shrinkage alert will be sent to the CEO and Head of Logistics
                 </p>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">
-                  Shrinkage Reason <span className="text-surface-700 font-normal">(if qty differs)</span>
-                </label>
-                <select name="shrinkageReason" className="input">
-                  <option value="">N/A — full quantity received</option>
-                  <option value="DAMAGED">Damaged in transit</option>
-                  <option value="LOST">Lost during shipping</option>
-                  <option value="EXPIRED">Expired product</option>
-                  <option value="THEFT">Suspected theft</option>
-                  <option value="COUNTING_ERROR">Counting error at source</option>
-                  <option value="OTHER">Other</option>
-                </select>
-              </div>
+              <FormSelect
+                name="shrinkageReason"
+                label="Shrinkage Reason (if qty differs)"
+                options={[
+                  { value: '', label: 'N/A — full quantity received' },
+                  { value: 'DAMAGED', label: 'Damaged in transit' },
+                  { value: 'LOST', label: 'Lost during shipping' },
+                  { value: 'EXPIRED', label: 'Expired product' },
+                  { value: 'THEFT', label: 'Suspected theft' },
+                  { value: 'COUNTING_ERROR', label: 'Counting error at source' },
+                  { value: 'OTHER', label: 'Other' },
+                ]}
+              />
 
               <div className="flex gap-2 pt-2">
                 <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Verifying...">
@@ -360,7 +348,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 const shrinkage = t.quantityReceived !== null ? t.quantitySent - t.quantityReceived : 0;
                 return (
                   <tr key={t.id} className="table-row">
-                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">
+                    <td className="table-cell font-medium text-app-fg">
                       <DeferredSection resolve={products} skeleton="inline">
                         {(resolvedProducts) => {
                           const prod = resolvedProducts.find((p: Product) => p.id === t.productId);
@@ -368,10 +356,10 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                         }}
                       </DeferredSection>
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">
+                    <td className="table-cell text-app-fg-muted">
                       {getLocationName(t.fromLocationId)}
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200">
+                    <td className="table-cell text-app-fg-muted">
                       {getLocationName(t.toLocationId)}
                     </td>
                     <td className="table-cell text-right font-medium">{t.quantitySent}</td>
@@ -384,15 +372,13 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                           )}
                         </span>
                       ) : (
-                        <span className="text-surface-700 dark:text-surface-300">{'\u2014'}</span>
+                        <span className="text-app-fg-muted">{'\u2014'}</span>
                       )}
                     </td>
                     <td className="table-cell">
-                      <span className={STATUS_BADGE[t.transferStatus] ?? 'badge'}>
-                        {t.transferStatus.replace(/_/g, ' ')}
-                      </span>
+                      <StatusBadge status={t.transferStatus} />
                     </td>
-                    <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                    <td className="table-cell text-app-fg-muted text-sm">
                       {new Date(t.createdAt).toLocaleDateString('en-NG', {
                         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                       })}
@@ -414,10 +400,15 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
               })}
               {filteredTransfers.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                    {activeTab === 'all'
-                      ? 'No transfers yet. Initiate a transfer to move stock between locations.'
-                      : `No ${activeTab.replace('_', ' ')} transfers.`}
+                  <td colSpan={8} className="px-4 py-12 text-center">
+                    <EmptyState
+                      title="No transfers found"
+                      description={
+                        activeTab === 'all'
+                          ? 'No transfers yet. Initiate a transfer to move stock between locations.'
+                          : `No ${activeTab.replace('_', ' ')} transfers.`
+                      }
+                    />
                   </td>
                 </tr>
               )}
@@ -430,9 +421,9 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
           {filteredTransfers.map((t: Transfer) => {
             const shrinkage = t.quantityReceived !== null ? t.quantitySent - t.quantityReceived : 0;
             return (
-              <div key={t.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+              <div key={t.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-surface-900 dark:text-white text-sm">
+                  <span className="font-medium text-app-fg text-sm">
                     <DeferredSection resolve={products} skeleton="inline">
                       {(resolvedProducts) => {
                         const prod = resolvedProducts.find((p: Product) => p.id === t.productId);
@@ -440,12 +431,10 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                       }}
                     </DeferredSection>
                   </span>
-                  <span className={STATUS_BADGE[t.transferStatus] ?? 'badge'}>
-                    {t.transferStatus.replace(/_/g, ' ')}
-                  </span>
+                  <StatusBadge status={t.transferStatus} />
                 </div>
 
-                <div className="flex items-center gap-2 text-sm text-surface-800 dark:text-surface-200">
+                <div className="flex items-center gap-2 text-sm text-app-fg-muted">
                   <span>{getLocationName(t.fromLocationId)}</span>
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
@@ -456,7 +445,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 <div className="flex items-center justify-between text-sm">
                   <div className="flex gap-4">
                     <span>
-                      Sent: <span className="font-medium text-surface-900 dark:text-white">{t.quantitySent}</span>
+                      Sent: <span className="font-medium text-app-fg">{t.quantitySent}</span>
                     </span>
                     {t.quantityReceived !== null && (
                       <span>
@@ -474,7 +463,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                   )}
                 </div>
 
-                <p className="text-xs text-surface-700 dark:text-surface-300">
+                <p className="text-xs text-app-fg-muted">
                   {new Date(t.createdAt).toLocaleDateString('en-NG', {
                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                   })}
@@ -488,9 +477,14 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
             );
           })}
           {filteredTransfers.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-300">
-              No transfers found
-            </div>
+            <EmptyState
+              title="No transfers found"
+              description={
+                activeTab === 'all'
+                  ? 'No transfers yet. Initiate a transfer to move stock between locations.'
+                  : `No ${activeTab.replace('_', ' ')} transfers.`
+              }
+            />
           )}
         </div>
       </div>

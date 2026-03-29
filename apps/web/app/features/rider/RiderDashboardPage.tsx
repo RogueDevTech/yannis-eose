@@ -87,7 +87,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
       {/* Header */}
       <div className="mb-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-surface-900 dark:text-white">
+          <h1 className="text-xl font-bold text-app-fg">
             My Deliveries
           </h1>
           <div className="flex items-center gap-2">
@@ -153,22 +153,22 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
       {/* Empty state */}
       {activeTab === 'transit' && orders.length === 0 && (
         <div className="mt-16 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-surface-100 dark:bg-surface-800">
-            <svg className="h-8 w-8 text-surface-700" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-app-hover">
+            <svg className="h-8 w-8 text-app-fg-muted" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125h-.752a2.25 2.25 0 0 0-1.342.447L13.5 12l-2.654-1.94A2.25 2.25 0 0 0 9.504 9.56H3.375c-.621 0-1.125.504-1.125 1.125v4.5c0 .621.504 1.125 1.125 1.125H6.75" />
             </svg>
           </div>
-          <p className="text-surface-800 dark:text-surface-200">No deliveries in transit</p>
+          <p className="text-app-fg-muted">No deliveries in transit</p>
         </div>
       )}
       {activeTab === 'pickup' && dispatchedOrders.length === 0 && (
         <div className="mt-16 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-surface-100 dark:bg-surface-800">
-            <svg className="h-8 w-8 text-surface-700" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-app-hover">
+            <svg className="h-8 w-8 text-app-fg-muted" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-2.25-1.313M21 7.5v2.25m0-2.25l-2.25 1.313M3 7.5l2.25-1.313M3 7.5l2.25 1.313M3 7.5v2.25m9 3l2.25-1.313M12 12.75l-2.25-1.313M12 12.75V15m0 6.75l2.25-1.313M12 21.75V19.5m0 2.25l-2.25-1.313m0-16.875L12 2.25l2.25 1.313M21 14.25v2.25l-2.25 1.313m-13.5 0L3 16.5v-2.25" />
             </svg>
           </div>
-          <p className="text-surface-800 dark:text-surface-200">No orders waiting for pickup</p>
+          <p className="text-app-fg-muted">No orders waiting for pickup</p>
         </div>
       )}
 
@@ -178,24 +178,24 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
           {dispatchedOrders.map((order) => (
             <div
               key={order.id}
-              className="rounded-xl border border-surface-200 bg-white dark:border-surface-700 dark:bg-surface-900 p-4"
+              className="rounded-xl border border-app-border bg-app-elevated p-4"
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-semibold text-surface-900 dark:text-white">{order.customerName}</p>
-                  <p className="mt-0.5 text-xs text-surface-800 dark:text-surface-200">{order.id.slice(0, 8)}...</p>
+                  <p className="font-semibold text-app-fg">{order.customerName}</p>
+                  <p className="mt-0.5 text-xs text-app-fg-muted">{order.id.slice(0, 8)}...</p>
                 </div>
                 {order.totalAmount && (
-                  <span className="text-sm font-semibold text-surface-700 dark:text-surface-300">
+                  <span className="text-sm font-semibold text-app-fg-muted">
                     &#8358;{parseFloat(order.totalAmount).toLocaleString()}
                   </span>
                 )}
               </div>
               {order.deliveryAddress && (
-                <p className="mt-2 text-sm text-surface-600 dark:text-surface-200">{order.deliveryAddress}</p>
+                <p className="mt-2 text-sm text-app-fg-muted">{order.deliveryAddress}</p>
               )}
               {order.deliveryNotes && (
-                <p className="mt-1 text-xs italic text-surface-700 dark:text-surface-300">Note: {order.deliveryNotes}</p>
+                <p className="mt-1 text-xs italic text-app-fg-muted">Note: {order.deliveryNotes}</p>
               )}
               <fetcher.Form method="POST" className="mt-3">
                 <input type="hidden" name="orderId" value={order.id} />
@@ -225,7 +225,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
             className={`rounded-xl border p-4 transition-colors cursor-pointer ${
               selectedOrder?.id === order.id
                 ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20'
-                : 'border-surface-200 bg-white dark:border-surface-700 dark:bg-surface-900'
+                : 'border-app-border bg-app-elevated'
             }`}
             onClick={() => {
               setSelectedOrder(selectedOrder?.id === order.id ? null : order);
@@ -239,27 +239,27 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
           >
             <div className="flex items-start justify-between">
               <div>
-                <p className="font-semibold text-surface-900 dark:text-white">
+                <p className="font-semibold text-app-fg">
                   {order.customerName}
                 </p>
-                <p className="mt-0.5 text-xs text-surface-800 dark:text-surface-200">
+                <p className="mt-0.5 text-xs text-app-fg-muted">
                   {order.id.slice(0, 8)}...
                 </p>
               </div>
               {order.totalAmount && (
-                <span className="text-sm font-semibold text-surface-700 dark:text-surface-300">
+                <span className="text-sm font-semibold text-app-fg-muted">
                   &#8358;{parseFloat(order.totalAmount).toLocaleString()}
                 </span>
               )}
             </div>
 
             {order.deliveryAddress && (
-              <p className="mt-2 text-sm text-surface-600 dark:text-surface-200">
+              <p className="mt-2 text-sm text-app-fg-muted">
                 {order.deliveryAddress}
               </p>
             )}
             {order.deliveryNotes && (
-              <p className="mt-1 text-xs italic text-surface-700 dark:text-surface-300">
+              <p className="mt-1 text-xs italic text-app-fg-muted">
                 Note: {order.deliveryNotes}
               </p>
             )}
@@ -270,7 +270,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
                 {/* v1: Only 3PL marks delivered. Rider can only mark Returned. */}
                 {!actionType && (
                   <div className="space-y-2">
-                    <p className="text-sm text-surface-600 dark:text-surface-400">
+                    <p className="text-sm text-app-fg-muted">
                       Your 3PL manager will confirm delivery. If the customer rejects, mark as Returned below.
                     </p>
                     <button
@@ -287,21 +287,21 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
                 {/* RETURNED form */}
                 {actionType === 'RETURNED' && (
                   <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-                    <label className="block text-sm font-medium text-surface-700 dark:text-surface-300">
+                    <label className="block text-sm font-medium text-app-fg-muted">
                       Return Reason (min 10 characters)
                     </label>
                     <textarea
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       rows={3}
-                      className="w-full rounded-lg border border-surface-300 bg-white px-4 py-3 text-sm dark:border-surface-600 dark:bg-surface-800 dark:text-white"
+                      className="w-full rounded-lg border border-app-border bg-white px-4 py-3 text-sm dark:border-surface-600 dark:bg-surface-800 dark:text-white"
                       placeholder="Customer refused, wrong address, etc."
                     />
                     <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => setActionType(null)}
-                        className="flex-1 rounded-lg border border-surface-300 py-3 text-sm font-medium text-surface-700 dark:border-surface-600 dark:text-surface-300"
+                        className="flex-1 rounded-lg border border-app-border py-3 text-sm font-medium text-app-fg-muted dark:border-surface-600 dark:text-surface-300"
                         style={{ minHeight: '48px' }}
                       >
                         Back

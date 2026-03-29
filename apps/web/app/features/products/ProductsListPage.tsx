@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { Button } from '~/components/ui/button';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { PageHeader } from '~/components/ui/page-header';
+import { SearchInput } from '~/components/ui/search-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { EmptyState } from '~/components/ui/empty-state';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { Pagination } from '~/components/ui/pagination';
 import type { Product } from './types';
-import { PRODUCT_STATUS_COLORS } from './types';
 import { ProductViewModal } from './ProductViewModal';
 
 interface ProductsListPageProps {
@@ -12,6 +17,8 @@ interface ProductsListPageProps {
   page: number;
   totalPages: number;
   canEditProduct?: boolean;
+  /** Shown only when user has products.create (e.g. warehouse); media buyers must not see Add Product. */
+  canCreateProduct?: boolean;
 }
 
 function formatPriceRange(product: Product): string {
@@ -39,16 +46,16 @@ function formatOffersStructure(offers: Product['offers'] | null | undefined): st
 }
 
 function OfferTiersDisplay({ offers }: { offers: Product['offers'] | null | undefined }) {
-  if (!offers?.length) return <span className="text-surface-500">\u2014</span>;
+  if (!offers?.length) return <span className="text-app-fg-muted">\u2014</span>;
   return (
-    <div className="space-y-2 text-xs text-surface-700 dark:text-surface-200 whitespace-normal">
+    <div className="space-y-2 text-xs text-app-fg-muted whitespace-normal">
       {offers.map((o, idx) => (
         <div key={`${o.qty}-${o.price}-${idx}`} className="flex items-baseline gap-x-3 whitespace-nowrap">
           <span className="tabular-nums w-5 text-right font-medium">{o.qty}</span>
-          <span className="text-surface-500">-</span>
+          <span className="text-app-fg-muted">-</span>
           <span className="tabular-nums font-medium">{'\u20A6'}{Number(o.price).toLocaleString()}</span>
           {o.label && (
-            <span className="text-surface-600 dark:text-surface-400">({o.label})</span>
+            <span className="text-app-fg-muted">({o.label})</span>
           )}
         </div>
       ))}
@@ -74,6 +81,7 @@ export function ProductsListPage({
   page,
   totalPages,
   canEditProduct = false,
+  canCreateProduct = false,
 }: ProductsListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -110,75 +118,60 @@ export function ProductsListPage({
   return (
     <div className="space-y-4">
       {/* Page header */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Products</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Manage your product catalog and bundle offers
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          <Link to="/admin/products/new" className="btn-primary">
-            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Add Product
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title="Products"
+        description="Manage your product catalog and bundle offers"
+        actions={
+          <>
+            <PageRefreshButton />
+            {canCreateProduct ? (
+              <Link to="/admin/products/new" className="btn-primary">
+                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Add Product
+              </Link>
+            ) : null}
+          </>
+        }
+      />
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Products</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Active</p>
-          <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">
-            {products.filter((p) => p.status === 'ACTIVE').length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Categories</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
-            {new Set(products.map((p) => p.category).filter(Boolean)).size}
-          </p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        items={[
+          { label: 'Total Products', value: total, valueClassName: 'text-app-fg' },
+          {
+            label: 'Active',
+            value: products.filter((p) => p.status === 'ACTIVE').length,
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+          {
+            label: 'Categories',
+            value: new Set(products.map((p) => p.category).filter(Boolean)).size,
+            valueClassName: 'text-app-fg',
+          },
+        ]}
+      />
 
       {/* Filters */}
       <div className="card">
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-700"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search by name..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input pl-10 py-1.5"
-            />
-          </div>
-          <select
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search by name..."
+            className="flex-1"
+          />
+          <FormSelect
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="input w-full sm:w-40 py-1.5"
-          >
-            <option value="ALL">All Status</option>
-            <option value="ACTIVE">Active</option>
-            <option value="INACTIVE">Inactive</option>
-            <option value="ARCHIVED">Archived</option>
-          </select>
+            options={[
+              { value: 'ALL', label: 'All Status' },
+              { value: 'ACTIVE', label: 'Active' },
+              { value: 'INACTIVE', label: 'Inactive' },
+              { value: 'ARCHIVED', label: 'Archived' },
+            ]}
+            className="w-full sm:w-40"
+          />
         </div>
       </div>
 
@@ -187,27 +180,25 @@ export function ProductsListPage({
         {filteredProducts.map((product) => (
           <article
             key={product.id}
-            className="group relative bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-700 p-5 shadow-sm hover:shadow-md hover:border-surface-300 dark:hover:border-surface-600 transition-all duration-200 flex flex-col min-h-[180px] h-full"
+            className="group relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm hover:shadow-md hover:border-app-border transition-all duration-200 flex flex-col min-h-[180px] h-full"
           >
             <div className="flex items-start justify-between gap-3 mb-2">
-              <h3 className="font-semibold text-surface-900 dark:text-white text-base leading-snug line-clamp-2 min-w-0 flex-1">
+              <h3 className="font-semibold text-app-fg text-base leading-snug line-clamp-2 min-w-0 flex-1">
                 {product.name}
               </h3>
-              <span className={`${PRODUCT_STATUS_COLORS[product.status] ?? 'badge'} shrink-0 capitalize`}>
-                {product.status.toLowerCase()}
-              </span>
+              <StatusBadge status={product.status} size="sm" />
             </div>
 
-            <div className="text-sm text-surface-500 dark:text-surface-400 mb-4 flex-1">
+            <div className="text-sm text-app-fg-muted mb-4 flex-1">
               {getDisplayCategory(product) !== '\u2014' && (
                 <>
-                  <span className="text-surface-700 dark:text-surface-300">{getDisplayCategory(product)}</span>
+                  <span className="text-app-fg-muted">{getDisplayCategory(product)}</span>
                   <span className="mx-1.5">·</span>
                 </>
               )}
               {product.brandName && (
                 <>
-                  <span className="text-surface-700 dark:text-surface-300">{product.brandName}</span>
+                  <span className="text-app-fg-muted">{product.brandName}</span>
                   <span className="mx-1.5">·</span>
                 </>
               )}
@@ -217,19 +208,19 @@ export function ProductsListPage({
             </div>
 
             {(product.description || (product.offers && product.offers.length > 0)) && (
-              <div className="mb-4 pt-3 border-t border-surface-100 dark:border-surface-800">
-                <p className="text-xs font-medium text-surface-500 dark:text-surface-500 uppercase tracking-wider mb-2">
+              <div className="mb-4 pt-3 border-t border-app-border">
+                <p className="text-xs font-medium text-app-fg-muted dark:text-app-fg-muted uppercase tracking-wider mb-2">
                   Offer tiers · Price
                 </p>
                 <div className="space-y-1">
                   {product.offers && product.offers.length > 0 && (
                     <OfferTiersDisplay offers={product.offers} />
                   )}
-                  <p className="text-sm font-medium text-surface-800 dark:text-surface-200">
+                  <p className="text-sm font-medium text-app-fg-muted">
                     {formatPriceRange(product)}
                   </p>
                   {product.description && (
-                    <p className="text-xs text-surface-600 dark:text-surface-400 line-clamp-2">
+                    <p className="text-xs text-app-fg-muted line-clamp-2">
                       {product.description}
                     </p>
                   )}
@@ -237,7 +228,7 @@ export function ProductsListPage({
               </div>
             )}
 
-            <div className="flex items-center gap-2 pt-3 border-t border-surface-100 dark:border-surface-800">
+            <div className="flex items-center gap-2 pt-3 border-t border-app-border">
               <button
                 type="button"
                 onClick={() => setViewProduct(product)}
@@ -250,31 +241,22 @@ export function ProductsListPage({
           </article>
         ))}
         {filteredProducts.length === 0 && (
-          <div className="col-span-full rounded-xl border border-dashed border-surface-300 dark:border-surface-600 bg-surface-50 dark:bg-surface-800/50 py-16 text-center">
-            <p className="text-surface-600 dark:text-surface-400 font-medium">
-              {products.length === 0 ? 'No products yet' : 'No matching products found'}
-            </p>
-            <p className="text-sm text-surface-500 dark:text-surface-500 mt-1">
-              {products.length === 0 ? 'Add your first product with Add Product above.' : 'Try adjusting your search or filters.'}
-            </p>
+          <div className="col-span-full">
+            <EmptyState
+              title={products.length === 0 ? 'No products yet' : 'No matching products found'}
+              description={products.length === 0 ? 'Add your first product with Add Product above.' : 'Try adjusting your search or filters.'}
+              bordered
+            />
           </div>
         )}
       </div>
 
       {/* Pagination */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-surface-800 dark:text-surface-200">
+        <p className="text-sm text-app-fg-muted">
           Showing {filteredProducts.length} of {total} products
         </p>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
-            Previous
-          </Button>
-          <span className="text-sm text-surface-800 dark:text-surface-200 px-2">Page {page} of {safeTotalPages}</span>
-          <Button variant="secondary" size="sm" disabled={page >= safeTotalPages} onClick={() => goToPage(page + 1)}>
-            Next
-          </Button>
-        </div>
+        <Pagination page={page} totalPages={safeTotalPages} onPageChange={goToPage} showLabel />
       </div>
 
       {/* View product modal */}

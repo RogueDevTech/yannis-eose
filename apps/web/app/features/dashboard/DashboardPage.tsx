@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -41,10 +42,10 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
       {/* Page header */}
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-app-fg">
             {getGreeting()}, {firstName}
           </h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 font-medium mt-1">
+          <p className="text-sm text-app-fg-muted font-medium mt-1">
             {getRoleDescription(role)}
           </p>
         </div>
@@ -53,7 +54,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
           <button
             type="button"
             onClick={() => setAmountsHidden((h) => !h)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 px-3 py-2 text-sm font-medium text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-app-border bg-app-elevated px-3 py-2 text-sm font-medium text-app-fg-muted hover:bg-app-hover transition-colors"
             title={amountsHidden ? 'Show amounts' : 'Hide amounts'}
           >
             {amountsHidden ? (
@@ -124,13 +125,13 @@ function GenericFallbackDashboard() {
   return (
     <div className="card">
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <div className="w-12 h-12 rounded-full bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-4">
-          <svg className="w-6 h-6 text-surface-500 dark:text-surface-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <div className="w-12 h-12 rounded-full bg-app-hover flex items-center justify-center mb-4">
+          <svg className="w-6 h-6 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
           </svg>
         </div>
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Welcome</h2>
-        <p className="text-sm text-surface-600 dark:text-surface-200 mb-6 max-w-sm">
+        <h2 className="text-lg font-semibold text-app-fg mb-2">Welcome</h2>
+        <p className="text-sm text-app-fg-muted mb-6 max-w-sm">
           Use the sidebar to navigate to your modules, or visit settings to manage your account.
         </p>
         <Link
@@ -154,17 +155,28 @@ function SuperAdminDashboard({ data, naira, hidden }: { data: DashboardPageData;
 
   return (
     <>
-      {/* Top KPIs — Revenue/Profit deferred, Orders/Unprocessed immediate */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <DeferredSection resolve={data.profit} skeleton="stat">
-          {(profit) => <StatCard label="Revenue" value={naira(Math.round(profit.revenue))} icon="revenue" />}
-        </DeferredSection>
-        <DeferredSection resolve={data.profit} skeleton="stat">
-          {(profit) => <StatCard label="True Profit" value={naira(Math.round(profit.trueProfit))} icon="profit" highlight={profit.trueProfit >= 0 ? 'success' : 'danger'} />}
-        </DeferredSection>
-        <StatCard label="Orders" value={data.totalOrders.toString()} icon="orders" />
-        <StatCard label="Unprocessed" value={unprocessed.toString()} icon="pending" highlight={unprocessed > 10 ? 'danger' : unprocessed > 0 ? 'warning' : undefined} />
-      </div>
+      <DeferredSection resolve={data.profit} fallback={<OverviewStatStripSkeleton count={4} />}>
+        {(profit) => (
+          <OverviewStatStrip
+            items={[
+              { label: 'Revenue', value: naira(Math.round(profit.revenue)), valueClassName: 'text-app-fg' },
+              {
+                label: 'True Profit',
+                value: naira(Math.round(profit.trueProfit)),
+                valueClassName:
+                  profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400',
+              },
+              { label: 'Orders', value: data.totalOrders.toString(), valueClassName: 'text-app-fg' },
+              {
+                label: 'Unprocessed',
+                value: unprocessed.toString(),
+                valueClassName:
+                  unprocessed > 10 ? 'text-danger-600 dark:text-danger-400' : unprocessed > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+              },
+            ]}
+          />
+        )}
+      </DeferredSection>
 
       {/* Secondary KPIs — all deferred */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -193,10 +205,10 @@ function SuperAdminDashboard({ data, naira, hidden }: { data: DashboardPageData;
                 </svg>
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-surface-900 dark:text-white">
+                <h3 className="text-sm font-semibold text-app-fg">
                   {confirmed} {confirmed === 1 ? 'order' : 'orders'} awaiting allocation
                 </h3>
-                <p className="text-sm text-surface-800 dark:text-surface-200">
+                <p className="text-sm text-app-fg-muted">
                   Confirmed orders need to be allocated to a logistics location for dispatch.
                 </p>
               </div>
@@ -208,28 +220,24 @@ function SuperAdminDashboard({ data, naira, hidden }: { data: DashboardPageData;
         </div>
       )}
 
-      {/* Order Pipeline — immediate (uses orderCounts) */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Pipeline</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-          {[
-            { label: 'Unprocessed', key: 'UNPROCESSED', color: 'text-warning-600 dark:text-warning-400' },
-            { label: 'CS Assigned', key: 'CS_ASSIGNED', color: 'text-info-600 dark:text-info-400' },
-            { label: 'CS Engaged', key: 'CS_ENGAGED', color: 'text-info-600 dark:text-info-400' },
-            { label: 'Confirmed', key: 'CONFIRMED', color: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Allocated', key: 'ALLOCATED', color: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Dispatched', key: 'DISPATCHED', color: 'text-brand-600 dark:text-brand-400' },
-            { label: 'In Transit', key: 'IN_TRANSIT', color: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Delivered', key: 'DELIVERED', color: 'text-success-600 dark:text-success-400' },
-            { label: 'Cancelled', key: 'CANCELLED', color: 'text-danger-600 dark:text-danger-400' },
-            { label: 'Returned', key: 'RETURNED', color: 'text-danger-600 dark:text-danger-400' },
-          ].map((item) => (
-            <div key={item.key} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
-              <p className={`text-2xl font-bold ${item.color}`}>{counts[item.key] ?? 0}</p>
-              <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{item.label}</p>
-            </div>
-          ))}
-        </div>
+        <h2 className="text-lg font-semibold text-app-fg mb-4">Order Pipeline</h2>
+        <OverviewStatStrip
+          embedded
+          tileClassName="min-w-[5.5rem]"
+          items={[
+            { label: 'Unprocessed', value: counts['UNPROCESSED'] ?? 0, valueClassName: 'text-warning-600 dark:text-warning-400' },
+            { label: 'CS Assigned', value: counts['CS_ASSIGNED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
+            { label: 'CS Engaged', value: counts['CS_ENGAGED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
+            { label: 'Confirmed', value: counts['CONFIRMED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Allocated', value: counts['ALLOCATED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Dispatched', value: counts['DISPATCHED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'In Transit', value: counts['IN_TRANSIT'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Delivered', value: counts['DELIVERED'] ?? 0, valueClassName: 'text-success-600 dark:text-success-400' },
+            { label: 'Cancelled', value: counts['CANCELLED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
+            { label: 'Returned', value: counts['RETURNED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
+          ]}
+        />
       </div>
 
       {/* Recent Orders + Quick Actions — immediate */}
@@ -259,41 +267,50 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
 
   return (
     <>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Pending Queue" value={pendingQueue.toString()} icon="pending" highlight={pendingQueue > 20 ? 'danger' : pendingQueue > 0 ? 'warning' : 'success'} />
-        <StatCard label="Currently Engaged" value={engaged.toString()} icon="orders" />
-        <StatCard label="Confirmed" value={confirmed.toString()} icon="orders" highlight="success" />
-        <DeferredSection resolve={data.metrics} skeleton="stat">
-          {(metrics) => <StatCard label="Delivery Rate" value={`${metrics.deliveryRate.toFixed(1)}%`} icon="roas" highlight={metrics.deliveryRate >= 70 ? 'success' : 'warning'} />}
-        </DeferredSection>
-      </div>
+      <DeferredSection resolve={data.metrics} fallback={<OverviewStatStripSkeleton count={4} />}>
+        {(metrics) => (
+          <OverviewStatStrip
+            items={[
+              {
+                label: 'Pending Queue',
+                value: pendingQueue.toString(),
+                valueClassName:
+                  pendingQueue > 20 ? 'text-danger-600 dark:text-danger-400' : pendingQueue > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-success-600 dark:text-success-400',
+              },
+              { label: 'Currently Engaged', value: engaged.toString(), valueClassName: 'text-app-fg' },
+              { label: 'Confirmed', value: confirmed.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+              {
+                label: 'Delivery Rate',
+                value: `${metrics.deliveryRate.toFixed(1)}%`,
+                valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+              },
+            ]}
+          />
+        )}
+      </DeferredSection>
 
-      {/* Order Pipeline */}
       <div className="card">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Order Pipeline</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-          {[
-            { label: 'Unprocessed', value: unprocessed, color: 'text-warning-600 dark:text-warning-400' },
-            { label: 'CS Assigned', value: csAssigned, color: 'text-info-600 dark:text-info-400' },
-            { label: 'CS Engaged', value: engaged, color: 'text-info-600 dark:text-info-400' },
-            { label: 'Confirmed', value: confirmed, color: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Allocated', value: allocated, color: 'text-brand-600 dark:text-brand-400' },
-            { label: 'In Transit', value: inTransit, color: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Delivered', value: delivered, color: 'text-success-600 dark:text-success-400' },
-            { label: 'Cancelled', value: cancelled, color: 'text-danger-600 dark:text-danger-400' },
-          ].map((item) => (
-            <div key={item.label} className="text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
-              <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
-              <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">{item.label}</p>
-            </div>
-          ))}
-        </div>
+        <h2 className="text-lg font-semibold text-app-fg mb-4">Order Pipeline</h2>
+        <OverviewStatStrip
+          embedded
+          tileClassName="min-w-[5.5rem]"
+          items={[
+            { label: 'Unprocessed', value: unprocessed, valueClassName: 'text-warning-600 dark:text-warning-400' },
+            { label: 'CS Assigned', value: csAssigned, valueClassName: 'text-info-600 dark:text-info-400' },
+            { label: 'CS Engaged', value: engaged, valueClassName: 'text-info-600 dark:text-info-400' },
+            { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Allocated', value: allocated, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'In Transit', value: inTransit, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400' },
+            { label: 'Cancelled', value: cancelled, valueClassName: 'text-danger-600 dark:text-danger-400' },
+          ]}
+        />
       </div>
 
       {role === 'HEAD_OF_CS' && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Team Management</h2>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+          <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
+          <p className="text-sm text-app-fg-muted mb-4">
             Manage agent assignments and monitor queue health.
           </p>
           <div className="flex gap-2">
@@ -313,27 +330,44 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
 function MarketingDashboard({ data, role, naira, hidden }: { data: DashboardPageData; role: string; naira: NairaFn; hidden: boolean }) {
   return (
     <>
-      <DeferredSection resolve={data.metrics} skeleton="stat">
+      <DeferredSection resolve={data.metrics} fallback={<OverviewStatStripSkeleton count={5} />}>
         {(metrics) => (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard label="CPA" value={naira(Math.round(metrics.cpa))} icon="revenue" />
-            <StatCard label="True ROAS" value={`${metrics.trueRoas.toFixed(2)}x`} icon="roas" highlight={metrics.trueRoas >= 2 ? 'success' : metrics.trueRoas >= 1 ? 'warning' : 'danger'} />
-            <StatCard label="Delivery Rate" value={`${metrics.deliveryRate.toFixed(1)}%`} icon="margin" highlight={metrics.deliveryRate >= 70 ? 'success' : 'warning'} />
-            <StatCard label="Confirmation Rate" value={`${metrics.confirmationRate.toFixed(1)}%`} icon="margin" highlight={metrics.confirmationRate >= 70 ? 'success' : 'warning'} />
-            <StatCard label="Total Spend" value={naira(Math.round(metrics.totalSpend))} icon="revenue" />
-          </div>
+          <OverviewStatStrip
+            tileClassName="min-w-[6rem]"
+            items={[
+              { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: 'text-app-fg' },
+              {
+                label: 'True ROAS',
+                value: `${metrics.trueRoas.toFixed(2)}x`,
+                valueClassName:
+                  metrics.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : metrics.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
+              },
+              {
+                label: 'Delivery Rate',
+                value: `${metrics.deliveryRate.toFixed(1)}%`,
+                valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+              },
+              {
+                label: 'Confirmation Rate',
+                value: `${metrics.confirmationRate.toFixed(1)}%`,
+                valueClassName: metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+              },
+              { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg' },
+            ]}
+          />
         )}
       </DeferredSection>
 
       {role === 'HEAD_OF_MARKETING' && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Team Management</h2>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+          <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
+          <p className="text-sm text-app-fg-muted mb-4">
             Manage media buyers and monitor team performance.
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>
-            <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">Funding & Ad Spend</Link>
+            <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">Funding</Link>
+            <Link to="/admin/marketing/ad-spend" prefetch="intent" className="btn-secondary btn-sm">Ad spend</Link>
             <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
           </div>
         </div>
@@ -343,13 +377,13 @@ function MarketingDashboard({ data, role, naira, hidden }: { data: DashboardPage
         {(metrics) => (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="card">
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Performance Summary</h2>
+              <h2 className="text-lg font-semibold text-app-fg mb-4">Performance Summary</h2>
               <div className="space-y-3">
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Total Orders</span><span className="text-sm font-medium text-surface-900 dark:text-white">{metrics.totalOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.confirmedOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Conf. Rate</span><span className="text-sm font-medium text-surface-900 dark:text-white">{metrics.confirmationRate.toFixed(1)}%</span></div>
-                <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivered Revenue</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(metrics.deliveredRevenue))}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{metrics.totalOrders}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.confirmedOrders}</span></div>
+                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
+                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(metrics.deliveredRevenue))}</span></div>
               </div>
             </div>
 
@@ -367,30 +401,46 @@ function FinanceDashboard({ data, naira, hidden }: { data: DashboardPageData; na
   void hidden;
   return (
     <>
-      <DeferredSection resolve={data.profit} skeleton="stat">
+      <DeferredSection resolve={data.profit} fallback={<OverviewStatStripSkeleton count={4} />}>
         {(profit) => {
           const totalCosts = profit.landedCost + profit.deliveryFee + profit.adSpend + profit.commission + profit.fulfillmentCost + profit.operationalLoss;
           return (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <StatCard label="Revenue" value={naira(Math.round(profit.revenue))} icon="revenue" />
-                <StatCard label="True Profit" value={naira(Math.round(profit.trueProfit))} icon="profit" highlight={profit.trueProfit >= 0 ? 'success' : 'danger'} />
-                <StatCard label="Net Margin" value={`${profit.margin.toFixed(1)}%`} icon="margin" highlight={profit.margin >= 20 ? 'success' : profit.margin > 0 ? 'warning' : 'danger'} />
-                <StatCard label="Total Costs" value={naira(Math.round(totalCosts))} icon="orders" highlight="danger" />
-              </div>
+              <OverviewStatStrip
+                items={[
+                  { label: 'Revenue', value: naira(Math.round(profit.revenue)), valueClassName: 'text-app-fg' },
+                  {
+                    label: 'True Profit',
+                    value: naira(Math.round(profit.trueProfit)),
+                    valueClassName:
+                      profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400',
+                  },
+                  {
+                    label: 'Net Margin',
+                    value: `${profit.margin.toFixed(1)}%`,
+                    valueClassName:
+                      profit.margin >= 20
+                        ? 'text-success-600 dark:text-success-400'
+                        : profit.margin > 0
+                          ? 'text-warning-600 dark:text-warning-400'
+                          : 'text-danger-600 dark:text-danger-400',
+                  },
+                  { label: 'Total Costs', value: naira(Math.round(totalCosts)), valueClassName: 'text-danger-600 dark:text-danger-400' },
+                ]}
+              />
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
                 <div className="card">
-                  <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Cost Breakdown</h2>
+                  <h2 className="text-lg font-semibold text-app-fg mb-4">Cost Breakdown</h2>
                   <div className="space-y-3">
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Landed COGS</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.landedCost))}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Delivery Fees</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.deliveryFee))}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Ad Spend</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.adSpend))}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Commission</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.commission))}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Fulfillment</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.fulfillmentCost))}</span></div>
-                    <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Operational Loss</span><span className="text-sm font-medium text-surface-900 dark:text-white">{naira(Math.round(profit.operationalLoss))}</span></div>
-                    <div className="pt-2 border-t border-surface-200 dark:border-surface-700 flex justify-between">
-                      <span className="text-sm font-semibold text-surface-900 dark:text-white">True Profit</span>
+                    <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Landed COGS</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(profit.landedCost))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivery Fees</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(profit.deliveryFee))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Ad Spend</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(profit.adSpend))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Commission</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(profit.commission))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Fulfillment</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(profit.fulfillmentCost))}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Operational Loss</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(profit.operationalLoss))}</span></div>
+                    <div className="pt-2 border-t border-app-border flex justify-between">
+                      <span className="text-sm font-semibold text-app-fg">True Profit</span>
                       <span className={`text-sm font-bold ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
                         {naira(Math.round(profit.trueProfit))}
                       </span>
@@ -419,13 +469,20 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
 
   return (
     <>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <StatCard label="Awaiting Allocation" value={confirmed.toString()} icon="pending" highlight={confirmed > 10 ? 'danger' : confirmed > 0 ? 'warning' : undefined} />
-        <StatCard label="Allocated" value={allocated.toString()} icon="orders" />
-        <StatCard label="Dispatched" value={dispatched.toString()} icon="orders" highlight="warning" />
-        <StatCard label="In Transit" value={inTransit.toString()} icon="orders" />
-        <StatCard label="Delivered" value={delivered.toString()} icon="orders" highlight="success" />
-      </div>
+      <OverviewStatStrip
+        tileClassName="min-w-[6rem]"
+        items={[
+          {
+            label: 'Awaiting Allocation',
+            value: confirmed.toString(),
+            valueClassName: confirmed > 10 ? 'text-danger-600 dark:text-danger-400' : confirmed > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+          },
+          { label: 'Allocated', value: allocated.toString(), valueClassName: 'text-app-fg' },
+          { label: 'Dispatched', value: dispatched.toString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
+          { label: 'In Transit', value: inTransit.toString(), valueClassName: 'text-app-fg' },
+          { label: 'Delivered', value: delivered.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+        ]}
+      />
 
       {confirmed > 0 && (
         <div className="card border-warning-200 dark:border-warning-700/50">
@@ -437,10 +494,10 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
                 </svg>
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-surface-900 dark:text-white">
+                <h3 className="text-sm font-semibold text-app-fg">
                   {confirmed} {confirmed === 1 ? 'order' : 'orders'} awaiting allocation
                 </h3>
-                <p className="text-sm text-surface-800 dark:text-surface-200">
+                <p className="text-sm text-app-fg-muted">
                   Confirmed orders need to be allocated to a logistics location for dispatch.
                 </p>
               </div>
@@ -454,12 +511,12 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Delivery Pipeline</h2>
+          <h2 className="text-lg font-semibold text-app-fg mb-4">Delivery Pipeline</h2>
           <div className="space-y-3">
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Awaiting Allocation</span><span className={`text-sm font-medium ${confirmed > 0 ? 'text-warning-600 dark:text-warning-400' : ''}`}>{confirmed}</span></div>
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Ready for Dispatch</span><span className="text-sm font-medium">{allocated}</span></div>
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Active Deliveries</span><span className="text-sm font-medium">{inTransit}</span></div>
-            <div className="flex justify-between"><span className="text-sm text-surface-800 dark:text-surface-200">Returns Queue</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{counts['RETURNED'] ?? 0}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Awaiting Allocation</span><span className={`text-sm font-medium ${confirmed > 0 ? 'text-warning-600 dark:text-warning-400' : ''}`}>{confirmed}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Ready for Dispatch</span><span className="text-sm font-medium">{allocated}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Active Deliveries</span><span className="text-sm font-medium">{inTransit}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Returns Queue</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{counts['RETURNED'] ?? 0}</span></div>
           </div>
         </div>
         <QuickActionsCard role={role} unprocessed={0} />
@@ -473,19 +530,31 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
 function WarehouseDashboard({ data }: { data: DashboardPageData }) {
   return (
     <>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <DeferredSection resolve={data.totalProducts} skeleton="stat">
-          {(total) => <StatCard label="Products" value={total.toString()} icon="products" />}
-        </DeferredSection>
-        <StatCard label="Total Orders" value={data.totalOrders.toString()} icon="orders" />
-        <StatCard label="Delivered" value={((data.orderCounts as Record<string, number>)['DELIVERED'] ?? 0).toString()} icon="orders" highlight="success" />
-        <StatCard label="Returns" value={((data.orderCounts as Record<string, number>)['RETURNED'] ?? 0).toString()} icon="pending" highlight="danger" />
-      </div>
+      <DeferredSection resolve={data.totalProducts} fallback={<OverviewStatStripSkeleton count={4} />}>
+        {(total) => (
+          <OverviewStatStrip
+            items={[
+              { label: 'Products', value: total.toString(), valueClassName: 'text-app-fg' },
+              { label: 'Total Orders', value: data.totalOrders.toString(), valueClassName: 'text-app-fg' },
+              {
+                label: 'Delivered',
+                value: ((data.orderCounts as Record<string, number>)['DELIVERED'] ?? 0).toString(),
+                valueClassName: 'text-success-600 dark:text-success-400',
+              },
+              {
+                label: 'Returns',
+                value: ((data.orderCounts as Record<string, number>)['RETURNED'] ?? 0).toString(),
+                valueClassName: 'text-danger-600 dark:text-danger-400',
+              },
+            ]}
+          />
+        )}
+      </DeferredSection>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Inventory Management</h2>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+          <h2 className="text-lg font-semibold text-app-fg mb-2">Inventory Management</h2>
+          <p className="text-sm text-app-fg-muted mb-4">
             Monitor stock levels, process intakes, and manage transfers.
           </p>
           <div className="flex gap-2">
@@ -505,7 +574,7 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
 function HRDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: NairaFn; hidden: boolean }) {
   void hidden;
   return (
-    <DeferredSection resolve={data.payoutSummary} skeleton="stat">
+    <DeferredSection resolve={data.payoutSummary} fallback={<OverviewStatStripSkeleton count={4} />}>
       {(summary) => {
         const draftTotal = Number(summary['DRAFT']?.total ?? 0);
         const approvedTotal = Number(summary['APPROVED']?.total ?? 0);
@@ -513,19 +582,27 @@ function HRDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: 
 
         return (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard label="Draft Payouts" value={naira(draftTotal)} icon="pending" highlight={draftTotal > 0 ? 'warning' : undefined} />
-              <StatCard label="Approved" value={naira(approvedTotal)} icon="orders" />
-              <StatCard label="Paid" value={naira(paidTotal)} icon="profit" highlight="success" />
-              <DeferredSection resolve={data.totalUsers} skeleton="stat">
-                {(total) => <StatCard label="Staff" value={total.toString()} icon="users" />}
-              </DeferredSection>
-            </div>
+            <DeferredSection resolve={data.totalUsers} fallback={<OverviewStatStripSkeleton count={4} />}>
+              {(total) => (
+                <OverviewStatStrip
+                  items={[
+                    {
+                      label: 'Draft Payouts',
+                      value: naira(draftTotal),
+                      valueClassName: draftTotal > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                    },
+                    { label: 'Approved', value: naira(approvedTotal), valueClassName: 'text-app-fg' },
+                    { label: 'Paid', value: naira(paidTotal), valueClassName: 'text-success-600 dark:text-success-400' },
+                    { label: 'Staff', value: total.toString(), valueClassName: 'text-app-fg' },
+                  ]}
+                />
+              )}
+            </DeferredSection>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
               <div className="card">
-                <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-2">Payroll Actions</h2>
-                <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+                <h2 className="text-lg font-semibold text-app-fg mb-2">Payroll Actions</h2>
+                <p className="text-sm text-app-fg-muted mb-4">
                   Generate payouts, manage commission plans, and process adjustments.
                 </p>
                 <div className="flex gap-2">
@@ -543,8 +620,8 @@ function HRDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: 
                       </svg>
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Pending Approval</h3>
-                      <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
+                      <h3 className="text-sm font-semibold text-app-fg">Pending Approval</h3>
+                      <p className="text-sm text-app-fg-muted mt-1">
                         {summary['DRAFT']?.count ?? 0} draft payouts totaling {naira(draftTotal)} awaiting review.
                       </p>
                       <Link to="/hr/payroll" prefetch="intent" className="text-sm text-brand-500 hover:text-brand-600 font-medium mt-2 inline-block">
@@ -568,7 +645,7 @@ function RecentOrdersCard({ orders, hidden }: { orders: DashboardData['recentOrd
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Recent Orders</h2>
+        <h2 className="text-lg font-semibold text-app-fg">Recent Orders</h2>
         <Link to="/admin/cs/orders" prefetch="intent" className="text-sm text-brand-500 hover:text-brand-600 font-medium">View All</Link>
       </div>
       {orders.length > 0 ? (
@@ -578,17 +655,17 @@ function RecentOrdersCard({ orders, hidden }: { orders: DashboardData['recentOrd
               key={order.id}
               to={`/admin/orders/${order.id}`}
               prefetch="intent"
-              className="flex items-center justify-between p-3 rounded-lg hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
+              className="flex items-center justify-between p-3 rounded-lg hover:bg-app-hover/50 transition-colors"
             >
               <div className="min-w-0 flex-1">
-                <p className="font-medium text-surface-900 dark:text-surface-100 truncate">{order.customerName}</p>
-                <p className="text-sm text-surface-700 dark:text-surface-200">
+                <p className="font-medium text-app-fg truncate">{order.customerName}</p>
+                <p className="text-sm text-app-fg-muted">
                   {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
               <div className="flex items-center gap-3 ml-3">
                 {order.totalAmount && (
-                  <span className="text-sm font-medium text-surface-900 dark:text-surface-100">
+                  <span className="text-sm font-medium text-app-fg">
                     {hidden ? HIDDEN_AMOUNT : formatNaira(Number(order.totalAmount))}
                   </span>
                 )}
@@ -598,7 +675,7 @@ function RecentOrdersCard({ orders, hidden }: { orders: DashboardData['recentOrd
           ))}
         </div>
       ) : (
-        <div className="flex items-center justify-center h-32 text-surface-700 dark:text-surface-300 text-sm">No orders yet</div>
+        <div className="flex items-center justify-center h-32 text-app-fg-muted text-sm">No orders yet</div>
       )}
     </div>
   );
@@ -608,21 +685,21 @@ function QuickActionsCard({ role, unprocessed }: { role: string; unprocessed: nu
   const actions = getQuickActions(role, unprocessed);
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Quick Actions</h2>
+      <h2 className="text-lg font-semibold text-app-fg mb-4">Quick Actions</h2>
       <div className="space-y-2">
         {actions.map((action) => (
           <Link
             key={action.href}
             to={action.href}
             prefetch="intent"
-            className="flex items-center gap-3 p-3 rounded-lg hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
+            className="flex items-center gap-3 p-3 rounded-lg hover:bg-app-hover/50 transition-colors"
           >
             <div className={`w-9 h-9 rounded-lg ${action.bg} flex items-center justify-center`}>
               <ActionIcon type={action.icon} />
             </div>
             <div>
-              <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{action.label}</p>
-              <p className="text-sm text-surface-800 dark:text-surface-200">{action.description}</p>
+              <p className="text-sm font-medium text-app-fg">{action.label}</p>
+              <p className="text-sm text-app-fg-muted">{action.description}</p>
             </div>
           </Link>
         ))}
@@ -647,8 +724,9 @@ function getQuickActions(role: string, unprocessed: number) {
     case 'HEAD_OF_MARKETING':
     case 'MEDIA_BUYER':
       return [
-        { href: '/admin/marketing/funding', label: 'Marketing', description: 'Funding & ad spend', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
-        { href: '/admin/marketing/forms', label: 'Forms', description: 'Manage forms', icon: 'orders', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
+        { href: '/admin/marketing/funding', label: 'Funding', description: 'Ledger & requests', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
+        { href: '/admin/marketing/ad-spend', label: 'Ad spend', description: 'Log & approve spend', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
+        { href: '/admin/marketing/forms', label: 'Forms', description: 'Manage forms', icon: 'orders', bg: 'bg-app-hover text-app-fg-muted' },
       ];
     case 'FINANCE_OFFICER':
       return [
@@ -664,7 +742,7 @@ function getQuickActions(role: string, unprocessed: number) {
     default:
       return [
         ...common,
-        { href: '/admin/settings', label: 'Settings', description: 'Account settings', icon: 'settings', bg: 'bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-200' },
+        { href: '/admin/settings', label: 'Settings', description: 'Account settings', icon: 'settings', bg: 'bg-app-hover text-app-fg-muted' },
       ];
   }
 }
@@ -672,7 +750,7 @@ function getQuickActions(role: string, unprocessed: number) {
 function StatCard({ label, value, icon, highlight }: { label: string; value: string; icon: string; highlight?: 'warning' | 'success' | 'danger' }) {
   const valueColor = highlight
     ? { warning: 'text-warning-600 dark:text-warning-400', success: 'text-success-600 dark:text-success-400', danger: 'text-danger-600 dark:text-danger-400' }[highlight]
-    : 'text-surface-900 dark:text-white';
+    : 'text-app-fg';
 
   const iconBg = highlight
     ? { warning: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400', success: 'bg-success-50 dark:bg-success-700/20 text-success-600 dark:text-success-400', danger: 'bg-danger-50 dark:bg-danger-700/20 text-danger-600 dark:text-danger-400' }[highlight]
@@ -681,7 +759,7 @@ function StatCard({ label, value, icon, highlight }: { label: string; value: str
   return (
     <div className="card">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-surface-800 dark:text-surface-200 uppercase tracking-wider">{label}</p>
+        <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">{label}</p>
         <div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}>
           <StatIcon type={icon} />
         </div>

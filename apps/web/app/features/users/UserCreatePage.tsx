@@ -5,6 +5,11 @@ import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Checkbox } from '~/components/ui/checkbox';
+import { Breadcrumb } from '~/components/ui/breadcrumb';
+import { PageHeader } from '~/components/ui/page-header';
+import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { RadioGroup } from '~/components/ui/radio-group';
 import type {
   UserCreateLoaderData,
   UserCreateProduct,
@@ -68,24 +73,12 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
 
   return (
     <div className="w-full space-y-6">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
-        <Link to="/hr/users" className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
-          Users
-        </Link>
-        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-        <span className="text-surface-900 dark:text-white font-medium">Add User</span>
-      </div>
+      <Breadcrumb items={[{ label: 'Users', to: '/hr/users' }, { label: 'Add User' }]} />
 
-      {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Add User</h1>
-        <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
-          Create a new account for a team member with role-specific settings.
-        </p>
-      </div>
+      <PageHeader
+        title="Add User"
+        description="Create a new account for a team member with role-specific settings."
+      />
 
       {/* Success: requires approval */}
       {actionData?.requiresApproval && (
@@ -117,82 +110,75 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
 
         {/* Section 1: Account Details */}
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Account Details</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Account Details</h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Role — first so conditional sections appear below */}
             <div className="sm:col-span-2">
-              <label htmlFor="role" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Role *
-              </label>
-              <select
+              <FormSelect
                 id="role"
                 name="role"
+                label="Role"
                 required
-                className="input"
                 value={selectedRole}
                 onChange={(e) => setSelectedRole(e.target.value)}
-              >
-                <option value="">Select a role</option>
-                {ROLES.map((role) => (
-                  <option key={role.value} value={role.value}>
-                    {role.label}
-                  </option>
-                ))}
-              </select>
+                placeholder="Select a role"
+                options={ROLES.map((r) => ({ value: r.value, label: r.label }))}
+              />
               {selectedRole && (
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                <p className="text-xs text-app-fg-muted mt-1">
                   {ROLES.find((r) => r.value === selectedRole)?.description}
                 </p>
               )}
             </div>
 
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Full Name *
-              </label>
-              <input id="name" name="name" type="text" required minLength={2} className="input" placeholder="John Doe" />
+              <TextInput
+                id="name"
+                name="name"
+                label="Full Name"
+                required
+                minLength={2}
+                placeholder="John Doe"
+              />
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Email Address *
-              </label>
-              <input id="email" name="email" type="email" required className="input" placeholder="john@company.com" />
-              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
-                A password will be auto-generated and sent to this email.
-              </p>
+              <TextInput
+                id="email"
+                name="email"
+                type="email"
+                label="Email Address"
+                required
+                placeholder="john@company.com"
+                hint="A password will be auto-generated and sent to this email."
+              />
             </div>
 
             <div>
-              <label htmlFor="primaryBranchId" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Primary Branch *
-              </label>
-              <select
+              <FormSelect
                 id="primaryBranchId"
                 name="primaryBranchId"
+                label="Primary Branch"
                 required
-                className="input"
-              >
-                <option value="">Select primary branch</option>
-                {branches
+                placeholder="Select primary branch"
+                options={branches
                   .filter((branch: UserCreateBranch) => branch.status === 'ACTIVE')
-                  .map((branch: UserCreateBranch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name} ({branch.code})
-                    </option>
-                  ))}
-              </select>
-              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                  .map((branch: UserCreateBranch) => ({
+                    value: branch.id,
+                    label: `${branch.name} (${branch.code})`,
+                  }))}
+              />
+              <p className="text-xs text-app-fg-muted mt-1">
                 Determines the default branch context and data scope on first login.
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+              <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
                 Status
               </label>
-              <p className="text-sm text-surface-600 dark:text-surface-400">
+              <p className="text-sm text-app-fg-muted">
                 New users are created as <strong>Pending</strong> and become <strong>Active</strong> after they log in for the first time.
               </p>
               <input type="hidden" name="status" value="PENDING" />
@@ -203,43 +189,38 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
         {/* Section 2: Role-Specific Settings */}
         {(showCapacity || showLogisticsLocation || showProductAssignment) && (
           <div className="card space-y-4">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Role Settings</h2>
+            <h2 className="text-lg font-semibold text-app-fg">Role Settings</h2>
 
             {/* Capacity (CS roles) */}
             {showCapacity && (
               <div>
-                <label htmlFor="capacity" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Order Capacity
-                </label>
-                <input
+                <TextInput
                   id="capacity"
                   name="capacity"
                   type="number"
+                  label="Order Capacity"
                   min={1}
                   max={100}
-                  defaultValue={10}
-                  className="input w-full sm:w-32"
+                  defaultValue="10"
+                  wrapperClassName="w-full sm:w-32"
+                  hint="Maximum concurrent orders this agent can handle."
                 />
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
-                  Maximum concurrent orders this agent can handle.
-                </p>
               </div>
             )}
 
             {/* Logistics Location (TPL roles) */}
             {showLogisticsLocation && (
               <div>
-                <label htmlFor="logisticsLocationId" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Logistics Location
-                </label>
-                <select id="logisticsLocationId" name="logisticsLocationId" className="input">
-                  <option value="">Select location</option>
-                  {locations.map((loc: UserCreateLocation) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.name} — {loc.address}
-                    </option>
-                  ))}
-                </select>
+                <FormSelect
+                  id="logisticsLocationId"
+                  name="logisticsLocationId"
+                  label="Logistics Location"
+                  placeholder="Select location"
+                  options={locations.map((loc: UserCreateLocation) => ({
+                    value: loc.id,
+                    label: `${loc.name} — ${loc.address}`,
+                  }))}
+                />
                 {locations.length === 0 && (
                   <InlineNotification
                     variant="warning"
@@ -254,30 +235,30 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
             {/* Product Assignment */}
             {showProductAssignment && (
               <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
                   Assign Products
                 </label>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mb-2">
+                <p className="text-xs text-app-fg-muted mb-2">
                   Leave blank to assign all products. Select specific products to restrict.
                 </p>
                 {products.length > 0 ? (
-                  <div className="border border-surface-200 dark:border-surface-700 rounded-lg max-h-48 overflow-y-auto">
+                  <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
                     {products.map((product: UserCreateProduct) => (
                       <label
                         key={product.id}
-                        className="flex items-center gap-3 px-3 py-2 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer border-b border-surface-100 dark:border-surface-800 last:border-b-0"
+                        className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
                       >
                         <Checkbox
                           checked={selectedProductIds.includes(product.id)}
                           onChange={() => toggleProduct(product.id)}
                         />
-                        <span className="text-sm text-surface-900 dark:text-surface-100">{product.name}</span>
-                        <span className="text-xs text-surface-700 dark:text-surface-300 ml-auto">{product.category ?? ''}</span>
+                        <span className="text-sm text-app-fg">{product.name}</span>
+                        <span className="text-xs text-app-fg-muted ml-auto">{product.category ?? ''}</span>
                       </label>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-surface-700">No products found.</p>
+                  <p className="text-xs text-app-fg-muted">No products found.</p>
                 )}
 
                 {selectedProductIds.length > 0 && (
@@ -287,7 +268,7 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
                         name="restrictProductAccess"
                         value="true"
                       />
-                      <span className="text-sm text-surface-700 dark:text-surface-300">
+                      <span className="text-sm text-app-fg-muted">
                         Restrict access to only assigned products
                       </span>
                     </label>
@@ -301,51 +282,40 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
         {/* Section 3: Compensation */}
         {showCompensation && (
           <div className="card space-y-4">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Compensation</h2>
+            <h2 className="text-lg font-semibold text-app-fg">Compensation</h2>
 
             {/* Mode toggle — always show so user can choose plan vs flat */}
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  checked={compensationMode === 'inline'}
-                  onChange={() => setCompensationMode('inline')}
-                  className="text-brand-500 focus:ring-brand-500"
-                />
-                <span className="text-sm text-surface-700 dark:text-surface-300">Define compensation (flat)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  checked={compensationMode === 'existing'}
-                  onChange={() => setCompensationMode('existing')}
-                  className="text-brand-500 focus:ring-brand-500"
-                />
-                <span className="text-sm text-surface-700 dark:text-surface-300">Use existing plan</span>
-              </label>
-            </div>
+            <RadioGroup
+              name="_compensationModeToggle"
+              options={[
+                { value: 'inline', label: 'Define compensation (flat)' },
+                { value: 'existing', label: 'Use existing plan' },
+              ]}
+              value={compensationMode}
+              onChange={(v) => setCompensationMode(v as 'inline' | 'existing')}
+              layout="horizontal"
+            />
 
             {/* Existing plan selector — dropdown when plans exist */}
             {compensationMode === 'existing' && filteredPlans.length > 0 && (
               <div>
-                <label htmlFor="commissionPlanId" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  Commission Plan
-                </label>
-                <select id="commissionPlanId" name="commissionPlanId" className="input">
-                  <option value="">Select a plan</option>
-                  {filteredPlans.map((plan: UserCreateCommissionPlan) => (
-                    <option key={plan.id} value={plan.id}>
-                      {plan.planName}
-                    </option>
-                  ))}
-                </select>
+                <FormSelect
+                  id="commissionPlanId"
+                  name="commissionPlanId"
+                  label="Commission Plan"
+                  placeholder="Select a plan"
+                  options={filteredPlans.map((plan: UserCreateCommissionPlan) => ({
+                    value: plan.id,
+                    label: plan.planName,
+                  }))}
+                />
               </div>
             )}
 
             {/* No plans for this role — show Create plan action */}
             {compensationMode === 'existing' && filteredPlans.length === 0 && (
-              <div className="rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700 px-4 py-3">
-                <p className="text-sm text-surface-700 dark:text-surface-300">
+              <div className="rounded-lg bg-app-hover border border-app-border px-4 py-3">
+                <p className="text-sm text-app-fg-muted">
                   No commission plans for this role yet.
                 </p>
                 <Link
@@ -363,7 +333,7 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Fixed Salary */}
                   <div>
-                    <label htmlFor="fixedSalary" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                    <label htmlFor="fixedSalary" className="block text-sm font-medium text-app-fg-muted mb-1.5">
                       Fixed Salary
                     </label>
                     <AmountInput
@@ -377,7 +347,7 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
 
                   {/* Bonus */}
                   <div>
-                    <label htmlFor="bonus" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                    <label htmlFor="bonus" className="block text-sm font-medium text-app-fg-muted mb-1.5">
                       Bonus
                     </label>
                     <AmountInput
@@ -390,7 +360,7 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
                   </div>
                 </div>
 
-                <p className="text-xs text-surface-600 dark:text-surface-400">
+                <p className="text-xs text-app-fg-muted">
                   Fixed salary, bonus, and flat commission amounts are monthly.
                 </p>
 
@@ -402,23 +372,18 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
         {/* Section 4: Contact */}
         {selectedRole && (
           <div className="card space-y-4">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Contact</h2>
+            <h2 className="text-lg font-semibold text-app-fg">Contact</h2>
             <div className="sm:w-1/2">
-              <label htmlFor="phone" className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                WhatsApp / Phone Number
-              </label>
-              <input
+              <TextInput
                 id="phone"
                 name="phone"
                 type="tel"
-                className="input"
+                label="WhatsApp / Phone Number"
                 placeholder="08031234567 or +2348031234567"
                 pattern="^(0[789]\d{9}|\+234[789]\d{9})$"
                 title="Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)"
+                hint="Never displayed publicly. Masked in all views."
               />
-              <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
-                Never displayed publicly. Masked in all views.
-              </p>
             </div>
           </div>
         )}

@@ -15,6 +15,7 @@ import type {
   ListOrdersInput,
   OrderStatus,
 } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { DRIZZLE, PG_CLIENT, REDIS } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -47,6 +48,36 @@ export class OrdersService {
   ) {}
 
   /**
+   * Branch-scoped list queries filter by session branch when not listing by media buyer.
+   * When `mediaBuyerId` is set (marketing orders), do not apply session branch — campaign branch
+   * can differ from the buyer's primary session branch; attribution is media_buyer_id.
+   */
+  private async resolveBranchIdForNewOrder(params: {
+    campaignId?: string | null;
+    mediaBuyerId?: string | null;
+    fallbackBranchId?: string | null;
+  }): Promise<string | null> {
+    if (params.campaignId) {
+      const [row] = await this.db
+        .select({ branchId: schema.campaigns.branchId })
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, params.campaignId))
+        .limit(1);
+      if (row?.branchId) return row.branchId;
+    }
+    if (params.mediaBuyerId) {
+      const [row] = await this.db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(eq(schema.userBranches.userId, params.mediaBuyerId))
+        .orderBy(desc(schema.userBranches.isPrimary))
+        .limit(1);
+      if (row?.branchId) return row.branchId;
+    }
+    return params.fallbackBranchId ?? null;
+  }
+
+  /**
    * Create a new order with status UNPROCESSED.
    * Called by Edge Worker or admin manual entry.
    * When paymentMethod is PAY_ONLINE, initializes Paystack and returns authorizationUrl for redirect.
@@ -71,11 +102,18 @@ export class OrdersService {
       });
     }
 
+    const branchId = await this.resolveBranchIdForNewOrder({
+      campaignId: orderInput.campaignId ?? null,
+      mediaBuyerId: orderInput.mediaBuyerId ?? null,
+      fallbackBranchId: null,
+    });
+
     const rows = await this.db
       .insert(schema.orders)
       .values({
         campaignId: orderInput.campaignId ?? null,
         mediaBuyerId: orderInput.mediaBuyerId ?? null,
+        branchId: branchId ?? null,
         customerName: orderInput.customerName,
         customerPhoneHash: orderInput.customerPhoneHash,
         customerPhone: orderInput.customerPhone ?? null,
@@ -119,6 +157,7 @@ export class OrdersService {
       orderId: order.id,
       productName: 'Order created',
       branchId: order.branchId ?? null,
+      mediaBuyerId: order.mediaBuyerId ?? null,
     });
 
     // Notify Admin, Head of CS, Head of Marketing, and all CS agents (every new order)
@@ -171,13 +210,39 @@ export class OrdersService {
     // Auto-dispatch to least-loaded CS agent
     await this.autoDispatchToCS(order.id);
 
-    // Timeline event: order received
+    const mediaBuyerName = order.mediaBuyerId
+      ? await this.resolveUserNameById(order.mediaBuyerId)
+      : null;
+    const mbSuffix = mediaBuyerName
+      ? ` — attributed to media buyer ${mediaBuyerName}`
+      : '';
+    const isEdgeSubmission =
+      orderSource === 'edge-form' ||
+      actorId === EDGE_FORM_ACTOR_ID ||
+      actorId === null;
+    let receivedActorId: string | null;
+    let receivedActorName: string | null;
+    let receivedDescription: string;
+    if (isEdgeSubmission) {
+      receivedActorId = actorId ?? EDGE_FORM_ACTOR_ID;
+      receivedActorName = 'Edge form';
+      receivedDescription = `Order received from sales form${mbSuffix}`;
+    } else {
+      receivedActorId = actorId;
+      receivedActorName = actorId ? await this.resolveUserNameById(actorId) : null;
+      receivedDescription = `Order created${mbSuffix}`;
+    }
+
     this.writeTimelineEvent({
       orderId: order.id,
       eventType: 'ORDER_RECEIVED',
-      actorId: actorId,
-      actorName: actorId ? null : 'Edge Form',
-      description: 'Order received from sales form',
+      actorId: receivedActorId,
+      actorName: receivedActorName,
+      description: receivedDescription,
+      metadata:
+        mediaBuyerName && order.mediaBuyerId
+          ? { mediaBuyerId: order.mediaBuyerId, mediaBuyerName }
+          : undefined,
     });
 
     // Mark cart as CONVERTED if cartId was provided (same actor as order create for audit)
@@ -214,7 +279,11 @@ export class OrdersService {
    * Create an offline order (CS manual entry). Creator is set as assignee; no auto-dispatch.
    * Hashes customer phone server-side. Optionally checks for duplicate (same phone + product in 6h).
    */
-  async createOffline(input: CreateOfflineOrderInput, actorId: string): Promise<{ id: string }> {
+  async createOffline(
+    input: CreateOfflineOrderInput,
+    actorId: string,
+    sessionBranchId?: string | null,
+  ): Promise<{ id: string }> {
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
 
     const customerPhoneHash = this.hashPhone(input.customerPhone);
@@ -238,11 +307,18 @@ export class OrdersService {
       });
     }
 
+    const branchId = await this.resolveBranchIdForNewOrder({
+      campaignId: input.campaignId ?? null,
+      mediaBuyerId: input.mediaBuyerId ?? null,
+      fallbackBranchId: sessionBranchId ?? null,
+    });
+
     const rows = await this.db
       .insert(schema.orders)
       .values({
         campaignId: input.campaignId ?? null,
         mediaBuyerId: input.mediaBuyerId ?? null,
+        branchId: branchId ?? null,
         assignedCsId: actorId,
         customerName: input.customerName,
         customerPhoneHash,
@@ -283,6 +359,7 @@ export class OrdersService {
       orderId: order.id,
       productName: 'Offline order created',
       branchId: order.branchId ?? null,
+      mediaBuyerId: order.mediaBuyerId ?? null,
     });
     this.events.emitToUser(actorId, 'order:assigned', { orderId: order.id });
     this.events.emitToRoom('cs-all', 'order:new', { orderId: order.id }, order.branchId ?? null);
@@ -297,20 +374,27 @@ export class OrdersService {
       })
       .catch(() => {});
 
-    // Resolve actor name for timeline
-    const actorRow = await this.db
-      .select({ name: schema.users.name })
-      .from(schema.users)
-      .where(eq(schema.users.id, actorId))
-      .limit(1);
+    const [actorRow, mediaBuyerName] = await Promise.all([
+      this.db
+        .select({ name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, actorId))
+        .limit(1),
+      order.mediaBuyerId ? this.resolveUserNameById(order.mediaBuyerId) : Promise.resolve(null),
+    ]);
     const actorName = actorRow[0]?.name ?? null;
+    const mbSuffix = mediaBuyerName ? ` — attributed to media buyer ${mediaBuyerName}` : '';
 
     this.writeTimelineEvent({
       orderId: order.id,
       eventType: 'ORDER_RECEIVED',
       actorId: actorId,
       actorName,
-      description: 'Offline order created',
+      description: `Offline order created${mbSuffix}`,
+      metadata:
+        mediaBuyerName && order.mediaBuyerId
+          ? { mediaBuyerId: order.mediaBuyerId, mediaBuyerName }
+          : undefined,
     });
 
     return { id: order.id };
@@ -623,7 +707,7 @@ export class OrdersService {
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.createdAt, end));
     }
-    if (branchId) {
+    if (branchId && !input.mediaBuyerId) {
       conditions.push(eq(schema.orders.branchId, branchId));
     }
 
@@ -1153,15 +1237,21 @@ export class OrdersService {
       if (verified.amount !== orderAmountKobo && verified.amount > 0 && orderAmountKobo > 0) {
         return null;
       }
-      const actorId = '00000000-0000-0000-0000-000000000001'; // EDGE_FORM_ACTOR_ID
+      const actorId = EDGE_FORM_ACTOR_ID;
       await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
 
       const { cartId, ...orderInput } = payload;
+      const paystackBranchId = await this.resolveBranchIdForNewOrder({
+        campaignId: orderInput.campaignId ?? null,
+        mediaBuyerId: orderInput.mediaBuyerId ?? null,
+        fallbackBranchId: null,
+      });
       const rows = await this.db
         .insert(schema.orders)
         .values({
           campaignId: orderInput.campaignId ?? null,
           mediaBuyerId: orderInput.mediaBuyerId ?? null,
+          branchId: paystackBranchId ?? null,
           customerName: orderInput.customerName,
           customerPhoneHash: orderInput.customerPhoneHash,
           customerPhone: orderInput.customerPhone ?? null,
@@ -1205,6 +1295,7 @@ export class OrdersService {
         orderId: order.id,
         productName: 'Order created',
         branchId: order.branchId ?? null,
+        mediaBuyerId: order.mediaBuyerId ?? null,
       });
       this.notifications.createForRole('SUPER_ADMIN', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
       this.notifications.createForRole('HEAD_OF_CS', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
@@ -1213,13 +1304,23 @@ export class OrdersService {
       if (order.mediaBuyerId) {
         this.notifications.create({ userId: order.mediaBuyerId, type: 'order:new_campaign', title: 'New order from your campaign', body: 'A new order has been created from your campaign.', data: { orderId: order.id } }).catch(() => {});
       }
+      const mediaBuyerNamePay = order.mediaBuyerId
+        ? await this.resolveUserNameById(order.mediaBuyerId)
+        : null;
+      const mbSuffixPay = mediaBuyerNamePay
+        ? ` — attributed to media buyer ${mediaBuyerNamePay}`
+        : '';
       this.autoDispatchToCS(order.id).catch(() => {});
       this.writeTimelineEvent({
         orderId: order.id,
         eventType: 'ORDER_RECEIVED',
         actorId: actorId,
-        actorName: 'Edge Form',
-        description: 'Order received from sales form',
+        actorName: 'Edge form',
+        description: `Order received from sales form${mbSuffixPay}`,
+        metadata:
+          mediaBuyerNamePay && order.mediaBuyerId
+            ? { mediaBuyerId: order.mediaBuyerId, mediaBuyerName: mediaBuyerNamePay }
+            : undefined,
       });
       this.writeTimelineEvent({
         orderId: order.id,
@@ -1696,7 +1797,7 @@ export class OrdersService {
     if (mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
     if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId && !mediaBuyerId) conditions.push(eq(schema.orders.branchId, branchId));
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);
@@ -3284,11 +3385,73 @@ export class OrdersService {
       .where(eq(schema.orderTimelineEvents.orderId, orderId))
       .orderBy(asc(schema.orderTimelineEvents.createdAt));
 
+    const hasOrderReceived = rows.some((r) => r.eventType === 'ORDER_RECEIVED');
+    let mergedRows = rows;
+    if (!hasOrderReceived) {
+      const [ord] = await this.db
+        .select({
+          id: schema.orders.id,
+          createdAt: schema.orders.createdAt,
+          orderSource: schema.orders.orderSource,
+          mediaBuyerId: schema.orders.mediaBuyerId,
+          assignedCsId: schema.orders.assignedCsId,
+        })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+      if (ord) {
+        const [mediaBuyerName, assignedCsName] = await Promise.all([
+          ord.mediaBuyerId ? this.resolveUserNameById(ord.mediaBuyerId) : Promise.resolve(null),
+          ord.orderSource === 'offline' && ord.assignedCsId
+            ? this.resolveUserNameById(ord.assignedCsId)
+            : Promise.resolve(null),
+        ]);
+        const mbSuffix = mediaBuyerName ? ` — attributed to media buyer ${mediaBuyerName}` : '';
+        const synthetic =
+          ord.orderSource === 'offline'
+            ? ({
+                id: `derived:${ord.id}:order_received`,
+                orderId: ord.id,
+                eventType: 'ORDER_RECEIVED' as const,
+                actorId: ord.assignedCsId,
+                actorName: assignedCsName,
+                description: `Offline order created${mbSuffix}`,
+                metadata: {
+                  derivedFromOrderRow: true,
+                  ...(mediaBuyerName && ord.mediaBuyerId
+                    ? { mediaBuyerId: ord.mediaBuyerId, mediaBuyerName }
+                    : {}),
+                },
+                branchId: null,
+                createdAt: ord.createdAt,
+              } satisfies (typeof rows)[number])
+            : ({
+                id: `derived:${ord.id}:order_received`,
+                orderId: ord.id,
+                eventType: 'ORDER_RECEIVED' as const,
+                actorId: EDGE_FORM_ACTOR_ID,
+                actorName: 'Edge form',
+                description: `Order received from sales form${mbSuffix}`,
+                metadata: {
+                  derivedFromOrderRow: true,
+                  ...(mediaBuyerName && ord.mediaBuyerId
+                    ? { mediaBuyerId: ord.mediaBuyerId, mediaBuyerName }
+                    : {}),
+                },
+                branchId: null,
+                createdAt: ord.createdAt,
+              } satisfies (typeof rows)[number]);
+        mergedRows = [...rows, synthetic].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+      }
+    }
+
     // Role-based filtering
     const csRoles = new Set(['CS_AGENT', 'HEAD_OF_CS']);
     const logisticsRoles = new Set(['HEAD_OF_LOGISTICS', 'WAREHOUSE_MANAGER', 'TPL_MANAGER', 'TPL_RIDER']);
 
-    return rows.filter((row) => {
+    return mergedRows.filter((row) => {
       const eventType = row.eventType as string;
       if (actor.role === 'SUPER_ADMIN' || actor.role === 'FINANCE_OFFICER' || actor.role === 'HR_MANAGER') {
         return true;
@@ -3302,6 +3465,15 @@ export class OrdersService {
       // Marketing roles — see order lifecycle but not supervisor events
       return eventType !== 'SUPERVISOR_WATCHING';
     });
+  }
+
+  private async resolveUserNameById(userId: string): Promise<string | null> {
+    const row = await this.db
+      .select({ name: schema.users.name })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    return row[0]?.name ?? null;
   }
 
   /**

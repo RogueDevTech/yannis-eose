@@ -10,6 +10,11 @@ import { exportToCsv } from '~/lib/csv-export';
 import { formatNaira } from '~/lib/format-amount';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { PageHeader } from '~/components/ui/page-header';
+import { FormSelect } from '~/components/ui/form-select';
+import { EmptyState } from '~/components/ui/empty-state';
+import { Pagination } from '~/components/ui/pagination';
+import { TextInput } from '~/components/ui/text-input';
 import type { AuditEntry, AuditPageProps } from './types';
 
 // ── Polling config ───────────────────────────────────────────────
@@ -220,7 +225,7 @@ function AttachedFileDisplay({ url, onPreview }: { url: string; onPreview?: (url
       </a>
       {onPreview && (
         <>
-          <span className="text-surface-400 dark:text-surface-500">|</span>
+          <span className="text-app-fg-muted">|</span>
           <button
             type="button"
             onClick={() => onPreview(url)}
@@ -440,21 +445,21 @@ function UnknownActorModal({
 }) {
   return (
     <Modal open onClose={onClose} maxWidth="max-w-md" contentClassName="p-0 overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
+          <h3 className="text-lg font-semibold text-app-fg">
             Unknown Actor
           </h3>
           <button
             onClick={onClose}
             className="p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
           >
-            <svg className="w-5 h-5 text-surface-800 dark:text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-5 h-5 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
         <div className="px-6 py-4 space-y-3">
-          <p className="text-sm text-surface-700 dark:text-surface-300">
+          <p className="text-sm text-app-fg-muted">
             {changedBy === EDGE_FORM_ACTOR_ID ? (
               <>
                 <strong>Edge Form</strong> — This change was performed by the sales form hosted on the Cloudflare Edge.
@@ -468,23 +473,23 @@ function UnknownActorModal({
             )}
           </p>
           {changedBy && changedBy !== EDGE_FORM_ACTOR_ID && (
-            <p className="text-sm text-surface-700 dark:text-surface-300">
+            <p className="text-sm text-app-fg-muted">
               <strong>Display:</strong> {displayName}
               <br />
-              <strong>Actor ID:</strong> <code className="text-xs bg-surface-100 dark:bg-surface-800 px-1.5 py-0.5 rounded">{changedBy}</code>
+              <strong>Actor ID:</strong> <code className="text-xs bg-app-hover px-1.5 py-0.5 rounded">{changedBy}</code>
               <br />
               The user may have been deactivated or removed from the system. Historical audit entries preserve the original actor ID for traceability.
             </p>
           )}
           {!changedBy && (
-            <p className="text-sm text-surface-700 dark:text-surface-300">
+            <p className="text-sm text-app-fg-muted">
               <strong>Display:</strong> System
               <br />
               This change was performed automatically by the system (e.g. scheduled job, migration, or other background process).
             </p>
           )}
         </div>
-        <div className="px-6 py-4 border-t border-surface-200 dark:border-surface-700">
+        <div className="px-6 py-4 border-t border-app-border">
           <Button variant="primary" className="w-full sm:w-auto" onClick={onClose}>
             Close
           </Button>
@@ -816,7 +821,7 @@ function formatLeafValue(
   val: unknown,
   actorNames: Record<string, { name: string; role: string }>,
 ): React.ReactNode {
-  if (val === null || val === undefined) return <span className="text-surface-500">-</span>;
+  if (val === null || val === undefined) return <span className="text-app-fg-muted">-</span>;
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
   if (CURRENCY_FIELDS.has(key) && (typeof val === 'number' || (typeof val === 'string' && !isNaN(Number(val))))) {
     return formatCurrency(val);
@@ -838,7 +843,7 @@ const MAX_STRUCTURED_DEPTH = 10;
 
 function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }: StructuredValueProps): React.ReactNode {
   if (depth > MAX_STRUCTURED_DEPTH) {
-    return <span className="text-surface-500 italic">(nested too deep)</span>;
+    return <span className="text-app-fg-muted italic">(nested too deep)</span>;
   }
   // Parse JSON strings
   let resolved = value;
@@ -851,7 +856,7 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
   }
 
   if (resolved === null || resolved === undefined) {
-    return <span className="text-surface-500">-</span>;
+    return <span className="text-app-fg-muted">-</span>;
   }
 
   if (typeof resolved === 'boolean') {
@@ -867,19 +872,19 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
   }
 
   if (Array.isArray(resolved)) {
-    if (resolved.length === 0) return <span className="text-surface-500">(empty)</span>;
+    if (resolved.length === 0) return <span className="text-app-fg-muted">(empty)</span>;
     return (
       <ul className="list-none space-y-2 pl-0 mt-1">
         {resolved.map((item, i) => (
-          <li key={i} className="flex flex-col gap-0.5 pl-3 border-l-2 border-surface-200 dark:border-surface-600">
+          <li key={i} className="flex flex-col gap-0.5 pl-3 border-l-2 border-app-border">
             {item !== null && typeof item === 'object' && !Array.isArray(item) ? (
               <dl className="space-y-1 text-sm">
                 {Object.entries(item as Record<string, unknown>).map(([k, v]) => (
                   <div key={k} className="flex flex-wrap gap-x-2 gap-y-0.5">
-                    <dt className="font-medium text-surface-600 dark:text-surface-400 shrink-0">
+                    <dt className="font-medium text-app-fg-muted shrink-0">
                       {formatFieldName(k)}:
                     </dt>
-                    <dd className="text-surface-900 dark:text-surface-100">
+                    <dd className="text-app-fg">
                       {typeof v === 'object' && v !== null ? (
                         <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} depth={depth + 1} />
                       ) : (
@@ -890,7 +895,7 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
                 ))}
               </dl>
             ) : (
-              <span className="text-surface-800 dark:text-surface-200">
+              <span className="text-app-fg-muted">
                 {typeof item === 'object' && item !== null ? (
                   <StructuredValueDisplay value={item} fieldKey={String(i)} actorNames={actorNames} depth={depth + 1} />
                 ) : (
@@ -906,15 +911,15 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
 
   if (typeof resolved === 'object') {
     const entries = Object.entries(resolved as Record<string, unknown>);
-    if (entries.length === 0) return <span className="text-surface-500">(empty)</span>;
+    if (entries.length === 0) return <span className="text-app-fg-muted">(empty)</span>;
     return (
       <dl className="space-y-1.5 text-sm mt-1">
         {entries.map(([k, v]) => (
           <div key={k}>
-            <dt className="font-medium text-surface-600 dark:text-surface-400 text-xs uppercase tracking-wide">
+            <dt className="font-medium text-app-fg-muted text-xs uppercase tracking-wide">
               {formatFieldName(k)}
             </dt>
-            <dd className="mt-0.5 pl-2 border-l-2 border-surface-100 dark:border-surface-700">
+            <dd className="mt-0.5 pl-2 border-l-2 border-app-border">
               {typeof v === 'object' && v !== null ? (
                 <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} depth={depth + 1} />
               ) : (
@@ -934,7 +939,7 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
 
 function OffersDisplay({ value }: { value: unknown }) {
   const offers = parseOffersArray(value);
-  if (offers.length === 0) return <span className="text-surface-600 dark:text-surface-400">-</span>;
+  if (offers.length === 0) return <span className="text-app-fg-muted">-</span>;
   return (
     <div className="text-sm space-y-1.5 py-1">
       {offers.map((obj, i) => {
@@ -945,9 +950,9 @@ function OffersDisplay({ value }: { value: unknown }) {
           ? formatCurrency(priceVal)
           : String(priceVal ?? '—');
         return (
-          <div key={i} className="flex flex-wrap gap-x-2 gap-y-0.5 text-surface-800 dark:text-surface-200">
+          <div key={i} className="flex flex-wrap gap-x-2 gap-y-0.5 text-app-fg-muted">
             <span className="font-medium">{label}</span>
-            <span className="text-surface-600 dark:text-surface-400">— {String(qty)} qty</span>
+            <span className="text-app-fg-muted">— {String(qty)} qty</span>
             <span className="text-success-600 dark:text-success-400 font-medium">{price}</span>
           </div>
         );
@@ -982,12 +987,12 @@ function DetailModal({
   return (
     <Modal open onClose={onClose} maxWidth="max-w-2xl" contentClassName="p-0 max-h-[80dvh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700 shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-app-border shrink-0">
           <div>
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
+            <h3 className="text-lg font-semibold text-app-fg">
               Record Detail
             </h3>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+            <p className="text-sm text-app-fg-muted mt-0.5">
               {formatTableName(entry.tableName)} &middot; {entry.recordId.slice(0, 8)}...
             </p>
           </div>
@@ -1002,10 +1007,10 @@ function DetailModal({
         </div>
 
         {/* Meta */}
-        <div className="px-6 py-3 bg-surface-50 dark:bg-surface-800/50 border-b border-surface-200 dark:border-surface-700 shrink-0">
+        <div className="px-6 py-3 bg-app-hover border-b border-app-border shrink-0">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
             <div>
-              <span className="text-surface-800 dark:text-surface-200">Changed By</span>
+              <span className="text-app-fg-muted">Changed By</span>
               {actorKnown && entry.changedBy ? (
                 <Link
                   to={`/hr/users/${entry.changedBy}`}
@@ -1017,30 +1022,30 @@ function DetailModal({
                 <button
                   type="button"
                   onClick={() => onUnknownActorClick(entry.changedBy, actorDisplay)}
-                  className="block font-medium text-surface-600 hover:text-surface-900 dark:text-surface-200 dark:hover:text-surface-100 text-xs mt-0.5 underline underline-offset-2 cursor-pointer text-left"
+                  className="block font-medium text-surface-600 hover:text-app-fg dark:hover:text-surface-100 text-xs mt-0.5 underline underline-offset-2 cursor-pointer text-left"
                 >
                   {actorDisplay}
                 </button>
               ) : (
-                <p className="font-medium text-surface-900 dark:text-surface-100 text-xs mt-0.5">
+                <p className="font-medium text-app-fg text-xs mt-0.5">
                   {actorDisplay}
                 </p>
               )}
               {actorInfo && (
-                <p className="text-xs text-surface-700 dark:text-surface-300">
+                <p className="text-xs text-app-fg-muted">
                   {ROLE_LABELS[actorInfo.role] ?? actorInfo.role}
                 </p>
               )}
             </div>
             <div>
-              <span className="text-surface-800 dark:text-surface-200">Valid From</span>
-              <p className="text-surface-900 dark:text-surface-100 text-xs mt-0.5">
+              <span className="text-app-fg-muted">Valid From</span>
+              <p className="text-app-fg text-xs mt-0.5">
                 {formatDate(entry.validFrom)}
               </p>
             </div>
             <div>
-              <span className="text-surface-800 dark:text-surface-200">Valid To</span>
-              <p className="text-surface-900 dark:text-surface-100 text-xs mt-0.5">
+              <span className="text-app-fg-muted">Valid To</span>
+              <p className="text-app-fg text-xs mt-0.5">
                 {entry.validTo ? formatDate(entry.validTo) : 'Current'}
               </p>
             </div>
@@ -1059,10 +1064,10 @@ function DetailModal({
             <tbody>
               {fields.map(([key, value]) => (
                 <tr key={key} className="table-row">
-                  <td className="table-cell font-medium text-surface-700 dark:text-surface-300">
+                  <td className="table-cell font-medium text-app-fg-muted">
                     {formatFieldName(key)}
                   </td>
-                  <td className="table-cell text-surface-900 dark:text-surface-100 break-words whitespace-normal min-w-0">
+                  <td className="table-cell text-app-fg break-words whitespace-normal min-w-0">
                     {key === 'offers' ? (
                       <OffersDisplay value={value} />
                     ) : IMAGE_URL_FIELD_KEYS.has(key) && isImageUrlValue(value) ? (
@@ -1112,7 +1117,7 @@ function PollingStatusIndicator({
             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
           />
         </svg>
-        <span className="text-surface-700 dark:text-surface-200">Update</span>
+        <span className="text-app-fg-muted">Update</span>
       </span>
     );
   }
@@ -1133,7 +1138,7 @@ function PollingStatusIndicator({
         className="h-3 w-3 rounded-full bg-warning-500"
         title={`Next refresh in ${countdown}s`}
       />
-      <span className="text-surface-700 dark:text-surface-200">
+      <span className="text-app-fg-muted">
         Next refresh in {countdown}s
       </span>
     </span>
@@ -1166,39 +1171,33 @@ function TimeTravelPanel({
 
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-3">
+      <h2 className="text-lg font-semibold text-app-fg mb-3">
         Time Travel
       </h2>
-      <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+      <p className="text-sm text-app-fg-muted mb-4">
         View the state of any record at a specific point in time.
       </p>
       <fetcher.Form method="post">
         <input type="hidden" name="intent" value="timeTravel" />
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-          <select
+          <FormSelect
             name="tableName"
             value={ttTable}
             onChange={(e) => setTtTable(e.target.value)}
-            className="input text-sm"
-          >
-            {AUDITABLE_TABLES.map((t) => (
-              <option key={t} value={t}>{formatTableName(t)}</option>
-            ))}
-          </select>
-          <input
+            options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatTableName(t) }))}
+          />
+          <TextInput
             name="recordId"
             type="text"
             placeholder="Record ID (UUID)"
             value={ttRecordId}
             onChange={(e) => setTtRecordId(e.target.value)}
-            className="input text-sm"
           />
-          <input
+          <TextInput
             name="asOf"
             type="datetime-local"
             value={ttTimestamp}
             onChange={(e) => setTtTimestamp(e.target.value)}
-            className="input text-sm"
           />
           <Button
             type="submit"
@@ -1237,10 +1236,10 @@ function TimeTravelPanel({
                 .filter(([key]) => !HIDDEN_FIELDS.has(key))
                 .map(([key, value]) => (
                 <tr key={key} className="table-row">
-                  <td className="table-cell font-medium text-surface-700 dark:text-surface-300">
+                  <td className="table-cell font-medium text-app-fg-muted">
                     {formatFieldName(key)}
                   </td>
-                  <td className="table-cell text-surface-900 dark:text-surface-100 break-words whitespace-normal min-w-0">
+                  <td className="table-cell text-app-fg break-words whitespace-normal min-w-0">
                     {key === 'offers' ? (
                       <OffersDisplay value={value} />
                     ) : IMAGE_URL_FIELD_KEYS.has(key) && isImageUrlValue(value) ? (
@@ -1340,27 +1339,19 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
     setSearchParams(params);
   };
 
-  const goToPage = (page: number) => {
-    const params = new URLSearchParams(searchParams);
-    params.set('page', String(page));
-    setSearchParams(params);
-  };
-
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Audit Trail</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
-            Complete history of all data changes. Every mutation is permanently recorded.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <PageRefreshButton />
-          <PollingStatusIndicator state={pollState} countdown={countdown} />
-        </div>
-      </div>
+      <PageHeader
+        title="Audit Trail"
+        description="Complete history of all data changes. Every mutation is permanently recorded."
+        actions={
+          <div className="flex items-center gap-2">
+            <PageRefreshButton />
+            <PollingStatusIndicator state={pollState} countdown={countdown} />
+          </div>
+        }
+      />
 
       {error && !dismissedError && (
         <PageNotification
@@ -1375,24 +1366,15 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
       <div className="card">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
-              Table
-            </label>
-            <select
+            <FormSelect
+              label="Table"
               value={filters.tableName}
               onChange={(e) => updateFilter('tableName', e.target.value)}
-              className="input text-sm"
-            >
-              <option value="">All Tables</option>
-              {AUDITABLE_TABLES.map((t) => (
-                <option key={t} value={t}>{formatTableName(t)}</option>
-              ))}
-            </select>
+              placeholder="All Tables"
+              options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatTableName(t) }))}
+            />
           </div>
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
-              Actor
-            </label>
             <DeferredSection resolve={actorNames} skeleton="inline">
               {(resolvedActorNames) => {
                 const uniqueActors = Object.entries(resolvedActorNames).map(([id, info]) => ({
@@ -1401,32 +1383,27 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                   role: info.role,
                 }));
                 return uniqueActors.length > 0 ? (
-                  <select
+                  <FormSelect
+                    label="Actor"
                     value={filters.actorId}
                     onChange={(e) => updateFilter('actorId', e.target.value)}
-                    className="input text-sm"
-                  >
-                    <option value="">All Users</option>
-                    {uniqueActors.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} ({ROLE_LABELS[a.role] ?? a.role})
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="All Users"
+                    options={uniqueActors.map((a) => ({ value: a.id, label: `${a.name} (${ROLE_LABELS[a.role] ?? a.role})` }))}
+                  />
                 ) : (
-                  <input
+                  <TextInput
+                    label="Actor"
                     type="text"
                     placeholder="User UUID..."
                     value={filters.actorId}
                     onChange={(e) => updateFilter('actorId', e.target.value)}
-                    className="input text-sm"
                   />
                 );
               }}
             </DeferredSection>
           </div>
           <div>
-            <label className="block text-xs font-medium text-surface-800 dark:text-surface-200 mb-1">
+            <label className="block text-xs font-medium text-app-fg-muted mb-1">
               Date range
             </label>
             <DateFilterBar
@@ -1437,7 +1414,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
           </div>
           {isFilterLoading && (
             <div className="flex items-end">
-              <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+              <span className="flex items-center text-app-fg-muted" aria-hidden>
                 <Spinner size="sm" className="shrink-0" />
               </span>
             </div>
@@ -1447,7 +1424,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
 
       {/* Results count + Export */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-surface-800 dark:text-surface-200">
+        <p className="text-sm text-app-fg-muted">
           {total} {total === 1 ? 'entry' : 'entries'} found
         </p>
         {rows.length > 0 && (
@@ -1503,29 +1480,27 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
-                    No audit entries found. Try adjusting your filters.
-                  </td>
+                  <td colSpan={7}><EmptyState title="No audit entries found" description="Try adjusting your filters." /></td>
                 </tr>
               )}
               {rows.map((entry, idx) => (
                 <tr key={`${entry.recordId}-${entry.validFrom}-${idx}`} className="table-row">
-                  <td className="table-cell text-xs text-surface-700 dark:text-surface-300 whitespace-nowrap">
+                  <td className="table-cell text-xs text-app-fg-muted whitespace-nowrap">
                     {formatDate(entry.validFrom)}
                   </td>
                   <td className="table-cell">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-app-hover text-app-fg-muted">
                       {formatTableName(entry.tableName)}
                     </span>
                   </td>
-                  <td className="table-cell text-xs text-surface-700 dark:text-surface-300 max-w-[180px] sm:max-w-xs md:max-w-sm break-words whitespace-normal min-w-0">
+                  <td className="table-cell text-xs text-app-fg-muted max-w-[180px] sm:max-w-xs md:max-w-sm break-words whitespace-normal min-w-0">
                     <DeferredSection resolve={actorNames} skeleton="inline">
                       {(resolvedActorNames) => (
                         <AuditDescription entry={entry} actorNames={resolvedActorNames} />
                       )}
                     </DeferredSection>
                   </td>
-                  <td className="table-cell text-xs text-surface-700 dark:text-surface-300 whitespace-nowrap">
+                  <td className="table-cell text-xs text-app-fg-muted whitespace-nowrap">
                     <DeferredSection resolve={actorNames} skeleton="inline">
                       {(resolvedActorNames) => {
                         const display = getActorDisplay(entry.changedBy, resolvedActorNames);
@@ -1544,7 +1519,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                           <button
                             type="button"
                             onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
-                            className="text-surface-600 hover:text-surface-900 dark:text-surface-200 dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer"
+                            className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer"
                           >
                             {display}
                           </button>
@@ -1582,24 +1557,22 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
         {/* Mobile cards */}
         <div className="md:hidden space-y-3 px-1">
           {rows.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-surface-800 dark:text-surface-200">
-              No audit entries found. Try adjusting your filters.
-            </div>
+            <EmptyState title="No audit entries found" description="Try adjusting your filters." />
           ) : (
             rows.map((entry, idx) => (
               <div
                 key={`${entry.recordId}-${entry.validFrom}-${idx}`}
-                className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3"
+                className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
               >
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="text-xs text-surface-700 dark:text-surface-300">
+                  <span className="text-xs text-app-fg-muted">
                     {formatDate(entry.validFrom)}
                   </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-app-hover text-app-fg-muted">
                     {formatTableName(entry.tableName)}
                   </span>
                 </div>
-                <div className="text-sm text-surface-700 dark:text-surface-300 break-words min-w-0">
+                <div className="text-sm text-app-fg-muted break-words min-w-0">
                   <DeferredSection resolve={actorNames} skeleton="inline">
                     {(resolvedActorNames) => (
                       <AuditDescription entry={entry} actorNames={resolvedActorNames} />
@@ -1622,7 +1595,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                         <button
                           type="button"
                           onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
-                          className="text-surface-600 hover:text-surface-900 dark:text-surface-200 dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer text-sm"
+                          className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer text-sm"
                         >
                           {display}
                         </button>
@@ -1660,27 +1633,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => goToPage(filters.page - 1)}
-            disabled={filters.page <= 1}
-          >
-            Previous
-          </Button>
-          <span className="text-sm text-surface-800 dark:text-surface-200">
-            Page {filters.page} of {totalPages}
-          </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => goToPage(filters.page + 1)}
-            disabled={filters.page >= totalPages}
-          >
-            Next
-          </Button>
-        </div>
+        <Pagination page={filters.page} totalPages={totalPages} pageParam="page" />
       )}
 
       {/* Time Travel Panel — uses resolved actorNames */}

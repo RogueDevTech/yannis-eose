@@ -51,31 +51,31 @@ export function HighCpaWarningBanner({ buyers, threshold }: HighCpaWarningBanner
                 ₦{threshold.toLocaleString()}. Review ad performance.
               </p>
             </div>
-            <div className="shrink-0 flex items-center gap-1">
+            <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
               <button
                 type="button"
                 onClick={() => scrollChips(-220)}
-                className="p-1.5 rounded border border-warning-300/70 dark:border-warning-600/60 text-warning-700 dark:text-warning-300 hover:bg-warning-100 dark:hover:bg-warning-800/40 transition-colors"
+                className="p-1 sm:p-1.5 rounded border border-warning-300/70 dark:border-warning-600/60 text-warning-700 dark:text-warning-300 hover:bg-warning-100 dark:hover:bg-warning-800/40 transition-colors flex items-center justify-center"
                 aria-label="Scroll buyers left"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-3 h-3 sm:w-4 sm:h-4 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
               <button
                 type="button"
                 onClick={() => scrollChips(220)}
-                className="p-1.5 rounded border border-warning-300/70 dark:border-warning-600/60 text-warning-700 dark:text-warning-300 hover:bg-warning-100 dark:hover:bg-warning-800/40 transition-colors"
+                className="p-1 sm:p-1.5 rounded border border-warning-300/70 dark:border-warning-600/60 text-warning-700 dark:text-warning-300 hover:bg-warning-100 dark:hover:bg-warning-800/40 transition-colors flex items-center justify-center"
                 aria-label="Scroll buyers right"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-3 h-3 sm:w-4 sm:h-4 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
               </button>
               <button
                 type="button"
                 onClick={() => setDismissed(true)}
-                className="p-1.5 rounded text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-200 hover:bg-warning-100 dark:hover:bg-warning-800/30 transition-colors"
+                className="p-1.5 rounded text-app-fg-muted hover:text-app-fg hover:bg-warning-100 dark:hover:bg-warning-800/30 transition-colors"
                 aria-label="Dismiss"
               >
                 <svg

@@ -6,6 +6,8 @@ import { loginAsSuperAdmin, navigateTo } from './helpers';
  *
  * Tests the complete order state machine:
  * UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRANSIT → DELIVERED → COMPLETED
+ *
+ * Requires seed data: at least one order must exist (created by global-setup seed).
  */
 
 test.describe('Order Lifecycle', () => {
@@ -13,63 +15,57 @@ test.describe('Order Lifecycle', () => {
     await loginAsSuperAdmin(page);
   });
 
-  test('should display orders page with correct columns', async ({ page }) => {
+  test('orders page loads and shows the orders table', async ({ page }) => {
     await navigateTo(page, 'orders');
     await expect(page.getByText(/orders/i).first()).toBeVisible();
+    // Table must be present — seed data guarantees at least one row
+    await expect(page.locator('table')).toBeVisible();
   });
 
-  test('should show order status counts on dashboard', async ({ page }) => {
+  test('dashboard shows order status pipeline', async ({ page }) => {
     await page.goto('/admin');
-    // Dashboard should show status pipeline for SuperAdmin
+    await page.waitForLoadState('networkidle');
     await expect(page.locator('body')).toContainText(/unprocessed|orders|pipeline/i);
   });
 
-  test('should navigate to order detail page', async ({ page }) => {
+  test('clicking first order row opens order detail page', async ({ page }) => {
     await navigateTo(page, 'orders');
-    // If orders exist, click the first one
-    const firstOrder = page.locator('table tbody tr').first();
-    const orderExists = await firstOrder.isVisible().catch(() => false);
-    if (orderExists) {
-      await firstOrder.click();
-      await page.waitForURL(/\/admin\/orders\//);
-    }
+    const firstRow = page.locator('table tbody tr').first();
+    await expect(firstRow).toBeVisible({ timeout: 8000 });
+    await firstRow.click();
+    await page.waitForURL(/\/admin\/orders\//, { timeout: 8000 });
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
   });
 
-  test('should enforce state machine — no state skipping', async ({ page }) => {
+  test('order detail only shows valid next-state buttons for current status', async ({ page }) => {
     await navigateTo(page, 'orders');
-    // The UI should disable invalid state transitions
-    // An UNPROCESSED/CS_ASSIGNED order should show Call (or Call customer), not "Dispatch"
     const firstRow = page.locator('table tbody tr').first();
-    const rowExists = await firstRow.isVisible().catch(() => false);
-    if (rowExists) {
-      await firstRow.click();
-      await page.waitForURL(/\/admin\/orders\//);
-      // Check that only valid next-state buttons are enabled
-      const dispatchBtn = page.getByRole('button', { name: /dispatch/i });
-      const callBtn = page.getByRole('button', { name: /call/i });
-      // If order is UNPROCESSED or CS_ASSIGNED, dispatch should not be available
-      const status = await page.locator('[data-status]').getAttribute('data-status');
-      if (status === 'UNPROCESSED' || status === 'CS_ASSIGNED') {
-        if (await dispatchBtn.isVisible().catch(() => false)) {
-          await expect(dispatchBtn).toBeDisabled();
-        }
+    await expect(firstRow).toBeVisible({ timeout: 8000 });
+    await firstRow.click();
+    await page.waitForURL(/\/admin\/orders\//, { timeout: 8000 });
+
+    const status = await page.locator('[data-status]').getAttribute('data-status').catch(() => null);
+
+    if (status === 'UNPROCESSED' || status === 'CS_ASSIGNED') {
+      // Dispatch button must NOT be present or must be disabled for early-stage orders
+      const dispatchBtn = page.getByRole('button', { name: /^dispatch$/i });
+      if (await dispatchBtn.isVisible().catch(() => false)) {
+        await expect(dispatchBtn).toBeDisabled();
       }
     }
   });
 
-  test('should log state transitions in audit trail', async ({ page }) => {
+  test('order detail shows timeline/history section', async ({ page }) => {
     await navigateTo(page, 'orders');
     const firstRow = page.locator('table tbody tr').first();
-    const rowExists = await firstRow.isVisible().catch(() => false);
-    if (rowExists) {
-      await firstRow.click();
-      await page.waitForURL(/\/admin\/orders\//);
-      // Look for history/timeline section
-      const timeline = page.locator('[data-testid="order-timeline"], .timeline, [class*="history"]');
-      if (await timeline.isVisible().catch(() => false)) {
-        // Timeline should show who made changes and when
-        await expect(timeline).toContainText(/\d{4}/); // Should contain a date
-      }
-    }
+    await expect(firstRow).toBeVisible({ timeout: 8000 });
+    await firstRow.click();
+    await page.waitForURL(/\/admin\/orders\//, { timeout: 8000 });
+
+    // Timeline section must exist — writeTimelineEvent is called on every transition
+    const timeline = page.locator('[data-testid="order-timeline"], .timeline, [class*="timeline"], [class*="history"]');
+    await expect(timeline.first()).toBeVisible({ timeout: 5000 });
+    // Timeline must contain a date (year 2025 or 2026)
+    await expect(timeline.first()).toContainText(/202[56]/);
   });
 });

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Outlet, useLocation, useNavigation } from '@remix-run/react';
+import { NavLink, Outlet, useLocation, useNavigation } from '@remix-run/react';
 import { Sidebar, SidebarIcons, type SidebarGroup } from './sidebar';
 import { Header } from './header';
 import {
@@ -11,10 +11,14 @@ import {
 import { useSocket, useRealtimeNotifications } from '~/hooks/useSocket';
 import { ToastProvider } from '~/components/ui/toast';
 import { NotificationsStateProvider, useNotificationsState } from '~/contexts/notifications-state';
-import { subscribeToPush } from '~/lib/offline-sync';
+import { IosInstallBanner } from '~/components/ui/ios-install-banner';
+import { Modal } from '~/components/ui/modal';
+import { Button } from '~/components/ui/button';
+import { usePushSubscription } from '~/hooks/usePushSubscription';
 import { RouteLoader } from '~/components/ui/route-loader';
 import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
+import { useAppTheme } from '~/hooks/useAppTheme';
 
 interface Notification {
   id: string;
@@ -89,8 +93,14 @@ const navStructure: NavGroupDef[] = [
         permission: 'marketing.orders',
       },
       {
-        label: 'Funding & Ad Spend',
+        label: 'Funding',
         href: '/admin/marketing/funding',
+        icon: SidebarIcons.marketing,
+        permission: 'marketing.read',
+      },
+      {
+        label: 'Ad spend',
+        href: '/admin/marketing/ad-spend',
         icon: SidebarIcons.marketing,
         permission: 'marketing.read',
       },
@@ -248,7 +258,11 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'Config',
     items: [
-      { label: 'Notifications', href: '/admin/notifications', icon: SidebarIcons.notifications },
+      {
+        label: 'Notifications',
+        href: '/admin/notifications',
+        icon: SidebarIcons.notifications,
+      },
       { label: 'Settings', href: '/admin/settings', icon: SidebarIcons.settings },
       {
         label: 'Branches',
@@ -351,15 +365,15 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin',
     '/admin/marketing/overview',
     '/admin/marketing/team',
-    '/admin/marketing/orders',
     '/admin/marketing/funding',
+    '/admin/marketing/ad-spend',
   ],
   MEDIA_BUYER: [
     '/admin',
     '/admin/marketing/overview',
     '/admin/marketing/orders',
     '/admin/marketing/funding',
-    '/admin/marketing/leaderboard',
+    '/admin/marketing/ad-spend',
   ],
   HEAD_OF_CS: [
     '/admin',
@@ -454,9 +468,19 @@ function DashboardLayoutInner({
 }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showPushBanner, setShowPushBanner] = useState(false);
+  const [pushEnabling, setPushEnabling] = useState(false);
+  const { subscribe: subscribePush, permissionState, isSupported } = usePushSubscription();
+
+  const dismissPushPrompt = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yannis_push_banner_dismissed', '1');
+    }
+    setShowPushBanner(false);
+  };
   // Must match SSR (no sessionStorage): hydrate first, then read storage in useEffect.
   const [moreNavOpen, setMoreNavOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const { isDarkTheme } = useAppTheme();
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const { isConnected } = useSocket();
   const {
@@ -486,31 +510,36 @@ function DashboardLayoutInner({
 
   const notificationCount = displayUnreadCount(serverUnreadCount + realtimeCount);
 
-  // Initialize dark mode and sidebar collapse from localStorage
   useEffect(() => {
-    const stored = localStorage.getItem('yannis_theme');
-    if (stored === 'dark') {
-      setDarkMode(true);
-      document.documentElement.classList.add('dark');
-    }
     const savedCollapsed = localStorage.getItem('yannis_sidebar_collapsed');
     if (savedCollapsed === 'true') {
       setCollapsed(true);
     }
   }, []);
 
-  // Request push notification subscription (once, silently)
+  // Show a dismissible push prompt banner if push is supported but not yet granted
   useEffect(() => {
-    const w = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : null;
-    const env = w?.__ENV as Record<string, unknown> | undefined;
-    const vapidKey =
-      env && typeof env.VAPID_PUBLIC_KEY === 'string' ? env.VAPID_PUBLIC_KEY : undefined;
-    if (vapidKey) {
-      subscribeToPush(vapidKey).catch(() => {
-        // Push not supported or permission denied — silent fail
-      });
+    if (
+      isSupported &&
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'default' &&
+      !localStorage.getItem('yannis_push_banner_dismissed')
+    ) {
+      const t = setTimeout(() => setShowPushBanner(true), 2000);
+      return () => clearTimeout(t);
     }
-  }, []);
+  }, [isSupported]);
+
+  // If permission was already granted (e.g. returning user), sync the subscription to the DB once.
+  // Guarded by a ref so it only fires once per mount even if subscribePush identity changes.
+  const didAutoSubscribeRef = useRef(false);
+  useEffect(() => {
+    if (permissionState === 'granted' && !didAutoSubscribeRef.current) {
+      didAutoSubscribeRef.current = true;
+      subscribePush().catch(() => {});
+    }
+  }, [permissionState, subscribePush]);
 
   // Unlock notification sound on first user interaction (required by browser autoplay policy)
   // Keep audio context alive — browsers re-suspend it after inactivity,
@@ -549,18 +578,6 @@ function DashboardLayoutInner({
     prevRealtimeCountRef.current = realtimeCount;
   }, [realtimeCount]);
 
-  const toggleDarkMode = () => {
-    const next = !darkMode;
-    setDarkMode(next);
-    if (next) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('yannis_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('yannis_theme', 'light');
-    }
-  };
-
   const navGroups = getNavGroupsForUser(user);
   const bottomNavItems = getBottomNavItemsForUser(user);
   const allNavGroups = getNavGroupsForUser(user, { forMobile: true });
@@ -589,7 +606,7 @@ function DashboardLayoutInner({
   };
 
   return (
-    <div className="min-h-screen bg-surface-50 dark:bg-surface-950">
+    <div className="min-h-screen bg-app-canvas text-app-fg">
       <Sidebar
         groups={navGroups}
         collapsed={collapsed}
@@ -600,17 +617,16 @@ function DashboardLayoutInner({
           isRouteLoading && navigation.location ? navigation.location.pathname : undefined
         }
         notificationCount={notificationCount}
-        darkMode={darkMode}
+        isDarkTheme={isDarkTheme}
       />
       <Header
         user={user}
         sidebarCollapsed={collapsed}
-        darkMode={darkMode}
+        isDarkTheme={isDarkTheme}
         notificationsPromise={notificationsPromise}
         realtimeNotifications={realtimeNotifications}
         realtimeCount={realtimeCount}
         socketConnected={isConnected}
-        onToggleDarkMode={toggleDarkMode}
         onMobileMenuToggle={() => setMobileOpen(!mobileOpen)}
         onRemoveRealtimeNotification={removeRealtimeNotification}
         onPruneServerKnown={pruneServerKnown}
@@ -618,6 +634,85 @@ function DashboardLayoutInner({
         branches={branches}
         currentBranchId={user?.currentBranchId}
       />
+
+      <IosInstallBanner />
+
+      {/* Dismissible push notification prompt — full-width modal */}
+      <Modal
+        open={showPushBanner}
+        onClose={dismissPushPrompt}
+        maxWidth="max-w-md"
+        backdropBlur
+        aria-labelledby="push-prompt-title"
+        aria-describedby="push-prompt-desc"
+        contentClassName="bg-app-elevated border border-app-border p-0 overflow-hidden shadow-xl"
+      >
+        <div className="flex items-start gap-4 p-4 sm:p-5 md:p-6">
+          <div className="flex-shrink-0 w-11 h-11 rounded-full bg-brand-100 dark:bg-brand-900/40 flex items-center justify-center">
+            <svg
+              className="w-5 h-5 text-brand-600 dark:text-brand-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              stroke="currentColor"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
+              />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 id="push-prompt-title" className="text-base font-semibold text-app-fg">
+              Enable push notifications
+            </h2>
+            <p id="push-prompt-desc" className="text-sm text-app-fg-muted mt-1">
+              Stay updated on orders and alerts in real time.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 mt-4">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                loading={pushEnabling}
+                onClick={async () => {
+                  setPushEnabling(true);
+                  try {
+                    await subscribePush();
+                    setShowPushBanner(false);
+                  } catch (err) {
+                    console.error('[push] subscribe failed:', err);
+                    setShowPushBanner(false);
+                  } finally {
+                    setPushEnabling(false);
+                  }
+                }}
+              >
+                Enable
+              </Button>
+              <NavLink
+                to="/admin/settings?tab=push"
+                className="text-sm font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
+                onClick={() => setShowPushBanner(false)}
+              >
+                Manage in settings
+              </NavLink>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={dismissPushPrompt}
+            className="flex-shrink-0 rounded-lg p-1 text-app-fg-muted hover:text-app-fg hover:bg-app-canvas/80 dark:hover:bg-surface-800 transition-colors -mt-1 -mr-1"
+            aria-label="Dismiss"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </Modal>
 
       {/* Main content area */}
       <main
@@ -632,7 +727,7 @@ function DashboardLayoutInner({
             aria-live="polite"
           >
             {isRouteLoading && (
-              <div className="absolute inset-0 z-20 bg-surface-50 dark:bg-surface-950 p-4 lg:p-6">
+              <div className="absolute inset-0 z-20 bg-app-canvas p-4 lg:p-6">
                 {navigation.location?.pathname === '/admin/cs/queue' ? (
                   <CSOverviewSkeleton />
                 ) : (
@@ -672,6 +767,22 @@ function DashboardLayoutInner({
           allItems={allNavItemsForModal}
           allGroups={allNavGroupsForModal}
           currentPathname={location.pathname}
+          footer={
+            <NavLink
+              to="/admin/settings#install-app"
+              prefetch="intent"
+              onClick={() => {
+                try {
+                  sessionStorage.removeItem(MORE_OPEN_KEY);
+                } catch {}
+                setMoreNavOpen(false);
+              }}
+              className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-sm text-app-fg-muted hover:bg-app-hover"
+            >
+              <span className="flex-1 font-medium text-app-fg">Install app</span>
+              <span className="text-xs text-app-fg-muted">Add to home screen</span>
+            </NavLink>
+          }
         />
       )}
     </div>

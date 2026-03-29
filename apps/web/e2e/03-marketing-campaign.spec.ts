@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { loginAsSuperAdmin, navigateTo } from './helpers';
+import { loginAsSuperAdmin, loginAsMediaBuyer, navigateTo } from './helpers';
 
 /**
  * E2E Test: Marketing Campaign & Ad Spend Flow
  *
  * Tests campaign creation, funding ledger, and ad spend tracking.
+ * Requires seed data: at least one campaign and one media buyer must exist.
  */
 
 test.describe('Marketing Campaign Flow', () => {
@@ -12,46 +13,64 @@ test.describe('Marketing Campaign Flow', () => {
     await loginAsSuperAdmin(page);
   });
 
-  test('should display campaigns page', async ({ page }) => {
-    await navigateTo(page, 'campaigns');
-    await expect(page.locator('body')).toContainText(/campaign/i);
-  });
-
-  test('should display marketing page with KPIs', async ({ page }) => {
-    await navigateTo(page, 'marketing');
-    // Should show CPA, ROAS, and other marketing KPIs
+  test('marketing overview page loads without errors', async ({ page }) => {
+    await navigateTo(page, 'marketing/overview');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
     await expect(page.locator('body')).toContainText(/marketing|spend|performance/i);
   });
 
-  test('should show funding ledger tab', async ({ page }) => {
-    await navigateTo(page, 'marketing');
-    const fundingTab = page.getByRole('button', { name: /funding/i }).first();
-    const hasTab = await fundingTab.isVisible().catch(() => false);
-    if (hasTab) {
-      await fundingTab.click();
-      // Should show funding records
-      await expect(page.locator('body')).toContainText(/fund|amount|sent|status/i);
-    }
+  test('marketing funding page loads and shows funding table or empty state', async ({ page }) => {
+    await page.goto('/admin/marketing/funding');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    const hasEmptyState = await page.locator('body').getByText(/no funding|empty|no records/i).isVisible().catch(() => false);
+    expect(hasTable || hasEmptyState).toBe(true);
   });
 
-  test('should show ad spend tracking tab', async ({ page }) => {
-    await navigateTo(page, 'marketing');
-    const adSpendTab = page.getByRole('button', { name: /ad.spend|spend/i }).first();
-    const hasTab = await adSpendTab.isVisible().catch(() => false);
-    if (hasTab) {
-      await adSpendTab.click();
-      await expect(page.locator('body')).toContainText(/spend|amount|date/i);
-    }
+  test('marketing orders page loads and shows orders table or empty state', async ({ page }) => {
+    await page.goto('/admin/marketing/orders');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+
+    const hasTable = await page.locator('table').isVisible().catch(() => false);
+    const hasEmptyState = await page.locator('body').getByText(/no orders|empty|no records/i).isVisible().catch(() => false);
+    expect(hasTable || hasEmptyState).toBe(true);
   });
 
-  test('should show media buyer leaderboard', async ({ page }) => {
-    await navigateTo(page, 'marketing');
-    const perfTab = page.getByRole('button', { name: /performance|leaderboard/i }).first();
-    const hasTab = await perfTab.isVisible().catch(() => false);
-    if (hasTab) {
-      await perfTab.click();
-      // Should show leaderboard with ROAS/CPA metrics
-      await expect(page.locator('body')).toContainText(/roas|cpa|rank|buyer/i);
-    }
+  test('ad spend page loads without errors', async ({ page }) => {
+    await page.goto('/admin/marketing/ad-spend');
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+  });
+
+  test('forms (campaigns) page loads without errors', async ({ page }) => {
+    await page.goto('/admin/marketing/forms');
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+    await expect(page.locator('body')).toContainText(/form|campaign/i);
+  });
+});
+
+test.describe('Marketing — Media Buyer view', () => {
+  test('media buyer can see own orders page', async ({ page }) => {
+    await loginAsMediaBuyer(page);
+    await page.goto('/admin/marketing/orders');
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+    await expect(page.locator('body')).not.toContainText(/unauthorized|forbidden/i);
+  });
+
+  test('media buyer cannot see finance COGS data', async ({ page }) => {
+    await loginAsMediaBuyer(page);
+    await page.goto('/admin/marketing/orders');
+    await page.waitForLoadState('networkidle');
+
+    // No cost price values should appear
+    const body = await page.locator('body').textContent() ?? '';
+    expect(body).not.toMatch(/cost price.*₦\d{3,}/i);
   });
 });

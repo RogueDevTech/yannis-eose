@@ -26,15 +26,34 @@ export const listFundingSchema = z.object({
   senderId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
+  search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });
 export type ListFundingInput = z.infer<typeof listFundingSchema>;
 
+/** Scope for funding status counts — matches listFunding filters except status (counts are per-status). */
+export const fundingStatusCountsSchema = z.object({
+  receiverId: z.string().uuid().optional(),
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+  search: z.string().trim().max(200).optional(),
+});
+export type FundingStatusCountsInput = z.infer<typeof fundingStatusCountsSchema>;
+
+/** Same date scope as listFundingRequests (createdAt); visibility matches list (MB = own, others = branch). */
+export const fundingRequestStatusCountsSchema = z.object({
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+});
+export type FundingRequestStatusCountsInput = z.infer<typeof fundingRequestStatusCountsSchema>;
+
 export const listFundingRequestsSchema = z.object({
   requesterId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  search: z.string().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });
@@ -77,10 +96,23 @@ export const listAdSpendSchema = z.object({
   campaignId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
+  status: z.enum(['PENDING', 'APPROVED']).optional(),
+  search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });
 export type ListAdSpendInput = z.infer<typeof listAdSpendSchema>;
+
+/** Scope for ad spend status counts — matches listAdSpend filters except status. */
+export const adSpendStatusCountsSchema = z.object({
+  mediaBuyerId: z.string().uuid().optional(),
+  productId: z.string().uuid().optional(),
+  campaignId: z.string().uuid().optional(),
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+  search: z.string().trim().max(200).optional(),
+});
+export type AdSpendStatusCountsInput = z.infer<typeof adSpendStatusCountsSchema>;
 
 export const approveAdSpendSchema = z.object({
   adSpendId: z.string().uuid(),

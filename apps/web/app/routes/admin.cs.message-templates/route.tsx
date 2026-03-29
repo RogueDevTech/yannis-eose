@@ -176,7 +176,7 @@ function BodyEditor({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-surface-800 dark:text-surface-200">Message Body</label>
+        <label className="block text-sm font-medium text-app-fg-muted">Message Body</label>
         <div className="flex items-center gap-2">
           <select
             className="input w-44 text-xs"
@@ -210,9 +210,9 @@ function BodyEditor({
         className="input w-full resize-none font-mono text-sm"
         placeholder={placeholder}
       />
-      <div className="rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50/70 dark:bg-surface-900/40 p-3 text-sm leading-relaxed whitespace-pre-wrap break-words">
+      <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm leading-relaxed whitespace-pre-wrap break-words">
         {body.length === 0 ? (
-          <span className="text-surface-500 dark:text-surface-400">Preview appears here</span>
+          <span className="text-app-fg-muted">Preview appears here</span>
         ) : (
           segments.map((segment, index) => {
             if (segment.type === 'text') return <span key={`${segment.type}-${index}`}>{segment.value}</span>;
@@ -288,9 +288,9 @@ export default function MessageTemplatesRoute() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-surface-900 dark:text-white">Message Templates</h1>
-          <p className="text-sm text-surface-600 dark:text-surface-400 mt-0.5">
-            Pre-configured SMS and WhatsApp templates for CS agents. Type plain variable tokens like @customer_name.
+          <h1 className="text-xl font-bold text-app-fg">Message Templates</h1>
+          <p className="text-sm text-app-fg-muted mt-0.5">
+            Pre-configured SMS and WhatsApp templates for closers. Type plain variable tokens like @customer_name.
           </p>
         </div>
         <Button variant="primary" size="sm" onClick={() => { setCreateBody(''); setCreateOpen(true); }}>
@@ -308,7 +308,7 @@ export default function MessageTemplatesRoute() {
             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors duration-150 ${
               filterChannel === ch
                 ? 'bg-primary-600 text-white'
-                : 'bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400 hover:bg-surface-200 dark:hover:bg-surface-700'
+                : 'bg-app-hover text-app-fg-muted hover:bg-app-hover'
             }`}
           >
             {ch === 'ALL' ? 'All Channels' : ch}
@@ -321,25 +321,25 @@ export default function MessageTemplatesRoute() {
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-surface-200 dark:border-surface-700">
-                <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Channel</th>
-                <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Preview</th>
-                <th className="px-4 py-3 text-left font-medium text-surface-600 dark:text-surface-400">Status</th>
+              <tr className="border-b border-app-border">
+                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Name</th>
+                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Channel</th>
+                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Preview</th>
+                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Status</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-surface-100 dark:divide-surface-800">
+            <tbody className="divide-y divide-app-border">
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-surface-500 dark:text-surface-400">
+                  <td colSpan={5} className="px-4 py-10 text-center text-app-fg-muted">
                     No templates yet. Create one to enable SMS/WhatsApp messaging.
                   </td>
                 </tr>
               )}
               {filtered.map((tpl) => (
-                <tr key={tpl.id} className="hover:bg-surface-50 dark:hover:bg-surface-800/50">
-                  <td className="px-4 py-3 font-medium text-surface-900 dark:text-surface-100">{tpl.name}</td>
+                <tr key={tpl.id} className="hover:bg-app-hover/50">
+                  <td className="px-4 py-3 font-medium text-app-fg">{tpl.name}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       tpl.channel === 'WHATSAPP'
@@ -349,14 +349,14 @@ export default function MessageTemplatesRoute() {
                       {tpl.channel}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-surface-600 dark:text-surface-400 text-xs max-w-xs truncate">
+                  <td className="px-4 py-3 text-app-fg-muted text-xs max-w-xs truncate">
                     {toUiBody(tpl.body)}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       tpl.status === 'ACTIVE'
                         ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                        : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
+                        : 'bg-app-hover text-app-fg-muted'
                     }`}>
                       {tpl.status}
                     </span>
@@ -374,18 +374,18 @@ export default function MessageTemplatesRoute() {
 
         <div className="md:hidden space-y-3 p-3">
           {filtered.length === 0 && (
-            <div className="rounded-lg border border-dashed border-surface-300 dark:border-surface-700 p-8 text-center text-surface-500 dark:text-surface-400">
+            <div className="rounded-lg border border-dashed border-app-border p-8 text-center text-app-fg-muted">
               No templates yet. Create one to enable SMS/WhatsApp messaging.
             </div>
           )}
           {filtered.map((tpl) => (
             <div
               key={tpl.id}
-              className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4"
+              className="rounded-lg border border-app-border bg-app-elevated p-4"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-medium text-surface-900 dark:text-surface-100 truncate">{tpl.name}</p>
+                  <p className="font-medium text-app-fg truncate">{tpl.name}</p>
                   <span className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                     tpl.channel === 'WHATSAPP'
                       ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
@@ -397,12 +397,12 @@ export default function MessageTemplatesRoute() {
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                   tpl.status === 'ACTIVE'
                     ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                    : 'bg-surface-100 text-surface-600 dark:bg-surface-800 dark:text-surface-400'
+                    : 'bg-app-hover text-app-fg-muted'
                 }`}>
                   {tpl.status}
                 </span>
               </div>
-              <p className="mt-3 text-xs text-surface-600 dark:text-surface-400 line-clamp-3 break-words">
+              <p className="mt-3 text-xs text-app-fg-muted line-clamp-3 break-words">
                 {toUiBody(tpl.body)}
               </p>
               <div className="mt-3">
@@ -418,8 +418,8 @@ export default function MessageTemplatesRoute() {
       {/* Create Modal */}
       {createOpen && (
         <Modal open onClose={() => setCreateOpen(false)} maxWidth="max-w-lg" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Create Template</h3>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mb-4">
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Create Template</h3>
+          <p className="text-xs text-app-fg-muted mb-4">
             Available variables: <span className="font-mono text-primary-600">{PLACEHOLDER_HELP}</span>
           </p>
           <fetcher.Form
@@ -436,11 +436,11 @@ export default function MessageTemplatesRoute() {
             <input type="hidden" name="intent" value="create" />
             <input type="hidden" name="body" value={toBackendBody(createBody)} />
             <div>
-              <label className="block text-sm font-medium text-surface-800 dark:text-surface-200 mb-1">Template Name</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Template Name</label>
               <input name="name" type="text" required minLength={2} maxLength={100} className="input w-full" placeholder="e.g. Order Confirmation" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-800 dark:text-surface-200 mb-1">Channel</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Channel</label>
               <select name="channel" required className="input w-full">
                 <option value="">Select channel…</option>
                 <option value="SMS">SMS</option>
@@ -474,8 +474,8 @@ export default function MessageTemplatesRoute() {
       {/* Edit Modal */}
       {editTemplate && (
         <Modal open onClose={() => setEditTemplate(null)} maxWidth="max-w-lg" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Edit Template</h3>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mb-4">
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Edit Template</h3>
+          <p className="text-xs text-app-fg-muted mb-4">
             Available variables: <span className="font-mono text-primary-600">{PLACEHOLDER_HELP}</span>
           </p>
           <fetcher.Form
@@ -493,7 +493,7 @@ export default function MessageTemplatesRoute() {
             <input type="hidden" name="templateId" value={editTemplate.id} />
             <input type="hidden" name="body" value={toBackendBody(editBody)} />
             <div>
-              <label className="block text-sm font-medium text-surface-800 dark:text-surface-200 mb-1">Template Name</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Template Name</label>
               <input name="name" type="text" defaultValue={editTemplate.name} required className="input w-full" />
             </div>
             <BodyEditor
@@ -508,7 +508,7 @@ export default function MessageTemplatesRoute() {
               </p>
             )}
             <div>
-              <label className="block text-sm font-medium text-surface-800 dark:text-surface-200 mb-1">Status</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Status</label>
               <select name="status" defaultValue={editTemplate.status} className="input w-full">
                 <option value="ACTIVE">Active</option>
                 <option value="ARCHIVED">Archived</option>

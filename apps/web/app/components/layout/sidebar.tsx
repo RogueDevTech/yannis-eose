@@ -17,8 +17,8 @@ interface SidebarProps {
   activePathname?: string;
   /** Unread notification count to show on the Notifications nav item */
   notificationCount?: number;
-  /** Current theme: false = light, true = dark. Used for logo area and logo asset. */
-  darkMode?: boolean;
+  /** Dark named theme only — picks logo asset tuned for dark backgrounds. */
+  isDarkTheme?: boolean;
 }
 
 const STORAGE_KEY = 'yannis_sidebar_groups_v2';
@@ -37,7 +37,7 @@ function saveGroupState(state: Record<string, boolean>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose, activePathname, notificationCount, darkMode = false }: SidebarProps) {
+export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose, activePathname, notificationCount, isDarkTheme = false }: SidebarProps) {
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -63,20 +63,19 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
       )}
 
       <aside
-        className={`fixed top-0 left-0 z-50 h-screen bg-white dark:bg-surface-900 text-surface-900 dark:text-white transition-all duration-300 flex flex-col
+        className={`fixed top-0 left-0 z-50 h-screen bg-app-elevated text-app-fg transition-all duration-300 flex flex-col
           ${collapsed ? 'lg:w-[var(--sidebar-collapsed-width)]' : 'lg:w-[var(--sidebar-width)]'}
           ${mobileOpen ? 'w-[var(--sidebar-width)] translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        {/* Logo — theme-aware: light uses yannis-logo-white-bg.png, dark uses yannis-logo1.png */}
+        {/* Logo strip + asset — CSS vars per data-app-theme; PNG swap only for Dark theme */}
         <div
-          className={`flex items-center h-[var(--header-height)] flex-shrink-0 rounded-b-lg border-b
-            ${darkMode ? 'bg-surface-900 border-surface-700/50' : 'bg-white border-surface-200'}
+          className={`flex items-center h-[var(--header-height)] flex-shrink-0 rounded-b-lg border-b border-app-logo-strip-border bg-app-logo-strip-bg
             ${isExpanded ? 'justify-center px-2' : 'pl-6 pr-4'}
           `}
         >
           <img
-            src={darkMode ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
+            src={isDarkTheme ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
             alt="Yannis"
             className="h-8 w-auto max-w-full object-contain flex-shrink-0"
           />
@@ -135,13 +134,13 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
                 <button
                   type="button"
                   onClick={() => toggleGroup(group.group as string)}
-                  className="flex items-center justify-between w-full px-3 py-1 rounded-md hover:bg-surface-100 dark:hover:bg-surface-800/50 transition-colors duration-150 group/header"
+                  className="flex items-center justify-between w-full px-3 py-1 rounded-md hover:bg-app-hover transition-colors duration-150 group/header"
                 >
-                  <span className="text-[11px] uppercase tracking-wider text-surface-500 dark:text-surface-300 font-semibold select-none group-hover/header:text-surface-900 dark:group-hover/header:text-white transition-colors duration-150">
+                  <span className="text-[11px] uppercase tracking-wider text-app-fg-muted font-semibold select-none group-hover/header:text-app-fg transition-colors duration-150">
                     {group.group}
                   </span>
                   <svg
-                    className={`w-3.5 h-3.5 text-surface-400 transition-all duration-150 group-hover/header:text-surface-700 dark:group-hover/header:text-white ${
+                    className={`w-3.5 h-3.5 text-app-fg-muted transition-all duration-150 group-hover/header:text-app-fg ${
                       isOpen ? 'rotate-0' : '-rotate-90'
                     }`}
                     fill="none"
@@ -180,11 +179,11 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
         </nav>
 
         {/* Collapse toggle — desktop only; show tooltip when collapsed */}
-        <div className={`hidden lg:block border-t border-surface-200 dark:border-surface-700/50 p-3 ${collapsed ? 'relative group' : ''}`}>
+        <div className={`hidden lg:block border-t border-app-border/50 p-3 ${collapsed ? 'relative group' : ''}`}>
           <button
             onClick={onToggle}
             title={collapsed ? 'Expand sidebar' : undefined}
-            className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-surface-600 dark:text-surface-400 hover:bg-surface-100 hover:text-surface-900 dark:hover:bg-surface-800 dark:hover:text-white transition-colors duration-150"
+            className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-app-fg-muted hover:bg-app-hover hover:text-app-fg transition-colors duration-150"
           >
             <svg
               className={`w-5 h-5 transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}
@@ -203,7 +202,7 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
           </button>
           {collapsed && (
             <div
-              className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-surface-800 dark:bg-surface-700 text-white shadow-lg border border-surface-700 dark:border-surface-600 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 delay-200 pointer-events-none z-[100]"
+              className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-app-elevated text-app-fg shadow-lg border border-app-border opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 delay-200 pointer-events-none z-[100]"
               role="tooltip"
             >
               Expand sidebar
@@ -280,7 +279,7 @@ function SidebarNavLink({
         return `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${
           active
             ? 'bg-brand-500/15 text-brand-700 dark:bg-brand-500/20 dark:text-brand-300'
-            : 'text-surface-600 dark:text-surface-300 hover:bg-surface-100 hover:text-surface-900 dark:hover:bg-surface-800 dark:hover:text-white'
+            : 'text-app-fg-muted hover:bg-app-hover hover:text-app-fg'
         } ${isExpanded ? 'justify-center relative' : ''}`;
       }}
       >
@@ -305,7 +304,7 @@ function SidebarNavLink({
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed z-[9999] px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-surface-800 dark:bg-surface-700 text-white shadow-lg border border-surface-700 dark:border-surface-600 pointer-events-none"
+            className="fixed z-[9999] px-2.5 py-1.5 rounded-md text-xs font-medium whitespace-nowrap bg-app-elevated text-app-fg shadow-lg border border-app-border pointer-events-none"
             style={{
               left: tooltipPos.left,
               top: tooltipPos.top,

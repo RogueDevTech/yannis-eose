@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -12,6 +12,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
+import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import type {
   CSDashboardStreamData,
@@ -63,22 +64,22 @@ function AgentWorkloadCard({
           </span>
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
+          <p className="text-sm font-medium text-app-fg truncate">
             {agent.agentName}
           </p>
-          <p className="text-xs text-surface-800 dark:text-surface-200">
+          <p className="text-xs text-app-fg-muted">
             {agent.pendingCount} of {agent.capacity} slots
           </p>
         </div>
       </div>
-      <div className="w-full h-2 bg-surface-100 dark:bg-surface-800 rounded-full overflow-hidden">
+      <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-500 ${barColor}`}
           style={{ width: `${Math.min(utilization, 100)}%` }}
         />
       </div>
       <div className="flex items-center justify-between mt-2">
-        <span className="text-xs text-surface-700 dark:text-surface-300">
+        <span className="text-xs text-app-fg-muted">
           {Math.round(utilization)}% utilized
         </span>
         {agent.pendingCount >= agent.capacity && (
@@ -99,18 +100,44 @@ function AgentWorkloadCard({
     ? 'animate-slide-in-up border-success-400 dark:border-success-500 bg-gradient-to-br from-success-50 to-white dark:from-success-900/20 dark:to-surface-800 shadow-md'
     : '';
 
+  const viewOrdersLink = (
+    <Link
+      to={`/admin/cs/orders?csAgentId=${agent.agentId}`}
+      prefetch="intent"
+      className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-lg text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/25 hover:bg-brand-100 dark:hover:bg-brand-900/40 border border-brand-200/80 dark:border-brand-700/50 transition-colors"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+      </svg>
+      View orders
+    </Link>
+  );
+
   if (onOpen) {
     return (
-      <button
-        type="button"
-        onClick={() => onOpen(agent)}
-        className={`${className ?? 'card'} ${newClass} text-left cursor-pointer hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
+      <div
+        className={`${className ?? 'card'} ${newClass} flex flex-col overflow-hidden p-0 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200`}
       >
-        {inner}
-      </button>
+        <button
+          type="button"
+          onClick={() => onOpen(agent)}
+          className="text-left cursor-pointer flex-1 px-5 pt-5 pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 rounded-t-xl"
+        >
+          {inner}
+        </button>
+        <div className="px-5 pb-5 pt-0">
+          {viewOrdersLink}
+        </div>
+      </div>
     );
   }
-  return <div className={`${className ?? 'card'} ${newClass}`}>{inner}</div>;
+  return (
+    <div className={`${className ?? 'card'} ${newClass} flex flex-col overflow-hidden p-0`}>
+      <div className="px-5 pt-5 pb-3 flex-1">{inner}</div>
+      <div className="px-5 pb-5 pt-0">{viewOrdersLink}</div>
+    </div>
+  );
 }
 
 // ─── Agent Workload Detail Modal ───
@@ -162,24 +189,24 @@ function AgentWorkloadDetailModal({
           </div>
           <div className="min-w-0">
             <p className="text-base font-bold text-white leading-tight truncate">{agent.agentName}</p>
-            <p className="text-xs text-white/70 mt-0.5">CS Agent</p>
+            <p className="text-xs text-white/70 mt-0.5">Closer</p>
           </div>
         </div>
       </div>
 
       {/* Stats */}
       <div className="px-5 -mt-6">
-        <div className="bg-white dark:bg-surface-800 rounded-xl shadow-md border border-surface-100 dark:border-surface-700 p-3.5 grid grid-cols-3 gap-2.5">
-          <div className="rounded-lg bg-surface-50 dark:bg-surface-900/60 border border-surface-100 dark:border-surface-700 px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-surface-500 dark:text-surface-400 uppercase tracking-wide">Active</p>
-            <p className="text-xl leading-7 font-bold text-surface-900 dark:text-white mt-1">{agent.pendingCount}</p>
+        <div className="bg-app-elevated rounded-xl shadow-md border border-app-border p-3.5 grid grid-cols-3 gap-2.5">
+          <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
+            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Active</p>
+            <p className="text-xl leading-7 font-bold text-app-fg mt-1">{agent.pendingCount}</p>
           </div>
-          <div className="rounded-lg bg-surface-50 dark:bg-surface-900/60 border border-surface-100 dark:border-surface-700 px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-surface-500 dark:text-surface-400 uppercase tracking-wide">Capacity</p>
-            <p className="text-xl leading-7 font-bold text-surface-900 dark:text-white mt-1">{agent.capacity}</p>
+          <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
+            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Capacity</p>
+            <p className="text-xl leading-7 font-bold text-app-fg mt-1">{agent.capacity}</p>
           </div>
-          <div className="rounded-lg bg-surface-50 dark:bg-surface-900/60 border border-surface-100 dark:border-surface-700 px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-surface-500 dark:text-surface-400 uppercase tracking-wide">Free slots</p>
+          <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
+            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Free slots</p>
             <p className={`text-xl leading-7 font-bold mt-1 ${free <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{Math.max(0, free)}</p>
           </div>
         </div>
@@ -188,10 +215,10 @@ function AgentWorkloadDetailModal({
       {/* Utilization bar */}
       <div className="px-5 pt-5 pb-2">
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs font-medium text-surface-600 dark:text-surface-400">Utilization</p>
+          <p className="text-xs font-medium text-app-fg-muted">Utilization</p>
           <p className={`text-xs font-bold ${statusColor}`}>{Math.round(utilization)}%</p>
         </div>
-        <div className="w-full h-2.5 bg-surface-100 dark:bg-surface-700 rounded-full overflow-hidden">
+        <div className="w-full h-2.5 bg-app-hover rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${barColor}`}
             style={{ width: `${Math.min(utilization, 100)}%` }}
@@ -203,9 +230,23 @@ function AgentWorkloadDetailModal({
       </div>
 
       {/* Last action */}
-      <div className="px-5 py-4 border-t border-surface-100 dark:border-surface-800">
-        <p className="text-[10px] uppercase tracking-wider font-medium text-surface-400 dark:text-surface-500 mb-1">Last action</p>
-        <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{lastAction}</p>
+      <div className="px-5 py-4 border-t border-app-border">
+        <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted mb-1">Last action</p>
+        <p className="text-sm font-medium text-app-fg">{lastAction}</p>
+      </div>
+
+      <div className="px-5 pb-5">
+        <Link
+          to={`/admin/cs/orders?csAgentId=${agent.agentId}`}
+          prefetch="intent"
+          onClick={onClose}
+          className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 transition-colors"
+        >
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          View orders
+        </Link>
       </div>
     </Modal>
   );
@@ -245,14 +286,14 @@ const STAGE_CONFIG: Record<ActivityStage, {
   badgeColor: string;
   textColor: string;
 }> = {
-  browsing:     { label: 'Browsing',      dotColor: 'bg-warning-400',  ping: true,  cardBg: 'bg-white dark:bg-surface-800',  borderColor: 'border-surface-200 dark:border-surface-700',  badgeColor: 'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400',  textColor: 'text-warning-600 dark:text-warning-400' },
-  abandoned:    { label: 'Dropped off',   dotColor: 'bg-surface-400',  ping: false, cardBg: 'bg-white dark:bg-surface-800',  borderColor: 'border-surface-200 dark:border-surface-700',  badgeColor: 'bg-surface-100 dark:bg-surface-800 text-surface-500 dark:text-surface-400',  textColor: 'text-surface-500 dark:text-surface-400' },
-  order_placed: { label: 'Order placed',  dotColor: 'bg-brand-400',    ping: true,  cardBg: 'bg-white dark:bg-surface-800',  borderColor: 'border-brand-200 dark:border-brand-800',  badgeColor: 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400',  textColor: 'text-brand-600 dark:text-brand-400' },
-  with_cs:      { label: 'With CS',       dotColor: 'bg-indigo-400',   ping: true,  cardBg: 'bg-white dark:bg-surface-800',  borderColor: 'border-indigo-200 dark:border-indigo-800',  badgeColor: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400',  textColor: 'text-indigo-600 dark:text-indigo-400' },
-  confirmed:    { label: 'Confirmed',     dotColor: 'bg-brand-500',    ping: true,  cardBg: 'bg-white dark:bg-surface-800',  borderColor: 'border-brand-300 dark:border-brand-700',  badgeColor: 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400',  textColor: 'text-brand-600 dark:text-brand-400' },
-  in_delivery:  { label: 'Out for delivery', dotColor: 'bg-info-400',  ping: true,  cardBg: 'bg-white dark:bg-surface-800',  borderColor: 'border-info-200 dark:border-info-800',  badgeColor: 'bg-info-100 dark:bg-info-900/30 text-info-700 dark:text-info-400',  textColor: 'text-info-600 dark:text-info-400' },
-  delivered:    { label: 'Delivered ✓',   dotColor: 'bg-success-500',  ping: false, cardBg: 'bg-white dark:bg-surface-800',  borderColor: 'border-success-200 dark:border-success-800',  badgeColor: 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400',  textColor: 'text-success-600 dark:text-success-400' },
-  returned:     { label: 'Returned',      dotColor: 'bg-danger-400',   ping: false, cardBg: 'bg-white dark:bg-surface-800',  borderColor: 'border-danger-200 dark:border-danger-800',  badgeColor: 'bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400',  textColor: 'text-danger-600 dark:text-danger-400' },
+  browsing:     { label: 'Browsing',      dotColor: 'bg-warning-400',  ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-app-border',  badgeColor: 'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400',  textColor: 'text-warning-600 dark:text-warning-400' },
+  abandoned:    { label: 'Dropped off',   dotColor: 'bg-surface-400',  ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-app-border',  badgeColor: 'bg-app-hover text-app-fg-muted',  textColor: 'text-app-fg-muted' },
+  order_placed: { label: 'Order placed',  dotColor: 'bg-brand-400',    ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-brand-200 dark:border-brand-800',  badgeColor: 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400',  textColor: 'text-brand-600 dark:text-brand-400' },
+  with_cs:      { label: 'With CS',       dotColor: 'bg-indigo-400',   ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-indigo-200 dark:border-indigo-800',  badgeColor: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400',  textColor: 'text-indigo-600 dark:text-indigo-400' },
+  confirmed:    { label: 'Confirmed',     dotColor: 'bg-brand-500',    ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-brand-300 dark:border-brand-700',  badgeColor: 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400',  textColor: 'text-brand-600 dark:text-brand-400' },
+  in_delivery:  { label: 'Out for delivery', dotColor: 'bg-info-400',  ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-info-200 dark:border-info-800',  badgeColor: 'bg-info-100 dark:bg-info-900/30 text-info-700 dark:text-info-400',  textColor: 'text-info-600 dark:text-info-400' },
+  delivered:    { label: 'Delivered ✓',   dotColor: 'bg-success-500',  ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-success-200 dark:border-success-800',  badgeColor: 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400',  textColor: 'text-success-600 dark:text-success-400' },
+  returned:     { label: 'Returned',      dotColor: 'bg-danger-400',   ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-danger-200 dark:border-danger-800',  badgeColor: 'bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400',  textColor: 'text-danger-600 dark:text-danger-400' },
 };
 
 // ─── Live activity card ───
@@ -312,7 +353,7 @@ function LiveActivityCard({
 
         {/* Name */}
         <div className="mb-2">
-          <p className="text-sm font-semibold text-surface-900 dark:text-surface-100 truncate leading-tight">
+          <p className="text-sm font-semibold text-app-fg truncate leading-tight">
             {item.customerName}
           </p>
         </div>
@@ -321,7 +362,7 @@ function LiveActivityCard({
         {(item.productName || item.totalAmount) && (
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             {item.productName && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-surface-100 dark:bg-surface-700 text-surface-800 dark:text-surface-200">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-app-hover text-app-fg-muted">
                 <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                 </svg>
@@ -329,7 +370,7 @@ function LiveActivityCard({
               </span>
             )}
             {item.totalAmount && (
-              <span className="text-[11px] font-bold text-surface-900 dark:text-surface-100 shrink-0">
+              <span className="text-[11px] font-bold text-app-fg shrink-0">
                 &#8358;{Number(item.totalAmount).toLocaleString('en-NG')}
               </span>
             )}
@@ -337,7 +378,7 @@ function LiveActivityCard({
         )}
 
         {/* Timestamp */}
-        <div className="text-[11px] font-medium text-surface-700 dark:text-surface-300">
+        <div className="text-[11px] font-medium text-app-fg-muted">
           {new Date(item.updatedAt).toLocaleString('en-NG', {
             weekday: 'short', month: 'short', day: 'numeric',
             hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -414,7 +455,7 @@ function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityItem | n
           {/* Journey progress bar */}
           {stage !== 'abandoned' && stage !== 'returned' && (
             <div className="px-5 pt-4 pb-0 -mt-2">
-              <div className="bg-white dark:bg-surface-800 rounded-xl border border-surface-100 dark:border-surface-700 px-4 py-3">
+              <div className="bg-app-elevated rounded-xl border border-app-border px-4 py-3">
                 <div className="flex items-center justify-between gap-1">
                   {JOURNEY.map((j, i) => {
                     const isPast = i < stageIndex;
@@ -423,8 +464,8 @@ function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityItem | n
                     if (needsOrder && item.cartStatus !== 'CONVERTED') return null;
                     return (
                       <div key={j.stage} className="flex flex-col items-center gap-1 flex-1">
-                        <div className={`w-2 h-2 rounded-full transition-colors ${isPast ? 'bg-success-500' : isActive ? cfg.dotColor : 'bg-surface-200 dark:bg-surface-700'}`} />
-                        <span className={`text-[9px] font-medium text-center leading-tight ${isActive ? cfg.textColor : isPast ? 'text-success-600 dark:text-success-400' : 'text-surface-400 dark:text-surface-600'}`}>
+                        <div className={`w-2 h-2 rounded-full transition-colors ${isPast ? 'bg-success-500' : isActive ? cfg.dotColor : 'bg-app-hover'}`} />
+                        <span className={`text-[9px] font-medium text-center leading-tight ${isActive ? cfg.textColor : isPast ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>
                           {j.label}
                         </span>
                       </div>
@@ -437,7 +478,7 @@ function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityItem | n
 
           {/* Body */}
           <div className="px-5 pt-3 pb-5">
-            <div className="bg-white dark:bg-surface-800 rounded-xl shadow-sm border border-surface-100 dark:border-surface-700 divide-y divide-surface-100 dark:divide-surface-700 mb-3">
+            <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-3">
               <DetailRow label="Product" value={item.productName ?? '—'} icon={
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
@@ -470,11 +511,51 @@ function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityItem | n
               />
             </div>
 
-            <p className="text-xs text-center text-surface-400 dark:text-surface-500">
+            <div className="flex flex-col gap-2 mb-3">
+              {item.linkedOrderId ? (
+                <Link
+                  to={`/admin/orders/${item.linkedOrderId}`}
+                  prefetch="intent"
+                  onClick={onClose}
+                  className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  View order
+                </Link>
+              ) : (
+                <Link
+                  to="/admin/cs/queue?tab=queue"
+                  prefetch="intent"
+                  onClick={onClose}
+                  className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h10" />
+                  </svg>
+                  Open unassigned queue
+                </Link>
+              )}
+              <Link
+                to="/admin/cs/orders"
+                prefetch="intent"
+                onClick={onClose}
+                className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-app-fg bg-app-hover hover:bg-app-hover/80 border border-app-border transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+                All CS orders
+              </Link>
+            </div>
+
+            <p className="text-xs text-center text-app-fg-muted">
               {stage === 'browsing' && 'Customer is actively browsing — they may convert soon.'}
               {stage === 'abandoned' && 'Customer left without placing an order.'}
               {stage === 'order_placed' && 'Order created — waiting for CS assignment.'}
-              {stage === 'with_cs' && 'CS agent is engaged with this customer.'}
+              {stage === 'with_cs' && 'A closer is engaged with this customer.'}
               {stage === 'confirmed' && 'Order confirmed — awaiting logistics allocation.'}
               {stage === 'in_delivery' && 'Out for delivery.'}
               {stage === 'delivered' && 'Successfully delivered.'}
@@ -530,7 +611,7 @@ function ActiveOrderDetailModal({
 
           {/* Body */}
           <div className="px-5 pt-4 pb-5">
-            <div className="bg-white dark:bg-surface-800 rounded-xl shadow-sm border border-surface-100 dark:border-surface-700 divide-y divide-surface-100 dark:divide-surface-700 mb-4">
+            <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
               <DetailRow
                 label="Order ID"
                 value={order.id.slice(0, 8).toUpperCase()}
@@ -552,7 +633,7 @@ function ActiveOrderDetailModal({
                 />
               )}
               <DetailRow
-                label="Assigned Agent"
+                label="Assigned closer"
                 value={agent?.agentName ?? 'Unassigned'}
                 icon={
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -584,7 +665,7 @@ function ActiveOrderDetailModal({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                View Full Order
+                View order
               </Link>
               {order.assignedCsId && (
                 <button
@@ -595,7 +676,7 @@ function ActiveOrderDetailModal({
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
                   </svg>
-                  Reassign Agent
+                  Reassign closer
                 </button>
               )}
               <button
@@ -619,10 +700,10 @@ function ActiveOrderDetailModal({
 function DetailRow({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <span className="shrink-0 text-surface-400 dark:text-surface-500">{icon}</span>
+      <span className="shrink-0 text-app-fg-muted">{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] uppercase tracking-wider font-medium text-surface-400 dark:text-surface-500">{label}</p>
-        <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate mt-0.5">{value}</p>
+        <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted">{label}</p>
+        <p className="text-sm font-medium text-app-fg truncate mt-0.5">{value}</p>
       </div>
     </div>
   );
@@ -713,6 +794,25 @@ export function CSDashboardPage({
     activityScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
 
+  const overviewStripOverflowKey = useMemo(() => {
+    const tp = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
+    const cap = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
+    const sc = statusCounts as Record<string, number>;
+    return [
+      workloads.length,
+      tp,
+      unassignedTotal,
+      sc['CONFIRMED'] ?? 0,
+      sc['DELIVERED'] ?? 0,
+      cap,
+      sc['CS_ENGAGED'] ?? 0,
+      sc['CANCELLED'] ?? 0,
+      cartStats ? '1' : '0',
+    ].join('|');
+  }, [workloads, unassignedTotal, statusCounts, cartStats]);
+
+  const overviewHasOverflow = useHasHorizontalOverflow(overviewScrollRef, overviewStripOverflowKey);
+
   useEffect(() => {
     if (viewAllAgentsOpen) setViewAllPage(1);
   }, [viewAllAgentsOpen]);
@@ -750,7 +850,7 @@ export function CSDashboardPage({
     distributeResult && 'distributed' in distributeResult
       ? distributeResult.distributed === 0
         ? 'No unassigned orders to distribute'
-        : `${distributeResult.distributed} order(s) distributed to agents`
+        : `${distributeResult.distributed} order(s) distributed to closers`
       : 'CS action completed';
   useFetcherToast(fetcher.data, { successMessage });
   useFetcherToast(claimFetcher.data, { successMessage: claimFetcher.data?.message ?? 'Order claimed' });
@@ -926,11 +1026,11 @@ export function CSDashboardPage({
       {/* Page header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Live activities</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Manage agents, dispatch orders, and monitor workloads
+          <h1 className="text-2xl font-bold text-app-fg">Live activities</h1>
+          <p className="text-sm text-app-fg-muted mt-0.5">
+            Manage closers, dispatch orders, and monitor workloads
           </p>
-          <p className="text-xs text-surface-500 dark:text-surface-400 mt-1 flex items-center gap-1.5">
+          <p className="text-xs text-app-fg-muted mt-1 flex items-center gap-1.5">
             <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -973,93 +1073,72 @@ export function CSDashboardPage({
 
       {/* Overview + Order Pipeline (compact, single horizontal row) */}
       <div className="card">
-        <div className="flex justify-end items-center gap-2 mb-3">
-          <button
-            type="button"
-            onClick={() => scrollOverviewStrip(-280)}
-            className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
-            aria-label="Scroll overview left"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => scrollOverviewStrip(280)}
-            className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
-            aria-label="Scroll overview right"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        </div>
-        <div ref={overviewScrollRef} className="flex flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
-              Active Agents
+        <div className="flex items-center gap-2 min-w-0">
+          <div ref={overviewScrollRef} className="flex flex-1 min-w-0 flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
+              Active closers
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+            <p className="text-xl font-bold text-app-fg mt-1">
               {workloads.length}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Pending confirmation
             </p>
             <p className="text-xl font-bold text-warning-600 dark:text-warning-400 mt-1">
               {totalPending}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Unassigned
             </p>
             <p className="text-xl font-bold text-danger-600 dark:text-danger-400 mt-1">
               {unassignedTotal}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Confirmed
             </p>
             <p className="text-xl font-bold text-brand-600 dark:text-brand-400 mt-1">
               {confirmedCount}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Delivered
             </p>
             <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">
               {(statusCounts as Record<string, number>)['DELIVERED'] ?? 0}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Capacity
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+            <p className="text-xl font-bold text-app-fg mt-1">
               {totalPending}
-              <span className="text-sm font-normal text-surface-700 dark:text-surface-300">
+              <span className="text-sm font-normal text-app-fg-muted">
                 /{totalCapacity}
               </span>
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               CS Engaged
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+            <p className="text-xl font-bold text-app-fg mt-1">
               {(statusCounts as Record<string, number>)['CS_ENGAGED'] ?? 0}
             </p>
           </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Cancelled
             </p>
-            <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+            <p className="text-xl font-bold text-app-fg mt-1">
               {(statusCounts as Record<string, number>)['CANCELLED'] ?? 0}
             </p>
           </div>
@@ -1067,8 +1146,8 @@ export function CSDashboardPage({
             <>
               <DeferredSection resolve={cartStats} skeleton="inline">
                 {(stats: { pending: number; abandonedLast24h: number }) => (
-                  <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+                  <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
                       Cart Pending
                     </p>
                     <p className="text-xl font-bold text-warning-600 dark:text-warning-400 mt-1">
@@ -1079,17 +1158,42 @@ export function CSDashboardPage({
               </DeferredSection>
               <DeferredSection resolve={cartStats} skeleton="inline">
                 {(stats: { pending: number; abandonedLast24h: number }) => (
-                  <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-surface-50 dark:bg-surface-800">
-                    <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">
+                  <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
                       Abandoned (24h)
                     </p>
-                    <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">
+                    <p className="text-xl font-bold text-app-fg mt-1">
                       {stats.abandonedLast24h}
                     </p>
                   </div>
                 )}
               </DeferredSection>
             </>
+          )}
+          </div>
+          {overviewHasOverflow && (
+          <div className="hidden md:flex shrink-0 items-center gap-0.5 sm:gap-1.5 self-center">
+            <button
+              type="button"
+              onClick={() => scrollOverviewStrip(-280)}
+              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+              aria-label="Scroll overview left"
+            >
+              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollOverviewStrip(280)}
+              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+              aria-label="Scroll overview right"
+            >
+              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
           )}
         </div>
       </div>
@@ -1124,7 +1228,7 @@ export function CSDashboardPage({
                 {/* Header row with controls */}
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-surface-900 dark:text-white flex items-center gap-2">
+                    <h2 className="text-sm font-semibold text-app-fg flex items-center gap-2">
                       Live Activity
                       {newCartIds.size > 0 && (
                         <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
@@ -1132,7 +1236,7 @@ export function CSDashboardPage({
                         </span>
                       )}
                       {cartsFetcher.state === 'loading' && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-surface-400 dark:text-surface-500 font-normal">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-app-fg-muted font-normal">
                           <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
@@ -1141,31 +1245,33 @@ export function CSDashboardPage({
                         </span>
                       )}
                     </h2>
-                    <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
+                    <p className="text-xs text-app-fg-muted mt-0.5">
                       Order activity — today · Click a card for details
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => scrollActivityStrip(-280)}
-                      className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
-                      aria-label="Scroll left"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => scrollActivityStrip(280)}
-                      className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
-                      aria-label="Scroll right"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    <div className="hidden md:flex items-center gap-1 sm:gap-2">
+                      <button
+                        type="button"
+                        onClick={() => scrollActivityStrip(-280)}
+                        className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+                        aria-label="Scroll left"
+                      >
+                        <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => scrollActivityStrip(280)}
+                        className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+                        aria-label="Scroll right"
+                      >
+                        <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </div>
                     <Button type="button" variant="secondary" size="sm" onClick={() => setViewAllActivityOpen(true)}>
                       View all
                     </Button>
@@ -1191,27 +1297,27 @@ export function CSDashboardPage({
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-10 gap-2 text-center">
-                    <div className="w-10 h-10 rounded-full bg-surface-100 dark:bg-surface-800 flex items-center justify-center mb-1">
+                    <div className="w-10 h-10 rounded-full bg-app-hover flex items-center justify-center mb-1">
                       <svg className="w-5 h-5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                       </svg>
                     </div>
-                    <p className="text-sm font-medium text-surface-700 dark:text-surface-300">No order activity today</p>
-                    <p className="text-xs text-surface-400 dark:text-surface-500">Cards appear here as orders and carts come in</p>
+                    <p className="text-sm font-medium text-app-fg-muted">No order activity today</p>
+                    <p className="text-xs text-app-fg-muted">Cards appear here as orders and carts come in</p>
                   </div>
                 )}
 
-                {/* View all modal — paginated, matches Agent Workloads modal */}
+                {/* View all modal — paginated, matches Closer workloads modal */}
                 {viewAllActivityOpen && (
                   <Modal open onClose={() => setViewAllActivityOpen(false)} maxWidth="max-w-4xl" role="dialog" aria-labelledby="view-all-activity-title" contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col">
-                    <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
-                      <h2 id="view-all-activity-title" className="text-lg font-semibold text-surface-900 dark:text-white">
+                    <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-app-border shrink-0">
+                      <h2 id="view-all-activity-title" className="text-lg font-semibold text-app-fg">
                         All Live Activity
                       </h2>
                       <button
                         type="button"
                         onClick={() => setViewAllActivityOpen(false)}
-                        className="p-2 rounded-lg text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                        className="p-2 rounded-lg text-app-fg-muted hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
                         aria-label="Close"
                       >
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1219,8 +1325,8 @@ export function CSDashboardPage({
                         </svg>
                       </button>
                     </div>
-                    <div className="px-4 py-2 border-b border-surface-100 dark:border-surface-800 shrink-0">
-                      <p className="text-sm text-surface-600 dark:text-surface-400">
+                    <div className="px-4 py-2 border-b border-app-border shrink-0">
+                      <p className="text-sm text-app-fg-muted">
                         {sorted.length} item{sorted.length !== 1 ? 's' : ''} — today
                       </p>
                     </div>
@@ -1244,8 +1350,8 @@ export function CSDashboardPage({
                                 />
                               ))}
                             </div>
-                            <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-surface-100 dark:border-surface-800">
-                              <span className="text-sm text-surface-600 dark:text-surface-400">
+                            <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-app-border">
+                              <span className="text-sm text-app-fg-muted">
                                 Page {page} of {totalPages}
                                 {sorted.length > 0 && (
                                   <span className="ml-1">
@@ -1297,40 +1403,42 @@ export function CSDashboardPage({
         onCancel={(order) => setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName })}
       />
 
-      {/* Agent workload detail modal */}
+      {/* Closer workload detail modal */}
       <AgentWorkloadDetailModal agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
 
-      {/* Agent Workloads — horizontal scroll strip + View all */}
+      {/* Closer workloads — horizontal scroll strip + View all */}
       <div>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
-            <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Agent Workloads</h2>
-            <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">
-              {workloads.length} active agent{workloads.length !== 1 ? 's' : ''} · {totalPending}/{totalCapacity} slots filled
+            <h2 className="text-sm font-semibold text-app-fg">Closer workloads</h2>
+            <p className="text-xs text-app-fg-muted mt-0.5">
+              {workloads.length} active closer{workloads.length !== 1 ? 's' : ''} · {totalPending}/{totalCapacity} slots filled
             </p>
           </div>
           {workloads.length > 0 && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => scrollAgentStrip(-280)}
-                className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50 disabled:pointer-events-none transition-colors"
-                aria-label="Scroll left"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => scrollAgentStrip(280)}
-                className="p-2 rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 disabled:opacity-50 disabled:pointer-events-none transition-colors"
-                aria-label="Scroll right"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="hidden md:flex items-center gap-1 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => scrollAgentStrip(-280)}
+                  className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover disabled:opacity-50 disabled:pointer-events-none transition-colors flex items-center justify-center"
+                  aria-label="Scroll left"
+                >
+                  <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollAgentStrip(280)}
+                  className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover disabled:opacity-50 disabled:pointer-events-none transition-colors flex items-center justify-center"
+                  aria-label="Scroll right"
+                >
+                  <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
               <Button
                 type="button"
                 variant="secondary"
@@ -1344,7 +1452,7 @@ export function CSDashboardPage({
         </div>
         {workloads.length === 0 ? (
           <div className="card text-center py-8">
-            <p className="text-surface-700 dark:text-surface-300">No CS agents found. Manage staff from HR → Users.</p>
+            <p className="text-app-fg-muted">No closers found. Manage staff from HR → Users.</p>
           </div>
         ) : (
           <div
@@ -1374,7 +1482,7 @@ export function CSDashboardPage({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-surface-200 dark:border-surface-700">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-app-border">
         <Tabs
           value={activeTab}
           onChange={(v) => setActiveTab(v as typeof activeTab)}
@@ -1461,7 +1569,7 @@ export function CSDashboardPage({
       {activeTab === 'queue' && (
         <div>
           {unassignedOrders.length === 0 ? (
-            <div className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 p-10 text-center text-surface-600 dark:text-surface-400">
+            <div className="rounded-xl border border-app-border bg-app-elevated p-10 text-center text-app-fg-muted">
               No unassigned orders in queue
             </div>
           ) : (
@@ -1471,7 +1579,7 @@ export function CSDashboardPage({
                   key={order.id}
                   type="button"
                   onClick={() => setSelectedQueueOrder(order)}
-                  className="group relative w-full text-left rounded-xl border border-warning-200 dark:border-warning-800/60 bg-white dark:bg-surface-800 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                  className="group relative w-full text-left rounded-xl border border-warning-200 dark:border-warning-800/60 bg-app-elevated hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                 >
                   {/* Pulsing dot */}
                   <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
@@ -1488,21 +1596,21 @@ export function CSDashboardPage({
                     </div>
 
                     {/* Customer name */}
-                    <p className="text-sm font-semibold text-surface-900 dark:text-surface-100 truncate leading-tight mb-2">
+                    <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2">
                       {order.customerName}
                     </p>
 
                     {/* Amount */}
                     {order.totalAmount && (
                       <div className="mb-2">
-                        <span className="text-[11px] font-bold text-surface-900 dark:text-surface-100">
+                        <span className="text-[11px] font-bold text-app-fg">
                           &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
                         </span>
                       </div>
                     )}
 
                     {/* Timestamp */}
-                    <div className="text-[11px] font-medium text-surface-600 dark:text-surface-400">
+                    <div className="text-[11px] font-medium text-app-fg-muted">
                       {new Date(order.createdAt).toLocaleString('en-NG', {
                         month: 'short', day: 'numeric',
                         hour: '2-digit', minute: '2-digit',
@@ -1554,7 +1662,7 @@ export function CSDashboardPage({
               {/* Body */}
               <div className="px-5 pt-4 pb-5">
                 {/* Order details */}
-                <div className="bg-white dark:bg-surface-800 rounded-xl shadow-sm border border-surface-100 dark:border-surface-700 divide-y divide-surface-100 dark:divide-surface-700 mb-4">
+                <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
                   <DetailRow
                     label="Order ID"
                     value={qOrder.id.slice(0, 8).toUpperCase()}
@@ -1588,10 +1696,10 @@ export function CSDashboardPage({
                   />
                 </div>
 
-                {/* Assign agent */}
+                {/* Assign to closer */}
                 <div className="mb-3">
-                  <label className="block text-xs font-semibold text-surface-600 dark:text-surface-400 uppercase tracking-wide mb-1.5">
-                    Assign to Agent
+                  <label className="block text-xs font-semibold text-app-fg-muted uppercase tracking-wide mb-1.5">
+                    Assign to closer
                   </label>
                   <div className="flex gap-2">
                     <select
@@ -1599,7 +1707,7 @@ export function CSDashboardPage({
                       onChange={(e) => setAssignAgent((prev) => ({ ...prev, [qOrder.id]: e.target.value }))}
                       className="input py-1.5 text-sm flex-1"
                     >
-                      <option value="">Select agent...</option>
+                      <option value="">Select closer...</option>
                       {workloads
                         .filter((w: AgentWorkload) => w.pendingCount < w.capacity)
                         .map((w: AgentWorkload) => (
@@ -1632,7 +1740,7 @@ export function CSDashboardPage({
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    View Full Order
+                    View order
                   </Link>
                   <button
                     type="button"
@@ -1656,7 +1764,7 @@ export function CSDashboardPage({
         <div>
           {/* Card grid — matches live activity style */}
           {activeOrders.length === 0 ? (
-            <div className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 p-10 text-center text-surface-600 dark:text-surface-400">
+            <div className="rounded-xl border border-app-border bg-app-elevated p-10 text-center text-app-fg-muted">
               No active CS-engaged orders today
             </div>
           ) : (
@@ -1668,7 +1776,7 @@ export function CSDashboardPage({
                     key={order.id}
                     type="button"
                     onClick={() => setSelectedActiveOrder(order)}
-                    className="group relative w-full text-left rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-surface-800 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    className="group relative w-full text-left rounded-xl border border-indigo-200 dark:border-indigo-800 bg-app-elevated hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                   >
                     {/* Live pulse dot */}
                     <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
@@ -1685,31 +1793,31 @@ export function CSDashboardPage({
                       </div>
 
                       {/* Customer name */}
-                      <p className="text-sm font-semibold text-surface-900 dark:text-surface-100 truncate leading-tight mb-2">
+                      <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2">
                         {order.customerName}
                       </p>
 
                       {/* Amount */}
                       {order.totalAmount && (
                         <div className="mb-2">
-                          <span className="text-[11px] font-bold text-surface-900 dark:text-surface-100">
+                          <span className="text-[11px] font-bold text-app-fg">
                             &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
                           </span>
                         </div>
                       )}
 
-                      {/* Agent pill */}
+                      {/* Closer pill */}
                       <div className="flex items-center gap-1.5 mb-2">
                         <svg className="w-3 h-3 shrink-0 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                         </svg>
-                        <span className="text-[11px] font-medium text-surface-700 dark:text-surface-300 truncate">
+                        <span className="text-[11px] font-medium text-app-fg-muted truncate">
                           {agent?.agentName ?? 'Unassigned'}
                         </span>
                       </div>
 
                       {/* Timestamp */}
-                      <div className="text-[11px] font-medium text-surface-600 dark:text-surface-400">
+                      <div className="text-[11px] font-medium text-app-fg-muted">
                         {new Date(order.createdAt).toLocaleString('en-NG', {
                           month: 'short', day: 'numeric',
                           hour: '2-digit', minute: '2-digit',
@@ -1735,15 +1843,15 @@ export function CSDashboardPage({
         <div className="h-[28rem] overflow-auto">
           <div className="space-y-4">
           <div className="card">
-            <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">Hot Swap</h2>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
-              Select orders from one agent and bulk-reassign them to another agent.
+            <h2 className="text-lg font-semibold text-app-fg mb-1">Hot Swap</h2>
+            <p className="text-sm text-app-fg-muted mb-4">
+              Select orders from one closer and bulk-reassign them to another closer.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  From Agent
+                <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                  From closer
                 </label>
                 <select
                   value={hotSwapFrom}
@@ -1753,7 +1861,7 @@ export function CSDashboardPage({
                   }}
                   className="input"
                 >
-                  <option value="">Select source agent...</option>
+                  <option value="">Select source closer...</option>
                   {workloads.map((w: AgentWorkload) => (
                     <option key={w.agentId} value={w.agentId}>
                       {w.agentName} ({w.pendingCount} orders)
@@ -1762,15 +1870,15 @@ export function CSDashboardPage({
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                  To Agent
+                <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                  To closer
                 </label>
                 <select
                   value={hotSwapTo}
                   onChange={(e) => setHotSwapTo(e.target.value)}
                   className="input"
                 >
-                  <option value="">Select target agent...</option>
+                  <option value="">Select target closer...</option>
                   {workloads
                     .filter((w: AgentWorkload) => w.agentId !== hotSwapFrom)
                     .map((w: AgentWorkload) => (
@@ -1785,7 +1893,7 @@ export function CSDashboardPage({
             {hotSwapFrom && hotSwapSourceOrders.length > 0 && (
               <>
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm text-surface-700 dark:text-surface-300">
+                  <p className="text-sm text-app-fg-muted">
                     Select orders to reassign ({hotSwapOrderIds.length} selected)
                   </p>
                   <button
@@ -1800,7 +1908,7 @@ export function CSDashboardPage({
                   {hotSwapSourceOrders.map((order: CSOrder) => (
                     <label
                       key={order.id}
-                      className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer"
+                      className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-app-hover/50 cursor-pointer"
                     >
                       <Checkbox
                         checked={hotSwapOrderIds.includes(order.id)}
@@ -1808,12 +1916,12 @@ export function CSDashboardPage({
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate">
+                          <span className="text-sm font-medium text-app-fg truncate">
                             {order.customerName}
                           </span>
                           <OrderStatusBadge status={order.status} />
                         </div>
-                        <span className="text-xs text-surface-700 dark:text-surface-300">
+                        <span className="text-xs text-app-fg-muted">
                           {order.id.slice(0, 8)}... &middot; {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                         </span>
                       </div>
@@ -1824,8 +1932,8 @@ export function CSDashboardPage({
             )}
 
             {hotSwapFrom && hotSwapSourceOrders.length === 0 && (
-              <p className="text-sm text-surface-700 dark:text-surface-300 text-center py-4">
-                No active orders for this agent
+              <p className="text-sm text-app-fg-muted text-center py-4">
+                No active orders for this closer
               </p>
             )}
           </div>
@@ -1859,10 +1967,10 @@ export function CSDashboardPage({
               <div className="card">
                 <div className="flex items-start justify-between gap-4 mb-4">
                   <div>
-                    <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Claim Queue</h2>
-                    <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-                      Unassigned orders available to claim. First agent to click Claim takes the order.
-                      Cap: <strong>{claimCap}</strong> unconfirmed orders per agent.
+                    <h2 className="text-lg font-semibold text-app-fg">Claim Queue</h2>
+                    <p className="text-sm text-app-fg-muted mt-0.5">
+                      Unassigned orders available to claim. First closer to click Claim takes the order.
+                      Cap: <strong>{claimCap}</strong> unconfirmed orders per closer.
                     </p>
                   </div>
                   <span className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-success-600 dark:text-success-400">
@@ -1872,7 +1980,7 @@ export function CSDashboardPage({
                 </div>
 
                 {orders.length === 0 ? (
-                  <div className="text-center py-12 text-surface-700 dark:text-surface-300">
+                  <div className="text-center py-12 text-app-fg-muted">
                     No orders in the claim queue right now.
                   </div>
                 ) : (
@@ -1906,15 +2014,15 @@ export function CSDashboardPage({
                                   </Link>
                                 </td>
                                 <td className="table-cell">
-                                  <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{order.customerName}</p>
+                                  <p className="text-sm font-medium text-app-fg">{order.customerName}</p>
                                 </td>
                                 <td className="table-cell">
-                                  <span className="text-xs font-mono text-surface-700 dark:text-surface-300">{order.customerPhoneDisplay}</span>
+                                  <span className="text-xs font-mono text-app-fg-muted">{order.customerPhoneDisplay}</span>
                                 </td>
                                 <td className="table-cell text-right text-sm">
                                   {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
                                 </td>
-                                <td className="table-cell text-xs text-surface-700 dark:text-surface-300">
+                                <td className="table-cell text-xs text-app-fg-muted">
                                   {new Date(order.createdAt).toLocaleString('en-NG', {
                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                                   })}
@@ -1952,7 +2060,7 @@ export function CSDashboardPage({
                         return (
                           <div
                             key={order.id}
-                            className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3"
+                            className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
@@ -1962,12 +2070,12 @@ export function CSDashboardPage({
                                 >
                                   {order.id.slice(0, 8).toUpperCase()}
                                 </Link>
-                                <p className="text-sm font-medium text-surface-900 dark:text-surface-100 mt-0.5">{order.customerName}</p>
-                                <p className="text-xs font-mono text-surface-700 dark:text-surface-300">{order.customerPhoneDisplay}</p>
+                                <p className="text-sm font-medium text-app-fg mt-0.5">{order.customerName}</p>
+                                <p className="text-xs font-mono text-app-fg-muted">{order.customerPhoneDisplay}</p>
                                 {order.totalAmount && (
-                                  <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">₦{Number(order.totalAmount).toLocaleString()}</p>
+                                  <p className="text-xs text-app-fg-muted mt-1">₦{Number(order.totalAmount).toLocaleString()}</p>
                                 )}
-                                <p className="text-xs text-surface-500 dark:text-surface-400 mt-1">
+                                <p className="text-xs text-app-fg-muted mt-1">
                                   {new Date(order.createdAt).toLocaleString('en-NG', {
                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                                   })}
@@ -2010,21 +2118,21 @@ export function CSDashboardPage({
             if (lb.length === 0) return null;
             return (
               <div className="card p-0 overflow-hidden flex flex-col h-[28rem]">
-                <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
+                <div className="px-4 py-3 border-b border-app-border shrink-0">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-lg font-semibold text-surface-900 dark:text-white">CS Agent Performance</h3>
-                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+                      <h3 className="text-lg font-semibold text-app-fg">Closer performance</h3>
+                      <p className="text-xs text-app-fg-muted mt-0.5">
                         Ranked by delivery rate ({leaderboardPeriod === 'all_time' ? 'all time' : 'this month'})
                       </p>
                     </div>
-                    <div className="flex gap-1 rounded-lg bg-surface-100 dark:bg-surface-800 p-1">
+                    <div className="flex gap-1 rounded-lg bg-app-hover p-1">
                       <Link
                         to="/admin/cs/queue?period=this_month"
                         className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                           leaderboardPeriod === 'this_month'
-                            ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                            : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
+                            ? 'bg-app-elevated text-app-fg shadow-sm'
+                            : 'text-app-fg-muted hover:text-app-fg'
                         }`}
                       >
                         This month
@@ -2033,8 +2141,8 @@ export function CSDashboardPage({
                         to="/admin/cs/queue?period=all_time"
                         className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                           leaderboardPeriod === 'all_time'
-                            ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm'
-                            : 'text-surface-700 dark:text-surface-200 hover:text-surface-900 dark:hover:text-surface-200'
+                            ? 'bg-app-elevated text-app-fg shadow-sm'
+                            : 'text-app-fg-muted hover:text-app-fg'
                         }`}
                       >
                         All time
@@ -2047,7 +2155,7 @@ export function CSDashboardPage({
                     <thead>
                       <tr>
                         <th className="table-header">#</th>
-                        <th className="table-header">Agent</th>
+                        <th className="table-header">Closer</th>
                         <th className="table-header text-right">Engaged</th>
                         <th className="table-header text-right">Confirmed</th>
                         <th className="table-header text-right">Delivered</th>
@@ -2060,9 +2168,9 @@ export function CSDashboardPage({
                     <tbody>
                       {lb.map((e: CSLeaderboardEntry, idx: number) => (
                         <tr key={e.agentId} className="table-row">
-                          <td className="table-cell text-surface-700 dark:text-surface-300 font-mono text-sm">{idx + 1}</td>
+                          <td className="table-cell text-app-fg-muted font-mono text-sm">{idx + 1}</td>
                           <td className="table-cell">
-                            <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{e.agentName}</p>
+                            <p className="text-sm font-medium text-app-fg">{e.agentName}</p>
                           </td>
                           <td className="table-cell text-right text-sm">{e.ordersEngaged}</td>
                           <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">{e.ordersConfirmed}</td>
@@ -2070,11 +2178,11 @@ export function CSDashboardPage({
                           <td className="table-cell text-right text-sm">{e.callsMade}</td>
                           <td className="table-cell text-right text-sm">{e.confirmationRate.toFixed(1)}%</td>
                           <td className="table-cell text-right">
-                            <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-surface-900 dark:text-white'}`}>
+                            <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`}>
                               {e.deliveryRate.toFixed(1)}%
                             </span>
                           </td>
-                          <td className="table-cell text-right text-sm text-surface-700 dark:text-surface-300">
+                          <td className="table-cell text-right text-sm text-app-fg-muted">
                             {e.avgCallDurationSeconds >= 60
                               ? `${Math.floor(e.avgCallDurationSeconds / 60)}m ${e.avgCallDurationSeconds % 60}s`
                               : `${e.avgCallDurationSeconds}s`}
@@ -2090,29 +2198,29 @@ export function CSDashboardPage({
                   {lb.map((e: CSLeaderboardEntry, idx: number) => (
                     <div
                       key={e.agentId}
-                      className="rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 shadow-sm space-y-2"
+                      className="rounded-xl border border-app-border bg-app-elevated p-4 shadow-sm space-y-2"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-surface-700 dark:text-surface-300">#{idx + 1}</span>
-                          <span className="font-medium text-surface-900 dark:text-white text-sm">{e.agentName}</span>
+                          <span className="text-xs font-mono text-app-fg-muted">#{idx + 1}</span>
+                          <span className="font-medium text-app-fg text-sm">{e.agentName}</span>
                         </div>
-                        <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-surface-900 dark:text-white'}`}>
+                        <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`}>
                           {e.deliveryRate.toFixed(1)}% del.
                         </span>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         <div>
-                          <span className="text-surface-700 dark:text-surface-300">Confirmed</span>
-                          <p className="font-medium text-surface-900 dark:text-white">{e.ordersConfirmed}</p>
+                          <span className="text-app-fg-muted">Confirmed</span>
+                          <p className="font-medium text-app-fg">{e.ordersConfirmed}</p>
                         </div>
                         <div>
-                          <span className="text-surface-700 dark:text-surface-300">Calls</span>
-                          <p className="font-medium text-surface-900 dark:text-white">{e.callsMade}</p>
+                          <span className="text-app-fg-muted">Calls</span>
+                          <p className="font-medium text-app-fg">{e.callsMade}</p>
                         </div>
                         <div>
-                          <span className="text-surface-700 dark:text-surface-300">Conf. Rate</span>
-                          <p className="font-medium text-surface-900 dark:text-white">{e.confirmationRate.toFixed(1)}%</p>
+                          <span className="text-app-fg-muted">Conf. Rate</span>
+                          <p className="font-medium text-app-fg">{e.confirmationRate.toFixed(1)}%</p>
                         </div>
                       </div>
                     </div>
@@ -2133,15 +2241,15 @@ export function CSDashboardPage({
               <div className="card">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Callback Queue</h2>
-                    <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+                    <h2 className="text-lg font-semibold text-app-fg">Callback Queue</h2>
+                    <p className="text-sm text-app-fg-muted mt-0.5">
                       Orders awaiting callback retry after &ldquo;No Answer&rdquo;
                     </p>
                   </div>
                 </div>
 
                 {resolvedCallbacks.length === 0 ? (
-                  <div className="text-center py-12 text-surface-700 dark:text-surface-300">
+                  <div className="text-center py-12 text-app-fg-muted">
                     No callbacks scheduled
                   </div>
                 ) : (
@@ -2155,7 +2263,7 @@ export function CSDashboardPage({
                           className={`rounded-lg border p-4 ${
                             isDue
                               ? 'border-warning-300 dark:border-warning-700 bg-warning-50 dark:bg-warning-900/10'
-                              : 'border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900'
+                              : 'border-app-border bg-app-elevated'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-4">
@@ -2176,23 +2284,23 @@ export function CSDashboardPage({
                                   </span>
                                 )}
                               </div>
-                              <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
+                              <p className="text-sm font-medium text-app-fg">
                                 {order.customerName}
                               </p>
-                              <p className="text-xs text-surface-800 dark:text-surface-200">
+                              <p className="text-xs text-app-fg-muted">
                                 {order.customerPhoneDisplay}
-                                {agent ? ` \u00b7 Assigned: ${agent.agentName}` : ''}
+                                {agent ? ` \u00b7 Closer: ${agent.agentName}` : ''}
                                 {order.totalAmount ? ` \u00b7 \u20A6${Number(order.totalAmount).toLocaleString()}` : ''}
                               </p>
                               {order.callbackScheduledAt && (
-                                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                                <p className="text-xs text-app-fg-muted mt-1">
                                   Scheduled: {new Date(order.callbackScheduledAt).toLocaleString('en-NG', {
                                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                                   })}
                                 </p>
                               )}
                               {order.callbackNotes && (
-                                <p className="text-xs text-surface-800 dark:text-surface-200 mt-1 italic">
+                                <p className="text-xs text-app-fg-muted mt-1 italic">
                                   Note: {order.callbackNotes}
                                 </p>
                               )}
@@ -2247,7 +2355,7 @@ export function CSDashboardPage({
                     <div className="mt-2 space-y-2">
                       {pairs.slice(0, 3).map((pair: DuplicatePair) => (
                         <div key={pair.duplicate.id} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="text-surface-700 dark:text-surface-300 truncate">
+                          <span className="text-app-fg-muted truncate">
                             {pair.duplicate.customerName} — #{pair.duplicate.id.slice(0, 8)}
                           </span>
                           <div className="flex items-center gap-1.5 shrink-0">
@@ -2302,9 +2410,9 @@ export function CSDashboardPage({
               </svg>
             </div>
             <div>
-              <h3 className="text-base font-semibold text-surface-900 dark:text-white">Delete abandoned cart?</h3>
-              <p className="text-sm text-surface-700 dark:text-surface-300 mt-1">
-                This will permanently remove <span className="font-medium text-surface-900 dark:text-surface-100">{deleteCartConfirm.customerName}</span>'s cart entry. This cannot be undone.
+              <h3 className="text-base font-semibold text-app-fg">Delete abandoned cart?</h3>
+              <p className="text-sm text-app-fg-muted mt-1">
+                This will permanently remove <span className="font-medium text-app-fg">{deleteCartConfirm.customerName}</span>'s cart entry. This cannot be undone.
               </p>
             </div>
           </div>
@@ -2329,23 +2437,23 @@ export function CSDashboardPage({
       {/* ── Reassign order modal ───────────────── */}
       {reassignOrder && (
         <Modal open onClose={() => { setReassignOrder(null); setReassignToAgentId(''); }} maxWidth="max-w-md" contentClassName="p-6">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white mb-1">
+            <h3 className="text-lg font-semibold text-app-fg mb-1">
               Reassign order
             </h3>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mb-4">
+            <p className="text-sm text-app-fg-muted mb-4">
               {reassignOrder.customerName} ({reassignOrder.orderId.slice(0, 8)}...)
             </p>
 
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
-                Assign to agent
+              <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                Assign to closer
               </label>
               <select
                 value={reassignToAgentId}
                 onChange={(e) => setReassignToAgentId(e.target.value)}
                 className="input"
               >
-                <option value="">Select agent...</option>
+                <option value="">Select closer...</option>
                 {workloads
                   .filter((w: AgentWorkload) => w.agentId !== reassignOrder.assignedCsId && w.pendingCount < w.capacity)
                   .map((w: AgentWorkload) => (
@@ -2408,17 +2516,17 @@ export function CSDashboardPage({
         />
       )}
 
-      {/* View all Agent Workloads modal — 20 per page, Prev/Next */}
+      {/* View all Closer workloads modal — 20 per page, Prev/Next */}
       {viewAllAgentsOpen && (
-        <Modal open onClose={() => setViewAllAgentsOpen(false)} maxWidth="max-w-4xl" role="dialog" aria-labelledby="view-all-agents-title" contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-surface-100 dark:border-surface-800 shrink-0">
-              <h2 id="view-all-agents-title" className="text-lg font-semibold text-surface-900 dark:text-white">
-                Agent Workloads
+        <Modal open onClose={() => setViewAllAgentsOpen(false)} maxWidth="max-w-4xl" role="dialog" aria-labelledby="view-all-closers-title" contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-app-border shrink-0">
+              <h2 id="view-all-closers-title" className="text-lg font-semibold text-app-fg">
+                Closer workloads
               </h2>
               <button
                 type="button"
                 onClick={() => setViewAllAgentsOpen(false)}
-                className="p-2 rounded-lg text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                className="p-2 rounded-lg text-app-fg-muted hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
                 aria-label="Close"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2426,9 +2534,9 @@ export function CSDashboardPage({
                 </svg>
               </button>
             </div>
-            <div className="px-4 py-2 border-b border-surface-100 dark:border-surface-800 shrink-0">
-              <p className="text-sm text-surface-600 dark:text-surface-400">
-                {workloads.length} agent{workloads.length !== 1 ? 's' : ''}
+            <div className="px-4 py-2 border-b border-app-border shrink-0">
+              <p className="text-sm text-app-fg-muted">
+                {workloads.length} closer{workloads.length !== 1 ? 's' : ''}
               </p>
             </div>
             <div className="flex-1 min-h-0 overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -2454,8 +2562,8 @@ export function CSDashboardPage({
                         <AgentWorkloadCard key={agent.agentId} agent={agent} isNew={newAgentIds.has(agent.agentId)} onOpen={(a) => { setViewAllAgentsOpen(false); setSelectedAgent(a); }} />
                       ))}
                     </div>
-                    <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-surface-100 dark:border-surface-800">
-                      <span className="text-sm text-surface-600 dark:text-surface-400">
+                    <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-app-border">
+                      <span className="text-sm text-app-fg-muted">
                         Page {page} of {totalPages}
                         {sorted.length > 0 && (
                           <span className="ml-1">

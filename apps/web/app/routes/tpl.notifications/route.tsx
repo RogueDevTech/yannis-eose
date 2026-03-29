@@ -76,6 +76,7 @@ export default function TplNotificationsRoute() {
       unreadCount={data.unreadCount}
       pagination={data.pagination}
       unreadOnlyFilter={unreadOnly}
+      listBasePath="/tpl/notifications"
     />
   );
 }

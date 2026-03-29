@@ -41,6 +41,9 @@ export const CONFIGURABLE_EMAIL_TYPES = [
   'transfer:sent',
   'delivery_remittance:sent',
   'delivery_remittance:received',
+  'account:updated',
+  'account:security',
+  'approval:permission_request',
 ] as const;
 
 export const ALL_NOTIFICATION_TYPES = [
@@ -55,7 +58,7 @@ export interface NotificationTypeMeta {
   label: string;
   description: string;
   mandatory: boolean;
-  category: 'approvals' | 'orders' | 'marketing' | 'finance' | 'logistics' | 'hr';
+  category: 'approvals' | 'orders' | 'marketing' | 'finance' | 'logistics' | 'hr' | 'account';
 }
 
 export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
@@ -261,5 +264,26 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     description: '3PL — Finance marked your delivery remittance as received',
     mandatory: false,
     category: 'logistics',
+  },
+  'account:updated': {
+    type: 'account:updated',
+    label: 'Account updated by admin',
+    description: 'User — profile, access, or settings were changed by an administrator',
+    mandatory: false,
+    category: 'account',
+  },
+  'account:security': {
+    type: 'account:security',
+    label: 'Account security',
+    description: 'User — password reset, deactivation, or similar security-related change',
+    mandatory: false,
+    category: 'account',
+  },
+  'approval:permission_request': {
+    type: 'approval:permission_request',
+    label: 'Permission request',
+    description: 'SuperAdmin — HR submitted a user creation or role change for approval',
+    mandatory: false,
+    category: 'approvals',
   },
 };

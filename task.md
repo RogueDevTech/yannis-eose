@@ -3,7 +3,7 @@
 **Project:** Yannis EOSE (Enterprise Operations & Sales Engine)
 **Version:** 1.0
 **Date:** March 2026
-**Status:** 97%+ Complete — All application features done | Only infrastructure tasks remain: Multi-CDN (6.1), Load Testing (6.3)
+**Status:** 98%+ Complete — All application features done | Only infrastructure tasks remain: Multi-CDN (6.1), Load Testing (6.3)
 
 ---
 
@@ -1937,6 +1937,21 @@ Phase 8 (Feature Batch 2) ✅ COMPLETE
 ├── 11.x CS Communication Panel ✅
 ├── 12.x Supervisor Mirror View ✅
 └── 13.x Claim-Based Dispatch ✅
+         │
+Phase 14 (Push Notification Center) ✅ COMPLETE
+├── 14.1 Push Schema (4 tables) ✅
+├── 14.2 Send Path + Mirror In-App ✅
+├── 14.3 SW Push + Ack Handlers ✅
+├── 14.4 iOS Install Gate ✅
+├── 14.5 Broadcast UI ✅
+├── 14.6 Automation Rules UI ✅
+└── 14.7 Delivery Log UI + Resend ✅
+         │
+Phase 14b (App Theme System) ✅ COMPLETE
+├── 14b.1 6-theme library + boot script ✅
+├── 14b.2 users.app_theme column + migration ✅
+├── 14b.3 useAppTheme hook + server sync ✅
+└── 14b.4 iOS install banner ✅
 
 Legend: ✅ Complete  ~ Partial  ❌ Not Started
 ```
@@ -1945,7 +1960,7 @@ Legend: ✅ Complete  ~ Partial  ❌ Not Started
 
 ## Quick Reference: Project Status
 
-**The system is 100% complete (Phase 0–8).** All application features including Feature Batch 2 are built.
+**The system is 100% complete (Phase 0–8 + Phase 14).** All application features including Feature Batch 2 and the Push Notification Center are built.
 
 ### REMAINING — Infrastructure Only (Can Be Deferred to Deployment Phase)
 1. `Task 6.1` — Multi-CDN DNS Failover — Requires DNS provider setup (Route 53/NS1) + secondary CDN
@@ -1959,9 +1974,22 @@ Legend: ✅ Complete  ~ Partial  ❌ Not Started
 7. `Task 12.x` — Supervisor Mirror View ✅ (state broadcasting, backend, team live view, mirror UI)
 8. `Task 13.x` — Claim-Based Dispatch Mode ✅ (backend, queue UI, config UI)
 
+### COMPLETED — Phase 14: Push Notification Center ✅
+9. `Task 14.1` — Push Schema ✅ — 4 tables (`push_subscriptions`, `push_broadcasts`, `push_automation_rules`, `push_delivery_log`), 4 enums in migration `0051`
+10. `Task 14.2` — Send Path + Mirror ✅ — `NotificationsService.sendPush()`, mirrors every in-app notification to push automatically; VAPID keys via `web-push` npm
+11. `Task 14.3` — Service Worker Push + Ack ✅ — `sw.js` push/notificationclick handlers; `POST /push/ack` public endpoint via `PushController`; updates `shown_at`/`clicked_at` in delivery log
+12. `Task 14.4` — iOS Install Gate ✅ — `PushPermissionModal` (non-dismissible, blocks use until permission granted); `IosInstallBanner` (home screen prompt for iOS 16.4+)
+13. `Task 14.5` — Broadcast UI ✅ — `NotificationsBroadcastPanel`, role-scoped target selection, preview before send, sends to ALL/ROLE/USER
+14. `Task 14.6` — Automation Rules UI ✅ — `NotificationsAutomationsPanel`, CRUD for CRON/EVENT rules, `PushSchedulerService` dynamic job registry, toggle enable/disable
+15. `Task 14.7` — Delivery Log UI + Resend ✅ — `NotificationsDeliveryLogPanel`, filter by status/type/date, per-row Resend button, bulk resend
+
+### COMPLETED — Phase 14b: App Theme System ✅
+16. Per-user theme preference (6 themes) with localStorage + server sync, org-default fallback, before-paint boot script
+
 ### DEPLOYMENT BLOCKERS (Non-Code)
 - Edge Worker KV namespace IDs in `wrangler.toml` need real Cloudflare KV provisioning
 - Twilio credentials needed for real VOIP (works in mock mode without)
+- VAPID keys (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`) required for real push delivery (system degrades gracefully without them)
 
 ### COMPLETED — All Application Phases
 - ✅ Phase 0 (7/7): Monorepo, Schema, Audit, Auth, RLS, tRPC, Socket.io
@@ -1976,11 +2004,13 @@ Legend: ✅ Complete  ~ Partial  ❌ Not Started
 - ✅ Phase 6 (1/3): PWA Offline Sync (Multi-CDN ❌, Load Testing ❌)
 - ✅ Phase 7 (3/3): E2E Tests (7 specs), CI/CD Pipeline, Documentation (3 guides)
 - ✅ Phase 8 (22/22): Order Timeline (8.1–8.4), Multi-Branch (9.1–9.6), Remove Agent Transfer (10.1), CS Comms Panel (11.1–11.4), Supervisor Mirror (12.1–12.4), Claim Dispatch (13.1–13.3)
+- ✅ Phase 14 (7/7): Push Schema, Send Path, SW Ack, iOS Gate, Broadcast UI, Automation Rules, Delivery Log
+- ✅ Phase 14b (4/4): Theme library, DB column, useAppTheme hook, iOS install banner
 
 ### BUILD METRICS
-- **Backend**: 21 NestJS modules, 19 tRPC routers, 40+ SQL migrations
-- **Frontend**: 65+ Remix routes, 30+ feature modules, 35+ UI components, 8 hooks
-- **Schema**: 20 schema files, 14 validator files, system-versioned temporal tables
+- **Backend**: 22 NestJS modules, 19 tRPC routers, 55 SQL migrations
+- **Frontend**: 65+ Remix routes, 32 feature modules, 40+ UI components, 12 hooks
+- **Schema**: 20 schema files, 16 validator files, system-versioned temporal tables
 - **Tests**: 7 Playwright E2E specs covering all critical flows
 
 ---
@@ -2535,6 +2565,257 @@ HoCS settings UI to configure dispatch mode and claim cap.
 
 ---
 
+## Phase 14 — Push Notification Center
+
+> **Goal:** Full push notification system — lock-screen delivery, admin broadcast, automation rules, and a per-user delivery log with resend capability.
+
+---
+
+### Task 14.1 — Schema: Push Tables 🔴
+`[x]` Status: Complete
+**Dependencies:** None
+
+New Drizzle schema in `packages/shared/src/db/schema/push.ts`:
+
+```
+push_subscriptions    — user_id, endpoint, auth, p256dh, created_at
+push_broadcasts       — id (UUIDv7), created_by, target_type (ALL|ROLE|USER), target_role, target_user_id, title, body, sent_at, branch_id
+push_automation_rules — id, name, trigger_type (CRON|EVENT), cron_expr, event_key, target_type, target_role, title_template, body_template, is_active, branch_id (temporal)
+push_delivery_log     — id, user_id, broadcast_id, automation_rule_id, title, body, trigger_type (MIRROR|BROADCAST|AUTOMATION), status (SENT|FAILED|SHOWN|CLICKED), failure_reason, sent_at, shown_at, clicked_at
+```
+
+`push_delivery_log` and `push_broadcasts` are branch-scoped. `push_subscriptions` is user-scoped (no branch).
+
+**Acceptance Criteria:**
+- [x] Migration file created and runs cleanly
+- [x] `push_automation_rules` has temporal trigger (`*_history` table synced)
+- [x] All tables use UUIDv7 primary keys
+- [x] Zod validators created in `packages/shared/src/validators/push.ts`
+
+---
+
+### Task 14.2 — Backend: Push Send Path + Mirror 🔴
+`[x]` Status: Complete
+**Dependencies:** Task 14.1
+
+Core send infrastructure and in-app → push mirror.
+
+**In `apps/api/src/notifications/notifications.service.ts`:**
+- Install `web-push` in `apps/api`
+- Add VAPID env vars: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`
+- `savePushSubscription(userId, { endpoint, auth, p256dh })` — upsert on endpoint
+- `sendPush(userId, payload, meta: { triggerType, broadcastId?, automationRuleId? })`:
+  1. Fetch all subscriptions for user
+  2. Call `webpush.sendNotification()` for each
+  3. Write `push_delivery_log` row with status `SENT` or `FAILED`
+  4. On `410 Gone` error → delete stale subscription row
+- After every `db.insert(notifications)` in the service, call `sendPush()` with `triggerType: 'MIRROR'`
+
+**New tRPC procedures in `notifications.router.ts`:**
+- `notifications.savePushSubscription` — saves subscription from client
+- `notifications.getPushDeliveryLog` — paginated log, filterable by status/triggerType/userId/dateRange
+- `notifications.resendPush` — takes `logId`, re-calls `sendPush`, creates new log row (does NOT mutate original)
+- `notifications.bulkResendPush` — takes array of `logId`s
+
+**New REST endpoint (NOT tRPC — called from service worker):**
+- `POST /push/ack` — body: `{ logId: string, event: 'shown' | 'clicked' }`. No session auth. Validates logId exists. Updates `shown_at`/`clicked_at` and advances status.
+
+**Acceptance Criteria:**
+- [x] VAPID keys in `.env.example`
+- [x] Push subscription stored in DB after `subscribeToPush()` fires
+- [x] Every in-app notification also fires a push to the user's devices
+- [x] `push_delivery_log` row created for every send attempt
+- [x] `410 Gone` subscriptions deleted immediately
+- [x] `/push/ack` updates `shown_at` and `clicked_at` correctly
+
+---
+
+### Task 14.3 — Service Worker: Push + Ack Handlers 🔴
+`[x]` Status: Complete
+**Dependencies:** Task 14.2
+
+**In the PWA service worker:**
+- `push` event:
+  1. Parse `event.data.json()` → `{ title, body, icon, badge, data: { url, logId }, tag }`
+  2. Call `self.registration.showNotification(title, { body, icon, badge, data, tag })`
+  3. POST to `/push/ack` with `{ logId, event: 'shown' }`
+- `notificationclick` event:
+  1. `event.notification.close()`
+  2. POST to `/push/ack` with `{ logId: event.notification.data.logId, event: 'clicked' }`
+  3. `clients.openWindow(event.notification.data.url)` or focus existing client
+
+**Acceptance Criteria:**
+- [x] Notification appears on lock screen when app is fully closed
+- [x] Tapping notification opens correct deep-link route
+- [x] `shown_at` populated in `push_delivery_log` within 5 seconds of delivery
+- [x] `clicked_at` populated when user taps
+- [x] `tag` prevents duplicate notifications for same event
+
+---
+
+### Task 14.4 — iOS Install Gate 🟡
+`[x]` Status: Complete
+**Dependencies:** Task 14.2
+
+**In `DashboardLayout`:**
+- Detect: `isIOS() && !window.navigator.standalone`
+- Show a dismissible banner: "Tap Share → Add to Home Screen to receive call and order alerts on your lock screen"
+- Suppress after 3 dismissals (localStorage flag)
+- On iOS: only call `subscribeToPush()` after banner is dismissed/confirmed — not on mount
+
+**Acceptance Criteria:**
+- [x] Banner visible on iOS Safari non-standalone
+- [x] Banner absent on Android, desktop, standalone iOS
+- [x] Suppressed after 3 dismissals
+- [x] Push subscription only requested post-banner on iOS
+
+---
+
+### Task 14.5 — Broadcast UI (`/admin/notifications/broadcast`) 🟡
+`[x]` Status: Complete
+**Dependencies:** Task 14.2
+
+**New route:** `apps/web/app/routes/admin.notifications.broadcast.tsx`
+
+**UI:**
+- Target selector: "Everyone" | "Role" (dropdown) | "Specific User" (search)
+- Title input (max 80 chars, char counter)
+- Body input (max 120 chars, char counter)
+- Live preview card showing how the notification will look on a phone
+- Send button → confirm modal showing recipient count
+- After send: redirects to delivery log filtered to that broadcast
+
+**Server-side scope enforcement** (tRPC procedure checks caller role before allowing target).
+
+**Acceptance Criteria:**
+- [x] HoCS can only target CS Agents
+- [x] HoM can only target Media Buyers
+- [x] SuperAdmin can target everyone
+- [x] Recipient count shown in confirm modal before send
+- [x] After send, user lands on the delivery log for that broadcast
+
+---
+
+### Task 14.6 — Automation Rules UI (`/admin/notifications/automations`) 🟡
+`[x]` Status: Complete
+**Dependencies:** Task 14.2
+
+**New route:** `apps/web/app/routes/admin.notifications.automations.tsx`
+
+**UI:**
+- Table of all automation rules (name, trigger, target, status toggle, last fired)
+- Create / Edit modal:
+  - Name
+  - Trigger type: "Scheduled" or "Event-based"
+  - If Scheduled: human-readable cron builder (Every day at X | Every Monday at X | Every Nth of month at X)
+  - If Event-based: dropdown of named events (`agent_inactive_2h`, `order_stuck_24h`, `sla_breach`, `funding_not_confirmed_1h`)
+  - Target: role group or specific user
+  - Message: Title template + Body template with placeholder chips (`{{user_name}}`, `{{order_count}}`, etc.)
+  - Active toggle
+- Delete rule (with confirm)
+
+**Acceptance Criteria:**
+- [x] CRUD for automation rules works end-to-end
+- [x] Toggling active off stops the rule from firing (cron unregistered)
+- [x] Toggling active on re-registers the rule immediately (no restart)
+- [x] Placeholder chips auto-insert into message fields
+- [x] Role heads can only create rules targeting their own team
+
+---
+
+### Task 14.7 — Delivery Log UI (`/admin/notifications/log`) 🟡
+`[x]` Status: Complete
+**Dependencies:** Task 14.2
+
+**New route:** `apps/web/app/routes/admin.notifications.log.tsx`
+
+**UI:**
+- Filter bar: Status (All | SENT | FAILED | SHOWN | CLICKED) | Trigger type | Date range | User search
+- Table columns: User · Message title · Trigger · Sent At · Status badge · Shown At · Clicked At · Resend button
+- For broadcast rows: collapsible aggregate header (Sent: N · Shown: N · Clicked: N · Failed: N)
+- Resend button: visible on FAILED rows and SENT rows older than 30 minutes
+- Bulk select + "Resend Selected" action
+- Pagination (50 rows per page)
+
+**Acceptance Criteria:**
+- [x] All 4 statuses render with correct colour badges
+- [x] Resend creates a new log row (original row unchanged)
+- [x] Bulk resend works for up to 200 rows at once
+- [x] Broadcast aggregate totals are accurate
+- [x] Page is accessible to SuperAdmin and role heads (scoped to their sent broadcasts/rules)
+
+**Note:** `NotificationsDeliveryLogPanel` component in `apps/web/app/features/notifications/panels/`. Routes `admin.notifications.log.tsx` and `admin.notifications.broadcast.tsx` and `admin.notifications.automations.tsx` redirect into the tabbed `NotificationsPage` (`/admin/notifications?tab=...`).
+
+---
+
+## Phase 14b — Per-User App Theme System
+
+> **Goal:** Let each user choose their preferred UI theme (6 options). Persist server-side so it survives cross-device login. Apply before first paint to prevent flash.
+
+---
+
+### Task 14b.1 — Theme Library + Boot Script ✅
+`[x]` Status: Complete
+**Dependencies:** None
+
+- `apps/web/app/lib/theme.ts` — 6 theme definitions (`system`, `light`, `dark`, `dim`, `ink`, `soft`) with RGB preview tuples
+- `applyAppTheme(id)` — sets `data-app-theme` attribute on `<html>` and adds/removes `dark` class
+- `persistAndApplyTheme(id)` — saves to localStorage + applies
+- `getThemeBootScript()` — inlined `<script>` string to be injected before `<style>` in `<head>`; reads localStorage and applies before first paint; maps legacy IDs
+
+**Acceptance Criteria:**
+- [x] No flash of wrong theme on page load or hard refresh
+- [x] Boot script handles stale legacy theme IDs gracefully
+
+---
+
+### Task 14b.2 — DB Column + Migration ✅
+`[x]` Status: Complete
+**Dependencies:** None
+
+- Migration `0055_users_app_theme.sql` — adds nullable `app_theme text` column to `users` AND `users_history`
+- Drizzle schema in `users.ts` updated: `appTheme: text('app_theme')`
+- `ui.ts` validator: `appThemeIdSchema`, `updateMyAppThemeSchema`
+
+**Acceptance Criteria:**
+- [x] Column nullable (null = follow org default)
+- [x] `users_history` synced in same migration
+
+---
+
+### Task 14b.3 — useAppTheme Hook + Server Sync ✅
+`[x]` Status: Complete
+**Dependencies:** Task 14b.1, Task 14b.2
+
+- `apps/web/app/hooks/useAppTheme.ts` — `themeId`, `setTheme(id)`, `activeTheme`, `isDarkTheme`
+- `apps/web/app/hooks/useServerAppThemeSync.ts` — initial sync: reads server preference from loader, applies if different from localStorage
+- `apps/web/app/lib/trpc-browser.ts` — `fetchClientConfig()` (org default + user preference), `postUpdateMyAppTheme(id)` (persist to server without blocking UI)
+- Theme selector in Settings page (`SettingsPushPanel` or dedicated appearance tab)
+
+**Acceptance Criteria:**
+- [x] Theme change instant on client, syncs to server in background
+- [x] Theme restored correctly across new devices/sessions
+- [x] Custom event `app-theme-change` fired for cross-component reactivity
+
+---
+
+### Task 14b.4 — iOS Install Banner ✅
+`[x]` Status: Complete
+**Dependencies:** None
+
+- `apps/web/app/components/ui/ios-install-banner.tsx`
+- Slides up from bottom on iOS Safari non-standalone
+- Shows: "Tap the Share icon then 'Add to Home Screen'"
+- Dismisses to localStorage; shown max 3× total
+- Required prerequisite for iOS 16.4+ lock screen push
+
+**Acceptance Criteria:**
+- [x] Invisible on Android, desktop, or already-installed iOS PWA
+- [x] Disappears permanently after 3 dismissals
+- [x] Does not interfere with app navigation
+
+---
+
 ## Phase 8 — Dependency Graph
 
 ```
@@ -2566,7 +2847,15 @@ Task 12.1 (Agent State Broadcasting)
 Task 13.1 (Claim Mode Backend)
   ├── Task 13.2 (Claim Queue UI)
   └── Task 13.3 (Dispatch Config UI)
+
+Task 14.1 (Push Schema)
+  └── Task 14.2 (Push Send Path + Mirror)
+        ├── Task 14.3 (SW Push + Ack Handlers)
+        ├── Task 14.4 (iOS Install Gate)
+        ├── Task 14.5 (Broadcast UI)
+        ├── Task 14.6 (Automation Rules UI)
+        └── Task 14.7 (Delivery Log UI)
 ```
 
-**Recommended build order:** 10.1 → 8.1 → 9.1 → 9.2 → 9.3 → 8.2 → 8.3 → 8.4 → 9.4 → 9.5 → 9.6 → 11.1 → 11.2 → 11.3 → 11.4 → 12.1 → 12.2 → 12.3 → 12.4 → 13.1 → 13.2 → 13.3
+**Recommended build order:** 10.1 → 8.1 → 9.1 → 9.2 → 9.3 → 8.2 → 8.3 → 8.4 → 9.4 → 9.5 → 9.6 → 11.1 → 11.2 → 11.3 → 11.4 → 12.1 → 12.2 → 12.3 → 12.4 → 13.1 → 13.2 → 13.3 → 14.1 → 14.2 → 14.3 → 14.4 → 14.5 → 14.6 → 14.7
 - **Docs**: Developer Guide, Operational Runbook, 9 Architecture Decision Records

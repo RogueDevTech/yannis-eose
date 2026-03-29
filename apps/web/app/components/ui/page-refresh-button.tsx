@@ -17,7 +17,7 @@ export function PageRefreshButton({
   const isLoading = state === 'loading';
 
   const mergedClassName = [
-    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-surface-700 dark:text-surface-300 hover:text-brand-600 hover:bg-surface-100 dark:hover:bg-surface-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
+    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-app-fg-muted hover:text-brand-600 hover:bg-surface-100 dark:hover:bg-surface-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
     className,
   ]
     .filter(Boolean)

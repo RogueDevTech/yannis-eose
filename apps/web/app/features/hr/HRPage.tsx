@@ -9,28 +9,19 @@ import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
+import { PageHeader } from '~/components/ui/page-header';
+import { FormSelect } from '~/components/ui/form-select';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { NairaPrice } from '~/components/ui/naira-price';
+import { TextInput } from '~/components/ui/text-input';
 import type { CommissionPlan, Payout, Adjustment, HRUser, HRStreamData, PayoutSummary, SettlementConfig, SettlementPeriod } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
-
-const PAYOUT_COLORS: Record<string, string> = {
-  DRAFT: 'badge-warning',
-  APPROVED: 'badge-info',
-  PAID: 'badge-success',
-  REJECTED: 'badge-danger',
-};
-
-const ADJUSTMENT_COLORS: Record<string, string> = {
-  BONUS: 'badge-success',
-  EXTRA_SHIFT: 'badge-info',
-  PERFORMANCE: 'badge-brand',
-  DEDUCTION: 'badge-danger',
-  CLAWBACK: 'badge-danger',
-  OTHER: 'badge-warning',
-};
 
 const ROLE_OPTIONS = [
   'CS_AGENT', 'MEDIA_BUYER', 'HEAD_OF_CS', 'HEAD_OF_MARKETING',
@@ -98,12 +89,10 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
   return (
     <div className="space-y-4">
       <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">HR & Payroll</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Commission plans, payout management, and staff earnings
-          </p>
-        </div>
+        <PageHeader
+          title="HR & Payroll"
+          description="Commission plans, payout management, and staff earnings"
+        />
         <div className="flex flex-wrap gap-2">
           <PageRefreshButton />
           <Button
@@ -182,40 +171,45 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
         }}
       </DeferredSection>
 
-      {/* Stats — payoutSummary is deferred, plans count is critical */}
-      <DeferredSection resolve={payoutSummary} skeleton="stat">
+      <DeferredSection resolve={payoutSummary} fallback={<OverviewStatStripSkeleton count={4} />}>
         {(summary) => {
           const draftTotal = Number(summary['DRAFT']?.total ?? 0);
           const approvedTotal = Number(summary['APPROVED']?.total ?? 0);
           const paidTotal = Number(summary['PAID']?.total ?? 0);
 
           return (
-            <DeferredSection resolve={adjustments} skeleton="stat">
+            <DeferredSection resolve={adjustments} fallback={<OverviewStatStripSkeleton count={4} />}>
               {(resolvedAdjustments) => {
                 const clawbacks = resolvedAdjustments.filter((a: Adjustment) => a.category === 'CLAWBACK');
                 return (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="card">
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Draft Payouts</p>
-                      <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{formatNaira(draftTotal)}</p>
-                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['DRAFT']?.count ?? 0} staff</p>
-                    </div>
-                    <div className="card">
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Approved</p>
-                      <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{formatNaira(approvedTotal)}</p>
-                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['APPROVED']?.count ?? 0} staff</p>
-                    </div>
-                    <div className="card">
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Paid</p>
-                      <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{formatNaira(paidTotal)}</p>
-                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{summary['PAID']?.count ?? 0} staff</p>
-                    </div>
-                    <div className="card">
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Active Plans</p>
-                      <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{totalPlans}</p>
-                      <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">{clawbacks.length} clawback{clawbacks.length !== 1 ? 's' : ''}</p>
-                    </div>
-                  </div>
+                  <OverviewStatStrip
+                    items={[
+                      {
+                        label: 'Draft Payouts',
+                        value: formatNaira(draftTotal),
+                        valueClassName: 'text-warning-600 dark:text-warning-400',
+                        title: `${summary['DRAFT']?.count ?? 0} staff`,
+                      },
+                      {
+                        label: 'Approved',
+                        value: formatNaira(approvedTotal),
+                        valueClassName: 'text-brand-600 dark:text-brand-400',
+                        title: `${summary['APPROVED']?.count ?? 0} staff`,
+                      },
+                      {
+                        label: 'Paid',
+                        value: formatNaira(paidTotal),
+                        valueClassName: 'text-success-600 dark:text-success-400',
+                        title: `${summary['PAID']?.count ?? 0} staff`,
+                      },
+                      {
+                        label: 'Active Plans',
+                        value: totalPlans,
+                        valueClassName: 'text-app-fg',
+                        title: `${clawbacks.length} clawback${clawbacks.length !== 1 ? 's' : ''}`,
+                      },
+                    ]}
+                  />
                 );
               }}
             </DeferredSection>
@@ -227,23 +221,23 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
       <ResponsiveFormPanel open={showGenerate} onClose={() => setShowGenerate(false)}>
         <fetcher.Form method="post" className="card space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Generate Payouts</h3>
-            <button type="button" onClick={() => setShowGenerate(false)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
+            <h3 className="text-lg font-semibold text-app-fg">Generate Payouts</h3>
+            <button type="button" onClick={() => setShowGenerate(false)} className="text-app-fg-muted hover:text-app-fg">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
-          <p className="text-sm text-surface-800 dark:text-surface-200">
+          <p className="text-sm text-app-fg-muted">
             Generates DRAFT payouts for all active staff based on delivered orders within the settlement period.
             Commission is based on DELIVERED_AT timestamp, not order creation date.
           </p>
           <input type="hidden" name="intent" value="generatePayouts" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Period Start</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Period Start</label>
               <input name="periodStart" type="date" required className="input" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Period End</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Period End</label>
               <input name="periodEnd" type="date" required className="input" />
             </div>
           </div>
@@ -262,62 +256,62 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
       <ResponsiveFormPanel open={showAddPlan} onClose={() => setShowAddPlan(false)}>
         <fetcher.Form method="post" className="card space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">New Commission Plan</h3>
-            <button type="button" onClick={() => setShowAddPlan(false)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
+            <h3 className="text-lg font-semibold text-app-fg">New Commission Plan</h3>
+            <button type="button" onClick={() => setShowAddPlan(false)} className="text-app-fg-muted hover:text-app-fg">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
           <input type="hidden" name="intent" value="createPlan" />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Plan Name</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Plan Name</label>
               <input name="planName" type="text" required placeholder="e.g. CS Standard Plan" className="input" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Role</label>
-              <select name="role" required className="input">
-                <option value="">Select role...</option>
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
-                ))}
-              </select>
+              <FormSelect
+                label="Role"
+                name="role"
+                required
+                placeholder="Select role..."
+                options={ROLE_OPTIONS.map((r) => ({ value: r, label: r.replace(/_/g, ' ') }))}
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Base Salary (&#8358;)</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Base Salary (&#8358;)</label>
               <AmountInput name="baseSalary" placeholder="0" className="input" />
-              <p className="text-xs text-surface-700 mt-0.5">Earned when orders &ge; threshold</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Earned when orders &ge; threshold</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Base Threshold (orders)</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Base Threshold (orders)</label>
               <input name="baseThreshold" type="number" min="0" placeholder="20" className="input" />
-              <p className="text-xs text-surface-700 mt-0.5">Min delivered to earn base salary</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Min delivered to earn base salary</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Per Order Rate (&#8358;)</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Per Order Rate (&#8358;)</label>
               <AmountInput name="perOrderRate" placeholder="0" className="input" />
-              <p className="text-xs text-surface-700 mt-0.5">Commission per delivered order</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Commission per delivered order</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Bonus Per Extra Order (&#8358;)</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Bonus Per Extra Order (&#8358;)</label>
               <AmountInput name="bonusPerExtraOrder" placeholder="0" className="input" />
-              <p className="text-xs text-surface-700 mt-0.5">Extra bonus above threshold</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Extra bonus above threshold</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Penalty Per Return (&#8358;)</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Penalty Per Return (&#8358;)</label>
               <AmountInput name="penaltyPerReturn" placeholder="0" className="input" />
-              <p className="text-xs text-surface-700 mt-0.5">Deducted per returned order</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Deducted per returned order</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Delivery Rate Threshold (%)</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Delivery Rate Threshold (%)</label>
               <input name="deliveryRateThreshold" type="number" min="0" max="100" step="0.1" placeholder="80" className="input" />
-              <p className="text-xs text-surface-700 mt-0.5">Above this = 50% extra bonus</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Above this = 50% extra bonus</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Effective From</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Effective From</label>
               <input name="effectiveFrom" type="date" required className="input" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Effective To (optional)</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Effective To (optional)</label>
               <input name="effectiveTo" type="date" className="input" />
             </div>
           </div>
@@ -336,42 +330,48 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
       <ResponsiveFormPanel open={showAddAdjustment} onClose={() => setShowAddAdjustment(false)}>
         <fetcher.Form method="post" className="card space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Add Earning Adjustment</h3>
-            <button type="button" onClick={() => setShowAddAdjustment(false)} className="text-surface-700 hover:text-surface-900 dark:hover:text-surface-300">
+            <h3 className="text-lg font-semibold text-app-fg">Add Earning Adjustment</h3>
+            <button type="button" onClick={() => setShowAddAdjustment(false)} className="text-app-fg-muted hover:text-app-fg">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
           <input type="hidden" name="intent" value="createAdjustment" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Staff Member</label>
               <DeferredSection resolve={users} skeleton="inline">
                 {(resolvedUsers) => (
-                  <select name="staffId" required className="input">
-                    <option value="">Select staff...</option>
-                    {resolvedUsers.map((u: HRUser) => (
-                      <option key={u.id} value={u.id}>{u.name} ({u.role?.replace(/_/g, ' ')})</option>
-                    ))}
-                  </select>
+                  <FormSelect
+                    label="Staff Member"
+                    name="staffId"
+                    required
+                    placeholder="Select staff..."
+                    options={resolvedUsers.map((u: HRUser) => ({ value: u.id, label: `${u.name} (${u.role?.replace(/_/g, ' ')})` }))}
+                  />
                 )}
               </DeferredSection>
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Category</label>
-              <select name="category" required className="input">
-                <option value="">Select category...</option>
-                {ADJ_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>
-                ))}
-              </select>
+              <FormSelect
+                label="Category"
+                name="category"
+                required
+                placeholder="Select category..."
+                options={ADJ_CATEGORIES.map((c) => ({ value: c, label: c.replace(/_/g, ' ') }))}
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Amount (&#8358;)</label>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
               <AmountInput name="amount" required placeholder="e.g. 5,000.00 or -500 for deduction" className="input" allowNegative />
             </div>
             <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Reason</label>
-              <input name="reason" type="text" required minLength={5} placeholder="Reason for adjustment (min 5 chars)" className="input" />
+              <TextInput
+                label="Reason"
+                name="reason"
+                type="text"
+                required
+                minLength={5}
+                placeholder="Reason for adjustment (min 5 chars)"
+              />
             </div>
           </div>
           <div className="flex gap-2">
@@ -426,22 +426,22 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                           <tr key={p.id} className="table-row cursor-pointer" onClick={() => setExpandedPayoutId(expandedPayoutId === p.id ? null : p.id)}>
                             <td className="table-cell">
                               <div>
-                                <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{getStaffName(p.staffId)}</p>
-                                <p className="text-sm text-surface-700 dark:text-surface-300">{getStaffRole(p.staffId)}</p>
+                                <p className="text-sm font-medium text-app-fg">{getStaffName(p.staffId)}</p>
+                                <p className="text-sm text-app-fg-muted">{getStaffRole(p.staffId)}</p>
                               </div>
                             </td>
-                            <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
+                            <td className="table-cell text-sm text-app-fg-muted">
                               {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })} — {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                             </td>
-                            <td className="table-cell text-right text-sm">&#8358;{Number(p.baseSalary).toLocaleString()}</td>
-                            <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">&#8358;{Number(p.performanceBonus).toLocaleString()}</td>
-                            <td className="table-cell text-right text-sm text-brand-600 dark:text-brand-400">&#8358;{Number(p.addOnsTotal).toLocaleString()}</td>
+                            <td className="table-cell text-right text-sm"><NairaPrice value={Number(p.baseSalary)} /></td>
+                            <td className="table-cell text-right text-sm text-success-600 dark:text-success-400"><NairaPrice value={Number(p.performanceBonus)} /></td>
+                            <td className="table-cell text-right text-sm text-brand-600 dark:text-brand-400"><NairaPrice value={Number(p.addOnsTotal)} /></td>
                             <td className="table-cell text-right text-sm text-danger-600 dark:text-danger-400">
-                              {Number(p.deductionsTotal) > 0 ? `-\u20A6${Number(p.deductionsTotal).toLocaleString()}` : '\u2014'}
+                              {Number(p.deductionsTotal) > 0 ? <><span>-</span><NairaPrice value={Number(p.deductionsTotal)} /></> : '\u2014'}
                             </td>
-                            <td className="table-cell text-right font-medium">{formatNaira(Number(p.totalPayout))}</td>
+                            <td className="table-cell text-right font-medium"><NairaPrice value={Number(p.totalPayout)} /></td>
                             <td className="table-cell">
-                              <span className={PAYOUT_COLORS[p.status] ?? 'badge'}>{p.status}</span>
+                              <StatusBadge status={p.status} />
                             </td>
                             <td className="table-cell">
                               {p.status === 'DRAFT' && (
@@ -482,28 +482,28 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                           {/* Expanded breakdown */}
                           {expandedPayoutId === p.id && (
                             <tr key={`${p.id}-detail`}>
-                              <td colSpan={9} className="px-6 py-4 bg-surface-50 dark:bg-surface-900/50">
+                              <td colSpan={9} className="px-6 py-4 bg-app-hover">
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                                   <div>
-                                    <p className="text-xs text-surface-700 dark:text-surface-300 uppercase">Base Salary</p>
-                                    <p className="font-medium text-surface-900 dark:text-white">&#8358;{Number(p.baseSalary).toLocaleString()}</p>
+                                    <p className="text-xs text-app-fg-muted uppercase">Base Salary</p>
+                                    <p className="font-medium text-app-fg"><NairaPrice value={Number(p.baseSalary)} /></p>
                                   </div>
                                   <div>
-                                    <p className="text-xs text-surface-700 dark:text-surface-300 uppercase">Performance Bonus</p>
-                                    <p className="font-medium text-success-600 dark:text-success-400">+&#8358;{Number(p.performanceBonus).toLocaleString()}</p>
+                                    <p className="text-xs text-app-fg-muted uppercase">Performance Bonus</p>
+                                    <p className="font-medium text-success-600 dark:text-success-400">+<NairaPrice value={Number(p.performanceBonus)} /></p>
                                   </div>
                                   <div>
-                                    <p className="text-xs text-surface-700 dark:text-surface-300 uppercase">Add-ons (Bonuses, OT)</p>
-                                    <p className="font-medium text-brand-600 dark:text-brand-400">+&#8358;{Number(p.addOnsTotal).toLocaleString()}</p>
+                                    <p className="text-xs text-app-fg-muted uppercase">Add-ons (Bonuses, OT)</p>
+                                    <p className="font-medium text-brand-600 dark:text-brand-400">+<NairaPrice value={Number(p.addOnsTotal)} /></p>
                                   </div>
                                   <div>
-                                    <p className="text-xs text-surface-700 dark:text-surface-300 uppercase">Deductions (Clawbacks)</p>
-                                    <p className="font-medium text-danger-600 dark:text-danger-400">-&#8358;{Number(p.deductionsTotal).toLocaleString()}</p>
+                                    <p className="text-xs text-app-fg-muted uppercase">Deductions (Clawbacks)</p>
+                                    <p className="font-medium text-danger-600 dark:text-danger-400">-<NairaPrice value={Number(p.deductionsTotal)} /></p>
                                   </div>
                                 </div>
-                                <div className="mt-3 pt-3 border-t border-surface-200 dark:border-surface-700 flex justify-between">
-                                  <span className="text-sm font-semibold text-surface-900 dark:text-white">Net Payout</span>
-                                  <span className="text-lg font-bold text-surface-900 dark:text-white">{formatNaira(Number(p.totalPayout))}</span>
+                                <div className="mt-3 pt-3 border-t border-app-border flex justify-between">
+                                  <span className="text-sm font-semibold text-app-fg">Net Payout</span>
+                                  <span className="text-lg font-bold text-app-fg"><NairaPrice value={Number(p.totalPayout)} /></span>
                                 </div>
                               </td>
                             </tr>
@@ -511,7 +511,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                         </>
                       ))}
                       {payouts.length === 0 && (
-                        <tr><td colSpan={9} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No payouts yet. Generate payouts for a settlement period.</td></tr>
+                        <tr><td colSpan={9}><EmptyState title="No payouts yet" description="Generate payouts for a settlement period." /></td></tr>
                       )}
                     </tbody>
                   </table>
@@ -520,34 +520,34 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                 {/* Mobile payouts */}
                 <div className="md:hidden space-y-3 px-1">
                   {payouts.map((p: Payout) => (
-                    <div key={p.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                    <div key={p.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-medium text-surface-900 dark:text-white text-sm">{getStaffName(p.staffId)}</p>
-                          <p className="text-sm text-surface-700 dark:text-surface-300">{getStaffRole(p.staffId)}</p>
+                          <p className="font-medium text-app-fg text-sm">{getStaffName(p.staffId)}</p>
+                          <p className="text-sm text-app-fg-muted">{getStaffRole(p.staffId)}</p>
                         </div>
-                        <span className={PAYOUT_COLORS[p.status] ?? 'badge'}>{p.status}</span>
+                        <StatusBadge status={p.status} />
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <div>
-                          <span className="text-surface-700 dark:text-surface-300">Base</span>
-                          <p className="font-medium text-surface-900 dark:text-white">&#8358;{Number(p.baseSalary).toLocaleString()}</p>
+                          <span className="text-app-fg-muted">Base</span>
+                          <p className="font-medium text-app-fg"><NairaPrice value={Number(p.baseSalary)} /></p>
                         </div>
                         <div>
-                          <span className="text-surface-700 dark:text-surface-300">Bonus</span>
-                          <p className="font-medium text-success-600 dark:text-success-400">&#8358;{Number(p.performanceBonus).toLocaleString()}</p>
+                          <span className="text-app-fg-muted">Bonus</span>
+                          <p className="font-medium text-success-600 dark:text-success-400"><NairaPrice value={Number(p.performanceBonus)} /></p>
                         </div>
                         <div>
-                          <span className="text-surface-700 dark:text-surface-300">Total</span>
-                          <p className="font-bold text-surface-900 dark:text-white">{formatNaira(Number(p.totalPayout))}</p>
+                          <span className="text-app-fg-muted">Total</span>
+                          <p className="font-bold text-app-fg"><NairaPrice value={Number(p.totalPayout)} /></p>
                         </div>
                       </div>
                       {Number(p.deductionsTotal) > 0 && (
                         <p className="text-xs text-danger-600 dark:text-danger-400">
-                          Deductions: -&#8358;{Number(p.deductionsTotal).toLocaleString()}
+                          Deductions: -<NairaPrice value={Number(p.deductionsTotal)} />
                         </p>
                       )}
-                      <p className="text-xs text-surface-700 dark:text-surface-300">
+                      <p className="text-xs text-app-fg-muted">
                         {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })} — {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                       </p>
                       {p.status === 'DRAFT' && (
@@ -579,7 +579,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                     </div>
                   ))}
                   {payouts.length === 0 && (
-                    <div className="p-8 text-center text-surface-700 dark:text-surface-300">No payouts yet</div>
+                    <EmptyState title="No payouts yet" description="Generate payouts for a settlement period." />
                   )}
                 </div>
               </div>
@@ -603,22 +603,22 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
               </thead>
               <tbody>
                 {plans.map((plan: CommissionPlan) => (
-                  <tr key={plan.id} className="table-row cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/50" onClick={() => setViewPlan(plan)}>
-                    <td className="table-cell font-medium text-surface-900 dark:text-surface-100">{plan.planName}</td>
+                  <tr key={plan.id} className="table-row cursor-pointer hover:bg-app-hover/50" onClick={() => setViewPlan(plan)}>
+                    <td className="table-cell font-medium text-app-fg">{plan.planName}</td>
                     <td className="table-cell">
                       <span className="badge-info">{plan.role.replace(/_/g, ' ')}</span>
                     </td>
-                    <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
+                    <td className="table-cell text-sm text-app-fg-muted">
                       {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       {plan.effectiveTo ? ` — ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}` : ' — Ongoing'}
                     </td>
-                    <td className="table-cell text-xs text-surface-800 dark:text-surface-200 max-w-[300px]">
+                    <td className="table-cell text-xs text-app-fg-muted max-w-[300px]">
                       {formatRules(plan.rules)}
                     </td>
                   </tr>
                 ))}
                 {plans.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No commission plans yet</td></tr>
+                  <tr><td colSpan={4}><EmptyState title="No commission plans yet" description="Create a commission plan to get started." /></td></tr>
                 )}
               </tbody>
             </table>
@@ -627,20 +627,20 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
           {/* Mobile plans */}
           <div className="md:hidden space-y-3 px-1">
             {plans.map((plan: CommissionPlan) => (
-              <div key={plan.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3 cursor-pointer active:bg-surface-50 dark:active:bg-surface-800/50" onClick={() => setViewPlan(plan)}>
+              <div key={plan.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 cursor-pointer active:bg-surface-50 dark:active:bg-surface-800/50" onClick={() => setViewPlan(plan)}>
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-surface-900 dark:text-white text-sm">{plan.planName}</span>
+                  <span className="font-medium text-app-fg text-sm">{plan.planName}</span>
                   <span className="badge-info text-xs">{plan.role.replace(/_/g, ' ')}</span>
                 </div>
-                <p className="text-sm text-surface-700 dark:text-surface-300">{formatRules(plan.rules)}</p>
-                <p className="text-xs text-surface-700 dark:text-surface-300">
+                <p className="text-sm text-app-fg-muted">{formatRules(plan.rules)}</p>
+                <p className="text-xs text-app-fg-muted">
                   From {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                   {plan.effectiveTo ? ` to ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}` : ' — Ongoing'}
                 </p>
               </div>
             ))}
             {plans.length === 0 && (
-              <div className="p-8 text-center text-surface-700 dark:text-surface-300">No commission plans yet</div>
+              <EmptyState title="No commission plans yet" description="Create a commission plan to get started." />
             )}
           </div>
         </div>
@@ -651,10 +651,10 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
         <Modal open onClose={() => setViewPlan(null)} maxWidth="max-w-lg" backdropBlur contentClassName="flex flex-col gap-5 p-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-base font-semibold text-surface-900 dark:text-white">{viewPlan.planName}</h3>
+                  <h3 className="text-base font-semibold text-app-fg">{viewPlan.planName}</h3>
                   <span className="badge-info text-xs mt-1 inline-block">{viewPlan.role.replace(/_/g, ' ')}</span>
                 </div>
-                <button type="button" onClick={() => setViewPlan(null)} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 p-1">
+                <button type="button" onClick={() => setViewPlan(null)} className="text-app-fg-muted hover:text-app-fg p-1">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -664,7 +664,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
               {/* Status & Dates */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wide">Status</p>
+                  <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Status</p>
                   {(() => {
                     const now = new Date();
                     const from = new Date(viewPlan.effectiveFrom);
@@ -675,8 +675,8 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                   })()}
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wide">Effective Period</p>
-                  <p className="text-sm text-surface-900 dark:text-white mt-1">
+                  <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Effective Period</p>
+                  <p className="text-sm text-app-fg mt-1">
                     {new Date(viewPlan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                     {viewPlan.effectiveTo
                       ? ` — ${new Date(viewPlan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`
@@ -687,53 +687,53 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
 
               {/* Rules Breakdown */}
               <div>
-                <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wide mb-3">Commission Rules</p>
+                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide mb-3">Commission Rules</p>
                 <div className="space-y-2">
                   {viewPlan.rules.baseSalary != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Base Salary</p>
-                        <p className="text-xs text-surface-500 dark:text-surface-400">
+                        <p className="text-sm font-medium text-app-fg">Base Salary</p>
+                        <p className="text-xs text-app-fg-muted">
                           Fixed pay when delivered orders {'\u2265'} {viewPlan.rules.baseThreshold ?? 0}
                         </p>
                       </div>
-                      <span className="text-sm font-semibold text-surface-900 dark:text-white">&#8358;{Number(viewPlan.rules.baseSalary).toLocaleString()}</span>
+                      <span className="text-sm font-semibold text-app-fg"><NairaPrice value={Number(viewPlan.rules.baseSalary)} /></span>
                     </div>
                   )}
                   {viewPlan.rules.baseThreshold != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Base Threshold</p>
-                        <p className="text-xs text-surface-500 dark:text-surface-400">Minimum delivered orders to earn base salary</p>
+                        <p className="text-sm font-medium text-app-fg">Base Threshold</p>
+                        <p className="text-xs text-app-fg-muted">Minimum delivered orders to earn base salary</p>
                       </div>
-                      <span className="text-sm font-semibold text-surface-900 dark:text-white">{Number(viewPlan.rules.baseThreshold)} orders</span>
+                      <span className="text-sm font-semibold text-app-fg">{Number(viewPlan.rules.baseThreshold)} orders</span>
                     </div>
                   )}
                   {viewPlan.rules.perOrderRate != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Per Order Commission</p>
-                        <p className="text-xs text-surface-500 dark:text-surface-400">Earned for every delivered order</p>
+                        <p className="text-sm font-medium text-app-fg">Per Order Commission</p>
+                        <p className="text-xs text-app-fg-muted">Earned for every delivered order</p>
                       </div>
-                      <span className="text-sm font-semibold text-success-600 dark:text-success-400">&#8358;{Number(viewPlan.rules.perOrderRate).toLocaleString()}</span>
+                      <span className="text-sm font-semibold text-success-600 dark:text-success-400"><NairaPrice value={Number(viewPlan.rules.perOrderRate)} /></span>
                     </div>
                   )}
                   {viewPlan.rules.bonusPerExtraOrder != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Extra Order Bonus</p>
-                        <p className="text-xs text-surface-500 dark:text-surface-400">
+                        <p className="text-sm font-medium text-app-fg">Extra Order Bonus</p>
+                        <p className="text-xs text-app-fg-muted">
                           Additional bonus per order above {viewPlan.rules.baseThreshold ?? 0} threshold
                         </p>
                       </div>
-                      <span className="text-sm font-semibold text-success-600 dark:text-success-400">&#8358;{Number(viewPlan.rules.bonusPerExtraOrder).toLocaleString()}</span>
+                      <span className="text-sm font-semibold text-success-600 dark:text-success-400"><NairaPrice value={Number(viewPlan.rules.bonusPerExtraOrder)} /></span>
                     </div>
                   )}
                   {viewPlan.rules.deliveryRateThreshold != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Delivery Rate Bonus</p>
-                        <p className="text-xs text-surface-500 dark:text-surface-400">
+                        <p className="text-sm font-medium text-app-fg">Delivery Rate Bonus</p>
+                        <p className="text-xs text-app-fg-muted">
                           50% extra on bonus when delivery rate exceeds threshold
                         </p>
                       </div>
@@ -741,16 +741,16 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                     </div>
                   )}
                   {viewPlan.rules.penaltyPerReturn != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-surface-50 dark:bg-surface-800">
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
                       <div>
-                        <p className="text-sm font-medium text-surface-900 dark:text-white">Return Penalty</p>
-                        <p className="text-xs text-surface-500 dark:text-surface-400">Clawback deducted per returned order</p>
+                        <p className="text-sm font-medium text-app-fg">Return Penalty</p>
+                        <p className="text-xs text-app-fg-muted">Clawback deducted per returned order</p>
                       </div>
-                      <span className="text-sm font-semibold text-danger-600 dark:text-danger-400">-&#8358;{Number(viewPlan.rules.penaltyPerReturn).toLocaleString()}</span>
+                      <span className="text-sm font-semibold text-danger-600 dark:text-danger-400">-<NairaPrice value={Number(viewPlan.rules.penaltyPerReturn)} /></span>
                     </div>
                   )}
                   {Object.keys(viewPlan.rules).length === 0 && (
-                    <p className="text-sm text-surface-500 dark:text-surface-400 text-center py-4">No rules configured for this plan</p>
+                    <p className="text-sm text-app-fg-muted text-center py-4">No rules configured for this plan</p>
                   )}
                 </div>
               </div>
@@ -773,38 +773,38 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
 
                 return (
                   <div>
-                    <p className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wide mb-2">Example Calculation</p>
-                    <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-1.5 text-sm">
-                      <p className="text-xs text-surface-500 dark:text-surface-400 mb-2">
+                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide mb-2">Example Calculation</p>
+                    <div className="rounded-lg border border-app-border p-3 space-y-1.5 text-sm">
+                      <p className="text-xs text-app-fg-muted mb-2">
                         If a staff member delivers {exampleOrders} orders with {exampleReturns} returns:
                       </p>
                       {earnedBase > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-surface-700 dark:text-surface-300">Base Salary</span>
-                          <span className="font-medium text-surface-900 dark:text-white">&#8358;{earnedBase.toLocaleString()}</span>
+                          <span className="text-app-fg-muted">Base Salary</span>
+                          <span className="font-medium text-app-fg"><NairaPrice value={earnedBase} /></span>
                         </div>
                       )}
                       {earnedPerOrder > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-surface-700 dark:text-surface-300">Per Order ({exampleOrders} x &#8358;{perOrder.toLocaleString()})</span>
-                          <span className="font-medium text-surface-900 dark:text-white">&#8358;{earnedPerOrder.toLocaleString()}</span>
+                          <span className="text-app-fg-muted">Per Order ({exampleOrders} x <NairaPrice value={perOrder} />)</span>
+                          <span className="font-medium text-app-fg"><NairaPrice value={earnedPerOrder} /></span>
                         </div>
                       )}
                       {earnedExtraBonus > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-surface-700 dark:text-surface-300">Extra Bonus ({extraOrders} x &#8358;{extraBonus.toLocaleString()})</span>
-                          <span className="font-medium text-surface-900 dark:text-white">&#8358;{earnedExtraBonus.toLocaleString()}</span>
+                          <span className="text-app-fg-muted">Extra Bonus ({extraOrders} x <NairaPrice value={extraBonus} />)</span>
+                          <span className="font-medium text-app-fg"><NairaPrice value={earnedExtraBonus} /></span>
                         </div>
                       )}
                       {earnedPenalty > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-surface-700 dark:text-surface-300">Return Penalty ({exampleReturns} x &#8358;{penalty.toLocaleString()})</span>
-                          <span className="font-medium text-danger-600 dark:text-danger-400">-&#8358;{earnedPenalty.toLocaleString()}</span>
+                          <span className="text-app-fg-muted">Return Penalty ({exampleReturns} x <NairaPrice value={penalty} />)</span>
+                          <span className="font-medium text-danger-600 dark:text-danger-400">-<NairaPrice value={earnedPenalty} /></span>
                         </div>
                       )}
-                      <div className="border-t border-surface-200 dark:border-surface-700 pt-1.5 flex justify-between font-semibold">
-                        <span className="text-surface-900 dark:text-white">Estimated Total</span>
-                        <span className="text-success-600 dark:text-success-400">&#8358;{total.toLocaleString()}</span>
+                      <div className="border-t border-app-border pt-1.5 flex justify-between font-semibold">
+                        <span className="text-app-fg">Estimated Total</span>
+                        <span className="text-success-600 dark:text-success-400"><NairaPrice value={total} /></span>
                       </div>
                     </div>
                   </div>
@@ -844,23 +844,19 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                           {resolvedAdjustments.map((adj: Adjustment) => (
                             <tr key={adj.id} className="table-row">
                               <td className="table-cell">
-                                <p className="text-sm font-medium text-surface-900 dark:text-surface-100">{getStaffName(adj.staffId)}</p>
+                                <p className="text-sm font-medium text-app-fg">{getStaffName(adj.staffId)}</p>
                               </td>
                               <td className="table-cell">
-                                <span className={ADJUSTMENT_COLORS[adj.category] ?? 'badge'}>{adj.category.replace(/_/g, ' ')}</span>
+                                <StatusBadge status={adj.category} />
                               </td>
                               <td className={`table-cell text-right font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : ''}`}>
-                                {Number(adj.amount) < 0 ? '-' : ''}&#8358;{Math.abs(Number(adj.amount)).toLocaleString()}
+                                {Number(adj.amount) < 0 ? <><span>-</span><NairaPrice value={Math.abs(Number(adj.amount))} /></> : <NairaPrice value={Number(adj.amount)} />}
                               </td>
-                              <td className="table-cell text-sm text-surface-800 dark:text-surface-200 max-w-[200px] truncate">{adj.reason}</td>
+                              <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{adj.reason}</td>
                               <td className="table-cell">
-                                {adj.approvedBy ? (
-                                  <span className="badge-success">Approved</span>
-                                ) : (
-                                  <span className="badge-warning">Pending</span>
-                                )}
+                                <StatusBadge status={adj.approvedBy ? 'APPROVED' : 'PENDING'} />
                               </td>
-                              <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                              <td className="table-cell text-app-fg-muted text-sm">
                                 {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                               </td>
                               <td className="table-cell">
@@ -877,7 +873,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                             </tr>
                           ))}
                           {resolvedAdjustments.length === 0 && (
-                            <tr><td colSpan={7} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">No earnings adjustments yet</td></tr>
+                            <tr><td colSpan={7}><EmptyState title="No earnings adjustments yet" description="Add an adjustment to get started." /></td></tr>
                           )}
                         </tbody>
                       </table>
@@ -886,22 +882,18 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                     {/* Mobile adjustments */}
                     <div className="md:hidden space-y-3 px-1">
                       {resolvedAdjustments.map((adj: Adjustment) => (
-                        <div key={adj.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                        <div key={adj.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                           <div className="flex items-center justify-between">
-                            <span className="font-medium text-surface-900 dark:text-white text-sm">{getStaffName(adj.staffId)}</span>
-                            <span className={ADJUSTMENT_COLORS[adj.category] ?? 'badge'}>{adj.category.replace(/_/g, ' ')}</span>
+                            <span className="font-medium text-app-fg text-sm">{getStaffName(adj.staffId)}</span>
+                            <StatusBadge status={adj.category} />
                           </div>
                           <div className="flex items-center justify-between">
-                            <span className={`font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-surface-900 dark:text-white'}`}>
-                              {Number(adj.amount) < 0 ? '-' : ''}&#8358;{Math.abs(Number(adj.amount)).toLocaleString()}
+                            <span className={`font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}>
+                              {Number(adj.amount) < 0 ? <><span>-</span><NairaPrice value={Math.abs(Number(adj.amount))} /></> : <NairaPrice value={Number(adj.amount)} />}
                             </span>
-                            {adj.approvedBy ? (
-                              <span className="badge-success text-xs">Approved</span>
-                            ) : (
-                              <span className="badge-warning text-xs">Pending</span>
-                            )}
+                            <StatusBadge status={adj.approvedBy ? 'APPROVED' : 'PENDING'} />
                           </div>
-                          <p className="text-xs text-surface-700 dark:text-surface-300">{adj.reason}</p>
+                          <p className="text-xs text-app-fg-muted">{adj.reason}</p>
                           {!adj.approvedBy && adj.category !== 'CLAWBACK' && (
                             <fetcher.Form method="post">
                               <input type="hidden" name="intent" value="approveAdjustment" />
@@ -912,7 +904,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                         </div>
                       ))}
                       {resolvedAdjustments.length === 0 && (
-                        <div className="p-8 text-center text-surface-700 dark:text-surface-300">No adjustments yet</div>
+                        <EmptyState title="No adjustments yet" description="Add an adjustment to get started." />
                       )}
                     </div>
                   </div>
@@ -930,18 +922,18 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
           <DeferredSection resolve={settlementConfig} skeleton="card">
             {(resolvedConfig) => (
               <div className="card p-5">
-                <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-3">Active Settlement Window</h3>
+                <h3 className="text-base font-semibold text-app-fg mb-3">Active Settlement Window</h3>
                 {resolvedConfig ? (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wide">Window Type</p>
-                      <p className="text-sm font-semibold text-surface-900 dark:text-white mt-0.5">{resolvedConfig.windowType}</p>
+                      <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Window Type</p>
+                      <p className="text-sm font-semibold text-app-fg mt-0.5">{resolvedConfig.windowType}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wide">
+                      <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">
                         {resolvedConfig.windowType === 'MONTHLY' ? 'Start Day of Month' : 'Start Day of Week'}
                       </p>
-                      <p className="text-sm font-semibold text-surface-900 dark:text-white mt-0.5">
+                      <p className="text-sm font-semibold text-app-fg mt-0.5">
                         {resolvedConfig.windowType === 'MONTHLY'
                           ? `Day ${resolvedConfig.startDay}`
                           : ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][resolvedConfig.startDay] ?? `Day ${resolvedConfig.startDay}`
@@ -949,14 +941,14 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wide">Last Updated</p>
-                      <p className="text-sm font-semibold text-surface-900 dark:text-white mt-0.5">
+                      <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Last Updated</p>
+                      <p className="text-sm font-semibold text-app-fg mt-0.5">
                         {new Date(resolvedConfig.createdAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-surface-800 dark:text-surface-200">No settlement window configured. Set one below to enable automated payout periods.</p>
+                  <p className="text-sm text-app-fg-muted">No settlement window configured. Set one below to enable automated payout periods.</p>
                 )}
               </div>
             )}
@@ -968,19 +960,19 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
               if (!resolvedPeriod) return null;
               return (
                 <div className="card p-5 border-l-4 border-l-brand-500">
-                  <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-2">Current Settlement Period</h3>
+                  <h3 className="text-base font-semibold text-app-fg mb-2">Current Settlement Period</h3>
                   <div className="flex flex-wrap gap-4">
                     <div>
-                      <p className="text-xs text-surface-800 dark:text-surface-200">Start</p>
-                      <p className="text-sm font-medium text-surface-900 dark:text-white">{resolvedPeriod.periodStart}</p>
+                      <p className="text-xs text-app-fg-muted">Start</p>
+                      <p className="text-sm font-medium text-app-fg">{resolvedPeriod.periodStart}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-surface-800 dark:text-surface-200">End</p>
-                      <p className="text-sm font-medium text-surface-900 dark:text-white">{resolvedPeriod.periodEnd}</p>
+                      <p className="text-xs text-app-fg-muted">End</p>
+                      <p className="text-sm font-medium text-app-fg">{resolvedPeriod.periodEnd}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-surface-800 dark:text-surface-200">Type</p>
-                      <p className="text-sm font-medium text-surface-900 dark:text-white">{resolvedPeriod.windowType}</p>
+                      <p className="text-xs text-app-fg-muted">Type</p>
+                      <p className="text-sm font-medium text-app-fg">{resolvedPeriod.windowType}</p>
                     </div>
                   </div>
                 </div>
@@ -992,31 +984,32 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
           <DeferredSection resolve={settlementConfig} skeleton="card">
             {(resolvedConfig) => (
               <div className="card p-5">
-                <h3 className="text-base font-semibold text-surface-900 dark:text-white mb-3">Update Settlement Window</h3>
+                <h3 className="text-base font-semibold text-app-fg mb-3">Update Settlement Window</h3>
                 <fetcher.Form method="post" className="space-y-4">
                   <input type="hidden" name="intent" value="setSettlementConfig" />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-surface-600 dark:text-surface-200 mb-1">Window Type</label>
-                      <select name="windowType" defaultValue={resolvedConfig?.windowType ?? 'MONTHLY'} className="input w-full">
-                        <option value="WEEKLY">Weekly</option>
-                        <option value="BIWEEKLY">Bi-Weekly</option>
-                        <option value="MONTHLY">Monthly</option>
-                      </select>
+                      <FormSelect
+                        label="Window Type"
+                        name="windowType"
+                        defaultValue={resolvedConfig?.windowType ?? 'MONTHLY'}
+                        options={[
+                          { value: 'WEEKLY', label: 'Weekly' },
+                          { value: 'BIWEEKLY', label: 'Bi-Weekly' },
+                          { value: 'MONTHLY', label: 'Monthly' },
+                        ]}
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-surface-600 dark:text-surface-200 mb-1">Start Day</label>
-                      <input
+                      <TextInput
+                        label="Start Day"
                         name="startDay"
                         type="number"
                         min={1}
                         max={31}
-                        defaultValue={resolvedConfig?.startDay ?? 1}
-                        className="input w-full"
+                        defaultValue={String(resolvedConfig?.startDay ?? 1)}
+                        hint="For Weekly/Bi-Weekly: 1=Mon, 7=Sun. For Monthly: day of month (1-31)."
                       />
-                      <p className="text-xs text-surface-700 mt-1">
-                        For Weekly/Bi-Weekly: 1=Mon, 7=Sun. For Monthly: day of month (1-31).
-                      </p>
                     </div>
                   </div>
                   <Button type="submit" variant="primary" size="sm" loading={fetcher.state !== 'idle'} loadingText="Saving...">
@@ -1036,7 +1029,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
           title="Mark payout as paid?"
           description={
             <>
-              Confirm that <strong>{markPaidConfirm.staffName}</strong> has been paid <strong>&#8358;{markPaidConfirm.amount.toLocaleString()}</strong>. This action cannot be undone.
+              Confirm that <strong>{markPaidConfirm.staffName}</strong> has been paid <strong><NairaPrice value={markPaidConfirm.amount} /></strong>. This action cannot be undone.
             </>
           }
           confirmLabel="Mark Paid"

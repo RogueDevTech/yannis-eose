@@ -15,7 +15,7 @@ const RANK_LABELS = {
 
 const RANK_COLORS = {
   1: 'text-amber-500 dark:text-amber-400',
-  2: 'text-surface-400 dark:text-surface-500',
+  2: 'text-app-fg-muted',
   3: 'text-amber-700 dark:text-amber-600',
 } as const;
 

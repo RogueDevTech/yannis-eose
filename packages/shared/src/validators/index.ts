@@ -42,6 +42,7 @@ export {
   createStaffSchema,
   updateStaffSchema,
   listUsersSchema,
+  searchUsersForPushTargetSchema,
   resetPasswordSchema,
   processEmailChangeSchema,
 } from './users';
@@ -52,6 +53,7 @@ export type {
   CreateStaffInput,
   UpdateStaffInput,
   ListUsersInput,
+  SearchUsersForPushTargetInput,
   ResetPasswordInput,
   ProcessEmailChangeInput,
 } from './users';
@@ -155,12 +157,15 @@ export {
   createFundingSchema,
   verifyFundingSchema,
   listFundingSchema,
+  fundingStatusCountsSchema,
+  fundingRequestStatusCountsSchema,
   listFundingRequestsSchema,
   approveFundingRequestSchema,
   rejectFundingRequestSchema,
   getFundingBalanceSchema,
   createAdSpendSchema,
   listAdSpendSchema,
+  adSpendStatusCountsSchema,
   approveAdSpendSchema,
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
@@ -174,12 +179,15 @@ export type {
   CreateFundingInput,
   VerifyFundingInput,
   ListFundingInput,
+  FundingStatusCountsInput,
+  FundingRequestStatusCountsInput,
   ListFundingRequestsInput,
   ApproveFundingRequestInput,
   RejectFundingRequestInput,
   GetFundingBalanceInput,
   CreateAdSpendInput,
   ListAdSpendInput,
+  AdSpendStatusCountsInput,
   ApproveAdSpendInput,
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
@@ -236,6 +244,18 @@ export type {
   NotificationEmailConfig,
 } from './settings';
 
+// UI / client config
+export {
+  APP_THEME_IDS,
+  appThemeIdSchema,
+  CLIENT_UI_CONFIG_KEY,
+  clientUiConfigSchema,
+  updateMyAppThemeSchema,
+  updateClientUiConfigSchema,
+} from './ui';
+
+export type { AppThemeId, ClientUiConfig, UpdateMyAppThemeInput } from './ui';
+
 // HR & Payroll validators
 export {
   commissionRulesSchema,
@@ -261,3 +281,30 @@ export type {
   ApproveAdjustmentInput,
   SetSettlementConfigInput,
 } from './hr';
+
+// Push Notification Center validators
+export {
+  savePushSubscriptionSchema,
+  removePushSubscriptionSchema,
+  broadcastPushSchema,
+  getPushDeliveryLogSchema,
+  resendPushSchema,
+  bulkResendPushSchema,
+  pushAckSchema,
+  createAutomationRuleSchema,
+  updateAutomationRuleSchema,
+  toggleAutomationRuleSchema,
+} from './push';
+
+export type {
+  SavePushSubscriptionInput,
+  RemovePushSubscriptionInput,
+  BroadcastPushInput,
+  GetPushDeliveryLogInput,
+  ResendPushInput,
+  BulkResendPushInput,
+  PushAckInput,
+  CreateAutomationRuleInput,
+  UpdateAutomationRuleInput,
+  ToggleAutomationRuleInput,
+} from './push';

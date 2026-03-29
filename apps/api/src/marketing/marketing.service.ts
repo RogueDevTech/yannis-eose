@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, gte, lte, count, sum, inArray } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, count, sum, inArray, or, ilike, getTableColumns, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -8,8 +9,11 @@ import type {
   CreateFundingInput,
   VerifyFundingInput,
   ListFundingInput,
+  FundingStatusCountsInput,
+  FundingRequestStatusCountsInput,
   CreateAdSpendInput,
   ListAdSpendInput,
+  AdSpendStatusCountsInput,
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
   ListOfferTemplatesInput,
@@ -175,7 +179,10 @@ export class MarketingService {
   }
 
   async listFunding(input: ListFundingInput, branchId?: string | null) {
-    const conditions = [];
+    const fundingSender = alias(schema.users, 'funding_sender');
+    const fundingReceiver = alias(schema.users, 'funding_receiver');
+
+    const conditions: SQL[] = [];
     if (input.status) {
       conditions.push(eq(schema.marketingFunding.status, input.status));
     }
@@ -189,7 +196,9 @@ export class MarketingService {
       conditions.push(gte(schema.marketingFunding.sentAt, new Date(input.startDate)));
     }
     if (input.endDate) {
-      conditions.push(lte(schema.marketingFunding.sentAt, new Date(input.endDate)));
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.marketingFunding.sentAt, end));
     }
     const branchUserIds = await this.getBranchUserIds(branchId);
     if (branchUserIds && branchUserIds.length === 0) {
@@ -201,39 +210,148 @@ export class MarketingService {
     if (branchUserIds) {
       conditions.push(inArray(schema.marketingFunding.receiverId, branchUserIds));
     }
+    const searchTrimmed = input.search?.trim();
+    if (searchTrimmed) {
+      const searchOr = or(
+        ilike(fundingSender.name, `%${searchTrimmed}%`),
+        ilike(fundingReceiver.name, `%${searchTrimmed}%`),
+        ilike(schema.marketingFunding.id, `%${searchTrimmed}%`),
+      );
+      if (searchOr) conditions.push(searchOr);
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
+    const baseFrom = this.db
+      .select({
+        ...getTableColumns(schema.marketingFunding),
+        senderName: fundingSender.name,
+        receiverName: fundingReceiver.name,
+      })
+      .from(schema.marketingFunding)
+      .leftJoin(fundingSender, eq(schema.marketingFunding.senderId, fundingSender.id))
+      .leftJoin(fundingReceiver, eq(schema.marketingFunding.receiverId, fundingReceiver.id))
+      .where(whereClause);
+
     const [records, totalRows] = await Promise.all([
-      this.db.select().from(schema.marketingFunding).where(whereClause)
-        .orderBy(desc(schema.marketingFunding.sentAt))
-        .limit(input.limit).offset(offset),
-      this.db.select({ count: count() }).from(schema.marketingFunding).where(whereClause),
+      baseFrom.orderBy(desc(schema.marketingFunding.sentAt)).limit(input.limit).offset(offset),
+      this.db
+        .select({ count: count() })
+        .from(schema.marketingFunding)
+        .leftJoin(fundingSender, eq(schema.marketingFunding.senderId, fundingSender.id))
+        .leftJoin(fundingReceiver, eq(schema.marketingFunding.receiverId, fundingReceiver.id))
+        .where(whereClause),
     ]);
 
-    const nameById = new Map<string, string>();
-    if (records.length > 0) {
-      const userIds = [...new Set(records.flatMap((r) => [r.senderId, r.receiverId]))];
-      const userRows = await this.db
-        .select({ id: schema.users.id, name: schema.users.name })
-        .from(schema.users)
-        .where(inArray(schema.users.id, userIds));
-      for (const u of userRows) {
-        nameById.set(u.id, u.name);
-      }
-    }
-
-    const recordsWithNames = records.map((r) => ({
-      ...r,
-      senderName: nameById.get(r.senderId) ?? null,
-      receiverName: nameById.get(r.receiverId) ?? null,
-    }));
+    const total = Number(totalRows[0]?.count ?? 0);
 
     return {
-      records: recordsWithNames,
-      pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
+      records,
+      pagination: { page: input.page, limit: input.limit, total },
     };
+  }
+
+  async fundingStatusCounts(input: FundingStatusCountsInput, branchId?: string | null) {
+    const fundingSender = alias(schema.users, 'funding_status_sender');
+    const fundingReceiver = alias(schema.users, 'funding_status_receiver');
+
+    const conditions: SQL[] = [];
+    if (input.receiverId) {
+      conditions.push(eq(schema.marketingFunding.receiverId, input.receiverId));
+    }
+    if (input.startDate) {
+      conditions.push(gte(schema.marketingFunding.sentAt, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.marketingFunding.sentAt, end));
+    }
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds && branchUserIds.length === 0) {
+      return { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
+    }
+    if (branchUserIds) {
+      conditions.push(inArray(schema.marketingFunding.receiverId, branchUserIds));
+    }
+    const searchTrimmed = input.search?.trim();
+    if (searchTrimmed) {
+      const searchOr = or(
+        ilike(fundingSender.name, `%${searchTrimmed}%`),
+        ilike(fundingReceiver.name, `%${searchTrimmed}%`),
+        ilike(schema.marketingFunding.id, `%${searchTrimmed}%`),
+      );
+      if (searchOr) conditions.push(searchOr);
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const rows = await this.db
+      .select({
+        status: schema.marketingFunding.status,
+        c: count(),
+      })
+      .from(schema.marketingFunding)
+      .leftJoin(fundingSender, eq(schema.marketingFunding.senderId, fundingSender.id))
+      .leftJoin(fundingReceiver, eq(schema.marketingFunding.receiverId, fundingReceiver.id))
+      .where(whereClause)
+      .groupBy(schema.marketingFunding.status);
+
+    const out = { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
+    for (const r of rows) {
+      const n = Number(r.c);
+      if (r.status === 'SENT') out.SENT = n;
+      else if (r.status === 'COMPLETED') out.COMPLETED = n;
+      else if (r.status === 'DISPUTED') out.DISPUTED = n;
+      out.ALL += n;
+    }
+    return out;
+  }
+
+  async fundingRequestStatusCounts(
+    input: FundingRequestStatusCountsInput,
+    user: { id: string; role: string },
+    branchId?: string | null,
+  ) {
+    const conditions: SQL[] = [];
+    if (user.role === 'MEDIA_BUYER') {
+      conditions.push(eq(schema.marketingFundingRequests.requesterId, user.id));
+    }
+    if (input.startDate) {
+      conditions.push(gte(schema.marketingFundingRequests.createdAt, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.marketingFundingRequests.createdAt, end));
+    }
+    const branchUserIds = await this.getBranchUserIds(branchId);
+    if (branchUserIds && branchUserIds.length === 0) {
+      return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+    }
+    if (branchUserIds) {
+      conditions.push(inArray(schema.marketingFundingRequests.requesterId, branchUserIds));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const rows = await this.db
+      .select({
+        status: schema.marketingFundingRequests.status,
+        c: count(),
+      })
+      .from(schema.marketingFundingRequests)
+      .where(whereClause)
+      .groupBy(schema.marketingFundingRequests.status);
+
+    const out = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+    for (const r of rows) {
+      const n = Number(r.c);
+      if (r.status === 'PENDING') out.PENDING = n;
+      else if (r.status === 'APPROVED') out.APPROVED = n;
+      else if (r.status === 'REJECTED') out.REJECTED = n;
+      out.ALL += n;
+    }
+    return out;
   }
 
   async getFundingSummary(branchId?: string | null) {
@@ -541,7 +659,15 @@ export class MarketingService {
    * List funding requests. Media Buyer: only their own. HoM/Admin: can filter by requesterId or get all.
    */
   async listFundingRequests(
-    input: { requesterId?: string; startDate?: string; endDate?: string; page: number; limit: number },
+    input: {
+      requesterId?: string;
+      startDate?: string;
+      endDate?: string;
+      status?: 'PENDING' | 'APPROVED' | 'REJECTED';
+      search?: string;
+      page: number;
+      limit: number;
+    },
     branchId?: string | null,
   ) {
     const conditions = [];
@@ -555,6 +681,18 @@ export class MarketingService {
       const end = new Date(input.endDate);
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.marketingFundingRequests.createdAt, end));
+    }
+    if (input.status) {
+      conditions.push(eq(schema.marketingFundingRequests.status, input.status));
+    }
+    if (input.search) {
+      const term = `%${input.search}%`;
+      conditions.push(
+        or(
+          ilike(schema.users.name, term),
+          ilike(schema.marketingFundingRequests.reason, term),
+        ) as SQL,
+      );
     }
     const branchUserIds = await this.getBranchUserIds(branchId);
     if (branchUserIds && branchUserIds.length === 0) {
@@ -783,7 +921,96 @@ export class MarketingService {
   }
 
   async listAdSpend(input: ListAdSpendInput, branchId?: string | null) {
-    const conditions = [];
+    const buyer = alias(schema.users, 'ad_spend_list_buyer');
+    const prod = alias(schema.products, 'ad_spend_list_product');
+    const camp = alias(schema.campaigns, 'ad_spend_list_campaign');
+
+    const conditions: SQL[] = [];
+    if (input.mediaBuyerId) {
+      conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.productId) {
+      conditions.push(eq(schema.adSpendLogs.productId, input.productId));
+    }
+    if (input.campaignId) {
+      conditions.push(eq(schema.adSpendLogs.campaignId, input.campaignId));
+    }
+    if (input.status) {
+      conditions.push(eq(schema.adSpendLogs.status, input.status));
+    }
+    if (input.startDate) {
+      conditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.adSpendLogs.spendDate, end));
+    }
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      return {
+        records: [],
+        totalSpend: '0',
+        pagination: { page: input.page, limit: input.limit, total: 0 },
+      };
+    }
+    if (branchCampaignIds) {
+      conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+    }
+    const searchTrimmed = input.search?.trim();
+    if (searchTrimmed) {
+      const searchOr = or(
+        ilike(buyer.name, `%${searchTrimmed}%`),
+        ilike(prod.name, `%${searchTrimmed}%`),
+        ilike(camp.name, `%${searchTrimmed}%`),
+        ilike(schema.adSpendLogs.id, `%${searchTrimmed}%`),
+      );
+      if (searchOr) conditions.push(searchOr);
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const offset = (input.page - 1) * input.limit;
+
+    const [records, totalRows, totalSpendRows] = await Promise.all([
+      this.db
+        .select({ ...getTableColumns(schema.adSpendLogs) })
+        .from(schema.adSpendLogs)
+        .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
+        .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
+        .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
+        .where(whereClause)
+        .orderBy(desc(schema.adSpendLogs.spendDate))
+        .limit(input.limit)
+        .offset(offset),
+      this.db
+        .select({ count: count() })
+        .from(schema.adSpendLogs)
+        .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
+        .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
+        .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
+        .where(whereClause),
+      this.db
+        .select({ total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
+        .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
+        .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
+        .where(whereClause),
+    ]);
+
+    return {
+      records,
+      totalSpend: totalSpendRows[0]?.total ?? '0',
+      pagination: { page: input.page, limit: input.limit, total: Number(totalRows[0]?.count ?? 0) },
+    };
+  }
+
+  async adSpendStatusCounts(input: AdSpendStatusCountsInput, branchId?: string | null) {
+    const buyer = alias(schema.users, 'ad_spend_cnt_buyer');
+    const prod = alias(schema.products, 'ad_spend_cnt_product');
+    const camp = alias(schema.campaigns, 'ad_spend_cnt_campaign');
+
+    const conditions: SQL[] = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
     }
@@ -797,37 +1024,49 @@ export class MarketingService {
       conditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
     }
     if (input.endDate) {
-      conditions.push(lte(schema.adSpendLogs.spendDate, new Date(input.endDate)));
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.adSpendLogs.spendDate, end));
     }
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
-      return {
-        records: [],
-        totalSpend: '0',
-        pagination: { page: input.page, limit: input.limit, total: 0 },
-      };
+      return { PENDING: 0, APPROVED: 0, ALL: 0 };
     }
     if (branchCampaignIds) {
       conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
     }
-
+    const searchTrimmed = input.search?.trim();
+    if (searchTrimmed) {
+      const searchOr = or(
+        ilike(buyer.name, `%${searchTrimmed}%`),
+        ilike(prod.name, `%${searchTrimmed}%`),
+        ilike(camp.name, `%${searchTrimmed}%`),
+        ilike(schema.adSpendLogs.id, `%${searchTrimmed}%`),
+      );
+      if (searchOr) conditions.push(searchOr);
+    }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    const offset = (input.page - 1) * input.limit;
 
-    const [records, totalRows, totalSpendRows] = await Promise.all([
-      this.db.select().from(schema.adSpendLogs).where(whereClause)
-        .orderBy(desc(schema.adSpendLogs.spendDate))
-        .limit(input.limit).offset(offset),
-      this.db.select({ count: count() }).from(schema.adSpendLogs).where(whereClause),
-      this.db.select({ total: sum(schema.adSpendLogs.spendAmount) })
-        .from(schema.adSpendLogs).where(whereClause),
-    ]);
+    const rows = await this.db
+      .select({
+        status: schema.adSpendLogs.status,
+        c: count(),
+      })
+      .from(schema.adSpendLogs)
+      .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
+      .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
+      .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
+      .where(whereClause)
+      .groupBy(schema.adSpendLogs.status);
 
-    return {
-      records,
-      totalSpend: totalSpendRows[0]?.total ?? '0',
-      pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
-    };
+    const out = { PENDING: 0, APPROVED: 0, ALL: 0 };
+    for (const r of rows) {
+      const n = Number(r.c);
+      if (r.status === 'PENDING') out.PENDING = n;
+      else if (r.status === 'APPROVED') out.APPROVED = n;
+      out.ALL += n;
+    }
+    return out;
   }
 
   async getPerformanceMetrics(
@@ -870,14 +1109,14 @@ export class MarketingService {
 
     const orderConditions: Parameters<typeof and>[0][] = [];
     if (mediaBuyerId) orderConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
-    if (branchId) orderConditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId && !mediaBuyerId) orderConditions.push(eq(schema.orders.branchId, branchId));
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) orderConditions.push(lte(schema.orders.createdAt, periodEnd));
     const orderWhere = orderConditions.length > 0 ? and(...orderConditions) : (mediaBuyerId ? eq(schema.orders.mediaBuyerId, mediaBuyerId) : undefined);
 
     const deliveredConditions: Parameters<typeof and>[0][] = [eq(schema.orders.status, 'DELIVERED')];
     if (mediaBuyerId) deliveredConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
-    if (branchId) deliveredConditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId && !mediaBuyerId) deliveredConditions.push(eq(schema.orders.branchId, branchId));
     if (periodStart) deliveredConditions.push(gte(schema.orders.deliveredAt, periodStart));
     if (periodEnd) deliveredConditions.push(lte(schema.orders.deliveredAt, periodEnd));
     const deliveredWhere = and(...deliveredConditions);
@@ -897,7 +1136,7 @@ export class MarketingService {
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [inArray(schema.orders.status, [...confirmedStatuses])];
     if (mediaBuyerId) confirmedConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
-    if (branchId) confirmedConditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId && !mediaBuyerId) confirmedConditions.push(eq(schema.orders.branchId, branchId));
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) confirmedConditions.push(lte(schema.orders.createdAt, periodEnd));
     const confirmedWhere = and(...confirmedConditions);

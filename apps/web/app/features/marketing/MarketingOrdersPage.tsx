@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Link, useSearchParams, useNavigate, useNavigation } from '@remix-run/react';
+import { Link, useSearchParams, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
-import { Spinner } from '~/components/ui/spinner';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { PageHeader } from '~/components/ui/page-header';
+import { SearchInput } from '~/components/ui/search-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { Pagination } from '~/components/ui/pagination';
+import { EmptyState } from '~/components/ui/empty-state';
+import { NairaPrice } from '~/components/ui/naira-price';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
 import type { Order } from '~/features/orders/types';
@@ -36,7 +42,7 @@ export function MarketingOrdersPage({
   total,
   totalPages,
   page,
-  limit,
+  limit: _limit,
   statusCounts,
   statusFilter,
   searchFilter,
@@ -51,8 +57,6 @@ export function MarketingOrdersPage({
   const liveState = useLiveIndicator(liveEvents ?? []);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
 
@@ -64,19 +68,21 @@ export function MarketingOrdersPage({
   const buildQueryString = (overrides: { page?: number; status?: string; search?: string }) => {
     const params = new URLSearchParams(searchParams);
     if (overrides.page !== undefined) params.set('page', String(overrides.page));
+    // Always pass `status` when changing the status filter (including ALL) so the URL stays in sync.
     if (overrides.status !== undefined) {
       if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
       else params.set('status', overrides.status);
     }
+    // Always pass `search` when submitting the search form (including empty to clear).
     if (overrides.search !== undefined) {
       if (overrides.search) params.set('search', overrides.search);
       else params.delete('search');
     }
-    // Preserve date filter params (startDate, endDate, period)
     const qs = params.toString();
     return qs ? `?${qs}` : '?';
   };
 
+  const ordersInPeriodTotal = Object.values(statusCounts).reduce((sum, n) => sum + n, 0);
   const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
   const confirmedCount = statusCounts['CONFIRMED'] ?? 0;
   const deliveredCount = statusCounts['DELIVERED'] ?? 0;
@@ -84,135 +90,112 @@ export function MarketingOrdersPage({
 
   const handleStatusChange = (status: string) => {
     setSelectedStatus(status);
-    setSearchParams(buildQueryString({ status: status === 'ALL' ? undefined : status, page: 1 }));
+    setSearchParams(buildQueryString({ status, page: 1 }));
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setSearchParams(buildQueryString({ search: searchQuery || undefined, page: 1 }));
+    setSearchParams(buildQueryString({ search: searchQuery.trim(), page: 1 }));
   };
+
+  const statusOptions = STATUS_OPTIONS.map((status) => ({
+    value: status,
+    label: status === 'ALL'
+      ? `All Statuses (${ordersInPeriodTotal})`
+      : `${formatStatus(status)} (${statusCounts[status] ?? 0})`,
+  }));
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
-              {isMediaBuyer ? 'My Orders' : 'Marketing Orders'}
-            </h1>
-            <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-              {isMediaBuyer
-                ? 'Track your campaign orders and conversion funnel'
-                : 'View orders across all media buyers'}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+      <PageHeader
+        title={isMediaBuyer ? 'My Orders' : 'Marketing Orders'}
+        description={
+          isMediaBuyer
+            ? 'Track your campaign orders and conversion funnel'
+            : 'View orders across all media buyers'
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
             {liveEvents != null && liveEvents.length > 0 && (
               <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
             )}
-            <div className="flex items-center min-h-[2rem] rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 pl-2.5 pr-2 py-1">
+            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
               <DateFilterBar
                 startDate={dateFilters.startDate}
                 endDate={dateFilters.endDate}
                 periodAllTime={dateFilters.periodAllTime}
               />
             </div>
-            <div className="flex items-center gap-2 border-surface-200 dark:border-surface-700 sm:border-l sm:pl-4">
-              <Button
-                onClick={() =>
-                  exportToCsv(
-                    orders.map((o) => ({
-                      id: o.id,
-                      customer: o.customerName,
-                      ...(showMediaBuyerColumn && { mediaBuyer: o.mediaBuyerName ?? '—' }),
-                      phone: o.customerPhoneDisplay,
-                      status: o.status,
-                      amount: o.totalAmount ?? '',
-                      created: new Date(o.createdAt).toLocaleDateString(),
-                    })),
-                    [
-                      { key: 'id', label: 'Order ID' },
-                      { key: 'customer', label: 'Customer' },
-                      ...(showMediaBuyerColumn ? [{ key: 'mediaBuyer', label: 'Media Buyer' }] : []),
-                      { key: 'phone', label: 'Phone' },
-                      { key: 'status', label: 'Status' },
-                      { key: 'amount', label: 'Amount' },
-                      { key: 'created', label: 'Created' },
-                    ],
-                    `marketing-orders-${new Date().toISOString().split('T')[0]}.csv`,
-                  )
-                }
-                variant="secondary"
-                size="sm"
-              >
-                Export CSV
-              </Button>
-            </div>
+            <Button
+              onClick={() =>
+                exportToCsv(
+                  orders.map((o) => ({
+                    id: o.id,
+                    customer: o.customerName,
+                    ...(showMediaBuyerColumn && { mediaBuyer: o.mediaBuyerName ?? '—' }),
+                    status: o.status,
+                    amount: o.totalAmount ?? '',
+                    created: new Date(o.createdAt).toLocaleDateString(),
+                  })),
+                  [
+                    { key: 'id', label: 'Order ID' },
+                    { key: 'customer', label: 'Customer' },
+                    ...(showMediaBuyerColumn ? [{ key: 'mediaBuyer', label: 'Media Buyer' }] : []),
+                    { key: 'status', label: 'Status' },
+                    { key: 'amount', label: 'Amount' },
+                    { key: 'created', label: 'Created' },
+                  ],
+                  `marketing-orders-${new Date().toISOString().split('T')[0]}.csv`,
+                )
+              }
+              variant="secondary"
+              size="sm"
+            >
+              Export CSV
+            </Button>
           </div>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Unprocessed</p>
-          <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">{unprocessedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Confirmed</p>
-          <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-1">{confirmedCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivered</p>
-          <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">{deliveredCount}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivery Rate</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{deliveryRate}%</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">CPA</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
-            {cpa != null ? `\u20A6${Number(cpa).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '\u2014'}
-          </p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        items={[
+          { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+          { label: 'Unprocessed', value: unprocessedCount, valueClassName: 'text-warning-600 dark:text-warning-400' },
+          { label: 'Confirmed', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
+          { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
+          {
+            label: 'CPA',
+            value: cpa != null ? <>{'\u20A6'}{Number(cpa).toLocaleString(undefined, { maximumFractionDigits: 0 })}</> : '\u2014',
+            valueClassName: 'text-app-fg',
+          },
+        ]}
+      />
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1">
-          <input
-            type="search"
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center">
+        <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1 min-w-0">
+          <SearchInput
             placeholder="Search by customer or order ID..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="input flex-1"
+            onChange={(val) => setSearchQuery(val)}
+            wrapperClassName="flex-1 min-w-0"
           />
           <Button type="submit" variant="secondary" size="sm">
             Search
           </Button>
         </form>
-        <select
+        <FormSelect
           value={selectedStatus}
           onChange={(e) => handleStatusChange(e.target.value)}
-          className="input w-auto"
-        >
-          {STATUS_OPTIONS.map((status) => (
-            <option key={status} value={status}>
-              {status === 'ALL' ? 'All Statuses' : formatStatus(status)}
-            </option>
-          ))}
-        </select>
-        {isFilterLoading && (
-          <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
-            <Spinner size="sm" className="shrink-0" />
-          </span>
-        )}
+          options={statusOptions}
+          wrapperClassName="w-auto min-w-[11rem]"
+        />
       </div>
 
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0 overflow-hidden scroll-mt-4">
+        <div className="px-4 py-3 border-b border-app-border">
+          <h2 className="text-lg font-semibold text-app-fg">Orders ({total})</h2>
+        </div>
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -220,7 +203,6 @@ export function MarketingOrdersPage({
                 <th className="table-header">Order ID</th>
                 <th className="table-header">Customer</th>
                 {showMediaBuyerColumn && <th className="table-header">Media buyer</th>}
-                <th className="table-header">Phone</th>
                 <th className="table-header text-right">Amount</th>
                 <th className="table-header">Status</th>
                 <th className="table-header">Created</th>
@@ -238,11 +220,11 @@ export function MarketingOrdersPage({
                       {order.id.slice(0, 8)}...
                     </Link>
                   </td>
-                  <td className="table-cell font-medium text-surface-900 dark:text-surface-100">
+                  <td className="table-cell font-medium text-app-fg">
                     {order.customerName}
                   </td>
                   {showMediaBuyerColumn && (
-                    <td className="table-cell text-surface-800 dark:text-surface-200">
+                    <td className="table-cell text-app-fg-muted">
                       {order.mediaBuyerId ? (
                         <Link
                           to={`/hr/users/${order.mediaBuyerId}`}
@@ -255,14 +237,13 @@ export function MarketingOrdersPage({
                       )}
                     </td>
                   )}
-                  <td className="table-cell font-mono text-sm">{order.customerPhoneDisplay}</td>
                   <td className="table-cell text-right font-medium">
-                    {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
+                    <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
                   </td>
                   <td className="table-cell">
                     <OrderStatusBadge status={order.status} />
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200">
+                  <td className="table-cell text-app-fg-muted">
                     {new Date(order.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
                       day: 'numeric',
@@ -288,21 +269,31 @@ export function MarketingOrdersPage({
           </table>
         </div>
         {orders.length === 0 && (
-          <div className="py-12 text-center text-surface-700 dark:text-surface-300">
-            No orders found
+          <div className="hidden md:block">
+            <EmptyState
+              title="No orders match your filters"
+              description="Try adjusting your status filter or search query"
+              variant="card"
+            />
           </div>
         )}
 
-        {/* Mobile */}
-        <div className="md:hidden space-y-3 px-1">
+        <div className="md:hidden space-y-3 px-1 py-3">
+          {orders.length === 0 && (
+            <EmptyState
+              title="No orders match your filters"
+              description="Try adjusting your status filter or search query"
+              variant="card"
+            />
+          )}
           {orders.map((order) => (
             <Link
               key={order.id}
               to={`/admin/orders/${order.id}`}
-              className="block rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
+              className="block rounded-lg border border-app-border bg-app-elevated p-4 hover:bg-app-hover/50 transition-colors"
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-surface-900 dark:text-surface-100">{order.customerName}</span>
+                <span className="font-medium text-app-fg">{order.customerName}</span>
                 <OrderStatusBadge status={order.status} />
               </div>
               {showMediaBuyerColumn && order.mediaBuyerName && (
@@ -320,17 +311,16 @@ export function MarketingOrdersPage({
                       {order.mediaBuyerName}
                     </button>
                   ) : (
-                    <span className="text-surface-600 dark:text-surface-400">{order.mediaBuyerName}</span>
+                    <span className="text-app-fg-muted">{order.mediaBuyerName}</span>
                   )}
                 </div>
               )}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-surface-700 dark:text-surface-300 font-mono text-xs">{order.customerPhoneDisplay}</span>
-                <span className="font-medium text-surface-900 dark:text-surface-100">
-                  {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
+              <div className="flex items-center justify-end text-sm">
+                <span className="font-medium text-app-fg">
+                  <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
                 </span>
               </div>
-              <div className="flex items-center justify-between mt-1 text-xs text-surface-700 dark:text-surface-300">
+              <div className="flex items-center justify-between mt-1 text-xs text-app-fg-muted">
                 <span>{order.id.slice(0, 8)}...</span>
                 <span>
                   {new Date(order.createdAt).toLocaleDateString('en-NG', {
@@ -344,27 +334,12 @@ export function MarketingOrdersPage({
             </Link>
           ))}
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 border-t border-app-border px-4 py-3">
+            <Pagination page={page} totalPages={totalPages} pageParam="page" />
+          </div>
+        )}
       </div>
-
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Link
-            to={buildQueryString({ page: page - 1 })}
-            className={`btn-secondary btn-sm ${page <= 1 ? 'opacity-50 pointer-events-none' : ''}`}
-          >
-            Previous
-          </Link>
-          <span className="text-sm text-surface-700 dark:text-surface-300">
-            Page {page} of {totalPages}
-          </span>
-          <Link
-            to={buildQueryString({ page: page + 1 })}
-            className={`btn-secondary btn-sm ${page >= totalPages ? 'opacity-50 pointer-events-none' : ''}`}
-          >
-            Next
-          </Link>
-        </div>
-      )}
     </div>
   );
 }

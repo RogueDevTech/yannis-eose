@@ -6,8 +6,14 @@ import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Checkbox } from '~/components/ui/checkbox';
+import { PageHeader } from '~/components/ui/page-header';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
 import type { Campaign, CampaignFormConfig, FormsPageProps } from './types';
 
 function isOptionOn(value: boolean | string | undefined): boolean {
@@ -33,31 +39,31 @@ function FormOptionsSummary({ config }: { config: CampaignFormConfig | null }) {
   return (
     <div className="space-y-2">
       {hasCustomText && (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-surface-600 dark:text-surface-400">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-app-fg-muted">
           {config.heading && (
             <span className="truncate max-w-full" title={config.heading}>
-              <span className="font-medium text-surface-700 dark:text-surface-300">Heading:</span> {config.heading}
+              <span className="font-medium text-app-fg-muted">Heading:</span> {config.heading}
             </span>
           )}
           {config.subtitle && (
             <span className="truncate max-w-full" title={config.subtitle}>
-              <span className="font-medium text-surface-700 dark:text-surface-300">Subtitle:</span> {config.subtitle}
+              <span className="font-medium text-app-fg-muted">Subtitle:</span> {config.subtitle}
             </span>
           )}
           {config.buttonText && (
             <span>
-              <span className="font-medium text-surface-700 dark:text-surface-300">Button:</span> {config.buttonText}
+              <span className="font-medium text-app-fg-muted">Button:</span> {config.buttonText}
             </span>
           )}
           {config.accentColor && (
             <span className="inline-flex items-center gap-1.5">
-              <span className="font-medium text-surface-700 dark:text-surface-300">Accent:</span>
+              <span className="font-medium text-app-fg-muted">Accent:</span>
               <span
-                className="w-3.5 h-3.5 rounded-full border border-surface-300 dark:border-surface-600 shrink-0"
+                className="w-3.5 h-3.5 rounded-full border border-app-border shrink-0"
                 style={{ backgroundColor: config.accentColor }}
                 title={config.accentColor}
               />
-              <span className="font-mono text-surface-600 dark:text-surface-400">{config.accentColor}</span>
+              <span className="font-mono text-app-fg-muted">{config.accentColor}</span>
             </span>
           )}
         </div>
@@ -67,7 +73,7 @@ function FormOptionsSummary({ config }: { config: CampaignFormConfig | null }) {
           {optionalFields.map((f) => (
             <span
               key={f.label}
-              className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300"
+              className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-app-hover text-app-fg-muted"
             >
               {f.label}
             </span>
@@ -78,11 +84,6 @@ function FormOptionsSummary({ config }: { config: CampaignFormConfig | null }) {
   );
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE: 'badge-success',
-  INACTIVE: 'badge-warning',
-  ARCHIVED: 'badge-danger',
-};
 
 // ── Icons (24x24, consistent) ──────────────
 const ViewIcon = (
@@ -115,11 +116,20 @@ const ArchiveIcon = (
   </svg>
 );
 
+type DeploymentCopySection = 'hosted' | 'iframe' | 'shadow';
+
+const CheckIconSm = (
+  <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+  </svg>
+);
+
 // ── Main Component ───────────────────────────────────
 export function FormsPage({
   forms,
   totalForms: _totalForms,
   products,
+  productsLoadError = null,
   isMediaBuyer = false,
   showMediaBuyerColumn = false,
   currentUserName: _currentUserName,
@@ -131,6 +141,8 @@ export function FormsPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const [showAddForm, setShowAddForm] = useState(false);
   const [deploymentModal, setDeploymentModal] = useState<Campaign | null>(null);
+  const [deploymentCopiedSection, setDeploymentCopiedSection] = useState<DeploymentCopySection | null>(null);
+  const deploymentCopyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingForm, setEditingForm] = useState<Campaign | null>(null);
   /** Pending confirm for Deactivate or Archive (opens ConfirmActionModal) */
   const [confirmAction, setConfirmAction] = useState<{ type: 'deactivate' | 'archive'; id: string; name: string } | null>(null);
@@ -150,12 +162,17 @@ export function FormsPage({
   const actionError = (fetcher.data as { error?: string })?.error;
   const actionSuccess = (fetcher.data as { success?: boolean })?.success;
   const [dismissedError, setDismissedError] = useState(false);
+  const [dismissedProductsError, setDismissedProductsError] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'Saved successfully' });
   useFetcherToast(statusFetcher.data, { successMessage: 'Status updated' });
 
   useEffect(() => {
     if (actionError) setDismissedError(false);
   }, [actionError]);
+
+  useEffect(() => {
+    if (productsLoadError) setDismissedProductsError(false);
+  }, [productsLoadError]);
 
   // Close confirm modal (deactivate/archive) when statusFetcher returns success
   useEffect(() => {
@@ -200,6 +217,29 @@ export function FormsPage({
 
   const edgeWorkerUrl = ((typeof window !== 'undefined' ? window.__ENV?.EDGE_WORKER_URL : '') || '').replace(/\/+$/, '');
 
+  useEffect(() => {
+    if (!deploymentModal) {
+      setDeploymentCopiedSection(null);
+      if (deploymentCopyResetRef.current) {
+        clearTimeout(deploymentCopyResetRef.current);
+        deploymentCopyResetRef.current = null;
+      }
+    }
+  }, [deploymentModal]);
+
+  const copyDeploymentSnippet = useCallback((text: string, section: DeploymentCopySection) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      if (deploymentCopyResetRef.current) {
+        clearTimeout(deploymentCopyResetRef.current);
+      }
+      setDeploymentCopiedSection(section);
+      deploymentCopyResetRef.current = setTimeout(() => {
+        setDeploymentCopiedSection(null);
+        deploymentCopyResetRef.current = null;
+      }, 2200);
+    });
+  }, []);
+
   const handleStatusChange = useCallback((id: string, status: string) => {
     const formData = new FormData();
     formData.set('intent', 'updateForm');
@@ -210,41 +250,39 @@ export function FormsPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">
-            {showMyFormsOnly ? 'My Forms' : 'Forms'}
-          </h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            {showMyFormsOnly
-              ? 'Create and manage your order forms'
-              : 'Create and manage order forms for your products'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {!isMediaBuyer && currentUserId && (
-            <div className="flex items-center gap-1 rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/50 p-1">
-              <button
-                type="button"
-                onClick={() => setViewMode('all')}
-                className={`text-xs font-medium px-2.5 py-1 rounded transition-colors ${viewMode === 'all' ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm' : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'}`}
-              >
-                All forms
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('mine')}
-                className={`text-xs font-medium px-2.5 py-1 rounded transition-colors ${viewMode === 'mine' ? 'bg-white dark:bg-surface-700 text-surface-900 dark:text-white shadow-sm' : 'text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-200'}`}
-              >
-                My forms
-              </button>
-            </div>
-          )}
-          <Button variant="primary" size="sm" onClick={() => setShowAddForm(!showAddForm)}>
-            {showAddForm ? 'Close' : '+ New Form'}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title={showMyFormsOnly ? 'My Forms' : 'Forms'}
+        description={
+          showMyFormsOnly
+            ? 'Create and manage your order forms'
+            : 'Create and manage order forms for your products'
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            {!isMediaBuyer && currentUserId && (
+              <div className="flex items-center gap-1 rounded-md border border-app-border bg-app-hover p-1">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('all')}
+                  className={`text-xs font-medium px-2.5 py-1 rounded transition-colors ${viewMode === 'all' ? 'bg-app-elevated text-app-fg shadow-sm' : 'text-app-fg-muted hover:text-app-fg'}`}
+                >
+                  All forms
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('mine')}
+                  className={`text-xs font-medium px-2.5 py-1 rounded transition-colors ${viewMode === 'mine' ? 'bg-app-elevated text-app-fg shadow-sm' : 'text-app-fg-muted hover:text-app-fg'}`}
+                >
+                  My forms
+                </button>
+              </div>
+            )}
+            <Button variant="primary" size="sm" onClick={() => setShowAddForm(!showAddForm)}>
+              {showAddForm ? 'Close' : '+ New Form'}
+            </Button>
+          </div>
+        }
+      />
 
       {actionError && !dismissedError && (
         <PageNotification
@@ -252,6 +290,15 @@ export function FormsPage({
           message={actionError}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
+        />
+      )}
+
+      {productsLoadError && !dismissedProductsError && (
+        <PageNotification
+          variant="error"
+          message={productsLoadError}
+          durationMs={8000}
+          onDismiss={() => setDismissedProductsError(true)}
         />
       )}
 
@@ -274,86 +321,83 @@ export function FormsPage({
         </div>
       )}
 
-      {/* Stats — reflect current view (displayedForms) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Forms</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{displayedForms.length}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Active Forms</p>
-          <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">
-            {displayedForms.filter((c) => c.status === 'ACTIVE').length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Products</p>
-          <DeferredSection resolve={products} skeleton="inline">
-            {(resolvedProducts) => (
-              <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{resolvedProducts.length}</p>
-            )}
-          </DeferredSection>
-        </div>
-      </div>
+      <DeferredSection resolve={products} fallback={<OverviewStatStripSkeleton count={3} />}>
+        {(resolvedProducts) => (
+          <OverviewStatStrip
+            items={[
+              { label: 'Total Forms', value: displayedForms.length, valueClassName: 'text-app-fg' },
+              {
+                label: 'Active Forms',
+                value: displayedForms.filter((c) => c.status === 'ACTIVE').length,
+                valueClassName: 'text-success-600 dark:text-success-400',
+              },
+              { label: 'Products', value: resolvedProducts.length, valueClassName: 'text-app-fg' },
+            ]}
+          />
+        )}
+      </DeferredSection>
 
       {/* Add Form */}
       <ResponsiveFormPanel open={showAddForm} onClose={() => setShowAddForm(false)}>
         <fetcher.Form method="post" className="card space-y-3">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">New Form</h3>
+          <h3 className="text-lg font-semibold text-app-fg">New Form</h3>
           <input type="hidden" name="intent" value="createForm" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input name="name" type="text" required placeholder="Form name" className="input" />
+            <TextInput name="name" required placeholder="Form name" />
             <DeferredSection resolve={products} skeleton="inline">
               {(resolvedProducts) => (
-                <select name="productId" required className="input">
-                  <option value="">Select product...</option>
-                  {resolvedProducts.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} (&#8358;{Number(p.baseSalePrice).toLocaleString()})</option>
-                  ))}
-                </select>
+                <FormSelect
+                  name="productId"
+                  required
+                  options={resolvedProducts.map((p) => ({
+                    value: p.id,
+                    label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})`,
+                  }))}
+                  placeholder="Select product..."
+                />
               )}
             </DeferredSection>
           </div>
-          <div className="border-t border-surface-200 dark:border-surface-700 pt-3">
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-2">
+          <div className="border-t border-app-border pt-3">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-2">
               Form Customization (Optional)
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <input name="formHeading" type="text" placeholder="Form heading (default: Place Your Order)" className="input" />
-              <input name="formSubtitle" type="text" placeholder="Form subtitle" className="input" />
-              <input name="formButtonText" type="text" placeholder="Button text (default: Submit Order)" className="input" />
+              <TextInput name="formHeading" placeholder="Form heading (default: Place Your Order)" />
+              <TextInput name="formSubtitle" placeholder="Form subtitle" />
+              <TextInput name="formButtonText" placeholder="Button text (default: Submit Order)" />
               <div className="flex items-center gap-2">
-                <input name="formAccentColor" type="color" defaultValue="#6366f1" className="w-10 h-9 rounded border border-surface-200 dark:border-surface-700 cursor-pointer" />
-                <span className="text-sm text-surface-800 dark:text-surface-200">Accent color</span>
+                <input name="formAccentColor" type="color" defaultValue="#6366f1" className="w-10 h-9 rounded border border-app-border cursor-pointer" />
+                <span className="text-sm text-app-fg-muted">Accent color</span>
               </div>
             </div>
-            <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mt-4 mb-2">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">
               Optional Form Fields
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox name="showDeliveryAddress" defaultChecked={false} />
-                <span className="text-sm text-surface-700 dark:text-surface-300">Delivery Address</span>
+                <span className="text-sm text-app-fg-muted">Delivery Address</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox name="showDeliveryNotes" defaultChecked={false} />
-                <span className="text-sm text-surface-700 dark:text-surface-300">Delivery Notes</span>
+                <span className="text-sm text-app-fg-muted">Delivery Notes</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox name="showDeliveryState" defaultChecked={false} />
-                <span className="text-sm text-surface-700 dark:text-surface-300">Delivery State</span>
+                <span className="text-sm text-app-fg-muted">Delivery State</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox name="showGender" defaultChecked={false} />
-                <span className="text-sm text-surface-700 dark:text-surface-300">Gender</span>
+                <span className="text-sm text-app-fg-muted">Gender</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox name="showPreferredDeliveryDate" defaultChecked={false} />
-                <span className="text-sm text-surface-700 dark:text-surface-300">Preferred Delivery Date</span>
+                <span className="text-sm text-app-fg-muted">Preferred Delivery Date</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox name="showPaymentMethod" defaultChecked={false} />
-                <span className="text-sm text-surface-700 dark:text-surface-300">Payment method (Pay on delivery / Pay online)</span>
+                <span className="text-sm text-app-fg-muted">Payment method (Pay on delivery / Pay online)</span>
               </label>
             </div>
           </div>
@@ -373,16 +417,16 @@ export function FormsPage({
         {displayedForms.map((c) => (
           <article
             key={c.id}
-            className="group relative bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-700 p-5 shadow-sm hover:shadow-md hover:border-surface-300 dark:hover:border-surface-600 transition-all duration-200 flex flex-col min-h-[180px]"
+            className="group relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm hover:shadow-md hover:border-app-border transition-all duration-200 flex flex-col min-h-[180px]"
           >
             <div className="flex items-start justify-between gap-3 mb-2">
-              <h3 className="font-semibold text-surface-900 dark:text-white text-base leading-snug line-clamp-2 min-w-0 flex-1">
+              <h3 className="font-semibold text-app-fg text-base leading-snug line-clamp-2 min-w-0 flex-1">
                 {c.name}
               </h3>
-              <span className={`${STATUS_COLORS[c.status] ?? 'badge'} shrink-0 capitalize`}>{c.status.toLowerCase()}</span>
+              <StatusBadge status={c.status} className="shrink-0" />
             </div>
 
-            <div className="text-sm text-surface-500 dark:text-surface-400 mb-4 flex-1">
+            <div className="text-sm text-app-fg-muted mb-4 flex-1">
               {showMediaBuyerColumn && c.mediaBuyerId && (
                 <>
                   <Link
@@ -400,13 +444,13 @@ export function FormsPage({
             </div>
 
             {c.formConfig && (c.formConfig.heading || c.formConfig.subtitle || c.formConfig.buttonText || c.formConfig.accentColor || isOptionOn(c.formConfig.showDeliveryAddress) || isOptionOn(c.formConfig.showDeliveryNotes) || isOptionOn(c.formConfig.showDeliveryState) || isOptionOn(c.formConfig.showGender) || isOptionOn(c.formConfig.showPreferredDeliveryDate) || isOptionOn(c.formConfig.showPaymentMethod)) && (
-              <div className="mb-4 pt-3 border-t border-surface-100 dark:border-surface-800">
-                <p className="text-xs font-medium text-surface-500 dark:text-surface-500 uppercase tracking-wider mb-2">Form options</p>
+              <div className="mb-4 pt-3 border-t border-app-border">
+                <p className="text-xs font-medium text-app-fg-muted dark:text-app-fg-muted uppercase tracking-wider mb-2">Form options</p>
                 <FormOptionsSummary config={c.formConfig} />
               </div>
             )}
 
-            <div className="flex items-center gap-2 pt-3 border-t border-surface-100 dark:border-surface-800">
+            <div className="flex items-center gap-2 pt-3 border-t border-app-border">
               <Button
                 type="button"
                 variant="primary"
@@ -420,7 +464,7 @@ export function FormsPage({
               <button
                 type="button"
                 onClick={() => setEditingForm(c)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-white hover:bg-surface-100 dark:hover:bg-surface-800 rounded-lg transition-colors duration-150 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-app-fg-muted hover:text-app-fg hover:bg-surface-100 dark:hover:bg-surface-800 rounded-lg transition-colors duration-150 cursor-pointer"
               >
                 {EditIcon}
                 <span>Edit</span>
@@ -459,9 +503,11 @@ export function FormsPage({
           </article>
         ))}
         {displayedForms.length === 0 && (
-          <div className="col-span-full rounded-xl border border-dashed border-surface-300 dark:border-surface-600 bg-surface-50 dark:bg-surface-800/50 py-16 text-center">
-            <p className="text-surface-600 dark:text-surface-400 font-medium">No forms yet</p>
-            <p className="text-sm text-surface-500 dark:text-surface-500 mt-1">Create one with <strong>+ New Form</strong> above.</p>
+          <div className="col-span-full">
+            <EmptyState
+              title="No forms yet"
+              description="Create one with + New Form above."
+            />
           </div>
         )}
       </div>
@@ -470,8 +516,8 @@ export function FormsPage({
       {editingForm && (
         <Modal open onClose={() => setEditingForm(null)} maxWidth="max-w-lg" contentClassName="p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Edit Form</h3>
-              <button onClick={() => setEditingForm(null)} className="text-surface-700 hover:text-surface-900 dark:text-surface-400 dark:hover:text-white">
+              <h3 className="text-lg font-semibold text-app-fg">Edit Form</h3>
+              <button onClick={() => setEditingForm(null)} className="text-app-fg-muted hover:text-app-fg">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -480,32 +526,35 @@ export function FormsPage({
             <fetcher.Form method="post" className="space-y-4">
               <input type="hidden" name="intent" value="updateForm" />
               <input type="hidden" name="id" value={editingForm.id} />
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Form Name</label>
-                <input name="name" type="text" defaultValue={editingForm.name} className="input w-full" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Status</label>
-                <select name="status" defaultValue={editingForm.status} className="input w-full">
-                  <option value="ACTIVE">Active</option>
-                  <option value="INACTIVE">Inactive</option>
-                  <option value="ARCHIVED">Archived</option>
-                </select>
-              </div>
-              <div className="border-t border-surface-200 dark:border-surface-700 pt-3">
-                <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mb-2">
+              <TextInput
+                label="Form Name"
+                name="name"
+                defaultValue={editingForm.name}
+              />
+              <FormSelect
+                label="Status"
+                name="status"
+                defaultValue={editingForm.status}
+                options={[
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'INACTIVE', label: 'Inactive' },
+                  { value: 'ARCHIVED', label: 'Archived' },
+                ]}
+              />
+              <div className="border-t border-app-border pt-3">
+                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-2">
                   Form Customization
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <input name="formHeading" type="text" placeholder="Form heading" defaultValue={editingForm.formConfig?.heading ?? ''} className="input" />
-                  <input name="formSubtitle" type="text" placeholder="Form subtitle" defaultValue={editingForm.formConfig?.subtitle ?? ''} className="input" />
-                  <input name="formButtonText" type="text" placeholder="Button text" defaultValue={editingForm.formConfig?.buttonText ?? ''} className="input" />
+                  <TextInput name="formHeading" placeholder="Form heading" defaultValue={editingForm.formConfig?.heading ?? ''} />
+                  <TextInput name="formSubtitle" placeholder="Form subtitle" defaultValue={editingForm.formConfig?.subtitle ?? ''} />
+                  <TextInput name="formButtonText" placeholder="Button text" defaultValue={editingForm.formConfig?.buttonText ?? ''} />
                   <div className="flex items-center gap-2">
-                    <input name="formAccentColor" type="color" defaultValue={editingForm.formConfig?.accentColor ?? '#6366f1'} className="w-10 h-9 rounded border border-surface-200 dark:border-surface-700 cursor-pointer" />
-                    <span className="text-sm text-surface-800 dark:text-surface-200">Accent color</span>
+                    <input name="formAccentColor" type="color" defaultValue={editingForm.formConfig?.accentColor ?? '#6366f1'} className="w-10 h-9 rounded border border-app-border cursor-pointer" />
+                    <span className="text-sm text-app-fg-muted">Accent color</span>
                   </div>
                 </div>
-                <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider mt-4 mb-2">
+                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">
                   Optional Form Fields
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -514,42 +563,42 @@ export function FormsPage({
                       name="showDeliveryAddress"
                       defaultChecked={editingForm.formConfig?.showDeliveryAddress === true || editingForm.formConfig?.showDeliveryAddress === 'true'}
                     />
-                    <span className="text-sm text-surface-700 dark:text-surface-300">Delivery Address</span>
+                    <span className="text-sm text-app-fg-muted">Delivery Address</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Checkbox
                       name="showDeliveryNotes"
                       defaultChecked={editingForm.formConfig?.showDeliveryNotes === true || editingForm.formConfig?.showDeliveryNotes === 'true'}
                     />
-                    <span className="text-sm text-surface-700 dark:text-surface-300">Delivery Notes</span>
+                    <span className="text-sm text-app-fg-muted">Delivery Notes</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Checkbox
                       name="showDeliveryState"
                       defaultChecked={editingForm.formConfig?.showDeliveryState === true || editingForm.formConfig?.showDeliveryState === 'true'}
                     />
-                    <span className="text-sm text-surface-700 dark:text-surface-300">Delivery State</span>
+                    <span className="text-sm text-app-fg-muted">Delivery State</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Checkbox
                       name="showGender"
                       defaultChecked={editingForm.formConfig?.showGender === true || editingForm.formConfig?.showGender === 'true'}
                     />
-                    <span className="text-sm text-surface-700 dark:text-surface-300">Gender</span>
+                    <span className="text-sm text-app-fg-muted">Gender</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Checkbox
                       name="showPreferredDeliveryDate"
                       defaultChecked={editingForm.formConfig?.showPreferredDeliveryDate === true || editingForm.formConfig?.showPreferredDeliveryDate === 'true'}
                     />
-                    <span className="text-sm text-surface-700 dark:text-surface-300">Preferred Delivery Date</span>
+                    <span className="text-sm text-app-fg-muted">Preferred Delivery Date</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Checkbox
                       name="showPaymentMethod"
                       defaultChecked={editingForm.formConfig?.showPaymentMethod === true || editingForm.formConfig?.showPaymentMethod === 'true'}
                     />
-                    <span className="text-sm text-surface-700 dark:text-surface-300">Payment method (Pay on delivery / Pay online)</span>
+                    <span className="text-sm text-app-fg-muted">Payment method (Pay on delivery / Pay online)</span>
                   </label>
                 </div>
               </div>
@@ -567,10 +616,10 @@ export function FormsPage({
       {deploymentModal && (
         <Modal open onClose={() => setDeploymentModal(null)} maxWidth="max-w-lg" contentClassName="p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-surface-900 dark:text-white">
+              <h3 className="text-lg font-semibold text-app-fg">
                 Deployment: {deploymentModal.name}
               </h3>
-              <button onClick={() => setDeploymentModal(null)} className="text-surface-700 hover:text-surface-900">
+              <button onClick={() => setDeploymentModal(null)} className="text-app-fg-muted hover:text-app-fg">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -588,60 +637,126 @@ export function FormsPage({
               )}
               <div>
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Hosted URL</label>
+                  <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Hosted URL</label>
                   <button
-                    onClick={() => navigator.clipboard.writeText(`${edgeWorkerUrl}/form/${deploymentModal.id}`)}
-                    className="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                    type="button"
+                    onClick={() =>
+                      copyDeploymentSnippet(`${edgeWorkerUrl}/form/${deploymentModal.id}`, 'hosted')
+                    }
+                    className={`inline-flex items-center gap-1 text-xs font-medium transition-colors duration-200 ${
+                      deploymentCopiedSection === 'hosted'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-brand-500 hover:text-brand-600'
+                    }`}
                   >
-                    Copy
+                    {deploymentCopiedSection === 'hosted' ? (
+                      <>
+                        {CheckIconSm}
+                        Copied
+                      </>
+                    ) : (
+                      'Copy'
+                    )}
                   </button>
                 </div>
-                <div className="mt-1 p-3 bg-surface-50 dark:bg-surface-800 rounded-lg">
+                <div
+                  className={`mt-1 p-3 bg-app-hover rounded-lg transition-[box-shadow,ring-color] duration-300 ${
+                    deploymentCopiedSection === 'hosted'
+                      ? 'ring-2 ring-emerald-500/45 shadow-sm'
+                      : 'ring-2 ring-transparent'
+                  }`}
+                >
                   <code className="text-sm text-brand-600 dark:text-brand-400 break-all">
                     {edgeWorkerUrl}/form/{deploymentModal.id}
                   </code>
                 </div>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                <p className="text-xs text-app-fg-muted mt-1">
                   Share this URL directly with customers or use as a landing page.
                 </p>
               </div>
 
               <div>
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">iFrame Embed</label>
+                  <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">iFrame Embed</label>
                   <button
-                    onClick={() => navigator.clipboard.writeText(`<iframe src="${edgeWorkerUrl}/form/${deploymentModal.id}" width="100%" height="500" frameBorder="0"></iframe>`)}
-                    className="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                    type="button"
+                    onClick={() =>
+                      copyDeploymentSnippet(
+                        `<iframe src="${edgeWorkerUrl}/form/${deploymentModal.id}" width="100%" height="500" frameBorder="0"></iframe>`,
+                        'iframe',
+                      )
+                    }
+                    className={`inline-flex items-center gap-1 text-xs font-medium transition-colors duration-200 ${
+                      deploymentCopiedSection === 'iframe'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-brand-500 hover:text-brand-600'
+                    }`}
                   >
-                    Copy
+                    {deploymentCopiedSection === 'iframe' ? (
+                      <>
+                        {CheckIconSm}
+                        Copied
+                      </>
+                    ) : (
+                      'Copy'
+                    )}
                   </button>
                 </div>
-                <div className="mt-1 p-3 bg-surface-50 dark:bg-surface-800 rounded-lg">
-                  <code className="text-xs text-surface-700 dark:text-surface-300 break-all">
+                <div
+                  className={`mt-1 p-3 bg-app-hover rounded-lg transition-[box-shadow,ring-color] duration-300 ${
+                    deploymentCopiedSection === 'iframe'
+                      ? 'ring-2 ring-emerald-500/45 shadow-sm'
+                      : 'ring-2 ring-transparent'
+                  }`}
+                >
+                  <code className="text-xs text-app-fg-muted break-all">
                     {`<iframe src="${edgeWorkerUrl}/form/${deploymentModal.id}" width="100%" height="500" frameBorder="0"></iframe>`}
                   </code>
                 </div>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                <p className="text-xs text-app-fg-muted mt-1">
                   Embed the form as an iframe on any website or landing page.
                 </p>
               </div>
 
               <div>
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Shadow DOM Snippet</label>
+                  <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Shadow DOM Snippet</label>
                   <button
-                    onClick={() => navigator.clipboard.writeText(`<div id="yannis-form"></div><script src="${edgeWorkerUrl}/embed.js?campaign=${deploymentModal.id}"></script>`)}
-                    className="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                    type="button"
+                    onClick={() =>
+                      copyDeploymentSnippet(
+                        `<div id="yannis-form"></div><script src="${edgeWorkerUrl}/embed.js?campaign=${deploymentModal.id}"></script>`,
+                        'shadow',
+                      )
+                    }
+                    className={`inline-flex items-center gap-1 text-xs font-medium transition-colors duration-200 ${
+                      deploymentCopiedSection === 'shadow'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-brand-500 hover:text-brand-600'
+                    }`}
                   >
-                    Copy
+                    {deploymentCopiedSection === 'shadow' ? (
+                      <>
+                        {CheckIconSm}
+                        Copied
+                      </>
+                    ) : (
+                      'Copy'
+                    )}
                   </button>
                 </div>
-                <div className="mt-1 p-3 bg-surface-50 dark:bg-surface-800 rounded-lg">
-                  <code className="text-xs text-surface-700 dark:text-surface-300 break-all">
+                <div
+                  className={`mt-1 p-3 bg-app-hover rounded-lg transition-[box-shadow,ring-color] duration-300 ${
+                    deploymentCopiedSection === 'shadow'
+                      ? 'ring-2 ring-emerald-500/45 shadow-sm'
+                      : 'ring-2 ring-transparent'
+                  }`}
+                >
+                  <code className="text-xs text-app-fg-muted break-all">
                     {`<div id="yannis-form"></div><script src="${edgeWorkerUrl}/embed.js?campaign=${deploymentModal.id}"></script>`}
                   </code>
                 </div>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-1">
+                <p className="text-xs text-app-fg-muted mt-1">
                   Inject the form into any page via Shadow DOM — isolated from parent styles.
                 </p>
               </div>
@@ -672,7 +787,7 @@ export function FormsPage({
           }
           details={
             confirmAction.type === 'archive' ? (
-              <ul className="list-disc list-inside text-sm text-surface-600 dark:text-surface-400 space-y-1">
+              <ul className="list-disc list-inside text-sm text-app-fg-muted space-y-1">
                 <li>Hidden from default campaign lists</li>
                 <li>You can change status back anytime</li>
               </ul>

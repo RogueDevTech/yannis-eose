@@ -80,6 +80,7 @@ test.describe('RBAC — Access Control', () => {
       '/admin/inventory',
       '/admin/logistics',
       '/admin/marketing/funding',
+      '/admin/marketing/ad-spend',
       '/admin/finance/overview',
       '/admin/hr',
       '/admin/marketing/forms',

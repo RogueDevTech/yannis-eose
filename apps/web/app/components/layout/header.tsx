@@ -6,7 +6,6 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
 import { getNotificationLink, getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
 import { useNotificationsState } from '~/contexts/notifications-state';
-
 interface Notification {
   id: string;
   type: string;
@@ -30,12 +29,12 @@ interface HeaderProps {
     email: string;
   } | null;
   sidebarCollapsed: boolean;
-  darkMode: boolean;
+  /** Logo asset on mobile header — dark PNG only for Dark theme */
+  isDarkTheme: boolean;
   notificationsPromise: Promise<{ notifications: Notification[]; unreadCount: number }>;
   realtimeNotifications?: Notification[];
   realtimeCount?: number;
   socketConnected?: boolean;
-  onToggleDarkMode: () => void;
   onMobileMenuToggle: () => void;
   onRemoveRealtimeNotification?: (id: string) => void;
   onPruneServerKnown?: (serverIds: Set<string>) => void;
@@ -86,7 +85,21 @@ function SyncNotificationReadIds({ notifications, onPruneServerKnown }: { notifi
   return null;
 }
 
-export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise, realtimeNotifications = [], realtimeCount: _realtimeCount = 0, socketConnected, onToggleDarkMode, onMobileMenuToggle, onRemoveRealtimeNotification, onPruneServerKnown, onClearRealtimeNotifications, branches, currentBranchId }: HeaderProps) {
+export function Header({
+  user,
+  sidebarCollapsed,
+  isDarkTheme,
+  notificationsPromise,
+  realtimeNotifications = [],
+  realtimeCount: _realtimeCount = 0,
+  socketConnected,
+  onMobileMenuToggle,
+  onRemoveRealtimeNotification,
+  onPruneServerKnown,
+  onClearRealtimeNotifications,
+  branches,
+  currentBranchId,
+}: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileUserMenuOpen, setMobileUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -180,7 +193,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
 
   return (
     <header
-      className={`fixed top-0 right-0 z-30 h-[var(--header-height)] bg-white dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between px-4 lg:px-6 transition-all duration-300 left-0 ${
+      className={`fixed top-0 right-0 z-30 h-[var(--header-height)] bg-app-elevated border-b border-app-border text-app-fg flex items-center justify-between px-4 lg:px-6 transition-all duration-300 left-0 ${
         sidebarCollapsed
           ? 'lg:left-[var(--sidebar-collapsed-width)]'
           : 'lg:left-[var(--sidebar-width)]'
@@ -191,7 +204,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
         {/* Mobile hamburger — before logo */}
         <button
           onClick={onMobileMenuToggle}
-          className="lg:hidden p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
+          className="lg:hidden p-1.5 rounded-lg text-app-fg hover:bg-app-hover transition-colors"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -204,7 +217,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
           aria-label="Yannis home"
         >
           <img
-            src={darkMode ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
+            src={isDarkTheme ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
             alt="Yannis"
             className="h-[1.575rem] w-auto max-w-[108px] object-contain"
           />
@@ -241,7 +254,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                   <button
                     ref={notifTriggerRef}
                     onClick={() => setNotifOpen(!notifOpen)}
-                    className="relative p-1.5 rounded-lg text-surface-800 hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800 transition-colors"
+                    className="relative p-1.5 rounded-lg text-app-fg hover:bg-app-hover transition-colors"
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path
@@ -252,7 +265,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                     </svg>
                     {socketConnected !== undefined && (
                       <span
-                        className={`absolute bottom-0.5 left-0.5 w-2 h-2 rounded-full border border-white dark:border-surface-900 ${
+                        className={`absolute bottom-0.5 left-0.5 w-2 h-2 rounded-full border border-app-elevated ${
                           socketConnected ? 'bg-success-500' : 'bg-danger-500'
                         }`}
                         title={socketConnected ? 'Real-time connected' : 'Real-time disconnected'}
@@ -275,16 +288,16 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                         />
                         <div
                           ref={notifPanelRef}
-                          className="fixed top-0 right-0 h-full w-full max-w-md sm:max-w-lg bg-white dark:bg-surface-800 shadow-2xl z-[101] flex flex-col animate-slide-in-right"
+                          className="fixed top-0 right-0 h-full w-full max-w-md sm:max-w-lg bg-app-elevated shadow-2xl z-[101] flex flex-col animate-slide-in-right"
                           role="dialog"
                           aria-label="Notifications"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div className="flex items-center justify-between px-4 py-4 border-b border-surface-100 dark:border-surface-700 flex-shrink-0">
-                            <h3 className="text-base font-semibold text-surface-900 dark:text-white">
+                          <div className="flex items-center justify-between px-4 py-4 border-b border-app-border flex-shrink-0">
+                            <h3 className="text-base font-semibold text-app-fg">
                               Notifications
                               {mergedUnreadCount > 0 && (
-                                <span className="ml-1.5 text-sm text-surface-800 dark:text-surface-300 font-normal">
+                                <span className="ml-1.5 text-sm text-app-fg-muted font-normal">
                                   ({mergedUnreadCount} unread)
                                 </span>
                               )}
@@ -300,7 +313,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                               )}
                               <button
                                 onClick={() => setNotifOpen(false)}
-                                className="p-1.5 rounded-lg text-surface-600 hover:bg-surface-100 dark:text-surface-200 dark:hover:bg-surface-700 transition-colors"
+                                className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors"
                                 aria-label="Close notifications"
                               >
                                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -313,10 +326,10 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                           <div className="flex-1 overflow-y-auto min-h-0">
                             {mergedNotifications.length === 0 ? (
                               <div className="flex flex-col items-center justify-center h-full px-4 py-12 text-center">
-                                <svg className="w-12 h-12 text-surface-400 dark:text-surface-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                                <svg className="w-12 h-12 text-app-fg-muted mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
                                 </svg>
-                                <p className="text-sm text-surface-600 dark:text-surface-300">No notifications yet</p>
+                                <p className="text-sm text-app-fg-muted">No notifications yet</p>
                               </div>
                             ) : (
                               <div className="flex flex-col">
@@ -329,7 +342,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                                       key={n.id}
                                       type="button"
                                       onClick={() => handleNotificationClick(n)}
-                                      className={`w-full text-left px-4 py-3 border-b border-surface-50 dark:border-surface-700/50 hover:bg-surface-50 dark:hover:bg-surface-700/30 transition-colors cursor-pointer ${
+                                      className={`w-full text-left px-4 py-3 border-b border-app-border/50 hover:bg-app-hover transition-colors cursor-pointer ${
                                         !isRead ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''
                                       }`}
                                     >
@@ -338,16 +351,16 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                                           !isRead ? dotColor : 'bg-transparent'
                                         }`} />
                                         <div className="flex-1 min-w-0">
-                                          <p className="text-sm font-medium text-surface-900 dark:text-surface-100 leading-tight">
+                                          <p className="text-sm font-medium text-app-fg leading-tight">
                                             {n.title}
                                           </p>
                                           {n.body && (
-                                            <p className="text-xs text-surface-800 dark:text-surface-200 mt-0.5 line-clamp-2">
+                                            <p className="text-xs text-app-fg-muted mt-0.5 line-clamp-2">
                                               {n.body}
                                             </p>
                                           )}
                                           <div className="flex items-center gap-2 mt-1">
-                                            <p className="text-[11px] text-surface-700 dark:text-surface-300">
+                                            <p className="text-[11px] text-app-fg-muted">
                                               {timeAgo(n.createdAt)}
                                             </p>
                                             {link && (
@@ -366,7 +379,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                           </div>
 
                           {mergedNotifications.length > 0 && (
-                            <div className="px-4 py-3 border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
+                            <div className="px-4 py-3 border-t border-app-border flex-shrink-0">
                               <a
                                 href="/admin/notifications"
                                 className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium"
@@ -394,17 +407,17 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                           role="dialog"
                           aria-modal="true"
                           aria-labelledby="notification-detail-title"
-                          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[111] w-full max-w-md max-h-[90dvh] flex flex-col bg-white dark:bg-surface-800 rounded-xl shadow-xl border border-surface-200 dark:border-surface-700 mx-4 animate-fade-in"
+                          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[111] w-full max-w-md max-h-[90dvh] flex flex-col bg-app-elevated rounded-xl shadow-xl border border-app-border mx-4 animate-fade-in"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-start justify-between gap-3 p-5 pb-0 flex-shrink-0">
-                            <h2 id="notification-detail-title" className="text-lg font-semibold text-surface-900 dark:text-white pr-8">
+                            <h2 id="notification-detail-title" className="text-lg font-semibold text-app-fg pr-8">
                               {selectedNotification.title}
                             </h2>
                             <button
                               type="button"
                               onClick={() => setSelectedNotification(null)}
-                              className="p-1.5 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-700 transition-colors -mt-1 -mr-1"
+                              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors -mt-1 -mr-1"
                               aria-label="Close"
                             >
                               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -414,17 +427,17 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                           </div>
                           <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
                             {selectedNotification.body ? (
-                              <p className="text-sm text-surface-700 dark:text-surface-200 whitespace-pre-wrap">
+                              <p className="text-sm text-app-fg whitespace-pre-wrap">
                                 {selectedNotification.body}
                               </p>
                             ) : (
-                              <p className="text-sm text-surface-500 dark:text-surface-400 italic">No additional message.</p>
+                              <p className="text-sm text-app-fg-muted italic">No additional message.</p>
                             )}
-                            <p className="text-xs text-surface-500 dark:text-surface-400 mt-4">
+                            <p className="text-xs text-app-fg-muted mt-4">
                               {formatNotificationDate(selectedNotification.createdAt)}
                             </p>
                           </div>
-                          <div className="flex flex-wrap gap-2 p-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-surface-100 dark:border-surface-700 flex-shrink-0">
+                          <div className="flex flex-wrap gap-2 p-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-app-border flex-shrink-0">
                             {(() => {
                               const action = getNotificationAction(selectedNotification);
                               return action ? (
@@ -460,7 +473,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
             <button
               type="button"
               onClick={() => setMobileUserMenuOpen(true)}
-              className="md:hidden flex items-center gap-2 pl-2 border-l border-surface-200 dark:border-surface-700 hover:opacity-80 transition-opacity"
+              className="md:hidden flex items-center gap-2 pl-2 border-l border-app-border hover:opacity-80 transition-opacity"
             >
               <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center">
                 <span className="text-xs font-semibold text-white">
@@ -472,7 +485,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
             <button
               type="button"
               onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="hidden md:flex items-center gap-2 pl-3 border-l border-surface-200 dark:border-surface-700 hover:opacity-80 transition-opacity"
+              className="hidden md:flex items-center gap-2 pl-3 border-l border-app-border hover:opacity-80 transition-opacity"
             >
               <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center">
                 <span className="text-xs font-semibold text-white">
@@ -480,15 +493,15 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                 </span>
               </div>
               <div className="hidden md:block min-w-0 text-left">
-                <p className="text-sm font-medium text-surface-900 dark:text-surface-100 truncate leading-tight">
+                <p className="text-sm font-medium text-app-fg truncate leading-tight">
                   {user.name}
                 </p>
-                <p className="text-2xs text-surface-800 dark:text-surface-200 truncate">
+                <p className="text-2xs text-app-fg-muted truncate">
                   {formatRole(user.role)}
                 </p>
               </div>
               <svg
-                className={`w-4 h-4 text-surface-700 dark:text-surface-200 hidden md:block transition-transform duration-200 ${userMenuOpen ? 'rotate-180' : ''}`}
+                className={`w-4 h-4 text-app-fg-muted hidden md:block transition-transform duration-200 ${userMenuOpen ? 'rotate-180' : ''}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -500,36 +513,27 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
 
             {/* Dropdown menu (desktop) */}
             {userMenuOpen && (
-              <div className="absolute right-0 mt-2 w-56 rounded-lg bg-white dark:bg-surface-800 shadow-lg border border-surface-200 dark:border-surface-700 py-1 animate-fade-in z-50 hidden md:block">
-                <div className="px-4 py-2 border-b border-surface-100 dark:border-surface-700">
-                  <p className="text-xs text-surface-800 dark:text-surface-200 truncate">
+              <div className="absolute right-0 mt-2 w-56 rounded-lg bg-app-elevated shadow-lg border border-app-border py-1 animate-fade-in z-50 hidden md:block">
+                <div className="px-4 py-2 border-b border-app-border">
+                  <p className="text-xs text-app-fg-muted truncate">
                     {user.email}
                   </p>
                 </div>
 
                 <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onToggleDarkMode();
-                      setUserMenuOpen(false);
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
-                  >
-                    {darkMode ? (
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-                      </svg>
-                    )}
-                    <span>{darkMode ? 'Switch to light mode' : 'Switch to dark mode'}</span>
-                  </button>
                   <a
                     href="/admin/settings"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-app-fg-muted hover:bg-app-hover transition-colors"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                    </svg>
+                    My Profile
+                  </a>
+                  <a
+                    href="/admin/settings"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-app-fg-muted hover:bg-app-hover transition-colors"
                     onClick={() => setUserMenuOpen(false)}
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -541,7 +545,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                 </div>
 
                 {/* Logout */}
-                <div className="border-t border-surface-100 dark:border-surface-700 py-1">
+                <div className="border-t border-app-border py-1">
                   <Form method="post" action="/auth/logout">
                     <Button
                       type="submit"
@@ -564,21 +568,21 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
               onClose={() => setMobileUserMenuOpen(false)}
               aria-labelledby="mobile-user-menu-title"
               maxWidth="max-w-md"
-              contentClassName="border border-surface-200 dark:border-surface-700"
+              contentClassName="border border-app-border"
             >
-              <div className="px-5 py-4 border-b border-surface-100 dark:border-surface-700">
-                <p id="mobile-user-menu-title" className="text-base font-semibold text-surface-900 dark:text-surface-100">
+              <div className="px-5 py-4 border-b border-app-border">
+                <p id="mobile-user-menu-title" className="text-base font-semibold text-app-fg">
                   Account
                 </p>
-                <p className="text-sm font-medium text-surface-900 dark:text-surface-100 mt-2">{user.name}</p>
-                <p className="text-xs text-surface-500 dark:text-surface-300">{user.email}</p>
-                <p className="text-2xs text-surface-700 dark:text-surface-300 mt-0.5">{formatRole(user.role)}</p>
+                <p className="text-sm font-medium text-app-fg mt-2">{user.name}</p>
+                <p className="text-xs text-app-fg-muted">{user.email}</p>
+                <p className="text-2xs text-app-fg-muted mt-0.5">{formatRole(user.role)}</p>
               </div>
 
               {branches && branches.length > 0 && (
-                <div className="border-b border-surface-100 dark:border-surface-700 py-2">
+                <div className="border-b border-app-border py-2">
                   <div className="px-5 pt-1 pb-1">
-                    <p className="text-[10px] uppercase tracking-wider font-semibold text-surface-500 dark:text-surface-400">
+                    <p className="text-[10px] uppercase tracking-wider font-semibold text-app-fg-muted">
                       Branch
                     </p>
                   </div>
@@ -593,7 +597,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                           className={`w-full flex items-center justify-between gap-2 px-5 py-2.5 text-sm transition-colors ${
                             isMobileAllBranches
                               ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
-                              : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700/50'
+                              : 'text-app-fg-muted hover:bg-app-hover/50'
                           } ${isMobileBranchSwitching ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                           <span>All Branches</span>
@@ -614,12 +618,12 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                           className={`w-full flex items-center justify-between gap-2 px-5 py-2.5 text-sm transition-colors ${
                             branch.id === (currentBranchId ?? null)
                               ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300'
-                              : 'text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700/50'
+                              : 'text-app-fg-muted hover:bg-app-hover/50'
                           } ${isMobileBranchSwitching ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                           <span className="truncate">{branch.name}</span>
                           <span className="flex items-center gap-1.5 text-[10px]">
-                            <span className="font-mono text-surface-500 dark:text-surface-400">{branch.code}</span>
+                            <span className="font-mono text-app-fg-muted">{branch.code}</span>
                             {branch.id === (currentBranchId ?? null) && (
                               <svg className="w-3.5 h-3.5 flex-shrink-0 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -629,19 +633,19 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                         </button>
                       ))}
                       {isMobileBranchSwitching && (
-                        <p className="px-5 pt-1 text-[11px] text-surface-500 dark:text-surface-400">
+                        <p className="px-5 pt-1 text-[11px] text-app-fg-muted">
                           Switching branch...
                         </p>
                       )}
                     </div>
                   ) : (
                     <div className="px-5 pb-2">
-                      <div className="flex items-center justify-between rounded-md bg-surface-50 dark:bg-surface-700/40 px-3 py-2">
-                        <span className="text-sm text-surface-700 dark:text-surface-300 truncate">
+                      <div className="flex items-center justify-between rounded-md bg-app-hover px-3 py-2">
+                        <span className="text-sm text-app-fg truncate">
                           {mobileCurrentBranch?.name ?? 'Branch'}
                         </span>
                         {mobileCurrentBranch?.code && (
-                          <span className="text-[10px] font-mono text-surface-500 dark:text-surface-400">
+                          <span className="text-[10px] font-mono text-app-fg-muted">
                             {mobileCurrentBranch.code}
                           </span>
                         )}
@@ -652,29 +656,19 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
               )}
 
               <div className="py-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onToggleDarkMode();
-                    setMobileUserMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-5 py-2.5 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
-                >
-                  {darkMode ? (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-                    </svg>
-                  )}
-                  <span>{darkMode ? 'Switch to light mode' : 'Switch to dark mode'}</span>
-                </button>
-
                 <a
                   href="/admin/settings"
-                  className="flex items-center gap-2 px-5 py-2.5 text-sm text-surface-700 dark:text-surface-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+                  className="flex items-center gap-2 px-5 py-2.5 text-sm text-app-fg-muted hover:bg-app-hover transition-colors"
+                  onClick={() => setMobileUserMenuOpen(false)}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                  </svg>
+                  My Profile
+                </a>
+                <a
+                  href="/admin/settings"
+                  className="flex items-center gap-2 px-5 py-2.5 text-sm text-app-fg-muted hover:bg-app-hover transition-colors"
                   onClick={() => setMobileUserMenuOpen(false)}
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -685,7 +679,7 @@ export function Header({ user, sidebarCollapsed, darkMode, notificationsPromise,
                 </a>
               </div>
 
-              <div className="border-t border-surface-100 dark:border-surface-700 py-2">
+              <div className="border-t border-app-border py-2">
                 <Form method="post" action="/auth/logout">
                   <Button
                     type="submit"
@@ -756,12 +750,12 @@ function HeaderBranchSwitcher({
     const display = currentBranch ?? branches[0];
     if (!display) return null;
     return (
-      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-100 dark:bg-surface-800 border border-surface-200 dark:border-surface-700">
-        <svg className="w-3.5 h-3.5 text-surface-500 dark:text-surface-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-app-hover border border-app-border">
+        <svg className="w-3.5 h-3.5 text-app-fg-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
         </svg>
-        <span className="text-xs font-semibold text-surface-900 dark:text-surface-100">{display.name}</span>
-        <span className="text-[10px] text-surface-500 dark:text-surface-400 font-mono bg-surface-200 dark:bg-surface-700 px-1 rounded">
+        <span className="text-xs font-semibold text-app-fg">{display.name}</span>
+        <span className="text-[10px] text-app-fg-muted font-mono bg-app-hover px-1 rounded">
           {display.code}
         </span>
       </div>
@@ -778,7 +772,7 @@ function HeaderBranchSwitcher({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-100 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors duration-150 text-left"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-app-hover border border-app-border hover:bg-app-hover transition-colors duration-150 text-left"
         disabled={fetcher.state !== 'idle'}
       >
         {isAllBranches ? (
@@ -786,15 +780,15 @@ function HeaderBranchSwitcher({
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
           </svg>
         ) : (
-          <svg className="w-3.5 h-3.5 text-surface-500 dark:text-surface-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-3.5 h-3.5 text-app-fg-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
           </svg>
         )}
-        <span className={`text-xs font-semibold truncate max-w-[140px] ${isAllBranches ? 'text-brand-600 dark:text-brand-400' : 'text-surface-900 dark:text-surface-100'}`}>
+        <span className={`text-xs font-semibold truncate max-w-[140px] ${isAllBranches ? 'text-brand-600 dark:text-brand-400' : 'text-app-fg'}`}>
           {triggerLabel}
         </span>
         {triggerCode && (
-          <span className="text-[10px] text-surface-500 dark:text-surface-400 font-mono bg-surface-200 dark:bg-surface-700 px-1 rounded">
+          <span className="text-[10px] text-app-fg-muted font-mono bg-app-hover px-1 rounded">
             {triggerCode}
           </span>
         )}
@@ -808,7 +802,7 @@ function HeaderBranchSwitcher({
           </svg>
         ) : (
           <svg
-            className={`w-3 h-3 text-surface-400 dark:text-surface-500 ml-0.5 flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+            className={`w-3 h-3 text-app-fg-muted ml-0.5 flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -817,8 +811,8 @@ function HeaderBranchSwitcher({
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1.5 min-w-[220px] bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg shadow-lg z-50 py-1 overflow-hidden animate-fade-in">
-          <p className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-surface-400 dark:text-surface-500">
+        <div className="absolute top-full left-0 mt-1.5 min-w-[220px] bg-app-elevated border border-app-border rounded-lg shadow-lg z-50 py-1 overflow-hidden animate-fade-in">
+          <p className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-app-fg-muted">
             Switch Branch
           </p>
 
@@ -827,20 +821,20 @@ function HeaderBranchSwitcher({
             <button
               type="button"
               onClick={() => handleSwitch(null)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-50 dark:hover:bg-surface-700/50 transition-colors duration-100 ${
+              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-app-hover transition-colors duration-100 ${
                 isAllBranches ? 'bg-brand-50 dark:bg-brand-900/20' : ''
               }`}
             >
               <span className={`inline-flex items-center justify-center w-5 h-5 rounded flex-shrink-0 ${
-                isAllBranches ? 'bg-brand-600 text-white' : 'bg-surface-200 dark:bg-surface-600 text-surface-500 dark:text-surface-400'
+                isAllBranches ? 'bg-brand-600 text-white' : 'bg-app-hover text-app-fg-muted'
               }`}>
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
                 </svg>
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-surface-900 dark:text-white">All Branches</p>
-                <p className="text-[10px] text-surface-500 dark:text-surface-400">Global view — no branch filter</p>
+                <p className="text-xs font-medium text-app-fg">All Branches</p>
+                <p className="text-[10px] text-app-fg-muted">Global view — no branch filter</p>
               </div>
               {isAllBranches && (
                 <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -851,7 +845,7 @@ function HeaderBranchSwitcher({
           )}
 
           {canSeeAllBranches && branches.length > 0 && (
-            <div className="my-1 border-t border-surface-100 dark:border-surface-700" />
+            <div className="my-1 border-t border-app-border" />
           )}
 
           {branches.map((branch) => (
@@ -859,20 +853,20 @@ function HeaderBranchSwitcher({
               key={branch.id}
               type="button"
               onClick={() => handleSwitch(branch.id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-50 dark:hover:bg-surface-700/50 transition-colors duration-100 ${
+              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-app-hover transition-colors duration-100 ${
                 branch.id === currentBranchId ? 'bg-brand-50 dark:bg-brand-900/20' : ''
               }`}
             >
               <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold flex-shrink-0 ${
                 branch.id === currentBranchId
                   ? 'bg-brand-600 text-white'
-                  : 'bg-surface-200 dark:bg-surface-600 text-surface-600 dark:text-surface-300'
+                  : 'bg-app-hover text-app-fg-muted'
               }`}>
                 {branch.code.slice(0, 2)}
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-surface-900 dark:text-white truncate">{branch.name}</p>
-                <p className="text-[10px] text-surface-500 dark:text-surface-400">{branch.code}</p>
+                <p className="text-xs font-medium text-app-fg truncate">{branch.name}</p>
+                <p className="text-[10px] text-app-fg-muted">{branch.code}</p>
               </div>
               {branch.id === currentBranchId && (
                 <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

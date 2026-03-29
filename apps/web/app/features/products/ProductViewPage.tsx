@@ -13,20 +13,20 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
     <div className="w-full space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <Link to="/admin/products" className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
+        <Link to="/admin/products" className="text-app-fg-muted hover:text-brand-500">
           Products
         </Link>
-        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-4 h-4 text-app-border" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
-        <span className="text-surface-900 dark:text-white font-medium">{product.name}</span>
+        <span className="text-app-fg font-medium">{product.name}</span>
       </div>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">{product.name}</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
+          <h1 className="text-2xl font-bold text-app-fg">{product.name}</h1>
+          <p className="text-sm text-app-fg-muted mt-1">
             View product details and offer bundles.
           </p>
         </div>
@@ -51,33 +51,33 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
 
       {/* Product Details */}
       <div className="card space-y-4">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Product Details</h2>
+        <h2 className="text-lg font-semibold text-app-fg">Product Details</h2>
         <dl className="space-y-3 text-sm">
           <div>
-            <dt className="text-surface-800 dark:text-surface-200">Name</dt>
-            <dd className="text-surface-900 dark:text-white mt-0.5">{product.name}</dd>
+            <dt className="text-app-fg-muted">Name</dt>
+            <dd className="text-app-fg mt-0.5">{product.name}</dd>
           </div>
           {product.description && (
             <div>
-              <dt className="text-surface-800 dark:text-surface-200">Description</dt>
-              <dd className="text-surface-900 dark:text-white mt-0.5 whitespace-pre-wrap">{product.description}</dd>
+              <dt className="text-app-fg-muted">Description</dt>
+              <dd className="text-app-fg mt-0.5 whitespace-pre-wrap">{product.description}</dd>
             </div>
           )}
           <div>
-            <dt className="text-surface-800 dark:text-surface-200">Category</dt>
-            <dd className="text-surface-900 dark:text-white mt-0.5">
+            <dt className="text-app-fg-muted">Category</dt>
+            <dd className="text-app-fg mt-0.5">
               {product.categoryName ?? product.category ?? '—'}
             </dd>
           </div>
           <div>
-            <dt className="text-surface-800 dark:text-surface-200">Status</dt>
+            <dt className="text-app-fg-muted">Status</dt>
             <dd className="mt-0.5">
               <span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>{product.status}</span>
             </dd>
           </div>
           <div>
-            <dt className="text-surface-800 dark:text-surface-200">Created</dt>
-            <dd className="text-surface-900 dark:text-white mt-0.5">
+            <dt className="text-app-fg-muted">Created</dt>
+            <dd className="text-app-fg mt-0.5">
               {new Date(product.createdAt).toLocaleString('en-NG')}
             </dd>
           </div>
@@ -86,44 +86,44 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
 
       {/* Offer Bundles */}
       <div className="card space-y-4">
-        <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Offer Bundles</h2>
+        <h2 className="text-lg font-semibold text-app-fg">Offer Bundles</h2>
         {product.offers?.length ? (
           <div className="space-y-3">
             {product.offers.map((offer, index) => (
               <div
                 key={index}
-                className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700"
+                className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-lg bg-app-hover border border-app-border"
               >
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-surface-900 dark:text-white">{offer.label}</p>
-                  <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
+                  <p className="font-medium text-app-fg">{offer.label}</p>
+                  <p className="text-sm text-app-fg-muted mt-0.5">
                     {offer.qty} unit{offer.qty !== 1 ? 's' : ''} · &#8358;{Number(offer.price).toLocaleString()}
                   </p>
                 </div>
-                <div className="text-sm font-semibold text-surface-900 dark:text-white sm:text-right">
+                <div className="text-sm font-semibold text-app-fg sm:text-right">
                   &#8358;{Number(offer.price).toLocaleString()}
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-surface-600 dark:text-surface-400">No offer tiers defined.</p>
+          <p className="text-sm text-app-fg-muted">No offer tiers defined.</p>
         )}
       </div>
 
       {/* Cost & Stock (only if API returned cost; backend may strip for non-Finance/SuperAdmin) */}
       {product.costPrice != null && product.costPrice !== '' && (
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Cost & Stock</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Cost & Stock</h2>
           <dl className="space-y-3 text-sm">
             <div>
-              <dt className="text-surface-800 dark:text-surface-200">Cost Price per Unit (&#8358;)</dt>
-              <dd className="text-surface-900 dark:text-white mt-0.5">
+              <dt className="text-app-fg-muted">Cost Price per Unit (&#8358;)</dt>
+              <dd className="text-app-fg mt-0.5">
                 &#8358;{Number(product.costPrice).toLocaleString()}
               </dd>
             </div>
           </dl>
-          <p className="text-xs text-surface-700 dark:text-surface-300">
+          <p className="text-xs text-app-fg-muted">
             Add stock via Inventory → Stock Intake.
           </p>
         </div>

@@ -32,9 +32,9 @@ export function CSLeaderboardPage({
     <div className="space-y-6 px-3 sm:px-0">
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">CS Leaderboard</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-1">
-            CS agent performance ranked by delivery rate ({periodLabel}).
+          <h1 className="text-2xl font-bold text-app-fg">CS Leaderboard</h1>
+          <p className="text-sm text-app-fg-muted mt-1">
+            Closer performance ranked by delivery rate ({periodLabel}).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -44,7 +44,7 @@ export function CSLeaderboardPage({
             periodAllTime={dateFilters.periodAllTime}
           />
           {isFilterLoading && (
-            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+            <span className="flex items-center text-app-fg-muted" aria-hidden>
               <Spinner size="sm" className="shrink-0" />
             </span>
           )}
@@ -56,15 +56,15 @@ export function CSLeaderboardPage({
           if (lb.length === 0) {
             return (
               <div className="card p-8 text-center">
-                <p className="text-sm text-surface-700 dark:text-surface-200">No CS agent data for {periodLabel}.</p>
+                <p className="text-sm text-app-fg-muted">No closer data for {periodLabel}.</p>
               </div>
             );
           }
           return (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-surface-100 dark:border-surface-800">
-                <h2 className="text-base font-semibold text-surface-900 dark:text-white sm:text-lg">CS Agent Performance</h2>
-                <p className="text-xs text-surface-700 dark:text-surface-300 mt-0.5">
+              <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
+                <h2 className="text-base font-semibold text-app-fg sm:text-lg">Closer performance</h2>
+                <p className="text-xs text-app-fg-muted mt-0.5">
                   Ranked by delivery rate ({periodLabel})
                 </p>
               </div>
@@ -75,17 +75,17 @@ export function CSLeaderboardPage({
                   return (
                     <div
                       key={e.agentId}
-                      className={`rounded-lg border border-surface-100 bg-white p-4 dark:border-surface-800 dark:bg-surface-900/50 ${isTopThree ? 'bg-surface-50/80 dark:bg-surface-800/40' : ''}`}
+                      className={`rounded-lg border border-app-border bg-app-elevated p-4 ${isTopThree ? 'bg-app-hover' : ''}`}
                     >
                       {/* Mobile: stacked layout. Desktop: single row */}
                       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                         {/* Rank + trophy + name — full width on mobile, then primary pill */}
                         <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-200 dark:bg-surface-700 font-mono text-sm font-medium text-surface-700 dark:text-surface-300">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-medium text-app-fg-muted">
                             #{rank}
                           </span>
                           {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
-                          <p className={`min-w-0 flex-1 truncate text-sm font-medium text-surface-900 dark:text-white sm:flex-none ${isTopThree ? 'font-semibold' : ''}`}>
+                          <p className={`min-w-0 flex-1 truncate text-sm font-medium text-app-fg sm:flex-none ${isTopThree ? 'font-semibold' : ''}`}>
                             {e.agentName}
                           </p>
                         </div>
@@ -97,7 +97,7 @@ export function CSLeaderboardPage({
                                 ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400'
                                 : e.deliveryRate >= 50
                                   ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400'
-                                  : 'bg-surface-100 text-surface-800 dark:bg-surface-700 dark:text-surface-200'
+                                  : 'bg-app-hover text-app-fg'
                             }`}
                           >
                             {e.deliveryRate.toFixed(1)}% del.
@@ -105,8 +105,8 @@ export function CSLeaderboardPage({
                         </div>
                         {/* Metrics: 2-col grid on mobile, inline on desktop */}
                         <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
-                          <span className="text-surface-600 dark:text-surface-400">
-                            Engaged <strong className="text-surface-900 dark:text-white">{e.ordersEngaged}</strong>
+                          <span className="text-app-fg-muted">
+                            Engaged <strong className="text-app-fg">{e.ordersEngaged}</strong>
                           </span>
                           <span className="text-success-600 dark:text-success-400">
                             Confirmed <strong>{e.ordersConfirmed}</strong>
@@ -114,14 +114,14 @@ export function CSLeaderboardPage({
                           <span className="text-brand-600 dark:text-brand-400 font-medium">
                             Delivered <strong>{e.ordersDelivered}</strong>
                           </span>
-                          <span className="text-surface-600 dark:text-surface-400">
-                            Calls <strong className="text-surface-900 dark:text-white">{e.callsMade}</strong>
+                          <span className="text-app-fg-muted">
+                            Calls <strong className="text-app-fg">{e.callsMade}</strong>
                           </span>
-                          <span className="text-surface-600 dark:text-surface-400">
-                            Conf. <strong className="text-surface-900 dark:text-white">{e.confirmationRate.toFixed(1)}%</strong>
+                          <span className="text-app-fg-muted">
+                            Conf. <strong className="text-app-fg">{e.confirmationRate.toFixed(1)}%</strong>
                           </span>
-                          <span className="text-surface-600 dark:text-surface-400">
-                            Avg call <strong className="text-surface-900 dark:text-white">{formatAvgCall(e.avgCallDurationSeconds)}</strong>
+                          <span className="text-app-fg-muted">
+                            Avg call <strong className="text-app-fg">{formatAvgCall(e.avgCallDurationSeconds)}</strong>
                           </span>
                         </div>
                       </div>

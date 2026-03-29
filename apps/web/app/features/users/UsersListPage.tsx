@@ -1,9 +1,14 @@
 import { useState } from 'react';
-import { Button } from '~/components/ui/button';
 import { Link, useSearchParams, useNavigation } from '@remix-run/react';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { PageHeader } from '~/components/ui/page-header';
+import { SearchInput } from '~/components/ui/search-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { EmptyState } from '~/components/ui/empty-state';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { Pagination } from '~/components/ui/pagination';
 import type { User } from './types';
-import { ROLE_COLORS, USER_STATUS_COLORS, ROLE_OPTIONS, formatRole } from './types';
-import { Spinner } from '~/components/ui/spinner';
+import { ROLE_OPTIONS, formatRole } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 
 interface UsersListPageProps {
@@ -67,102 +72,70 @@ export function UsersListPage({
   return (
     <div className="space-y-4">
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Users</h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 mt-0.5">
-            Manage team members and their roles
-          </p>
-        </div>
-        <Link to="/hr/users/new" className="btn-primary">
-          <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Add User
-        </Link>
-      </div>
+      <PageHeader
+        title="Users"
+        description="Manage team members and their roles"
+        actions={
+          <Link to="/hr/users/new" className="btn-primary">
+            <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add User
+          </Link>
+        }
+      />
 
-      {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Total Users</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{total}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Active</p>
-          <p className="text-2xl font-bold text-success-600 dark:text-success-400 mt-1">
-            {users.filter((u) => u.status === 'ACTIVE').length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Pending</p>
-          <p className="text-2xl font-bold text-info-600 dark:text-info-400 mt-1">
-            {users.filter((u) => u.status === 'PENDING').length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Inactive / Archived</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
-            {users.filter((u) => u.status === 'INACTIVE' || u.status === 'ARCHIVED').length}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Roles</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">
-            {new Set(users.map((u) => u.role)).size}
-          </p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        tileClassName="min-w-[6.5rem]"
+        items={[
+          { label: 'Total Users', value: total, valueClassName: 'text-app-fg' },
+          {
+            label: 'Active',
+            value: users.filter((u) => u.status === 'ACTIVE').length,
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+          {
+            label: 'Pending',
+            value: users.filter((u) => u.status === 'PENDING').length,
+            valueClassName: 'text-info-600 dark:text-info-400',
+          },
+          {
+            label: 'Inactive / Archived',
+            value: users.filter((u) => u.status === 'INACTIVE' || u.status === 'ARCHIVED').length,
+            valueClassName: 'text-app-fg',
+          },
+          { label: 'Roles', value: new Set(users.map((u) => u.role)).size, valueClassName: 'text-app-fg' },
+        ]}
+      />
 
       {/* Filters bar */}
       <div className="card">
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-700"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search by name or email..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input pl-10 py-1.5"
-            />
-          </div>
-          <select
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search by name or email..."
+            className="flex-1"
+          />
+          <FormSelect
             value={statusParam}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="input w-full sm:w-40 py-1.5"
-          >
-            <option value="ALL">All Status</option>
-            <option value="PENDING">Pending</option>
-            <option value="ACTIVE">Active</option>
-            <option value="INACTIVE">Inactive</option>
-            <option value="ARCHIVED">Archived</option>
-            <option value="DEACTIVATED">Deactivated</option>
-          </select>
-          {isFilterLoading && (
-            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
-          <select
+            options={[
+              { value: 'ALL', label: 'All Status' },
+              { value: 'PENDING', label: 'Pending' },
+              { value: 'ACTIVE', label: 'Active' },
+              { value: 'INACTIVE', label: 'Inactive' },
+              { value: 'ARCHIVED', label: 'Archived' },
+              { value: 'DEACTIVATED', label: 'Deactivated' },
+            ]}
+            className="w-full sm:w-40"
+          />
+          <FormSelect
             value={roleParam}
             onChange={(e) => handleRoleChange(e.target.value)}
-            className="input w-full sm:w-48 py-1.5"
-          >
-            {ROLE_OPTIONS.map((role) => (
-              <option key={role} value={role}>
-                {role === 'ALL' ? 'All Roles' : formatRole(role)}
-              </option>
-            ))}
-          </select>
+            options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+            className="w-full sm:w-48"
+          />
         </div>
       </div>
 
@@ -192,25 +165,21 @@ export function UsersListPage({
                           {user.name.charAt(0).toUpperCase()}
                         </span>
                       </div>
-                      <span className="font-medium text-surface-900 dark:text-surface-100">{user.name}</span>
+                      <span className="font-medium text-app-fg">{user.name}</span>
                     </div>
                   </td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200">{user.email}</td>
+                  <td className="table-cell text-app-fg-muted">{user.email}</td>
                   <td className="table-cell">
-                    <span className={ROLE_COLORS[user.role] ?? 'badge'}>
-                      {formatRole(user.role)}
-                    </span>
+                    <StatusBadge status={user.role} label={formatRole(user.role)} />
                   </td>
                   <td className="table-cell">
                     <UserBranchBadges branches={user.branchMemberships} compact />
                   </td>
                   <td className="table-cell">
-                    <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>
-                      {user.status}
-                    </span>
+                    <StatusBadge status={user.status} />
                   </td>
                   <td className="table-cell text-center">{user.capacity}</td>
-                  <td className="table-cell text-surface-800 dark:text-surface-200">
+                  <td className="table-cell text-app-fg-muted">
                     {new Date(user.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
                       day: 'numeric',
@@ -229,8 +198,11 @@ export function UsersListPage({
               ))}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-surface-700 dark:text-surface-300">
-                    {users.length === 0 ? 'No users yet. Add your first team member.' : 'No matching users found'}
+                  <td colSpan={8}>
+                    <EmptyState
+                      title={users.length === 0 ? 'No users yet' : 'No matching users found'}
+                      description={users.length === 0 ? 'Add your first team member.' : 'Try adjusting your search or filters.'}
+                    />
                   </td>
                 </tr>
               )}
@@ -244,7 +216,7 @@ export function UsersListPage({
             <Link
               key={user.id}
               to={`/hr/users/${user.id}`}
-              className="block rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
+              className="block rounded-lg border border-app-border bg-app-elevated p-4 hover:bg-app-hover/50 transition-colors"
             >
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-9 h-9 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">
@@ -253,16 +225,14 @@ export function UsersListPage({
                   </span>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-medium text-surface-900 dark:text-surface-100 truncate">{user.name}</p>
-                  <p className="text-sm text-surface-800 dark:text-surface-200 truncate">{user.email}</p>
+                  <p className="font-medium text-app-fg truncate">{user.name}</p>
+                  <p className="text-sm text-app-fg-muted truncate">{user.email}</p>
                 </div>
-                <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
+                <StatusBadge status={user.status} />
               </div>
               <div className="flex items-center justify-between">
-                <span className={ROLE_COLORS[user.role] ?? 'badge'}>
-                  {formatRole(user.role)}
-                </span>
-                <span className="text-xs text-surface-700 dark:text-surface-300">
+                <StatusBadge status={user.role} label={formatRole(user.role)} />
+                <span className="text-xs text-app-fg-muted">
                   {new Date(user.createdAt).toLocaleDateString('en-NG', {
                     month: 'short',
                     day: 'numeric',
@@ -276,27 +246,19 @@ export function UsersListPage({
             </Link>
           ))}
           {filteredUsers.length === 0 && (
-            <div className="p-8 text-center text-surface-700 dark:text-surface-300">
-              {users.length === 0 ? 'No users yet' : 'No matching users found'}
-            </div>
+            <EmptyState
+              title={users.length === 0 ? 'No users yet' : 'No matching users found'}
+            />
           )}
         </div>
       </div>
 
       {/* Pagination */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-surface-800 dark:text-surface-200">
+        <p className="text-sm text-app-fg-muted">
           Showing {filteredUsers.length} of {total} users
         </p>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
-            Previous
-          </Button>
-          <span className="text-sm text-surface-800 dark:text-surface-200 px-2">Page {page} of {safeTotalPages}</span>
-          <Button variant="secondary" size="sm" disabled={page >= safeTotalPages} onClick={() => goToPage(page + 1)}>
-            Next
-          </Button>
-        </div>
+        <Pagination page={page} totalPages={safeTotalPages} onPageChange={goToPage} showLabel />
       </div>
     </div>
   );

@@ -11,6 +11,18 @@ const config: TailwindConfig = {
   theme: {
     extend: {
       colors: {
+        /** Semantic UI tokens — set per theme via `[data-app-theme]` in apps/web/app/tailwind.css */
+        app: {
+          canvas: 'rgb(var(--app-canvas) / <alpha-value>)',
+          elevated: 'rgb(var(--app-elevated) / <alpha-value>)',
+          border: 'rgb(var(--app-border) / <alpha-value>)',
+          'border-strong': 'rgb(var(--app-border-strong) / <alpha-value>)',
+          fg: 'rgb(var(--app-fg) / <alpha-value>)',
+          'fg-muted': 'rgb(var(--app-fg-muted) / <alpha-value>)',
+          hover: 'rgb(var(--app-hover) / <alpha-value>)',
+          'logo-strip-bg': 'rgb(var(--app-logo-strip-bg) / <alpha-value>)',
+          'logo-strip-border': 'rgb(var(--app-logo-strip-border) / <alpha-value>)',
+        },
         // Yannis brand blue — extracted from logo
         brand: {
           50: '#e8f0fe',
@@ -39,30 +51,59 @@ const config: TailwindConfig = {
           900: '#0f172a',
           950: '#020617',
         },
-        // Semantic colors
+        // Semantic colors — full scales (Tailwind red/amber/emerald/blue) so utilities like
+        // `text-danger-400`, `bg-warning-900/20`, `border-success-200` generate valid CSS.
         success: {
           50: '#ecfdf5',
+          100: '#d1fae5',
+          200: '#a7f3d0',
+          300: '#6ee7b7',
+          400: '#34d399',
           500: '#10b981',
           600: '#059669',
           700: '#047857',
+          800: '#065f46',
+          900: '#064e3b',
+          950: '#022c22',
         },
         warning: {
           50: '#fffbeb',
+          100: '#fef3c7',
+          200: '#fde68a',
+          300: '#fcd34d',
+          400: '#fbbf24',
           500: '#f59e0b',
           600: '#d97706',
           700: '#b45309',
+          800: '#92400e',
+          900: '#78350f',
+          950: '#451a03',
         },
         danger: {
           50: '#fef2f2',
+          100: '#fee2e2',
+          200: '#fecaca',
+          300: '#fca5a5',
+          400: '#f87171',
           500: '#ef4444',
           600: '#dc2626',
           700: '#b91c1c',
+          800: '#991b1b',
+          900: '#7f1d1d',
+          950: '#450a0a',
         },
         info: {
           50: '#eff6ff',
+          100: '#dbeafe',
+          200: '#bfdbfe',
+          300: '#93c5fd',
+          400: '#60a5fa',
           500: '#3b82f6',
           600: '#2563eb',
           700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a8a',
+          950: '#172554',
         },
       },
       fontFamily: {

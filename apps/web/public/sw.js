@@ -40,8 +40,9 @@ self.addEventListener('install', (event) => {
       );
     })
   );
-  // Activate immediately
-  self.skipWaiting();
+  // Do NOT call skipWaiting() — let the old SW finish before this one takes over.
+  // skipWaiting() causes clients.claim() to fire on open tabs mid-session, which
+  // interrupts in-flight requests and triggers reload loops.
 });
 
 // ── Activate ────────────────────────────────────────────────────
@@ -56,8 +57,6 @@ self.addEventListener('activate', (event) => {
       );
     })
   );
-  // Take control of all clients immediately
-  self.clients.claim();
 });
 
 // ── Fetch ───────────────────────────────────────────────────────
@@ -232,12 +231,15 @@ self.addEventListener('push', (event) => {
     payload = { title: 'Yannis EOSE', body: event.data.text() };
   }
 
+  const data = payload.data || {};
+  const logId = data.logId;
+
   const options = {
     body: payload.body || '',
-    icon: '/assets/yannis-logo1.png',
-    badge: '/assets/yannis-logo1.png',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     tag: payload.tag || 'yannis-notification',
-    data: payload.data || {},
+    data: data,
     actions: payload.actions || [],
     vibrate: [200, 100, 200],
     requireInteraction: payload.requireInteraction || false,
@@ -245,12 +247,29 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil(
     self.registration.showNotification(payload.title || 'Yannis EOSE', options).then(() => {
+      const tasks = [];
+
+      // Ack shown — ping delivery log
+      if (logId) {
+        tasks.push(
+          fetch('/push/ack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logId, event: 'shown' }),
+          }).catch(() => {})
+        );
+      }
+
       // Notify any open tabs to play the notification sound
-      return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-        clientList.forEach((client) => {
-          client.postMessage({ type: 'PLAY_NOTIFICATION_SOUND' });
-        });
-      });
+      tasks.push(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+          clientList.forEach((client) => {
+            client.postMessage({ type: 'PLAY_NOTIFICATION_SOUND' });
+          });
+        })
+      );
+
+      return Promise.all(tasks);
     })
   );
 });
@@ -261,24 +280,35 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const targetUrl = event.notification.data?.url || '/admin';
+  const logId = event.notification.data?.logId;
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If there's already a window open, focus it and navigate
-      for (const client of clientList) {
-        if ('focus' in client) {
-          client.focus();
-          client.postMessage({
-            type: 'NOTIFICATION_CLICK',
-            url: targetUrl,
-            data: event.notification.data,
-          });
-          return;
+    Promise.all([
+      // Ack clicked — ping delivery log
+      logId
+        ? fetch('/push/ack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logId, event: 'clicked' }),
+          }).catch(() => {})
+        : Promise.resolve(),
+
+      // Open or focus app window at the target route
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        for (const client of clientList) {
+          if ('focus' in client) {
+            client.focus();
+            client.postMessage({
+              type: 'NOTIFICATION_CLICK',
+              url: targetUrl,
+              data: event.notification.data,
+            });
+            return;
+          }
         }
-      }
-      // No window open — open a new one
-      return self.clients.openWindow(targetUrl);
-    })
+        return self.clients.openWindow(targetUrl);
+      }),
+    ])
   );
 });
 

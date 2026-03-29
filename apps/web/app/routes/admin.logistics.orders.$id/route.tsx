@@ -212,9 +212,9 @@ export default function LogisticsOrderDetailRoute() {
   if (!order) {
     return (
       <div className="card text-center py-12">
-        <p className="text-6xl font-bold text-surface-200 dark:text-surface-700 mb-4">404</p>
-        <h2 className="text-xl font-bold text-surface-900 dark:text-white">Order not found</h2>
-        <p className="mt-2 text-sm text-surface-800 dark:text-surface-200">
+        <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
+        <h2 className="text-xl font-bold text-app-fg">Order not found</h2>
+        <p className="mt-2 text-sm text-app-fg-muted">
           The order you&apos;re looking for doesn&apos;t exist or you don&apos;t have access.
         </p>
         <a href="/admin/logistics/orders" className="btn-primary mt-4 inline-block">

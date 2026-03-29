@@ -6,8 +6,13 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { FileUpload } from '~/components/ui/file-upload';
 import { Tabs } from '~/components/ui/tabs';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useFetcherToast } from '~/components/ui/toast';
-import { formatNaira } from '~/lib/format-amount';
+import { PageHeader } from '~/components/ui/page-header';
+import { NairaPrice } from '~/components/ui/naira-price';
+import { EmptyState } from '~/components/ui/empty-state';
+import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
 import { STATUS_DOT_CLASS, STATUS_LABELS } from '~/features/shared/order-status';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
@@ -222,20 +227,20 @@ function StatusPipeline({ status, order }: { status: string; order: OrderDetail 
           const ts = getStatusTimestamp(order, step);
           const label = STATUS_LABELS[step] ?? step;
 
-          let dotClass = 'bg-surface-300 dark:bg-surface-600';
-          let lineClass = 'bg-surface-200 dark:bg-surface-700';
-          let textClass = 'text-surface-400 dark:text-surface-500';
+          let dotClass = 'bg-app-border';
+          let lineClass = 'bg-app-hover';
+          let textClass = 'text-app-fg-muted';
 
           if (isPast) {
             dotClass = 'bg-emerald-500';
             lineClass = 'bg-emerald-400 dark:bg-emerald-600';
-            textClass = 'text-surface-700 dark:text-surface-300';
+            textClass = 'text-app-fg-muted';
           } else if (isCurrent) {
             dotClass = STATUS_DOT_CLASS[status] ?? 'bg-brand-500';
-            textClass = 'text-surface-900 dark:text-white font-semibold';
+            textClass = 'text-app-fg font-semibold';
           } else if (isCurrentTerminal) {
             dotClass = STATUS_DOT_CLASS[status] ?? 'bg-red-500';
-            textClass = 'text-surface-900 dark:text-white font-semibold';
+            textClass = 'text-app-fg font-semibold';
           }
 
           return (
@@ -251,13 +256,13 @@ function StatusPipeline({ status, order }: { status: string; order: OrderDetail 
                   {label}
                 </span>
                 {ts && (isPast || isCurrent) && (
-                  <span className="text-[9px] text-surface-400 dark:text-surface-500 tabular-nums">
+                  <span className="text-[9px] text-app-fg-muted tabular-nums">
                     {formatDateShort(ts)}
                   </span>
                 )}
               </div>
               {i < TPL_PIPELINE.length - 1 && (
-                <div className={`h-0.5 flex-1 mx-1 rounded-full ${isPast ? lineClass : 'bg-surface-200 dark:bg-surface-700'} transition-colors`} />
+                <div className={`h-0.5 flex-1 mx-1 rounded-full ${isPast ? lineClass : 'bg-app-hover'} transition-colors`} />
               )}
             </div>
           );
@@ -268,7 +273,7 @@ function StatusPipeline({ status, order }: { status: string; order: OrderDetail 
       {isTerminal && (
         <div className="mt-2 flex items-center gap-2">
           <OrderStatusBadge status={status} />
-          <span className="text-xs text-surface-500 dark:text-surface-400">
+          <span className="text-xs text-app-fg-muted">
             Order diverted from standard pipeline
           </span>
         </div>
@@ -280,7 +285,7 @@ function StatusPipeline({ status, order }: { status: string; order: OrderDetail 
           {TPL_PIPELINE.map((step, i) => {
             const isPast = i < currentIdx;
             const isCurrent = i === currentIdx;
-            let bg = 'bg-surface-200 dark:bg-surface-700';
+            let bg = 'bg-app-hover';
             if (isPast) bg = 'bg-emerald-500';
             else if (isCurrent) bg = STATUS_DOT_CLASS[status] ?? 'bg-brand-500';
             const label = STATUS_LABELS[step] ?? step;
@@ -288,12 +293,12 @@ function StatusPipeline({ status, order }: { status: string; order: OrderDetail 
               <div key={step} className="flex items-center gap-1 flex-shrink-0">
                 <div className={`w-2 h-2 rounded-full ${bg}`} title={label} />
                 {i < TPL_PIPELINE.length - 1 && (
-                  <div className={`w-3 h-px ${isPast ? 'bg-emerald-400' : 'bg-surface-300 dark:bg-surface-600'}`} />
+                  <div className={`w-3 h-px ${isPast ? 'bg-emerald-400' : 'bg-app-border'}`} />
                 )}
               </div>
             );
           })}
-          <span className="ml-2 text-xs font-medium text-surface-700 dark:text-surface-300">
+          <span className="ml-2 text-xs font-medium text-app-fg-muted">
             {STATUS_LABELS[status] ?? status}
           </span>
         </div>
@@ -314,10 +319,10 @@ function InfoRow({ icon, label, value, valueClass, mono }: {
   if (!value && value !== 0) return null;
   return (
     <div className="flex items-start gap-2.5 py-1.5">
-      {icon && <span className="text-surface-400 dark:text-surface-500 mt-0.5 flex-shrink-0">{icon}</span>}
+      {icon && <span className="text-app-fg-muted mt-0.5 flex-shrink-0">{icon}</span>}
       <div className="min-w-0">
-        <p className="text-[11px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium">{label}</p>
-        <p className={`text-sm ${mono ? 'font-mono' : ''} ${valueClass ?? 'text-surface-900 dark:text-surface-100'}`}>
+        <p className="text-[11px] uppercase tracking-wider text-app-fg-muted font-medium">{label}</p>
+        <p className={`text-sm ${mono ? 'font-mono' : ''} ${valueClass ?? 'text-app-fg'}`}>
           {value}
         </p>
       </div>
@@ -332,7 +337,7 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
 
   if (history.length === 0) {
     return (
-      <p className="text-sm text-surface-500 dark:text-surface-400 text-center py-6">
+      <p className="text-sm text-app-fg-muted text-center py-6">
         No audit history available.
       </p>
     );
@@ -343,7 +348,7 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
   return (
     <div className="relative">
       {/* Vertical line */}
-      <div className="absolute left-3 top-2 bottom-2 w-px bg-surface-200 dark:bg-surface-700" />
+      <div className="absolute left-3 top-2 bottom-2 w-px bg-app-hover" />
 
       <div className="space-y-0">
         {history.map((entry, idx) => {
@@ -359,22 +364,22 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
           return (
             <div key={entry.id} className="relative pl-8 py-2">
               {/* Dot on timeline */}
-              <div className={`absolute left-[7px] top-3.5 w-[10px] h-[10px] rounded-full border-2 border-white dark:border-surface-900 ${
+              <div className={`absolute left-[7px] top-3.5 w-[10px] h-[10px] rounded-full border-2 border-app-elevated ${
                 statusChange
                   ? (STATUS_DOT_CLASS[String(statusChange.newValue)] ?? 'bg-brand-500')
                   : isFirst
                     ? 'bg-emerald-500'
-                    : 'bg-surface-300 dark:bg-surface-600'
+                    : 'bg-app-border'
               }`} />
 
               <button
                 type="button"
                 onClick={() => setExpandedIdx(isExpanded ? null : idx)}
-                className="w-full text-left hover:bg-surface-50 dark:hover:bg-surface-800/50 rounded-lg px-2 py-1 -mx-2 transition-colors"
+                className="w-full text-left hover:bg-app-hover/50 rounded-lg px-2 py-1 -mx-2 transition-colors"
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <span className="text-sm font-medium text-surface-800 dark:text-surface-200">
+                    <span className="text-sm font-medium text-app-fg-muted">
                       {entry.action}
                     </span>
                     {statusChange && (
@@ -383,12 +388,12 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] text-surface-400 dark:text-surface-500 tabular-nums flex-shrink-0">
+                  <span className="text-[11px] text-app-fg-muted tabular-nums flex-shrink-0">
                     {timeAgo(entry.validFrom)}
                   </span>
                 </div>
                 {entry.changedBy && (
-                  <p className="text-[11px] text-surface-400 dark:text-surface-500 mt-0.5">
+                  <p className="text-[11px] text-app-fg-muted mt-0.5">
                     by {entry.changedBy}
                   </p>
                 )}
@@ -396,24 +401,24 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
 
               {/* Expanded diff view */}
               {isExpanded && diffs.length > 0 && (
-                <div className="mt-1.5 ml-2 bg-surface-50 dark:bg-surface-800/50 rounded-lg p-2.5 text-xs space-y-1">
+                <div className="mt-1.5 ml-2 bg-app-hover rounded-lg p-2.5 text-xs space-y-1">
                   {diffs.map((d) => (
                     <div key={d.field} className="flex items-start gap-2">
-                      <span className="font-mono text-surface-500 dark:text-surface-400 min-w-[100px] flex-shrink-0">
+                      <span className="font-mono text-app-fg-muted min-w-[100px] flex-shrink-0">
                         {d.field.replace(/_/g, ' ')}
                       </span>
                       <span className="text-red-500 dark:text-red-400 line-through">{formatValue(d.oldValue)}</span>
-                      <span className="text-surface-400">&rarr;</span>
+                      <span className="text-app-fg-muted">&rarr;</span>
                       <span className="text-emerald-600 dark:text-emerald-400">{formatValue(d.newValue)}</span>
                     </div>
                   ))}
-                  <p className="text-[10px] text-surface-400 dark:text-surface-500 pt-1 border-t border-surface-200 dark:border-surface-700 tabular-nums">
+                  <p className="text-[10px] text-app-fg-muted pt-1 border-t border-app-border tabular-nums">
                     {formatDate(entry.validFrom)}
                   </p>
                 </div>
               )}
               {isExpanded && diffs.length === 0 && isFirst && (
-                <div className="mt-1.5 ml-2 bg-surface-50 dark:bg-surface-800/50 rounded-lg p-2.5 text-xs text-surface-500 dark:text-surface-400">
+                <div className="mt-1.5 ml-2 bg-app-hover rounded-lg p-2.5 text-xs text-app-fg-muted">
                   Initial record creation &mdash; {formatDate(entry.validFrom)}
                 </div>
               )}
@@ -496,67 +501,63 @@ export function LogisticsOrderDetailPage({
 
   return (
     <div className="space-y-4 overflow-x-hidden min-w-0">
-      {/* Breadcrumb */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <Link to={backLink} className="text-surface-800 dark:text-surface-200 hover:text-brand-500">
-          {backLabel}
-        </Link>
-        <svg className="w-4 h-4 text-surface-300 dark:text-surface-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-        <span className="text-surface-900 dark:text-white font-medium truncate min-w-0">{order.id.slice(0, 8)}...</span>
-      </div>
-
-      {/* Header — matches OrderDetailPage / ProductViewPage */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 min-w-0">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-white truncate">
-            {order.customerName}
-          </h1>
-          <p className="text-sm text-surface-800 dark:text-surface-200 font-mono mt-0.5 break-all">
-            {order.id.slice(0, 8)}... &middot; Created {formatDate(order.createdAt)}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <PageRefreshButton />
-          {isOverdue && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-              <ClockIcon /> OVERDUE
-            </span>
-          )}
-          <OrderStatusBadge status={order.status} />
-        </div>
-      </div>
+      <PageHeader
+        title={order.customerName}
+        description={`${order.id.slice(0, 8)}... · Created ${formatDate(order.createdAt)}`}
+        breadcrumb={
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Link to={backLink} className="text-app-fg-muted hover:text-brand-500">
+              {backLabel}
+            </Link>
+            <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+            <span className="text-app-fg font-medium truncate min-w-0">{order.id.slice(0, 8)}...</span>
+          </div>
+        }
+        actions={
+          <>
+            <PageRefreshButton />
+            {isOverdue && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                <ClockIcon /> OVERDUE
+              </span>
+            )}
+            <OrderStatusBadge status={order.status} />
+          </>
+        }
+      />
 
       {/* Status Pipeline */}
       <div className="card p-4">
         <StatusPipeline status={order.status} order={order} />
       </div>
 
-      {/* Quick Stats — matches LogisticsOrdersPage stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Amount</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white tabular-nums mt-1">
-            {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Items</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white tabular-nums mt-1">
-            {totalQty} <span className="text-sm font-normal text-surface-500 dark:text-surface-400">units</span>
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Delivery Fee</p>
-          <p className="text-2xl font-bold text-surface-900 dark:text-white tabular-nums mt-1">
-            {order.deliveryFee ? formatNaira(Number(order.deliveryFee)) : '—'}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-surface-800 dark:text-surface-200 uppercase tracking-wider">Remittance</p>
-          <p className="mt-1">
-            {order.remittanceStatus ? (
+      <OverviewStatStrip
+        items={[
+          {
+            label: 'Amount',
+            value: <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} zeroAsDash />,
+            valueClassName: 'text-app-fg tabular-nums',
+          },
+          {
+            label: 'Items',
+            value: (
+              <>
+                {totalQty} <span className="text-sm font-normal text-app-fg-muted">units</span>
+              </>
+            ),
+            valueClassName: 'text-app-fg tabular-nums',
+          },
+          {
+            label: 'Delivery Fee',
+            value: <NairaPrice amount={order.deliveryFee ? Number(order.deliveryFee) : null} zeroAsDash />,
+            valueClassName: 'text-app-fg tabular-nums',
+          },
+          {
+            label: 'Remittance',
+            plainValue: true,
+            value: order.remittanceStatus ? (
               <span
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
                   order.remittanceStatus === 'RECEIVED'
@@ -578,11 +579,11 @@ export function LogisticsOrderDetailPage({
                 {order.remittanceStatus === 'SENT' ? 'Pending' : order.remittanceStatus === 'RECEIVED' ? 'Received' : order.remittanceStatus}
               </span>
             ) : (
-              <span className="text-sm text-surface-500 dark:text-surface-400">Not remitted</span>
-            )}
-          </p>
-        </div>
-      </div>
+              <span className="text-sm text-app-fg-muted">Not remitted</span>
+            ),
+          },
+        ]}
+      />
 
       {/* Tabs — underline variant to match OrderDetailPage */}
       <Tabs value={activeTab} onChange={setActiveTab} tabs={tabs} />
@@ -596,7 +597,7 @@ export function LogisticsOrderDetailPage({
               <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center">
                 <UserIcon />
               </div>
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Customer</h2>
+              <h2 className="text-lg font-semibold text-app-fg">Customer</h2>
             </div>
             <div className="space-y-0.5">
               <InfoRow icon={<UserIcon />} label="Name" value={order.customerName} />
@@ -627,7 +628,7 @@ export function LogisticsOrderDetailPage({
               <div className="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                 <TruckIcon />
               </div>
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Logistics</h2>
+              <h2 className="text-lg font-semibold text-app-fg">Logistics</h2>
             </div>
             <div className="space-y-0.5">
               {order.logisticsLocationName && (
@@ -657,7 +658,7 @@ export function LogisticsOrderDetailPage({
                   label="Delivery OTP"
                   value={order.deliveryOtp}
                   mono
-                  valueClass="font-bold text-lg text-surface-900 dark:text-white tracking-widest"
+                  valueClass="font-bold text-lg text-app-fg tracking-widest"
                 />
               )}
               {order.deliveryGpsLat && order.deliveryGpsLng && (
@@ -666,24 +667,24 @@ export function LogisticsOrderDetailPage({
                   label="GPS Coordinates"
                   value={`${order.deliveryGpsLat}, ${order.deliveryGpsLng}`}
                   mono
-                  valueClass="text-xs text-surface-500 dark:text-surface-400"
+                  valueClass="text-xs text-app-fg-muted"
                 />
               )}
             </div>
 
             {/* Timestamps grid */}
-            <div className="mt-3 pt-3 border-t border-surface-100 dark:border-surface-800">
+            <div className="mt-3 pt-3 border-t border-app-border">
               <div className="grid grid-cols-2 gap-2">
                 {order.allocatedAt && (
-                  <div className="text-center py-1.5 bg-surface-50 dark:bg-surface-800/50 rounded-lg">
-                    <p className="text-[10px] uppercase tracking-wider text-surface-400 dark:text-surface-500">Allocated</p>
-                    <p className="text-xs font-medium text-surface-700 dark:text-surface-300 tabular-nums">{formatDateShort(order.allocatedAt)}</p>
+                  <div className="text-center py-1.5 bg-app-hover rounded-lg">
+                    <p className="text-[10px] uppercase tracking-wider text-app-fg-muted">Allocated</p>
+                    <p className="text-xs font-medium text-app-fg-muted tabular-nums">{formatDateShort(order.allocatedAt)}</p>
                   </div>
                 )}
                 {order.dispatchedAt && (
-                  <div className="text-center py-1.5 bg-surface-50 dark:bg-surface-800/50 rounded-lg">
-                    <p className="text-[10px] uppercase tracking-wider text-surface-400 dark:text-surface-500">Dispatched</p>
-                    <p className="text-xs font-medium text-surface-700 dark:text-surface-300 tabular-nums">{formatDateShort(order.dispatchedAt)}</p>
+                  <div className="text-center py-1.5 bg-app-hover rounded-lg">
+                    <p className="text-[10px] uppercase tracking-wider text-app-fg-muted">Dispatched</p>
+                    <p className="text-xs font-medium text-app-fg-muted tabular-nums">{formatDateShort(order.dispatchedAt)}</p>
                   </div>
                 )}
                 {order.deliveredAt && (
@@ -693,9 +694,9 @@ export function LogisticsOrderDetailPage({
                   </div>
                 )}
                 {order.confirmedAt && (
-                  <div className="text-center py-1.5 bg-surface-50 dark:bg-surface-800/50 rounded-lg">
-                    <p className="text-[10px] uppercase tracking-wider text-surface-400 dark:text-surface-500">Confirmed</p>
-                    <p className="text-xs font-medium text-surface-700 dark:text-surface-300 tabular-nums">{formatDateShort(order.confirmedAt)}</p>
+                  <div className="text-center py-1.5 bg-app-hover rounded-lg">
+                    <p className="text-[10px] uppercase tracking-wider text-app-fg-muted">Confirmed</p>
+                    <p className="text-xs font-medium text-app-fg-muted tabular-nums">{formatDateShort(order.confirmedAt)}</p>
                   </div>
                 )}
               </div>
@@ -708,7 +709,7 @@ export function LogisticsOrderDetailPage({
               <div className="w-7 h-7 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
                 <BanknotesIcon />
               </div>
-              <h2 className="text-lg font-semibold text-surface-900 dark:text-white">Order Origin</h2>
+              <h2 className="text-lg font-semibold text-app-fg">Order Origin</h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6">
               {order.assignedCsName && (
@@ -738,7 +739,7 @@ export function LogisticsOrderDetailPage({
                 label="Order ID"
                 value={order.id}
                 mono
-                valueClass="text-xs text-surface-400 dark:text-surface-500 break-all"
+                valueClass="text-xs text-app-fg-muted break-all"
               />
             </div>
           </div>
@@ -752,61 +753,61 @@ export function LogisticsOrderDetailPage({
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-surface-100 dark:border-surface-800">
-                    <th className="text-left text-[11px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium px-4 py-2.5">Product</th>
-                    <th className="text-center text-[11px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium px-4 py-2.5">Qty</th>
-                    <th className="text-right text-[11px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium px-4 py-2.5">Unit Price</th>
-                    <th className="text-right text-[11px] uppercase tracking-wider text-surface-400 dark:text-surface-500 font-medium px-4 py-2.5">Subtotal</th>
+                  <tr className="border-b border-app-border">
+                    <th className="text-left text-[11px] uppercase tracking-wider text-app-fg-muted font-medium px-4 py-2.5">Product</th>
+                    <th className="text-center text-[11px] uppercase tracking-wider text-app-fg-muted font-medium px-4 py-2.5">Qty</th>
+                    <th className="text-right text-[11px] uppercase tracking-wider text-app-fg-muted font-medium px-4 py-2.5">Unit Price</th>
+                    <th className="text-right text-[11px] uppercase tracking-wider text-app-fg-muted font-medium px-4 py-2.5">Subtotal</th>
                   </tr>
                 </thead>
                 <tbody>
                   {order.orderItems.map((item, idx) => {
                     const subtotal = Number(item.unitPrice) * item.quantity;
                     return (
-                      <tr key={item.id} className={idx % 2 === 0 ? 'bg-surface-50/50 dark:bg-surface-800/20' : ''}>
+                      <tr key={item.id} className={idx % 2 === 0 ? 'bg-app-hover/50' : ''}>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2.5">
                             <div className="w-8 h-8 rounded-lg bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center flex-shrink-0">
                               <CubeIcon />
                             </div>
                             <div>
-                              <p className="text-sm font-medium text-surface-900 dark:text-surface-100">
+                              <p className="text-sm font-medium text-app-fg">
                                 {item.productName ?? `Product ${item.productId.slice(0, 8)}`}
                               </p>
-                              <p className="text-[10px] text-surface-400 dark:text-surface-500 font-mono">{item.productId.slice(0, 12)}...</p>
+                              <p className="text-[10px] text-app-fg-muted font-mono">{item.productId.slice(0, 12)}...</p>
                             </div>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-surface-100 dark:bg-surface-700 text-sm font-semibold text-surface-900 dark:text-white">
+                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-app-hover text-sm font-semibold text-app-fg">
                             {item.quantity}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right text-sm tabular-nums text-surface-700 dark:text-surface-300">
-                          {formatNaira(Number(item.unitPrice))}
+                        <td className="px-4 py-3 text-right text-sm tabular-nums text-app-fg-muted">
+                          <NairaPrice amount={Number(item.unitPrice)} />
                         </td>
-                        <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-surface-900 dark:text-white">
-                          {formatNaira(subtotal)}
+                        <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-app-fg">
+                          <NairaPrice amount={subtotal} />
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t-2 border-surface-200 dark:border-surface-700">
-                    <td className="px-4 py-3 text-sm font-bold text-surface-900 dark:text-white" colSpan={2}>Total</td>
-                    <td className="px-4 py-3 text-right text-xs text-surface-500 dark:text-surface-400 tabular-nums">
+                  <tr className="border-t-2 border-app-border">
+                    <td className="px-4 py-3 text-sm font-bold text-app-fg" colSpan={2}>Total</td>
+                    <td className="px-4 py-3 text-right text-xs text-app-fg-muted tabular-nums">
                       {totalQty} unit{totalQty !== 1 ? 's' : ''}
                     </td>
                     <td className="px-4 py-3 text-right text-base font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                      {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '---'}
+                      <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} zeroAsDash />
                     </td>
                   </tr>
                   {order.deliveryFee && Number(order.deliveryFee) > 0 && (
-                    <tr className="border-t border-surface-100 dark:border-surface-800">
-                      <td className="px-4 py-2 text-xs text-surface-500 dark:text-surface-400" colSpan={3}>Delivery Fee</td>
-                      <td className="px-4 py-2 text-right text-sm text-surface-700 dark:text-surface-300 tabular-nums">
-                        {formatNaira(Number(order.deliveryFee))}
+                    <tr className="border-t border-app-border">
+                      <td className="px-4 py-2 text-xs text-app-fg-muted" colSpan={3}>Delivery Fee</td>
+                      <td className="px-4 py-2 text-right text-sm text-app-fg-muted tabular-nums">
+                        <NairaPrice amount={Number(order.deliveryFee)} />
                       </td>
                     </tr>
                   )}
@@ -814,9 +815,7 @@ export function LogisticsOrderDetailPage({
               </table>
             </div>
           ) : (
-            <div className="text-center py-8 text-sm text-surface-500 dark:text-surface-400">
-              No items in this order.
-            </div>
+            <EmptyState title="No items" description="No items in this order." variant="inline" />
           )}
         </div>
       )}
@@ -832,20 +831,21 @@ export function LogisticsOrderDetailPage({
                   <MapPinIcon />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Allocate to Location</h3>
-                  <p className="text-[11px] text-surface-500 dark:text-surface-400">Assign this order to a 3PL hub for dispatch</p>
+                  <h3 className="text-sm font-semibold text-app-fg">Allocate to Location</h3>
+                  <p className="text-[11px] text-app-fg-muted">Assign this order to a 3PL hub for dispatch</p>
                 </div>
               </div>
               <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
                 <input type="hidden" name="intent" value="allocate" />
                 <div className="flex-1 min-w-[200px]">
-                  <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Location</label>
-                  <select name="logisticsLocationId" required className="input py-2 w-full" disabled={isSubmitting}>
-                    <option value="">Select location...</option>
-                    {allocatableLocations.map((loc) => (
-                      <option key={loc.id} value={loc.id}>{loc.name}</option>
-                    ))}
-                  </select>
+                  <FormSelect
+                    label="Location"
+                    name="logisticsLocationId"
+                    required
+                    disabled={isSubmitting}
+                    placeholder="Select location..."
+                    options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
+                  />
                 </div>
                 <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={isSubmitting}>
                   Allocate Order
@@ -862,20 +862,21 @@ export function LogisticsOrderDetailPage({
                   <TruckIcon />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Dispatch to Rider</h3>
-                  <p className="text-[11px] text-surface-500 dark:text-surface-400">Assign a rider for pickup and delivery</p>
+                  <h3 className="text-sm font-semibold text-app-fg">Dispatch to Rider</h3>
+                  <p className="text-[11px] text-app-fg-muted">Assign a rider for pickup and delivery</p>
                 </div>
               </div>
               <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
                 <input type="hidden" name="intent" value="dispatch" />
                 <div className="flex-1 min-w-[200px]">
-                  <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Rider</label>
-                  <select name="riderId" required className="input py-2 w-full" disabled={isSubmitting}>
-                    <option value="">{ridersForOrder.length === 0 ? 'No riders at this location' : 'Select rider...'}</option>
-                    {ridersForOrder.map((r) => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
-                  </select>
+                  <FormSelect
+                    label="Rider"
+                    name="riderId"
+                    required
+                    disabled={isSubmitting}
+                    placeholder={ridersForOrder.length === 0 ? 'No riders at this location' : 'Select rider...'}
+                    options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
+                  />
                 </div>
                 <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={isSubmitting || ridersForOrder.length === 0}>
                   Dispatch
@@ -892,8 +893,8 @@ export function LogisticsOrderDetailPage({
                   <TruckIcon />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Mark In Transit</h3>
-                  <p className="text-[11px] text-surface-500 dark:text-surface-400">Confirm rider has departed with order</p>
+                  <h3 className="text-sm font-semibold text-app-fg">Mark In Transit</h3>
+                  <p className="text-[11px] text-app-fg-muted">Confirm rider has departed with order</p>
                 </div>
               </div>
               <fetcher.Form method="post">
@@ -917,8 +918,8 @@ export function LogisticsOrderDetailPage({
                       <CheckCircleIcon />
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Mark Delivered</h3>
-                      <p className="text-[11px] text-surface-500 dark:text-surface-400">Full delivery confirmed by rider</p>
+                      <h3 className="text-sm font-semibold text-app-fg">Mark Delivered</h3>
+                      <p className="text-[11px] text-app-fg-muted">Full delivery confirmed by rider</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">
@@ -927,22 +928,32 @@ export function LogisticsOrderDetailPage({
                     {deliveryProofUrl && <input type="hidden" name="deliveryProofUrl" value={deliveryProofUrl} />}
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <TextInput
+                        label="Additional Delivery Cost"
+                        type="number"
+                        name="deliveryFeeAddOn"
+                        min={0}
+                        step="0.01"
+                        value={deliveryCost}
+                        onChange={(e) => setDeliveryCost(e.target.value)}
+                        placeholder="0"
+                        disabled={isSubmitting}
+                        leftAddon="₦"
+                      />
+                      <TextInput
+                        label="Discount at Delivery"
+                        type="number"
+                        name="deliveryDiscountAmount"
+                        min={0}
+                        step="0.01"
+                        value={deliveryDiscount}
+                        onChange={(e) => setDeliveryDiscount(e.target.value)}
+                        placeholder="0"
+                        disabled={isSubmitting}
+                        leftAddon="₦"
+                      />
                       <div>
-                        <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Additional Delivery Cost</label>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-surface-400">&#8358;</span>
-                          <input type="number" name="deliveryFeeAddOn" min={0} step="0.01" value={deliveryCost} onChange={(e) => setDeliveryCost(e.target.value)} className="input py-2 pl-7 w-full" placeholder="0" disabled={isSubmitting} />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Discount at Delivery</label>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-surface-400">&#8358;</span>
-                          <input type="number" name="deliveryDiscountAmount" min={0} step="0.01" value={deliveryDiscount} onChange={(e) => setDeliveryDiscount(e.target.value)} className="input py-2 pl-7 w-full" placeholder="0" disabled={isSubmitting} />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Proof Screenshot</label>
+                        <label className="block text-xs font-medium text-app-fg-muted mb-1">Proof Screenshot</label>
                         <FileUpload folder={S3_FOLDERS.DELIVERY_PROOF} onUpload={setDeliveryProofUrl} accept="image/*" label={deliveryProofUrl ? 'Uploaded' : 'Upload proof'} />
                       </div>
                     </div>
@@ -964,8 +975,8 @@ export function LogisticsOrderDetailPage({
                       <CubeIcon />
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Partial Delivery</h3>
-                      <p className="text-[11px] text-surface-500 dark:text-surface-400">Only some items delivered, rest returned</p>
+                      <h3 className="text-sm font-semibold text-app-fg">Partial Delivery</h3>
+                      <p className="text-[11px] text-app-fg-muted">Only some items delivered, rest returned</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">
@@ -974,38 +985,59 @@ export function LogisticsOrderDetailPage({
                     {partialDeliveryProofUrl && <input type="hidden" name="deliveryProofUrl" value={partialDeliveryProofUrl} />}
 
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                      <TextInput
+                        label="Delivered Qty"
+                        type="number"
+                        name="deliveredQuantity"
+                        min={0}
+                        required
+                        disabled={isSubmitting}
+                      />
+                      <TextInput
+                        label="Returned Qty"
+                        type="number"
+                        name="returnedQuantity"
+                        min={0}
+                        required
+                        disabled={isSubmitting}
+                      />
+                      <TextInput
+                        label="Extra Cost"
+                        type="number"
+                        name="deliveryFeeAddOn"
+                        min={0}
+                        step="0.01"
+                        value={partialDeliveryCost}
+                        onChange={(e) => setPartialDeliveryCost(e.target.value)}
+                        placeholder="0"
+                        disabled={isSubmitting}
+                        leftAddon="₦"
+                      />
+                      <TextInput
+                        label="Discount"
+                        type="number"
+                        name="deliveryDiscountAmount"
+                        min={0}
+                        step="0.01"
+                        value={partialDeliveryDiscount}
+                        onChange={(e) => setPartialDeliveryDiscount(e.target.value)}
+                        placeholder="0"
+                        disabled={isSubmitting}
+                        leftAddon="₦"
+                      />
                       <div>
-                        <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Delivered Qty</label>
-                        <input type="number" name="deliveredQuantity" min={0} required className="input py-2 w-full" disabled={isSubmitting} />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Returned Qty</label>
-                        <input type="number" name="returnedQuantity" min={0} required className="input py-2 w-full" disabled={isSubmitting} />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Extra Cost</label>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-surface-400">&#8358;</span>
-                          <input type="number" name="deliveryFeeAddOn" min={0} step="0.01" value={partialDeliveryCost} onChange={(e) => setPartialDeliveryCost(e.target.value)} className="input py-2 pl-7 w-full" placeholder="0" disabled={isSubmitting} />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Discount</label>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-surface-400">&#8358;</span>
-                          <input type="number" name="deliveryDiscountAmount" min={0} step="0.01" value={partialDeliveryDiscount} onChange={(e) => setPartialDeliveryDiscount(e.target.value)} className="input py-2 pl-7 w-full" placeholder="0" disabled={isSubmitting} />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Proof</label>
+                        <label className="block text-xs font-medium text-app-fg-muted mb-1">Proof</label>
                         <FileUpload folder={S3_FOLDERS.DELIVERY_PROOF} onUpload={setPartialDeliveryProofUrl} accept="image/*" label={partialDeliveryProofUrl ? 'Uploaded' : 'Upload'} />
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Reason for Partial Delivery</label>
-                      <input type="text" name="reason" className="input py-2 w-full" placeholder="Describe why only partial items were delivered..." disabled={isSubmitting} />
-                    </div>
+                    <TextInput
+                      label="Reason for Partial Delivery"
+                      type="text"
+                      name="reason"
+                      placeholder="Describe why only partial items were delivered..."
+                      disabled={isSubmitting}
+                    />
 
                     <div className="flex justify-end">
                       <Button type="submit" variant="secondary" loading={isSubmitting} disabled={isSubmitting}>
@@ -1026,17 +1058,22 @@ export function LogisticsOrderDetailPage({
                       </svg>
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Mark Returned</h3>
-                      <p className="text-[11px] text-surface-500 dark:text-surface-400">Customer rejected delivery</p>
+                      <h3 className="text-sm font-semibold text-app-fg">Mark Returned</h3>
+                      <p className="text-[11px] text-app-fg-muted">Customer rejected delivery</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="RETURNED" />
-                    <div>
-                      <label className="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Return Reason (required)</label>
-                      <input type="text" name="reason" required minLength={10} className="input py-2 w-full" placeholder="Describe return reason — minimum 10 characters" disabled={isSubmitting} />
-                    </div>
+                    <TextInput
+                      label="Return Reason (required)"
+                      type="text"
+                      name="reason"
+                      required
+                      minLength={10}
+                      placeholder="Describe return reason — minimum 10 characters"
+                      disabled={isSubmitting}
+                    />
                     <div className="flex justify-end">
                       <Button type="submit" variant="secondary" loading={isSubmitting} disabled={isSubmitting}>
                         Confirm Return
@@ -1058,8 +1095,8 @@ export function LogisticsOrderDetailPage({
                       <CubeIcon />
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Restock</h3>
-                      <p className="text-[11px] text-surface-500 dark:text-surface-400">Item sellable — return to local stock</p>
+                      <h3 className="text-sm font-semibold text-app-fg">Restock</h3>
+                      <p className="text-[11px] text-app-fg-muted">Item sellable — return to local stock</p>
                     </div>
                   </div>
                   <fetcher.Form method="post">
@@ -1080,14 +1117,21 @@ export function LogisticsOrderDetailPage({
                       </svg>
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-surface-900 dark:text-white">Write Off</h3>
-                      <p className="text-[11px] text-surface-500 dark:text-surface-400">Item damaged — log as operational loss</p>
+                      <h3 className="text-sm font-semibold text-app-fg">Write Off</h3>
+                      <p className="text-[11px] text-app-fg-muted">Item damaged — log as operational loss</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">
                     <input type="hidden" name="intent" value="transition" />
                     <input type="hidden" name="newStatus" value="WRITTEN_OFF" />
-                    <input type="text" name="reason" required minLength={10} className="input py-2 w-full" placeholder="Damage description (min 10 chars)" disabled={isSubmitting} />
+                    <TextInput
+                      type="text"
+                      name="reason"
+                      required
+                      minLength={10}
+                      placeholder="Damage description (min 10 chars)"
+                      disabled={isSubmitting}
+                    />
                     <Button type="submit" variant="secondary" size="sm" loading={isSubmitting} disabled={isSubmitting}>
                       Write Off
                     </Button>
@@ -1099,9 +1143,13 @@ export function LogisticsOrderDetailPage({
 
           {/* No actions available */}
           {!hasAction && (
-            <div className="card p-6 text-center">
-              <CheckCircleIcon className="w-8 h-8 mx-auto text-surface-300 dark:text-surface-600 mb-2" />
-              <p className="text-sm text-surface-500 dark:text-surface-400">No actions available for this order status.</p>
+            <div className="card p-6">
+              <EmptyState
+                icon={<CheckCircleIcon className="w-6 h-6" />}
+                title="No actions available"
+                description="No actions available for this order status."
+                variant="inline"
+              />
             </div>
           )}
         </div>
@@ -1110,7 +1158,7 @@ export function LogisticsOrderDetailPage({
       {/* ── TAB: History ────────────────────────────────────────── */}
       {activeTab === 'history' && (
         <div className="card p-4">
-          <h2 className="text-lg font-semibold text-surface-900 dark:text-white mb-4">Audit Trail</h2>
+          <h2 className="text-lg font-semibold text-app-fg mb-4">Audit Trail</h2>
           <DeferredSection resolve={history} skeleton="list">
             {(rows) => <HistoryTimeline history={rows} />}
           </DeferredSection>

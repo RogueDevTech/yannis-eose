@@ -25,7 +25,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
   const formsPromise = apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${listInputStr}`, { method: 'GET', cookie });
-  const productsPromise = apiRequest<unknown>('/trpc/products.list?input=%7B%22limit%22%3A20%7D', { method: 'GET', cookie });
+  const productsListInput = {
+    page: 1,
+    limit: 100,
+    status: 'ACTIVE' as const,
+    sortBy: 'name' as const,
+    sortOrder: 'asc' as const,
+  };
+  const productsInputStr = encodeURIComponent(JSON.stringify(productsListInput));
+  const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie });
 
   const formsRes = await formsPromise;
 
@@ -33,19 +41,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const resultData = formsRes.ok ? (formsRes.data as { result?: { data?: { campaigns: Campaign[]; pagination: { total: number } } } })?.result?.data : null;
   const formsData = resultData ?? null;
 
-  const products = await productsPromise
-    .then((productsRes) => {
-      const productsData = productsRes.ok
-        ? (productsRes.data as { result?: { data?: { products: Product[] } } })?.result?.data
-        : null;
-      return productsData?.products ?? [];
-    })
-    .catch(() => [] as Product[]);
+  let products: Product[] = [];
+  let productsLoadError: string | null = null;
+  try {
+    const productsRes = await productsPromise;
+    if (productsRes.ok) {
+      const productsData = (productsRes.data as { result?: { data?: { products: Product[] } } })?.result?.data;
+      products = productsData?.products ?? [];
+    } else {
+      console.error('[admin.marketing.forms] products.list failed', productsRes.status, productsRes.data);
+      productsLoadError = 'Could not load products. Try refreshing the page.';
+    }
+  } catch (err) {
+    console.error('[admin.marketing.forms] products.list error', err);
+    productsLoadError = 'Could not load products. Try refreshing the page.';
+  }
 
   return {
     forms: formsData?.campaigns ?? [],
     totalForms: formsData?.pagination?.total ?? 0,
     products,
+    productsLoadError,
     isMediaBuyer,
     showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN',
     currentUserId: user.id,
@@ -161,6 +177,7 @@ export default function FormsRoute() {
       forms={data.forms}
       totalForms={data.totalForms}
       products={data.products}
+      productsLoadError={data.productsLoadError}
       isMediaBuyer={data.isMediaBuyer}
       showMediaBuyerColumn={data.showMediaBuyerColumn}
       currentUserName={data.currentUserName}

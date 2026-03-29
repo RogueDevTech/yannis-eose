@@ -10,17 +10,19 @@ import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Spinner } from '~/components/ui/spinner';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { exportToCsv } from '~/lib/csv-export';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { formatRole } from '~/features/users/types';
+import { PageHeader } from '~/components/ui/page-header';
+import { NairaPrice } from '~/components/ui/naira-price';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { Pagination } from '~/components/ui/pagination';
+import { Textarea } from '~/components/ui/textarea';
+import { FormSelect } from '~/components/ui/form-select';
 
 const STATUS_OPTIONS = ['ALL', 'SENT', 'COMPLETED', 'DISPUTED'] as const;
-
-const STATUS_COLORS: Record<string, string> = {
-  SENT: 'badge-warning',
-  COMPLETED: 'badge-success',
-  DISPUTED: 'badge-danger',
-};
 
 const STATUS_LABELS: Record<string, string> = {
   ALL: 'All',
@@ -29,11 +31,6 @@ const STATUS_LABELS: Record<string, string> = {
   DISPUTED: 'Disputed',
 };
 
-const REQUEST_STATUS_COLORS: Record<string, string> = {
-  PENDING: 'badge-warning',
-  APPROVED: 'badge-success',
-  REJECTED: 'badge-danger',
-};
 
 export interface DisbursementRecord {
   id: string;
@@ -120,9 +117,9 @@ function ReceiptModal({
   return (
     <Modal open onClose={onClose} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Disbursement receipt</h3>
-          <button type="button" onClick={onClose} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+        <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+          <h3 className="text-lg font-semibold text-app-fg">Disbursement receipt</h3>
+          <button type="button" onClick={onClose} className="text-app-fg-muted hover:text-app-fg">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -135,19 +132,19 @@ function ReceiptModal({
           <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
             <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Disbursement amount</p>
             <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-              &#8358;{Number(amount).toLocaleString()}
+              <NairaPrice value={Number(amount)} />
             </p>
             <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
               <span>{senderName} &rarr; {receiverName}</span>
               <span>&middot;</span>
               <span>{new Date(sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
               <span>&middot;</span>
-              <span className={STATUS_COLORS[status] ?? 'badge'}>{STATUS_LABELS[status] ?? status}</span>
+              <StatusBadge status={status} />
             </div>
           </div>
 
           {/* Receipt image */}
-          <div className="rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50">
+          <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover">
             <img
               src={receiptUrl}
               alt="Payment receipt"
@@ -162,13 +159,13 @@ function ReceiptModal({
               <svg className="w-5 h-5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
               </svg>
-              <span className="text-sm text-surface-500 dark:text-surface-400">Receipt is not an image file</span>
+              <span className="text-sm text-app-fg-muted">Receipt is not an image file</span>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-200 dark:border-surface-700 shrink-0 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center justify-end gap-2 pt-3 border-t border-app-border shrink-0 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <a
             href={receiptUrl}
             target="_blank"
@@ -212,13 +209,13 @@ function CreateDisbursementModal({
   return (
     <Modal open onClose={onClose} maxWidth="max-w-md" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">New disbursement</h3>
+        <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+          <h3 className="text-lg font-semibold text-app-fg">New disbursement</h3>
           <button
             type="button"
             onClick={onClose}
             disabled={fetcher.state === 'submitting'}
-            className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300"
+            className="text-app-fg-muted hover:text-app-fg"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -230,24 +227,24 @@ function CreateDisbursementModal({
         <fetcher.Form method="post" className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <input type="hidden" name="intent" value="createFunding" />
 
-          <div>
-            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Recipient</label>
-            <select name="receiverId" required className="input w-full" defaultValue={preselectedReceiverId ?? ''}>
-              <option value="">Select recipient...</option>
-              {recipients.map((u) => {
-                const bal = recipientBalances.find((b) => b.userId === u.id);
-                const balanceLabel = bal != null ? ` — Balance: ${formatNaira(Number(bal.balance))}` : '';
-                return (
-                  <option key={u.id} value={u.id}>
-                    {u.name}{u.role ? ` (${formatRole(u.role)})` : ''}{balanceLabel}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
+          <FormSelect
+            label="Recipient"
+            name="receiverId"
+            required
+            defaultValue={preselectedReceiverId ?? ''}
+            placeholder="Select recipient..."
+            options={recipients.map((u) => {
+              const bal = recipientBalances.find((b) => b.userId === u.id);
+              const balanceLabel = bal != null ? ` — Balance: ${formatNaira(Number(bal.balance))}` : '';
+              return {
+                value: u.id,
+                label: `${u.name}${u.role ? ` (${formatRole(u.role)})` : ''}${balanceLabel}`,
+              };
+            })}
+          />
 
           <div>
-            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Amount (&#8358;)</label>
+            <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
             <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input w-full" />
           </div>
 
@@ -267,7 +264,7 @@ function CreateDisbursementModal({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface-200 dark:border-surface-700">
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
             <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={fetcher.state === 'submitting'}>
               Cancel
             </Button>
@@ -351,19 +348,6 @@ export function DisbursementsPage({
   const selectedStatus = optimisticStatus;
   const selectedReceiver = optimisticReceiver;
 
-  const buildQueryString = (overrides: Record<string, string | undefined>) => {
-    const params = new URLSearchParams(searchParams);
-    for (const [key, val] of Object.entries(overrides)) {
-      if (val === undefined || val === '' || val === 'ALL') {
-        params.delete(key);
-      } else {
-        params.set(key, val);
-      }
-    }
-    const qs = params.toString();
-    return qs ? `?${qs}` : '?';
-  };
-
   const handleStatusChange = (status: string) => {
     setOptimisticStatus(status);
     setSearchParams((p) => {
@@ -422,35 +406,33 @@ export function DisbursementsPage({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-white">Disbursements</h1>
-          <p className="text-sm text-surface-600 dark:text-surface-400 mt-0.5">
-            Send funds to Head of Marketing. HoM distributes to Media Buyers from Marketing &rarr; Funding.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          <DateFilterBar
-            startDate={filters.startDate}
-            endDate={filters.endDate}
-            periodAllTime={filters.periodAllTime}
-          />
-          <Button variant="secondary" size="sm" onClick={handleExportCsv}>
-            Export CSV
-          </Button>
-          {canCreate && (
-            <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-              + New disbursement
+      <PageHeader
+        title="Disbursements"
+        description="Send funds to Head of Marketing. HoM distributes to Media Buyers from Marketing → Funding."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <PageRefreshButton />
+            <DateFilterBar
+              startDate={filters.startDate}
+              endDate={filters.endDate}
+              periodAllTime={filters.periodAllTime}
+            />
+            <Button variant="secondary" size="sm" onClick={handleExportCsv}>
+              Export CSV
             </Button>
-          )}
-          {isFilterLoading && (
-            <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
-        </div>
-      </div>
+            {canCreate && (
+              <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
+                + New disbursement
+              </Button>
+            )}
+            {isFilterLoading && (
+              <span className="flex items-center text-app-fg-muted" aria-hidden>
+                <Spinner size="sm" className="shrink-0" />
+              </span>
+            )}
+          </div>
+        }
+      />
 
       {/* Create disbursement modal */}
       <CreateDisbursementModal
@@ -475,35 +457,24 @@ export function DisbursementsPage({
         />
       )}
 
-      {/* Summary stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card">
-          <p className="text-xs font-medium text-surface-600 dark:text-surface-400 uppercase tracking-wider">Total disbursed</p>
-          <p className="text-xl font-bold text-surface-900 dark:text-white mt-1">{formatNaira(totalAllAmt)}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-warning-600 dark:text-warning-400 uppercase tracking-wider">Pending</p>
-          <p className="text-xl font-bold text-warning-600 dark:text-warning-400 mt-1">{formatNaira(totalSentAmt)}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-success-600 dark:text-success-400 uppercase tracking-wider">Received</p>
-          <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">{formatNaira(totalReceivedAmt)}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs font-medium text-danger-600 dark:text-danger-400 uppercase tracking-wider">Disputed</p>
-          <p className="text-xl font-bold text-danger-600 dark:text-danger-400 mt-1">{formatNaira(totalDisputedAmt)}</p>
-        </div>
-      </div>
+      <OverviewStatStrip
+        items={[
+          { label: 'Total disbursed', value: formatNaira(totalAllAmt), valueClassName: 'text-app-fg tabular-nums' },
+          { label: 'Pending', value: formatNaira(totalSentAmt), valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums' },
+          { label: 'Received', value: formatNaira(totalReceivedAmt), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
+          { label: 'Disputed', value: formatNaira(totalDisputedAmt), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
+        ]}
+      />
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-surface-200 dark:border-surface-700">
+      <div className="flex gap-1 border-b border-app-border">
         <button
           type="button"
           onClick={() => setActiveTab('disbursements')}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'disbursements'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-300'
+              : 'border-transparent text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg'
           }`}
         >
           Disbursements
@@ -515,7 +486,7 @@ export function DisbursementsPage({
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'balances'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-300'
+              : 'border-transparent text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg'
           }`}
         >
           Recipient balances
@@ -527,7 +498,7 @@ export function DisbursementsPage({
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'requests'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-300'
+              : 'border-transparent text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg'
           }`}
         >
           Requests
@@ -551,7 +522,7 @@ export function DisbursementsPage({
                     className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
                       selectedStatus === s
                         ? 'bg-brand-600 text-white border-brand-600'
-                        : 'bg-white dark:bg-surface-800 text-surface-600 dark:text-surface-400 border-surface-200 dark:border-surface-700 hover:border-surface-400 dark:hover:border-surface-500'
+                        : 'bg-app-elevated text-app-fg-muted border-app-border hover:border-app-border-strong'
                     }`}
                   >
                     {STATUS_LABELS[s]}
@@ -573,7 +544,7 @@ export function DisbursementsPage({
               </select>
 
               {isFilterLoading && (
-                <span className="flex items-center text-surface-500 dark:text-surface-400" aria-hidden>
+                <span className="flex items-center text-app-fg-muted" aria-hidden>
                   <Spinner size="sm" className="shrink-0" />
                 </span>
               )}
@@ -600,7 +571,7 @@ export function DisbursementsPage({
                 <tbody>
                   {funding.map((f) => (
                     <tr key={f.id} className="table-row">
-                      <td className="table-cell text-sm text-surface-800 dark:text-surface-200">
+                      <td className="table-cell text-sm text-app-fg-muted">
                         {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </td>
                       <td className="table-cell text-sm">
@@ -613,16 +584,16 @@ export function DisbursementsPage({
                           {getName(f.receiverId)}
                         </Link>
                       </td>
-                      <td className="table-cell text-right font-medium text-surface-900 dark:text-white">
-                        &#8358;{Number(f.amount).toLocaleString()}
+                      <td className="table-cell text-right font-medium text-app-fg">
+                        <NairaPrice value={Number(f.amount)} />
                       </td>
                       <td className="table-cell">
-                        <span className={STATUS_COLORS[f.status] ?? 'badge'}>{STATUS_LABELS[f.status] ?? f.status}</span>
+                        <StatusBadge status={f.status} />
                       </td>
-                      <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                      <td className="table-cell text-sm text-app-fg-muted">
                         {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </td>
-                      <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                      <td className="table-cell text-sm text-app-fg-muted">
                         {f.verifiedAt
                           ? new Date(f.verifiedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
                           : '—'}
@@ -655,22 +626,22 @@ export function DisbursementsPage({
             {/* Mobile cards */}
             <div className="md:hidden space-y-3 px-1">
               {funding.map((f) => (
-                <div key={f.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                <div key={f.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-surface-800 dark:text-surface-200">
+                    <span className="text-sm font-medium text-app-fg-muted">
                       {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
-                    <span className={STATUS_COLORS[f.status] ?? 'badge'}>{STATUS_LABELS[f.status] ?? f.status}</span>
+                    <StatusBadge status={f.status} />
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm text-surface-700 dark:text-surface-300">
+                    <div className="text-sm text-app-fg-muted">
                       {getName(f.senderId)} &rarr; {getName(f.receiverId)}
                     </div>
-                    <span className="font-medium text-surface-900 dark:text-white">
-                      &#8358;{Number(f.amount).toLocaleString()}
+                    <span className="font-medium text-app-fg">
+                      <NairaPrice value={Number(f.amount)} />
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-xs text-surface-500 dark:text-surface-400">
+                  <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                     <span>{new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                     {f.receiptUrl ? (
                       <Button
@@ -688,48 +659,20 @@ export function DisbursementsPage({
             </div>
 
             {funding.length === 0 && (
-              <div className="px-4 py-12 text-center text-surface-500 dark:text-surface-400">
-                <svg className="w-10 h-10 mx-auto mb-3 text-surface-300 dark:text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
-                </svg>
-                <p className="text-sm font-medium">No disbursements found</p>
-                <p className="text-xs mt-1">
-                  {selectedStatus !== 'ALL' || selectedReceiver !== 'ALL'
+              <EmptyState
+                title="No disbursements found"
+                description={
+                  selectedStatus !== 'ALL' || selectedReceiver !== 'ALL'
                     ? 'Try adjusting your filters'
-                    : 'Create your first disbursement to get started'}
-                </p>
-              </div>
+                    : 'Create your first disbursement to get started'
+                }
+              />
             )}
           </div>
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <p className="text-sm text-surface-600 dark:text-surface-400">
-                Showing {(page - 1) * 20 + 1}&ndash;{Math.min(page * 20, totalFunding)} of {totalFunding} disbursements
-              </p>
-              <div className="flex items-center gap-2">
-                <Link
-                  to={page > 1 ? buildQueryString({ page: String(page - 1) }) : '#'}
-                  prefetch="intent"
-                  className={`btn-secondary btn-sm ${page <= 1 ? 'pointer-events-none opacity-50' : ''}`}
-                  aria-disabled={page <= 1}
-                >
-                  Previous
-                </Link>
-                <span className="text-sm text-surface-600 dark:text-surface-400 px-2">
-                  Page {page} of {totalPages}
-                </span>
-                <Link
-                  to={page < totalPages ? buildQueryString({ page: String(page + 1) }) : '#'}
-                  prefetch="intent"
-                  className={`btn-secondary btn-sm ${page >= totalPages ? 'pointer-events-none opacity-50' : ''}`}
-                  aria-disabled={page >= totalPages}
-                >
-                  Next
-                </Link>
-              </div>
-            </div>
+            <Pagination page={page} totalPages={totalPages} pageParam="page" />
           )}
         </>
       )}
@@ -737,9 +680,9 @@ export function DisbursementsPage({
       {/* Balances tab */}
       {activeTab === 'balances' && (
         <div className="card p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-            <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Recipient balances</h2>
-            <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">
+          <div className="px-4 py-3 border-b border-app-border">
+            <h2 className="text-sm font-semibold text-app-fg">Recipient balances</h2>
+            <p className="text-xs text-app-fg-muted mt-0.5">
               Funding received (confirmed) minus approved ad spend
             </p>
           </div>
@@ -767,14 +710,14 @@ export function DisbursementsPage({
                               {b.name}
                             </Link>
                           </td>
-                          <td className="table-cell text-sm text-surface-600 dark:text-surface-400">
+                          <td className="table-cell text-sm text-app-fg-muted">
                             {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}
                           </td>
                           <td className="table-cell text-right text-sm">
-                            &#8358;{Number(b.totalReceived).toLocaleString()}
+                            <NairaPrice value={Number(b.totalReceived)} />
                           </td>
                           <td className="table-cell text-right text-sm">
-                            &#8358;{Number(b.totalSpend).toLocaleString()}
+                            <NairaPrice value={Number(b.totalSpend)} />
                           </td>
                           <td className={`table-cell text-right font-medium ${
                             balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
@@ -814,7 +757,7 @@ export function DisbursementsPage({
                 {recipientBalances.map((b) => {
                   const balance = Number(b.balance);
                   return (
-                    <div key={b.userId} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-3">
+                    <div key={b.userId} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <Link to={`/hr/users/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 font-medium">
                           {b.name}
@@ -825,10 +768,10 @@ export function DisbursementsPage({
                           {formatNaira(balance)}
                         </span>
                       </div>
-                      <div className="text-sm text-surface-800 dark:text-surface-200 space-y-0.5 mb-2">
+                      <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
                         <div>Role: {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}</div>
-                        <div>Received: &#8358;{Number(b.totalReceived).toLocaleString()}</div>
-                        <div>Spent: &#8358;{Number(b.totalSpend).toLocaleString()}</div>
+                        <div>Received: <NairaPrice value={Number(b.totalReceived)} /></div>
+                        <div>Spent: <NairaPrice value={Number(b.totalSpend)} /></div>
                       </div>
                       {b.role === 'HEAD_OF_MARKETING' && (
                         <Button
@@ -855,9 +798,7 @@ export function DisbursementsPage({
               </div>
             </>
           ) : (
-            <div className="px-4 py-12 text-center text-surface-500 dark:text-surface-400">
-              <p className="text-sm">No recipient balances available</p>
-            </div>
+            <EmptyState title="No recipient balances available" />
           )}
         </div>
       )}
@@ -865,9 +806,9 @@ export function DisbursementsPage({
       {/* Requests tab — funding requests from Media Buyers / HoM */}
       {activeTab === 'requests' && (
         <div className="card p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-surface-100 dark:border-surface-800">
-            <h2 className="text-sm font-semibold text-surface-900 dark:text-white">Funding requests</h2>
-            <p className="text-xs text-surface-600 dark:text-surface-400 mt-0.5">
+          <div className="px-4 py-3 border-b border-app-border">
+            <h2 className="text-sm font-semibold text-app-fg">Funding requests</h2>
+            <p className="text-xs text-app-fg-muted mt-0.5">
               Send the money to the requester manually, then approve with a receipt image. They will be notified.
             </p>
           </div>
@@ -895,17 +836,17 @@ export function DisbursementsPage({
                             {r.requesterName ?? getRequesterName(r.requesterId)}
                           </Link>
                         </td>
-                        <td className="table-cell text-right font-medium">&#8358;{Number(r.amount).toLocaleString()}</td>
-                        <td className="table-cell text-surface-800 dark:text-surface-200 text-sm max-w-[200px] truncate" title={r.reason ?? undefined}>
+                        <td className="table-cell text-right font-medium"><NairaPrice value={Number(r.amount)} /></td>
+                        <td className="table-cell text-app-fg-muted text-sm max-w-[200px] truncate" title={r.reason ?? undefined}>
                           {r.reason ?? '—'}
                         </td>
                         <td className="table-cell">
-                          <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
+                          <StatusBadge status={r.status} />
                         </td>
-                        <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                        <td className="table-cell text-app-fg-muted text-sm">
                           {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                         </td>
-                        <td className="table-cell text-surface-800 dark:text-surface-200 text-sm">
+                        <td className="table-cell text-app-fg-muted text-sm">
                           {r.resolvedAt
                             ? new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
                             : '—'}
@@ -960,16 +901,16 @@ export function DisbursementsPage({
               </div>
               <div className="md:hidden space-y-3 px-1">
                 {fundingRequests.map((r) => (
-                  <div key={r.id} className="rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 p-4 space-y-2">
+                  <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
                     <div className="flex justify-between items-center">
-                      <Link to={`/hr/users/${r.requesterId}`} className="font-medium text-surface-900 dark:text-white text-sm">
+                      <Link to={`/hr/users/${r.requesterId}`} className="font-medium text-app-fg text-sm">
                         {r.requesterName ?? getRequesterName(r.requesterId)}
                       </Link>
-                      <span className={REQUEST_STATUS_COLORS[r.status] ?? 'badge'}>{r.status}</span>
+                      <StatusBadge status={r.status} />
                     </div>
-                    <p className="text-sm text-surface-800 dark:text-surface-200">&#8358;{Number(r.amount).toLocaleString()}</p>
-                    {r.reason && <p className="text-sm text-surface-700 dark:text-surface-300">{r.reason}</p>}
-                    <p className="text-xs text-surface-500 dark:text-surface-400">
+                    <p className="text-sm text-app-fg-muted"><NairaPrice value={Number(r.amount)} /></p>
+                    {r.reason && <p className="text-sm text-app-fg-muted">{r.reason}</p>}
+                    <p className="text-xs text-app-fg-muted">
                       {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       {r.resolvedAt &&
                         ` — Resolved ${new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`}
@@ -994,9 +935,7 @@ export function DisbursementsPage({
               </div>
             </>
           ) : (
-            <div className="px-4 py-12 text-center text-surface-500 dark:text-surface-400">
-              <p className="text-sm">No funding requests</p>
-            </div>
+            <EmptyState title="No funding requests" />
           )}
         </div>
       )}
@@ -1004,9 +943,9 @@ export function DisbursementsPage({
       {/* Funding request receipt modal */}
       {requestReceiptModal?.receiptUrl && (
         <Modal open onClose={() => setRequestReceiptModal(null)} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
-          <div className="flex items-center justify-between pb-3 border-b border-surface-200 dark:border-surface-700 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-            <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Funding request receipt</h3>
-            <button type="button" onClick={() => setRequestReceiptModal(null)} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+          <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
+            <h3 className="text-lg font-semibold text-app-fg">Funding request receipt</h3>
+            <button type="button" onClick={() => setRequestReceiptModal(null)} className="text-app-fg-muted hover:text-app-fg">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -1016,17 +955,17 @@ export function DisbursementsPage({
             <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
               <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Amount</p>
               <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-                &#8358;{Number(requestReceiptModal.amount).toLocaleString()}
+                <NairaPrice value={Number(requestReceiptModal.amount)} />
               </p>
               <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
                 <span>{requestReceiptModal.requesterName ?? getRequesterName(requestReceiptModal.requesterId)}</span>
                 <span>&middot;</span>
                 <span>{new Date(requestReceiptModal.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                 <span>&middot;</span>
-                <span className={REQUEST_STATUS_COLORS[requestReceiptModal.status] ?? 'badge'}>{requestReceiptModal.status}</span>
+                <StatusBadge status={requestReceiptModal.status} />
               </div>
             </div>
-            <div className="rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50">
+            <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover">
               <img
                 src={requestReceiptModal.receiptUrl}
                 alt="Funding request receipt"
@@ -1038,11 +977,11 @@ export function DisbursementsPage({
                 }}
               />
               <div className="items-center justify-center gap-2 p-8 hidden">
-                <span className="text-sm text-surface-500 dark:text-surface-400">Receipt image could not be loaded</span>
+                <span className="text-sm text-app-fg-muted">Receipt image could not be loaded</span>
               </div>
             </div>
           </div>
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-200 dark:border-surface-700 shrink-0 px-4 sm:px-5 pb-4">
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-app-border shrink-0 px-4 sm:px-5 pb-4">
             <a
               href={requestReceiptModal.receiptUrl}
               target="_blank"
@@ -1058,9 +997,9 @@ export function DisbursementsPage({
 
       {/* Approve funding request modal */}
       {approvingRequestId && (
-        <Modal open onClose={() => setApprovingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Approve funding request</h3>
-          <p className="text-sm text-surface-800 dark:text-surface-200">
+        <Modal open onClose={() => setApprovingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
+          <h3 className="text-lg font-semibold text-app-fg">Approve funding request</h3>
+          <p className="text-sm text-app-fg-muted">
             Send the money to the requester manually (e.g. bank transfer), then attach the receipt image below. They will be notified and can preview the receipt.
           </p>
           <RequestActionForm method="post" className="space-y-3">
@@ -1087,18 +1026,21 @@ export function DisbursementsPage({
 
       {/* Reject funding request modal */}
       {rejectingRequestId && (
-        <Modal open onClose={() => setRejectingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-white dark:bg-surface-800">
-          <h3 className="text-lg font-semibold text-surface-900 dark:text-white">Reject funding request</h3>
-          <p className="text-sm text-surface-800 dark:text-surface-200">
+        <Modal open onClose={() => setRejectingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
+          <h3 className="text-lg font-semibold text-app-fg">Reject funding request</h3>
+          <p className="text-sm text-app-fg-muted">
             The requester will be notified that their request was not approved.
           </p>
           <RequestActionForm method="post" className="space-y-3">
             <input type="hidden" name="intent" value="rejectFundingRequest" />
             <input type="hidden" name="requestId" value={rejectingRequestId} />
-            <div>
-              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1">Reason (optional)</label>
-              <textarea name="reason" rows={2} maxLength={500} placeholder="Optional note for records..." className="input" />
-            </div>
+            <Textarea
+              label="Reason (optional)"
+              name="reason"
+              rows={2}
+              maxLength={500}
+              placeholder="Optional note for records..."
+            />
             <div className="flex gap-2">
               <Button type="submit" variant="danger" size="sm" loading={requestActionFetcher.state === 'submitting'} loadingText="Rejecting...">
                 Reject

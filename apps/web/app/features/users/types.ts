@@ -109,6 +109,8 @@ export interface UserDetail {
   phone: string | null;
   visibleOrderStatuses: string[] | null;
   restrictProductAccess: boolean;
+  /** Product IDs from user_product_assignments (for edit form + save diff). */
+  assignedProductIds?: string[];
   commissionPlanId: string | null;
   createdAt: string;
   updatedAt: string;

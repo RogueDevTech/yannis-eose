@@ -1,7 +1,7 @@
 /**
- * CSMessagingPanel — unified SMS + WhatsApp communication panel for CS agents.
- * Renders tabs: Call (existing VOIP, passed as children), SMS, WhatsApp.
- * Phone is never revealed to the client — all sends go through the server action.
+ * CSMessagingPanel — Call (optional) + collapsible SMS/WhatsApp for CS agents.
+ * SMS/WhatsApp stays collapsed with zero template/outbox/prepare requests until expanded and a channel is chosen.
+ * Phone is never revealed to the client — sends go through server actions / device handlers as before.
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -37,7 +37,7 @@ interface CSMessagingPanelProps {
   showCallTab?: boolean;
 }
 
-type ActiveTab = 'call' | 'sms' | 'whatsapp';
+type TextChannel = 'sms' | 'whatsapp';
 
 function ChannelIcon({ channel }: { channel: 'sms' | 'whatsapp' | 'call' }) {
   if (channel === 'call') {
@@ -71,7 +71,9 @@ export function CSMessagingPanel({
   callContent,
   showCallTab = true,
 }: CSMessagingPanelProps) {
-  const [activeTab, setActiveTab] = useState<ActiveTab>(showCallTab ? 'call' : 'sms');
+  /** SMS/WhatsApp composer is closed by default — no template/outbox/prepare requests until expanded. */
+  const [textPanelOpen, setTextPanelOpen] = useState(false);
+  const [textChannel, setTextChannel] = useState<TextChannel | null>(null);
   const [messageBody, setMessageBody] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
 
@@ -93,41 +95,50 @@ export function CSMessagingPanel({
   const [pendingWhatsappLogBody, setPendingWhatsappLogBody] = useState('');
   const [preparedWhatsappPhone, setPreparedWhatsappPhone] = useState<string | null>(null);
 
-  // Load templates for the currently selected messaging channel.
-  // Important: reload when tab changes so WhatsApp does not reuse SMS-only results.
+  const closeTextPanel = () => {
+    setTextPanelOpen(false);
+    setTextChannel(null);
+    setMessageBody('');
+    setSelectedTemplateId('');
+  };
+
+  // Load templates only after user opens the panel and picks SMS or WhatsApp.
   useEffect(() => {
-    if (activeTab === 'sms' || activeTab === 'whatsapp') {
-      templatesFetcher.load(`/admin/api/messaging-templates?channel=${activeTab.toUpperCase()}`);
-    }
-  }, [activeTab]);
+    if (!textPanelOpen || !textChannel) return;
+    templatesFetcher.load(`/admin/api/messaging-templates?channel=${textChannel.toUpperCase()}`);
+  }, [textPanelOpen, textChannel]);
 
   useEffect(() => {
-    if (activeTab === 'sms' && !preparedSmsPhone && smsPrepareFetcher.state === 'idle') {
-      smsPrepareFetcher.submit({ intent: 'preparePhoneForSms' }, { method: 'post' });
-    }
-  }, [activeTab, preparedSmsPhone, smsPrepareFetcher]);
+    if (!textPanelOpen || textChannel !== 'sms' || preparedSmsPhone || smsPrepareFetcher.state !== 'idle') return;
+    smsPrepareFetcher.submit({ intent: 'preparePhoneForSms' }, { method: 'post' });
+  }, [textPanelOpen, textChannel, preparedSmsPhone, smsPrepareFetcher]);
 
   useEffect(() => {
-    if (activeTab === 'whatsapp' && !preparedWhatsappPhone && whatsappPrepareFetcher.state === 'idle') {
-      whatsappPrepareFetcher.submit({ intent: 'preparePhoneForWhatsApp' }, { method: 'post' });
-    }
-  }, [activeTab, preparedWhatsappPhone, whatsappPrepareFetcher]);
+    if (!textPanelOpen || textChannel !== 'whatsapp' || preparedWhatsappPhone || whatsappPrepareFetcher.state !== 'idle') return;
+    whatsappPrepareFetcher.submit({ intent: 'preparePhoneForWhatsApp' }, { method: 'post' });
+  }, [textPanelOpen, textChannel, preparedWhatsappPhone, whatsappPrepareFetcher]);
 
-  // Load outbox when messaging tab is active
+  // Load outbox only when SMS composer is active (same as before).
   useEffect(() => {
-    if (activeTab === 'sms') {
-      outboxFetcher.load(`/admin/api/messaging-outbox?orderId=${orderId}`);
-    }
-  }, [activeTab, orderId]);
+    if (!textPanelOpen || textChannel !== 'sms') return;
+    outboxFetcher.load(`/admin/api/messaging-outbox?orderId=${orderId}`);
+  }, [textPanelOpen, textChannel, orderId]);
 
   // Reset on successful send
   useEffect(() => {
     if (sendFetcher.state === 'idle' && sendFetcher.data?.success) {
       setMessageBody('');
       setSelectedTemplateId('');
-      outboxFetcher.load(`/admin/api/messaging-outbox?orderId=${orderId}`);
+      if (textChannel === 'sms') {
+        outboxFetcher.load(`/admin/api/messaging-outbox?orderId=${orderId}`);
+      }
     }
-  }, [sendFetcher.state, sendFetcher.data]);
+  }, [sendFetcher.state, sendFetcher.data, textChannel, orderId]);
+
+  useEffect(() => {
+    setSelectedTemplateId('');
+    setMessageBody('');
+  }, [textChannel]);
 
   useEffect(() => {
     if (smsPrepareFetcher.state !== 'idle') return;
@@ -245,7 +256,7 @@ export function CSMessagingPanel({
   }, [whatsappFetcher.state, whatsappFetcher.data, pendingWhatsappMessage, orderId, sendFetcher]);
 
   const channelTemplates = (templatesFetcher.data?.templates ?? []).filter(
-    (t) => t.channel === activeTab.toUpperCase()
+    (t) => textChannel !== null && t.channel === textChannel.toUpperCase()
   );
   const selectedTemplate = channelTemplates.find((t) => t.id === selectedTemplateId);
   const outboxMessages = (outboxFetcher.data?.messages ?? []).filter((msg) => msg.channel === 'SMS');
@@ -261,9 +272,10 @@ export function CSMessagingPanel({
   };
 
   const handleSend = () => {
-    if ((activeTab === 'sms' || activeTab === 'whatsapp') && !messageBody.trim() && !selectedTemplateId) return;
+    if (!textChannel) return;
+    if (!messageBody.trim() && !selectedTemplateId) return;
 
-    if (activeTab === 'sms') {
+    if (textChannel === 'sms') {
       const selected = channelTemplates.find((t) => t.id === selectedTemplateId);
       const composedMessage = selectedTemplateId && selected
         ? renderTemplateWithOrderData(selected.body)
@@ -288,7 +300,7 @@ export function CSMessagingPanel({
       return;
     }
 
-    if (activeTab === 'whatsapp') {
+    if (textChannel === 'whatsapp') {
       const selected = channelTemplates.find((t) => t.id === selectedTemplateId);
       const composedMessage = selectedTemplateId && selected
         ? renderTemplateWithOrderData(selected.body)
@@ -312,72 +324,129 @@ export function CSMessagingPanel({
       );
       return;
     }
-
-    sendFetcher.submit(
-      {
-        intent: 'sendMessage',
-        orderId,
-        channel: activeTab.toUpperCase() as 'SMS' | 'WHATSAPP',
-        ...(selectedTemplateId ? { templateId: selectedTemplateId } : { body: messageBody.trim() }),
-      },
-      { method: 'post', action: '/admin/api/send-message' },
-    );
   };
-
-  const tabs: { id: ActiveTab; label: string }[] = [
-    ...(showCallTab ? [{ id: 'call' as ActiveTab, label: 'Call' }] : []),
-    { id: 'sms', label: 'SMS' },
-    { id: 'whatsapp', label: 'WhatsApp' },
-  ];
 
   return (
     <>
     <div className="card">
-      <h2 className="text-sm font-semibold text-surface-900 dark:text-white mb-3">Customer Communication</h2>
+      <h2 className="text-sm font-semibold text-app-fg mb-3">Customer Communication</h2>
 
-      {/* Tab bar */}
-      <div className="flex border-b border-surface-200 dark:border-surface-700 mb-4 -mx-1">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors duration-150 ${
-              activeTab === tab.id
-                ? 'border-primary-600 text-primary-700 dark:text-primary-400'
-                : 'border-transparent text-surface-600 dark:text-surface-400 hover:text-surface-900 dark:hover:text-white'
-            }`}
-          >
-            <ChannelIcon channel={tab.id === 'whatsapp' ? 'whatsapp' : tab.id === 'sms' ? 'sms' : 'call'} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      {activeTab === 'call' && (
-        <div>
+      {showCallTab && (
+        <div className="mb-4 pb-4 border-b border-app-border">
           {callContent ?? (
-            <p className="text-sm text-surface-500 dark:text-surface-400">
+            <p className="text-sm text-app-fg-muted">
               VOIP call panel will appear here when the order is in CS Engaged status.
             </p>
           )}
         </div>
       )}
 
-      {(activeTab === 'sms' || activeTab === 'whatsapp') && (
-        <div className="space-y-3">
+      {/* SMS/WhatsApp: collapsed until expanded; no network calls until a channel is chosen */}
+      <div className="rounded-lg border border-app-border overflow-hidden">
+        <button
+          type="button"
+          onClick={() => {
+            if (textPanelOpen) {
+              closeTextPanel();
+            } else {
+              setTextPanelOpen(true);
+            }
+          }}
+          aria-expanded={textPanelOpen}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm font-medium text-app-fg bg-app-hover/40 hover:bg-app-hover/70 transition-colors duration-150"
+        >
+          <span className="flex items-center gap-2 min-w-0">
+            <span className="flex items-center gap-1 shrink-0 text-app-fg-muted">
+              <ChannelIcon channel="sms" />
+              <ChannelIcon channel="whatsapp" />
+            </span>
+            <span className="truncate">
+              {textPanelOpen && textChannel
+                ? textChannel === 'whatsapp'
+                  ? 'WhatsApp'
+                  : 'SMS'
+                : 'SMS & WhatsApp'}
+            </span>
+          </span>
+          <svg
+            className={`w-4 h-4 shrink-0 text-app-fg-muted transition-transform duration-200 ${textPanelOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {textPanelOpen && (
+          <div className="p-3 pt-2 space-y-3 border-t border-app-border bg-app-canvas/40">
+            <p className="text-xs text-app-fg-muted">Choose a channel to load templates and compose.</p>
+            <div className="flex rounded-lg border border-app-border p-0.5 bg-app-hover/30">
+              <button
+                type="button"
+                onClick={() => setTextChannel('sms')}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors duration-150 ${
+                  textChannel === 'sms'
+                    ? 'bg-primary-600 text-white shadow-sm'
+                    : 'text-app-fg-muted hover:text-app-fg'
+                }`}
+              >
+                <ChannelIcon channel="sms" />
+                SMS
+              </button>
+              <button
+                type="button"
+                onClick={() => setTextChannel('whatsapp')}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors duration-150 ${
+                  textChannel === 'whatsapp'
+                    ? 'bg-primary-600 text-white shadow-sm'
+                    : 'text-app-fg-muted hover:text-app-fg'
+                }`}
+              >
+                <ChannelIcon channel="whatsapp" />
+                WhatsApp
+              </button>
+            </div>
+
+            {textChannel && (
+        <div className="relative space-y-3 pt-1 min-h-[200px]">
+          {templatesFetcher.state === 'loading' && (
+            <div
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-lg bg-app-canvas/90 dark:bg-app-canvas/92 backdrop-blur-sm border border-app-border/60 shadow-sm"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+              aria-label="Loading message templates"
+            >
+              <svg
+                className="h-9 w-9 shrink-0 animate-spin text-primary-600 dark:text-primary-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+              <p className="text-sm font-medium text-app-fg">Loading templates…</p>
+            </div>
+          )}
           {/* Template picker */}
           {channelTemplates.length > 0 && (
             <div>
-              <label className="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">
                 Use template (optional)
               </label>
               <select
                 value={selectedTemplateId}
                 onChange={(e) => {
                   setSelectedTemplateId(e.target.value);
-                  if (e.target.value && (activeTab === 'sms' || activeTab === 'whatsapp')) {
+                  if (e.target.value) {
                     const tpl = channelTemplates.find((t) => t.id === e.target.value);
                     if (tpl) setMessageBody(renderTemplateWithOrderData(tpl.body));
                   }
@@ -385,14 +454,14 @@ export function CSMessagingPanel({
                 className="input w-full text-sm"
               >
                 <option value="">
-                  {activeTab === 'whatsapp' ? 'No template (freeform WhatsApp)' : 'No template (freeform SMS)'}
+                  {textChannel === 'whatsapp' ? 'No template (freeform WhatsApp)' : 'No template (freeform SMS)'}
                 </option>
                 {channelTemplates.map((tpl) => (
                   <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
                 ))}
               </select>
               {selectedTemplate && (
-                <div className="mt-2 p-2.5 rounded-lg bg-surface-50 dark:bg-surface-800/60 text-xs text-surface-700 dark:text-surface-300 font-mono whitespace-pre-wrap border border-surface-200 dark:border-surface-700">
+                <div className="mt-2 p-2.5 rounded-lg bg-app-hover/60 text-xs text-app-fg-muted font-mono whitespace-pre-wrap border border-app-border">
                   {renderTemplateWithOrderData(selectedTemplate.body)}
                 </div>
               )}
@@ -400,31 +469,28 @@ export function CSMessagingPanel({
           )}
 
           {/* Freeform message body for SMS and WhatsApp */}
-          {(activeTab === 'sms' || activeTab === 'whatsapp') && !selectedTemplateId && (
+          {!selectedTemplateId && (
             <div>
-              <label className="block text-xs font-medium text-surface-700 dark:text-surface-300 mb-1">
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">
                 Message
               </label>
               <textarea
                 value={messageBody}
                 onChange={(e) => setMessageBody(e.target.value)}
                 rows={3}
-                maxLength={activeTab === 'whatsapp' ? 1600 : 160}
-                placeholder={activeTab === 'whatsapp' ? 'Type your WhatsApp message…' : 'Type your SMS message…'}
+                maxLength={textChannel === 'whatsapp' ? 1600 : 160}
+                placeholder={textChannel === 'whatsapp' ? 'Type your WhatsApp message…' : 'Type your SMS message…'}
                 className="input w-full text-sm resize-none"
               />
-              <p className="text-[10px] text-surface-500 mt-0.5 text-right">
-                {messageBody.length}/{activeTab === 'whatsapp' ? 1600 : 160}
+              <p className="text-[10px] text-app-fg-muted mt-0.5 text-right">
+                {messageBody.length}/{textChannel === 'whatsapp' ? 1600 : 160}
               </p>
             </div>
           )}
 
-          {templatesFetcher.state === 'loading' && (
-            <p className="text-xs text-surface-500 dark:text-surface-400 animate-pulse">Loading templates…</p>
-          )}
           {templatesFetcher.state === 'idle' && channelTemplates.length === 0 && (
-            <p className="text-xs text-surface-500 dark:text-surface-400">
-              No {activeTab === 'whatsapp' ? 'WhatsApp' : 'SMS'} templates yet.{' '}
+            <p className="text-xs text-app-fg-muted">
+              No {textChannel === 'whatsapp' ? 'WhatsApp' : 'SMS'} templates yet.{' '}
               <a href="/admin/cs/message-templates" className="text-primary-600 hover:underline">
                 Create one
               </a>
@@ -468,16 +534,16 @@ export function CSMessagingPanel({
               </>
             ) : (
               <>
-                <ChannelIcon channel={activeTab === 'whatsapp' ? 'whatsapp' : 'sms'} />
-                Send {activeTab === 'whatsapp' ? 'WhatsApp' : 'SMS'}
+                <ChannelIcon channel={textChannel === 'whatsapp' ? 'whatsapp' : 'sms'} />
+                Send {textChannel === 'whatsapp' ? 'WhatsApp' : 'SMS'}
               </>
             )}
           </button>
 
           {/* Message history */}
-          {activeTab === 'sms' && outboxMessages.length > 0 && (
+          {textChannel === 'sms' && outboxMessages.length > 0 && (
             <div className="mt-4">
-              <p className="text-xs font-medium text-surface-700 dark:text-surface-300 mb-2">Sent SMS messages</p>
+              <p className="text-xs font-medium text-app-fg-muted mb-2">Sent SMS messages</p>
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {outboxMessages.map((msg) => (
                   <div
@@ -485,7 +551,7 @@ export function CSMessagingPanel({
                     className={`rounded-lg px-3 py-2 text-xs ${
                       msg.status === 'FAILED'
                         ? 'bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800'
-                        : 'bg-surface-50 dark:bg-surface-800/60'
+                        : 'bg-app-hover/60'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
@@ -495,11 +561,11 @@ export function CSMessagingPanel({
                         <ChannelIcon channel={msg.channel === 'WHATSAPP' ? 'whatsapp' : 'sms'} />
                         {msg.channel}
                       </span>
-                      <span className="text-surface-500 dark:text-surface-400">
+                      <span className="text-app-fg-muted">
                         {new Date(msg.sentAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
-                    <p className="text-surface-700 dark:text-surface-300 whitespace-pre-wrap">{msg.renderedBody}</p>
+                    <p className="text-app-fg-muted whitespace-pre-wrap">{msg.renderedBody}</p>
                     {msg.status === 'FAILED' && (
                       <p className="text-danger-600 dark:text-danger-400 mt-1">Send failed</p>
                     )}
@@ -509,7 +575,10 @@ export function CSMessagingPanel({
             </div>
           )}
         </div>
-      )}
+            )}
+          </div>
+        )}
+      </div>
     </div>
     <Modal
       open={confirmSmsModalOpen}
@@ -523,10 +592,10 @@ export function CSMessagingPanel({
       aria-describedby="confirm-sms-desc"
       contentClassName="p-5"
     >
-      <h3 id="confirm-sms-title" className="text-base font-semibold text-surface-900 dark:text-white">
+      <h3 id="confirm-sms-title" className="text-base font-semibold text-app-fg">
         Did you send this SMS message?
       </h3>
-      <p id="confirm-sms-desc" className="mt-2 text-sm text-surface-600 dark:text-surface-300">
+      <p id="confirm-sms-desc" className="mt-2 text-sm text-app-fg-muted">
         Confirm to sync this activity into order history.
       </p>
       <div className="mt-4 flex justify-end gap-2">
@@ -575,10 +644,10 @@ export function CSMessagingPanel({
       aria-describedby="confirm-whatsapp-desc"
       contentClassName="p-5"
     >
-      <h3 id="confirm-whatsapp-title" className="text-base font-semibold text-surface-900 dark:text-white">
+      <h3 id="confirm-whatsapp-title" className="text-base font-semibold text-app-fg">
         Did you send this WhatsApp message?
       </h3>
-      <p id="confirm-whatsapp-desc" className="mt-2 text-sm text-surface-600 dark:text-surface-300">
+      <p id="confirm-whatsapp-desc" className="mt-2 text-sm text-app-fg-muted">
         Confirm to sync this activity into order history.
       </p>
       <div className="mt-4 flex justify-end gap-2">

@@ -26,7 +26,7 @@ export function RouteLoader() {
           />
         </svg>
       </div>
-      <p className="text-sm font-medium text-surface-700 dark:text-surface-200">Loading…</p>
+      <p className="text-sm font-medium text-app-fg-muted">Loading…</p>
     </div>
   );
 }
