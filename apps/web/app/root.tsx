@@ -253,6 +253,10 @@ export default function App() {
                 if (event.data && event.data.type === 'PLAY_NOTIFICATION_SOUND' && typeof window.__playNotificationSound === 'function') {
                   window.__playNotificationSound();
                 }
+                if (event.data && event.data.type === 'PUSH_NOTIFICATION_RECEIVED') {
+                  // Refresh the in-app notification bell so the unread count updates immediately
+                  window.dispatchEvent(new CustomEvent('yannis:push-received', { detail: event.data }));
+                }
               });
             });
           }

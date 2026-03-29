@@ -130,6 +130,32 @@ export function useRealtimeNotifications(): {
     });
   });
 
+  // Also listen for push notifications received via service worker (handles the case where
+  // the socket was disconnected or the tab was in the background when the push arrived).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { title?: string; body?: string; data?: Record<string, unknown> };
+      if (!detail) return;
+      // Inject a synthetic notification entry so the bell count increments.
+      // Uses a stable synthetic id so duplicates are filtered if the socket also fires.
+      const syntheticId = `push-${detail.data?.logId ?? Date.now()}`;
+      const syntheticNotif: RealtimeNotification = {
+        id: syntheticId,
+        type: (detail.data?.type as string) ?? 'system:info',
+        title: detail.title ?? 'New notification',
+        body: detail.body ?? null,
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+      setNotifications((prev) => {
+        if (prev.some((n) => n.id === syntheticId)) return prev;
+        return [syntheticNotif, ...prev];
+      });
+    };
+    window.addEventListener('yannis:push-received', handler);
+    return () => window.removeEventListener('yannis:push-received', handler);
+  }, []);
+
   const removeRealtimeNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   }, []);

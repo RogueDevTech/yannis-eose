@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -8,9 +7,6 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 
-const HIDDEN_AMOUNT = '******';
-
-type NairaFn = (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string;
 
 const KNOWN_ROLES = [
   'SUPER_ADMIN',
@@ -31,11 +27,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
   const firstName = userName?.split(' ')[0] ?? 'User';
   const isKnownRole = role && KNOWN_ROLES.includes(role as (typeof KNOWN_ROLES)[number]);
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
-  const [amountsHidden, setAmountsHidden] = useState(role === 'SUPER_ADMIN');
-
-  /** Format naira or mask when hidden */
-  const naira = (amount: number, opts?: Parameters<typeof formatNaira>[1]) =>
-    amountsHidden ? HIDDEN_AMOUNT : formatNaira(amount, opts);
+  const naira = (amount: number, opts?: Parameters<typeof formatNaira>[1]) => formatNaira(amount, opts);
 
   return (
     <div className="space-y-6">
@@ -51,24 +43,6 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <PageRefreshButton />
-          <button
-            type="button"
-            onClick={() => setAmountsHidden((h) => !h)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-app-border bg-app-elevated px-3 py-2 text-sm font-medium text-app-fg-muted hover:bg-app-hover transition-colors"
-            title={amountsHidden ? 'Show amounts' : 'Hide amounts'}
-          >
-            {amountsHidden ? (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12c1.292 4.338 5.31 7.5 10.066 7.5.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            )}
-            <span className="hidden sm:inline">{amountsHidden ? 'Show' : 'Hide'}</span>
-          </button>
           <DateFilterBar startDate={dateFilters.startDate} endDate={dateFilters.endDate} periodAllTime={dateFilters.periodAllTime ?? false} />
         </div>
       </div>
@@ -77,13 +51,13 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
       {!role && <GenericFallbackDashboard />}
 
       {/* Role-specific dashboard */}
-      {(role === 'SUPER_ADMIN') && <SuperAdminDashboard data={data} naira={naira} hidden={amountsHidden} />}
+      {(role === 'SUPER_ADMIN') && <SuperAdminDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_CS' || role === 'CS_AGENT') && <CSDashboard data={data} role={role} />}
-      {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} naira={naira} hidden={amountsHidden} />}
-      {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} hidden={amountsHidden} />}
+      {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} naira={naira} />}
+      {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
       {(role === 'WAREHOUSE_MANAGER') && <WarehouseDashboard data={data} />}
-      {(role === 'HR_MANAGER') && <HRDashboard data={data} naira={naira} hidden={amountsHidden} />}
+      {(role === 'HR_MANAGER') && <HRDashboard data={data} naira={naira} />}
 
       {/* Unknown role: generic fallback */}
       {role && !isKnownRole && <GenericFallbackDashboard />}
@@ -148,7 +122,7 @@ function GenericFallbackDashboard() {
 
 // ── SuperAdmin Dashboard ─────────────────────────────────
 
-function SuperAdminDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: NairaFn; hidden: boolean }) {
+function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
   const counts = data.orderCounts as Record<string, number>;
   const unprocessed = counts['UNPROCESSED'] ?? 0;
   const confirmed = counts['CONFIRMED'] ?? 0;
@@ -243,7 +217,7 @@ function SuperAdminDashboard({ data, naira, hidden }: { data: DashboardPageData;
       {/* Recent Orders + Quick Actions — immediate */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <RecentOrdersCard orders={data.recentOrders} hidden={hidden} />
+          <RecentOrdersCard orders={data.recentOrders} />
         </div>
         <QuickActionsCard role="SUPER_ADMIN" unprocessed={unprocessed} />
       </div>
@@ -327,7 +301,7 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
 
 // ── Marketing Dashboard ──────────────────────────────────
 
-function MarketingDashboard({ data, role, naira, hidden }: { data: DashboardPageData; role: string; naira: NairaFn; hidden: boolean }) {
+function MarketingDashboard({ data, role, naira }: { data: DashboardPageData; role: string; naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
   return (
     <>
       <DeferredSection resolve={data.metrics} fallback={<OverviewStatStripSkeleton count={5} />}>
@@ -335,6 +309,7 @@ function MarketingDashboard({ data, role, naira, hidden }: { data: DashboardPage
           <OverviewStatStrip
             tileClassName="min-w-[6rem]"
             items={[
+              { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
               { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: 'text-app-fg' },
               {
                 label: 'True ROAS',
@@ -397,8 +372,7 @@ function MarketingDashboard({ data, role, naira, hidden }: { data: DashboardPage
 
 // ── Finance Dashboard ────────────────────────────────────
 
-function FinanceDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: NairaFn; hidden: boolean }) {
-  void hidden;
+function FinanceDashboard({ data, naira }: { data: DashboardPageData; naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
   return (
     <>
       <DeferredSection resolve={data.profit} fallback={<OverviewStatStripSkeleton count={4} />}>
@@ -571,8 +545,7 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
 
 // ── HR Dashboard ─────────────────────────────────────────
 
-function HRDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: NairaFn; hidden: boolean }) {
-  void hidden;
+function HRDashboard({ data, naira }: { data: DashboardPageData; naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
   return (
     <DeferredSection resolve={data.payoutSummary} fallback={<OverviewStatStripSkeleton count={4} />}>
       {(summary) => {
@@ -641,7 +614,7 @@ function HRDashboard({ data, naira, hidden }: { data: DashboardPageData; naira: 
 
 // ── Shared Components ────────────────────────────────────
 
-function RecentOrdersCard({ orders, hidden }: { orders: DashboardData['recentOrders']; hidden?: boolean }) {
+function RecentOrdersCard({ orders }: { orders: DashboardData['recentOrders'] }) {
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-4">
@@ -666,7 +639,7 @@ function RecentOrdersCard({ orders, hidden }: { orders: DashboardData['recentOrd
               <div className="flex items-center gap-3 ml-3">
                 {order.totalAmount && (
                   <span className="text-sm font-medium text-app-fg">
-                    {hidden ? HIDDEN_AMOUNT : formatNaira(Number(order.totalAmount))}
+                    {formatNaira(Number(order.totalAmount))}
                   </span>
                 )}
                 <OrderStatusBadge status={order.status} />
