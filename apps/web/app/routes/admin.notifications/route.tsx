@@ -358,10 +358,10 @@ function hrefForNotificationsTab(tab: NotificationsTabId, sp: URLSearchParams): 
 
 function tabNavLinkClass(isActive: boolean): string {
   return (
-    'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ' +
+    'whitespace-nowrap px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ' +
     (isActive
-      ? 'bg-brand-500/15 text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'
-      : 'text-app-fg-muted hover:bg-app-hover hover:text-app-fg')
+      ? 'border-brand-500 text-brand-700 dark:text-brand-300'
+      : 'border-transparent text-app-fg-muted hover:text-app-fg hover:border-app-border-strong')
   );
 }
 
@@ -440,43 +440,46 @@ export default function AdminNotificationsRoute() {
         </p>
       </div>
 
-      <nav
-        className="sticky top-0 z-10 -mx-1 flex flex-wrap gap-1 border-b border-app-border bg-app-canvas/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-app-canvas/80"
-        aria-label="Notifications sections"
-      >
-        <Link
-          to={hrefForNotificationsTab('feed', searchParams)}
-          className={tabNavLinkClass(displayTab === 'feed')}
-          preventScrollReset
+      <div className="sticky top-0 z-10 -mx-4 lg:-mx-6 border-b border-app-border bg-app-canvas/95 backdrop-blur supports-[backdrop-filter]:bg-app-canvas/80">
+        <nav
+          className="flex min-w-0 gap-0.5 overflow-x-auto px-4 lg:px-6 pt-1 pb-0"
+          aria-label="Notifications sections"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
-          In-app feed
-        </Link>
-        {canPushAdmin && (
-          <>
-            <Link
-              to={hrefForNotificationsTab('broadcast', searchParams)}
-              className={tabNavLinkClass(displayTab === 'broadcast')}
-              preventScrollReset
-            >
-              Broadcast push
-            </Link>
-            <Link
-              to={hrefForNotificationsTab('automations', searchParams)}
-              className={tabNavLinkClass(displayTab === 'automations')}
-              preventScrollReset
-            >
-              Automations
-            </Link>
-          </>
-        )}
-        <Link
-          to={hrefForNotificationsTab('log', searchParams)}
-          className={tabNavLinkClass(displayTab === 'log')}
-          preventScrollReset
-        >
-          Delivery log
-        </Link>
-      </nav>
+          <Link
+            to={hrefForNotificationsTab('feed', searchParams)}
+            className={tabNavLinkClass(displayTab === 'feed') + ' shrink-0'}
+            preventScrollReset
+          >
+            In-app feed
+          </Link>
+          {canPushAdmin && (
+            <>
+              <Link
+                to={hrefForNotificationsTab('broadcast', searchParams)}
+                className={tabNavLinkClass(displayTab === 'broadcast') + ' shrink-0'}
+                preventScrollReset
+              >
+                Broadcast push
+              </Link>
+              <Link
+                to={hrefForNotificationsTab('automations', searchParams)}
+                className={tabNavLinkClass(displayTab === 'automations') + ' shrink-0'}
+                preventScrollReset
+              >
+                Automations
+              </Link>
+            </>
+          )}
+          <Link
+            to={hrefForNotificationsTab('log', searchParams)}
+            className={tabNavLinkClass(displayTab === 'log') + ' shrink-0'}
+            preventScrollReset
+          >
+            Delivery log
+          </Link>
+        </nav>
+      </div>
 
       <div aria-busy={isPendingTabShell}>
         {isPendingTabShell ? (

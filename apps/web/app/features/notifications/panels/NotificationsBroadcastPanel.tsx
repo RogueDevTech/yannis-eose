@@ -506,7 +506,7 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
     (targetType !== 'USER' || targetUser !== null);
 
   const radioPillClass =
-    'flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors border-app-border bg-app-elevated text-app-fg ' +
+    'flex cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors border-app-border bg-app-elevated text-app-fg ' +
     'has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500/10 has-[:checked]:text-brand-700 ' +
     'dark:has-[:checked]:border-brand-400 dark:has-[:checked]:bg-brand-900/30 dark:has-[:checked]:text-brand-300';
 
@@ -562,7 +562,7 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
       )}
 
       <div className="grid gap-6 lg:grid-cols-12 lg:items-start">
-        <div className="space-y-6 lg:col-span-7">
+        <div className="space-y-6 lg:col-span-7 min-w-0">
           <fetcher.Form method="post" className="space-y-6">
             <input type="hidden" name="intent" value="broadcast" />
             {targetType === 'USER' && targetUser && (
@@ -596,7 +596,7 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
 
               <div className="space-y-4 rounded-b-xl px-5 py-4">
                 {/* Target type pills */}
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
                   {(
                     [
                       { value: 'ALL', label: 'Everyone' },
@@ -745,8 +745,8 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
           </fetcher.Form>
         </div>
 
-        {/* ── Preview ── */}
-        <div className="lg:col-span-5">
+        {/* ── Preview — hidden on mobile, visible from lg ── */}
+        <div className="hidden lg:block lg:col-span-5">
           <div className="card overflow-hidden p-0 lg:sticky lg:top-4">
             <div className="border-b border-app-border px-5 py-4">
               <h3 className="text-sm font-semibold text-app-fg">Preview</h3>
