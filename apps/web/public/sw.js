@@ -260,11 +260,18 @@ self.addEventListener('push', (event) => {
         );
       }
 
-      // Notify any open tabs to play the notification sound
+      // Notify any open tabs: play sound + refresh in-app notification bell
       tasks.push(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
           clientList.forEach((client) => {
             client.postMessage({ type: 'PLAY_NOTIFICATION_SOUND' });
+            // Triggers an in-app notification bell refresh so the unread count updates
+            client.postMessage({
+              type: 'PUSH_NOTIFICATION_RECEIVED',
+              title: payload.title,
+              body: payload.body,
+              data: data,
+            });
           });
         })
       );
@@ -279,7 +286,8 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const targetUrl = event.notification.data?.url || '/admin';
+  // Only navigate to a specific deep link — if no url in payload, just focus the app without redirecting
+  const targetUrl = event.notification.data?.url || null;
   const logId = event.notification.data?.logId;
 
   event.waitUntil(
@@ -293,20 +301,23 @@ self.addEventListener('notificationclick', (event) => {
           }).catch(() => {})
         : Promise.resolve(),
 
-      // Open or focus app window at the target route
+      // Open or focus app window — navigate to deep link only if one exists
       self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
         for (const client of clientList) {
           if ('focus' in client) {
             client.focus();
-            client.postMessage({
-              type: 'NOTIFICATION_CLICK',
-              url: targetUrl,
-              data: event.notification.data,
-            });
+            if (targetUrl) {
+              client.postMessage({
+                type: 'NOTIFICATION_CLICK',
+                url: targetUrl,
+                data: event.notification.data,
+              });
+            }
             return;
           }
         }
-        return self.clients.openWindow(targetUrl);
+        // No open tab — open the app at the deep link or home
+        return self.clients.openWindow(targetUrl || '/admin');
       }),
     ])
   );

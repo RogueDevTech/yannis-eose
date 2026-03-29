@@ -2855,7 +2855,168 @@ Task 14.1 (Push Schema)
         ├── Task 14.5 (Broadcast UI)
         ├── Task 14.6 (Automation Rules UI)
         └── Task 14.7 (Delivery Log UI)
+
+Task 15.1 (VOIP Schema Migration)
+  └── Task 15.2 (VoiceService — Termii + AT Failover)
+        ├── Task 15.3 (Outbound Call Integration)
+        ├── Task 15.4 (Inbound Webhook + Call Routing)
+        └── Task 15.5 (New Caller Lead Profile Auto-Creation)
 ```
+
+---
+
+## Phase 15: VOIP Migration — Twilio → Termii + Africa's Talking
+
+> **Goal:** Replace Twilio with a dual-provider Nigerian VoIP system (Termii as primary, Africa's Talking as failover). Reduces per-call cost by 20–79x, eliminates USD exchange rate exposure, and improves answer rates through direct telco interconnects.
+
+> **Context:** Full discovery in project memory `project_voip_migration.md`. Do not start until the owner has accounts on both Termii and Africa's Talking with funded wallets and API keys in hand.
+
+---
+
+### Task 15.1 — Schema Migration 🟡
+`[ ]` Status: Not started
+**Dependencies:** None (additive changes only)
+
+Update `packages/shared/src/db/schema/` to support dual-provider call logging and inbound lead profiles.
+
+**Changes required:**
+
+1. **Extend `call_logs` table** (already exists — add missing columns):
+   - `provider` varchar(50) — `'termii'` | `'africastalking'` | `'mock'`
+   - `direction` varchar(20) — `'inbound'` | `'outbound'`
+   - `cost_ngn` numeric(10,2) — per-second cost in Naira
+   - `from_number` varchar(20) — masked on read for non-Finance/SuperAdmin
+   - `to_number` varchar(20) — masked on read
+   - `failover_used` boolean default false — true if AT was used after Termii failed
+
+2. **Create `lead_profiles` table** (new — for inbound caller identification):
+   - `id` UUIDv7 primary key
+   - `phone_number_hash` varchar — hashed, never raw (same masking rule as orders)
+   - `display_name` varchar(255) — from Truecaller lookup, nullable
+   - `carrier` varchar(50) — MTN / Airtel / Glo / 9Mobile
+   - `location` varchar(100) — city/region from telco metadata
+   - `last_agent_id` uuid references users — last agent who handled this caller
+   - `last_called_at` timestamptz
+   - `created_at` timestamptz
+   - Temporal audit (valid_from, valid_to, modified_by) + history table
+
+3. **Add migration SQL** for both changes (new file `drizzle/0056_voip_migration.sql`)
+
+**Acceptance Criteria:**
+- [ ] `call_logs` has all new columns (migration is additive — no data loss)
+- [ ] `lead_profiles` table exists with temporal audit configured
+- [ ] `call_logs_history` and `lead_profiles_history` tables exist with triggers
+- [ ] Drizzle types regenerated and exported from `packages/shared`
+
+---
+
+### Task 15.2 — VoiceService: Dual-Provider with Failover 🔴
+`[ ]` Status: Not started
+**Dependencies:** Task 15.1, Termii API key, Africa's Talking API key + username
+
+Replace the existing `VoipService` (Twilio) with a new `VoiceService` that implements Termii as primary and Africa's Talking as automatic failover.
+
+**New environment variables** (add to `.env` and `.env.example`):
+```
+TERMII_API_KEY=
+AFRICASTALKING_USERNAME=
+AFRICASTALKING_API_KEY=
+VOICE_MODE=termii   # termii | africastalking | failover | mock
+```
+
+**Remove:**
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_TWIML_APP_SID` from `.env` and `.env.example`
+
+**Implementation:**
+- `apps/api/src/voip/providers/termii.provider.ts` — wraps Termii REST Voice API
+- `apps/api/src/voip/providers/africastalking.provider.ts` — wraps AT Voice SDK
+- `apps/api/src/voip/voice.service.ts` — replaces `voip.service.ts`:
+  - `makeCall(agentId, orderOrPhone)` — tries Termii, falls back to AT on error/timeout (2s)
+  - `releaseCallLock(orderId)` — unchanged logic
+  - `generateToken()` — replaced by provider-specific session/channel token
+  - Billing: calculate `cost_ngn` using per-second rate × duration at call end
+  - Logs every attempt to `call_logs` with `provider` and `failover_used`
+
+**Keep the 3-tier mode pattern:**
+- `VOICE_MODE=mock` → simulate call (20s mock timeline, no real API call) — for dev
+- `VOICE_MODE=termii` → Termii only, no failover
+- `VOICE_MODE=africastalking` → AT only, no failover
+- `VOICE_MODE=failover` → Termii first, AT on failure (production default)
+
+**Acceptance Criteria:**
+- [ ] `makeCall()` succeeds via Termii in normal conditions
+- [ ] `makeCall()` automatically retries via AT when Termii returns non-2xx or times out
+- [ ] `failover_used = true` logged in `call_logs` when AT is used
+- [ ] Mock mode still works for local dev without any API keys
+- [ ] All existing 15-second call gate logic preserved (VOIP call duration > 15s to confirm order)
+- [ ] Existing `voip.router.ts` tRPC procedures updated to call new `VoiceService`
+- [ ] Old Twilio SDK (`twilio` npm package) removed from `apps/api/package.json`
+
+---
+
+### Task 15.3 — Outbound Call Flow 🟡
+`[ ]` Status: Not started
+**Dependencies:** Task 15.2
+
+Wire the new `VoiceService` into the existing CS agent call flow. The UI should require zero changes — the "Call" button already works; only the backend provider changes.
+
+**Changes:**
+- Update `voip.controller.ts` — replace Twilio TwiML responses with Termii/AT equivalents
+- Update `voip.router.ts` — `initiateCall`, `endCall`, `getCallStatus` procedures work with new service
+- Call cost stored in `call_logs.cost_ngn` at call completion (webhook from provider)
+- Provider webhook endpoint: `POST /api/voip/webhook/status` — receives call completion events from Termii/AT, updates `call_logs` with `duration_seconds` and `cost_ngn`
+
+**Acceptance Criteria:**
+- [ ] CS agent clicks Call → call connects via Termii (or AT failover)
+- [ ] Call duration tracked and stored in `call_logs`
+- [ ] Cost in NGN calculated and stored at call end
+- [ ] 15-second gate still blocks Confirm button until call duration confirmed
+
+---
+
+### Task 15.4 — Inbound Call Webhook + Agent Routing 🟡
+`[ ]` Status: Not started
+**Dependencies:** Task 15.2, dedicated virtual number purchased from Africa's Talking
+
+Handle calls coming into the business's virtual number. Route to the correct agent based on order history.
+
+**New endpoint:** `POST /api/voip/webhook/inbound`
+- Public (no session auth) — validate provider IP or HMAC signature
+- Receives: `from` (caller number), `to` (virtual number), `sessionId`
+- Logic:
+  1. Hash the `from` number — look up in `orders` for an assigned agent
+  2. If found → return XML/JSON instruction to dial that agent's browser session
+  3. If not found → round-robin to available CS agents (capacity check via Redis)
+  4. Create/update `lead_profiles` row for the caller
+- Return provider-specific XML/JSON call control response
+
+**Acceptance Criteria:**
+- [ ] Inbound call to virtual number routes to the correct assigned agent
+- [ ] New callers route to the next available agent via round-robin
+- [ ] `lead_profiles` row created/updated on every inbound call
+- [ ] Webhook validates provider signature (rejects unauthorized POSTs)
+
+---
+
+### Task 15.5 — New Caller Lead Profile Auto-Creation 🟢
+`[ ]` Status: Not started
+**Dependencies:** Task 15.4, optional Truecaller API key
+
+When an inbound call comes from an unknown number, enrich the auto-created `lead_profiles` row with caller identity data.
+
+**Implementation:**
+- After hashing the inbound number, fire an async lookup (non-blocking — don't delay call routing):
+  - Call Truecaller API with the phone number
+  - If match found: update `lead_profiles.display_name`, `carrier`, `location`
+  - If no match: leave nullable fields null
+- CS agent's inbound call screen shows: "Incoming: [Name or Unknown] — [Carrier] — [Location]"
+- `TRUECALLER_API_KEY` env variable (optional — skip lookup gracefully if not set)
+
+**Acceptance Criteria:**
+- [ ] Inbound call screen shows enriched caller info when Truecaller returns a match
+- [ ] Call routing is NOT delayed by the lookup (async after routing decision)
+- [ ] Graceful fallback when Truecaller key is absent or lookup fails
+- [ ] `lead_profiles` record visible in order detail when the caller is linked to an order
 
 **Recommended build order:** 10.1 → 8.1 → 9.1 → 9.2 → 9.3 → 8.2 → 8.3 → 8.4 → 9.4 → 9.5 → 9.6 → 11.1 → 11.2 → 11.3 → 11.4 → 12.1 → 12.2 → 12.3 → 12.4 → 13.1 → 13.2 → 13.3 → 14.1 → 14.2 → 14.3 → 14.4 → 14.5 → 14.6 → 14.7
 - **Docs**: Developer Guide, Operational Runbook, 9 Architecture Decision Records

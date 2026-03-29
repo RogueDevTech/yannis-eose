@@ -57,7 +57,6 @@ interface SettingsPageProps {
 
 export type SettingsTabId = 'profile' | 'security' | 'push' | 'system' | 'orgEmails';
 
-const BASE_SETTINGS_TABS: SettingsTabId[] = ['profile', 'security', 'push'];
 
 function ThemeAppearanceOption({
   theme: t,
@@ -208,7 +207,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
   const allowedTabs = useMemo((): SettingsTabId[] => {
-    return isSuperAdmin ? [...BASE_SETTINGS_TABS, 'system', 'orgEmails'] : BASE_SETTINGS_TABS;
+    return isSuperAdmin ? ['profile', 'security', 'push', 'system', 'orgEmails'] : ['profile', 'security', 'push'];
   }, [isSuperAdmin]);
 
   const resolveTab = useCallback(

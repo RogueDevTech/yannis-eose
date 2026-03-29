@@ -327,18 +327,20 @@ export function MarketingFundingPage({
         )}
       </DeferredSection>
 
-      {/* High CPA Alert Banner — deferred because it depends on leaderboard */}
-      <DeferredSection resolve={leaderboard} skeleton="inline">
-        {(lb) => {
-          const highCpaBuyers = lb.filter((b: LeaderboardEntry) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0);
-          return (
-            <HighCpaWarningBanner
-              buyers={highCpaBuyers.map((b: LeaderboardEntry) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
-              threshold={HIGH_CPA_THRESHOLD}
-            />
-          );
-        }}
-      </DeferredSection>
+      {/* High CPA Alert Banner — admin only, not shown to media buyers */}
+      {!isMediaBuyerView && (
+        <DeferredSection resolve={leaderboard} skeleton="inline">
+          {(lb) => {
+            const highCpaBuyers = lb.filter((b: LeaderboardEntry) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0);
+            return (
+              <HighCpaWarningBanner
+                buyers={highCpaBuyers.map((b: LeaderboardEntry) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
+                threshold={HIGH_CPA_THRESHOLD}
+              />
+            );
+          }}
+        </DeferredSection>
+      )}
 
       <>
           {/* Request Funding Modal — Media Buyer or Head of Marketing */}
