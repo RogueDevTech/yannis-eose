@@ -67,7 +67,7 @@ function resolveNotificationsTab(
   if (!NOTIFICATIONS_TAB_IDS.includes(r as NotificationsTabId)) {
     return 'feed';
   }
-  if ((r === 'broadcast' || r === 'automations') && !canPushAdmin) {
+  if ((r === 'broadcast' || r === 'automations' || r === 'log') && !canPushAdmin) {
     return 'feed';
   }
   return r as NotificationsTabId;
@@ -471,13 +471,15 @@ export default function AdminNotificationsRoute() {
               </Link>
             </>
           )}
-          <Link
-            to={hrefForNotificationsTab('log', searchParams)}
-            className={tabNavLinkClass(displayTab === 'log') + ' shrink-0'}
-            preventScrollReset
-          >
-            Delivery log
-          </Link>
+          {canPushAdmin && (
+            <Link
+              to={hrefForNotificationsTab('log', searchParams)}
+              className={tabNavLinkClass(displayTab === 'log') + ' shrink-0'}
+              preventScrollReset
+            >
+              Delivery log
+            </Link>
+          )}
         </nav>
       </div>
 

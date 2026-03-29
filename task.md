@@ -3020,3 +3020,139 @@ When an inbound call comes from an unknown number, enrich the auto-created `lead
 
 **Recommended build order:** 10.1 → 8.1 → 9.1 → 9.2 → 9.3 → 8.2 → 8.3 → 8.4 → 9.4 → 9.5 → 9.6 → 11.1 → 11.2 → 11.3 → 11.4 → 12.1 → 12.2 → 12.3 → 12.4 → 13.1 → 13.2 → 13.3 → 14.1 → 14.2 → 14.3 → 14.4 → 14.5 → 14.6 → 14.7
 - **Docs**: Developer Guide, Operational Runbook, 9 Architecture Decision Records
+---
+
+## Phase 16: Performance & Scalability Hardening
+
+> **Goal:** Sustain 2,000+ requests/minute under real production load without Postgres saturation or latency degradation.
+> **Target benchmarks:** ≤ 500ms P95 for all dashboard reads, ≤ 200ms for cached reads, connection pool never exhausted.
+
+---
+
+### Task 16.1 — Redis Query Cache Layer 🔴
+`[ ]` Status: Not started
+**Dependencies:** All core features complete
+
+The most impactful single change. Wrap the 5 most expensive read procedures in a Redis cache with TTL. Invalidate on relevant mutations.
+
+**Procedures to cache (Redis key → TTL → invalidation trigger):**
+
+| Procedure | Redis key pattern | TTL | Invalidated by |
+|---|---|---|---|
+| `dashboard.ceoOverview` | `cache:ceo:{branchId}` | 60s | Any order status change, payout created |
+| `finance.pl` | `cache:finance:pl:{branchId}:{dateRange}` | 120s | Invoice created, payout approved |
+| `marketing.metrics` | `cache:marketing:metrics:{userId}` | 60s | Ad spend logged, order attributed |
+| `orders.list` (dashboard view) | `cache:orders:list:{branchId}:{hash(input)}` | 30s | Order created, status changed |
+| `notifications.list` | `cache:notif:{userId}:{page}` | 15s | Notification created, marked read |
+
+**Implementation:**
+- Add `CacheService` (`apps/api/src/common/cache/cache.service.ts`) — wraps `ioredis` with typed `get<T>` / `set` / `del` / `delPattern` methods
+- Inject `CacheService` into the 5 target services
+- Every cached procedure: check Redis first → on miss, query Postgres → write to Redis with TTL → return
+- On mutation: call `cache.delPattern('cache:orders:list:{branchId}:*')` etc. in the same transaction
+- Cache key includes a stable hash of the input params (use `JSON.stringify` + `crypto.createHash('sha256')`)
+
+**Acceptance Criteria:**
+- [ ] Cache hit rate > 80% on dashboard reads under simulated load (k6)
+- [ ] CEO overview P95 drops from > 2s to < 300ms on repeat requests
+- [ ] No stale data shown — cache invalidated within the same request that mutates
+- [ ] Redis memory usage stays bounded (TTLs enforced, no unbounded key growth)
+- [ ] Cache miss logging to measure hit rate in production
+
+---
+
+### Task 16.2 — PgBouncer / Connection Pooler 🔴
+`[ ]` Status: Not started
+**Dependencies:** None — infrastructure only
+
+NestJS opens a direct Drizzle/postgres.js connection pool. Under serverless scale-out or heavy concurrency, each instance opens its own pool and Postgres hits `max_connections`.
+
+**Implementation:**
+- Add PgBouncer in **transaction mode** in front of Postgres (or enable the managed pooler on Neon/Supabase)
+- Update `DATABASE_URL` in all `.env` files to point to the pooler endpoint, not the direct Postgres port
+- Set `postgres.js` pool size to `max: 5` per NestJS instance (down from default 10) — PgBouncer multiplexes
+- Verify `SET LOCAL yannis.current_user_id` still works in transaction mode (it does — SET LOCAL scopes to the transaction, not the connection)
+- Add `DB_POOL_MAX` env variable so pool size is configurable per deployment
+
+**Acceptance Criteria:**
+- [ ] Postgres `pg_stat_activity` shows < 20 server connections under 50 concurrent API clients
+- [ ] No `too many clients` errors under load test
+- [ ] `SET LOCAL` actor injection still works correctly (integration test passes)
+- [ ] Pool size configurable via `DB_POOL_MAX` env var
+
+---
+
+### Task 16.3 — Async Push via QStash Queue 🟡
+`[ ]` Status: Not started
+**Dependencies:** Task 16.1
+
+`sendPush()` currently fires VAPID HTTP calls inline during the HTTP request. Under order-heavy traffic (many state changes triggering push), this adds 200–800ms to response time and queues up outbound HTTP.
+
+**Implementation:**
+- Add `QStashService` (`apps/api/src/common/qstash/qstash.service.ts`) — wraps Upstash QStash SDK
+- Create `POST /api/internal/push/dispatch` endpoint (internal — validate `QSTASH_CURRENT_SIGNING_KEY`)
+- Modify `NotificationsService.sendPush()`: instead of firing VAPID directly, enqueue a QStash message with `{ userId, payload, meta }`
+- QStash delivers to `/api/internal/push/dispatch` which does the actual VAPID send
+- Keep the `push_delivery_log` INSERT synchronous (before enqueue) so the log row exists immediately with status `SENT`
+- Add `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` to `.env.example`
+- Fallback: if `QSTASH_TOKEN` is not set, fire inline (preserves local dev behaviour)
+
+**Acceptance Criteria:**
+- [ ] Order state change HTTP response time does not include VAPID latency
+- [ ] Push still delivered within 5 seconds of enqueue (QStash SLA)
+- [ ] `push_delivery_log` row created synchronously before enqueue
+- [ ] `410 Gone` stale subscription cleanup still works (handled in `/internal/push/dispatch`)
+- [ ] Local dev without QStash token falls back to inline send
+
+---
+
+### Task 16.4 — Materialized View Refresh Verification 🟡
+`[ ]` Status: Not started
+**Dependencies:** None
+
+The Finance P&L and CEO overview use materialized views. If these are being queried via base tables instead of the mat views, or if the views are not being refreshed on schedule, every request hits full aggregation queries.
+
+**Audit steps:**
+1. Confirm `REFRESH MATERIALIZED VIEW CONCURRENTLY` is scheduled (pg_cron or NestJS `@Cron`) at appropriate intervals
+2. Confirm `finance.pl` tRPC procedure queries the materialized view, not `orders` directly
+3. Add a `materialized_view_refreshes` health log table — each refresh writes a row with `view_name`, `refreshed_at`, `duration_ms`
+4. Expose `GET /api/health/mat-views` returning last refresh time per view — alert if stale > 5 minutes
+
+**Acceptance Criteria:**
+- [ ] All materialized views refreshed on a schedule (not per-request)
+- [ ] Finance P&L query confirmed to hit mat view (check `EXPLAIN ANALYZE`)
+- [ ] Health endpoint shows last refresh time for each view
+- [ ] Alert fires (log warning) if any view is stale > 5 minutes
+
+---
+
+### Task 16.5 — Load Test & Benchmark 🟢
+`[ ]` Status: Not started
+**Dependencies:** Tasks 16.1, 16.2, 16.3, 16.4
+
+Validate that the system meets the 2,000 req/min target and all PRD performance benchmarks.
+
+**Tooling:** k6 (open source, scriptable, CI-friendly)
+
+**Test scenarios:**
+
+| Scenario | VUs | Duration | Pass criterion |
+|---|---|---|---|
+| Dashboard reads (CEO + orders list) | 50 | 2 min | P95 < 500ms, 0 errors |
+| Order state transitions | 20 | 2 min | P95 < 500ms, 0 errors |
+| Notification list (with Redis cache) | 100 | 2 min | P95 < 200ms |
+| Sustained mixed load (2000 req/min) | 35 | 5 min | P99 < 1s, error rate < 0.1% |
+| Postgres connection exhaustion test | 100 | 1 min | No `too many clients` errors |
+
+**Scripts location:** `apps/api/load-tests/` (k6 scripts)
+
+**Acceptance Criteria:**
+- [ ] All 5 scenarios pass their criteria on staging with production-scale data (10k+ orders)
+- [ ] k6 HTML report committed to `docs/load-test-results/`
+- [ ] No Postgres `max_connections` errors at 2,000 req/min
+- [ ] Redis cache hit rate > 80% during sustained load scenario
+- [ ] Results documented in `docs/RUNBOOK.md` under "Performance Benchmarks"
+
+---
+
+**Phase 16 build order:** 16.2 → 16.1 → 16.4 → 16.3 → 16.5

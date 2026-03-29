@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { NavLink } from '@remix-run/react';
 
 export interface BottomNavItem {
@@ -208,37 +208,6 @@ export function BottomNav({
   const showMore = allItems.length > 4;
   const displayBarItems = showMore ? barItems.slice(0, 4) : barItems;
 
-  // Hide on scroll-down, reveal on scroll-up (prevents iOS rubber-band jump)
-  const [hidden, setHidden] = useState(false);
-  const lastScrollY = useRef(0);
-  const ticking = useRef(false);
-
-  const handleScroll = useCallback(() => {
-    if (ticking.current) return;
-    ticking.current = true;
-    requestAnimationFrame(() => {
-      const y = window.scrollY;
-      const delta = y - lastScrollY.current;
-      // Only hide after scrolling down > 8px, reveal on any upward scroll
-      if (delta > 8 && y > 60) {
-        setHidden(true);
-      } else if (delta < -4) {
-        setHidden(false);
-      }
-      lastScrollY.current = y;
-      ticking.current = false;
-    });
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [handleScroll]);
-
-  // Always show when "More" modal is open
-  useEffect(() => {
-    if (moreOpen) setHidden(false);
-  }, [moreOpen]);
 
   const handleOpenMore = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -268,11 +237,8 @@ export function BottomNav({
   return (
     <>
       <nav
-        className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden items-stretch gap-1.5 px-2 pt-1.5 bg-app-elevated border-t border-app-border pb-[calc(env(safe-area-inset-bottom)+0.375rem)] transition-transform duration-300 ease-in-out will-change-transform"
-        style={{
-          minHeight: 'var(--bottom-nav-height)',
-          transform: hidden ? 'translateY(calc(100% + env(safe-area-inset-bottom)))' : 'translateY(0)',
-        }}
+        className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden items-stretch gap-1.5 px-2 pt-1.5 bg-app-elevated border-t border-app-border pb-[calc(env(safe-area-inset-bottom)+0.375rem)]"
+        style={{ minHeight: 'var(--bottom-nav-height)' }}
         aria-label="Main navigation"
       >
         {displayBarItems.map((item) => {

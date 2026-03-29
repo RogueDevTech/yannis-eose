@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRevalidator } from '@remix-run/react';
 
-const PULL_THRESHOLD = 72;
-const PULL_MAX = 110;
+const PULL_THRESHOLD = 120;       // px of visual pull needed to trigger refresh (was 72)
+const PULL_MAX = 160;              // max visual pull distance (was 110)
+const PULL_DEAD_ZONE = 20;         // raw finger movement ignored before anything shows (was 0)
 const SCROLL_TOP_TOLERANCE = 12;
 const RELEASE_TRANSITION_MS = 200;
+const RESISTANCE = 0.35;           // lower = heavier resistance (was 0.55)
 
 interface PullToRefreshProps {
   children: React.ReactNode;
@@ -54,10 +56,10 @@ export function PullToRefresh({ children, disabled = false }: PullToRefreshProps
         setPullDistance(0);
         return;
       }
-      const delta = e.touches[0].clientY - startYRef.current;
-      if (delta <= 0) return;
+      const rawDelta = e.touches[0].clientY - startYRef.current;
+      if (rawDelta <= PULL_DEAD_ZONE) return;
       e.preventDefault();
-      const value = Math.min(delta * 0.55, PULL_MAX); // resistance factor
+      const value = Math.min((rawDelta - PULL_DEAD_ZONE) * RESISTANCE, PULL_MAX);
       setPullDistance(value);
       reachedThresholdRef.current = value >= PULL_THRESHOLD;
     },

@@ -234,7 +234,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   );
   const [profileName, setProfileName] = useState(user?.name ?? '');
   const { themeId, setTheme, activeTheme } = useAppTheme();
-  const { canInstall, install, canPromptInstall, isIosManualInstall } = usePwaInstall();
+  const { canInstall, install, canPromptInstall, isIosManualInstall, isInstalled } = usePwaInstall();
 
   // CS dispatch strategy: derived from settings, local state for form selection
   const csDispatchSetting = systemSettings.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
@@ -412,7 +412,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             </div>
           </div>
 
-          <div ref={installAnchorRef} id="install-app" className="card lg:col-span-2 scroll-mt-24">
+          {!isInstalled && <div ref={installAnchorRef} id="install-app" className="card lg:col-span-2 scroll-mt-24">
             <h3 className="text-lg font-semibold text-app-fg mb-4">Install app</h3>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between rounded-lg border border-app-border px-4 py-3">
               <div className="min-w-0">
@@ -448,7 +448,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                 </Button>
               )}
             </div>
-          </div>
+          </div>}
         </div>
       )}
 

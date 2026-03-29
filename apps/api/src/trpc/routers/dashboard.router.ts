@@ -5,6 +5,7 @@ import type { FinanceService } from '../../finance/finance.service';
 import type { MarketingService } from '../../marketing/marketing.service';
 import type { HrService } from '../../hr/hr.service';
 import type { InventoryService } from '../../inventory/inventory.service';
+import { CacheService } from '../../common/cache/cache.service';
 
 // Factory pattern: services injected from NestJS module
 let ordersService: OrdersService | null = null;
@@ -12,6 +13,7 @@ let financeService: FinanceService | null = null;
 let marketingService: MarketingService | null = null;
 let hrService: HrService | null = null;
 let inventoryService: InventoryService | null = null;
+let cacheService: CacheService | null = null;
 
 export function setDashboardServices(services: {
   orders: OrdersService;
@@ -25,6 +27,164 @@ export function setDashboardServices(services: {
   marketingService = services.marketing;
   hrService = services.hr;
   inventoryService = services.inventory;
+}
+
+export function setCacheService(service: CacheService) {
+  cacheService = service;
+}
+
+async function _ceoOverviewFetch(params: {
+  startDate: string | undefined;
+  endDate: string | undefined;
+  branchId: string | null | undefined;
+}) {
+  const { startDate, endDate, branchId } = params;
+
+  const logErr = (label: string) => (err: unknown) => {
+    console.error(`[ceoOverview] ${label} failed:`, err instanceof Error ? err.message : err);
+    return undefined;
+  };
+
+  const hasDateRange = Boolean(startDate && endDate);
+  const [
+    fastProfitResult,
+    statusCountsWhenDated,
+    invoiceSummary,
+    marketingMetrics,
+    payoutSummary,
+    csWorkloads,
+  ] = await Promise.all([
+    financeService!.getFastProfitReport(startDate, endDate).catch(() => null),
+    hasDateRange ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId).catch(logErr('statusCounts')) : Promise.resolve(undefined),
+    financeService!.getInvoiceSummary().catch(logErr('invoiceSummary')),
+    marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId).catch(logErr('marketingMetrics')),
+    hrService!.getPayoutSummary().catch(logErr('payoutSummary')),
+    ordersService!.getCSAgentWorkloads(branchId).catch(logErr('csWorkloads')),
+  ]);
+
+  let profitReport: {
+    revenue: number;
+    landedCost: number;
+    deliveryFee: number;
+    adSpend: number;
+    commission: number;
+    fulfillmentCost: number;
+    operationalLoss: number;
+    trueProfit: number;
+    orderCount: number;
+    margin: number;
+  };
+  if (fastProfitResult) {
+    profitReport = {
+      revenue: fastProfitResult.revenue,
+      landedCost: fastProfitResult.landedCost,
+      deliveryFee: fastProfitResult.deliveryFee,
+      adSpend: fastProfitResult.adSpend,
+      commission: fastProfitResult.commission,
+      fulfillmentCost: fastProfitResult.fulfillmentCost ?? 0,
+      operationalLoss: fastProfitResult.operationalLoss ?? 0,
+      trueProfit: fastProfitResult.trueProfit,
+      orderCount: fastProfitResult.orderCount,
+      margin: fastProfitResult.margin,
+    };
+  } else {
+    const fullReport = await financeService!.getProfitReport({ groupBy: 'product', startDate, endDate, branchId }).catch(logErr('profitReport'));
+    profitReport = fullReport ?? {
+      revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0,
+      commission: 0, fulfillmentCost: 0, operationalLoss: 0,
+      trueProfit: 0, orderCount: 0, margin: 0,
+    };
+  }
+
+  // Status counts: when date range or branch-scoped use explicit query; when all-time global use fast path MVs
+  let statusCounts: Record<string, number>;
+  if (hasDateRange) {
+    statusCounts = (statusCountsWhenDated ?? {}) as Record<string, number>;
+  } else if (!branchId && fastProfitResult?.statusCounts && Object.keys(fastProfitResult.statusCounts).length > 0) {
+    statusCounts = fastProfitResult.statusCounts as Record<string, number>;
+  } else {
+    const allTimeCounts = await ordersService!.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId).catch(logErr('statusCounts'));
+    statusCounts = (allTimeCounts ?? {}) as Record<string, number>;
+  }
+
+  const safeMarketingMetrics = marketingMetrics ?? {
+    totalSpend: 0, totalOrders: 0, deliveredOrders: 0,
+    deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0,
+    cpa: 0, trueRoas: 0, deliveryRate: 0,
+  };
+  const safePayoutSummary = payoutSummary ?? { totalPaid: 0, totalPending: 0, staffCount: 0 };
+  const safeCSWorkloads = csWorkloads ?? [];
+
+  const totalOrders = Object.values(statusCounts).reduce(
+    (sum, count) => sum + (count ?? 0),
+    0,
+  );
+
+  const activeOrders =
+    (statusCounts['UNPROCESSED'] ?? 0) +
+    (statusCounts['CS_ASSIGNED'] ?? 0) +
+    (statusCounts['CS_ENGAGED'] ?? 0) +
+    (statusCounts['CONFIRMED'] ?? 0) +
+    (statusCounts['ALLOCATED'] ?? 0) +
+    (statusCounts['DISPATCHED'] ?? 0) +
+    (statusCounts['IN_TRANSIT'] ?? 0);
+
+  const deliveredOrders = statusCounts['DELIVERED'] ?? 0;
+  const cancelledOrders = statusCounts['CANCELLED'] ?? 0;
+  const returnedOrders = statusCounts['RETURNED'] ?? 0;
+
+  const totalCSAgents = safeCSWorkloads.length;
+  const totalCSPending = safeCSWorkloads.reduce(
+    (sum: number, w: { pendingCount: number }) => sum + w.pendingCount,
+    0,
+  );
+  const csUtilization =
+    safeCSWorkloads.length > 0
+      ? safeCSWorkloads.reduce(
+          (sum: number, w: { pendingCount: number; capacity: number }) =>
+            sum + w.pendingCount / Math.max(w.capacity, 1),
+          0,
+        ) / safeCSWorkloads.length
+      : 0;
+
+  return {
+    revenue: profitReport.revenue ?? 0,
+    trueProfit: profitReport.trueProfit ?? 0,
+    margin: profitReport.margin ?? 0,
+    costBreakdown: {
+      landedCost: profitReport.landedCost ?? 0,
+      deliveryFee: profitReport.deliveryFee ?? 0,
+      adSpend: profitReport.adSpend ?? 0,
+      commission: profitReport.commission ?? 0,
+      fulfillmentCost: profitReport.fulfillmentCost ?? 0,
+      operationalLoss: profitReport.operationalLoss ?? 0,
+    },
+    orderPipeline: {
+      total: totalOrders,
+      active: activeOrders,
+      delivered: deliveredOrders,
+      cancelled: cancelledOrders,
+      returned: returnedOrders,
+      statusCounts,
+    },
+    marketing: {
+      totalSpend: safeMarketingMetrics.totalSpend ?? 0,
+      cpa: safeMarketingMetrics.cpa ?? 0,
+      roas: safeMarketingMetrics.trueRoas ?? 0,
+      deliveryRate: safeMarketingMetrics.deliveryRate ?? 0,
+    },
+    csTeam: {
+      agentCount: totalCSAgents,
+      pendingOrders: totalCSPending,
+      utilization: Math.round(csUtilization * 100),
+    },
+    payroll: {
+      totalPaid: safePayoutSummary.totalPaid ?? 0,
+      totalPending: safePayoutSummary.totalPending ?? 0,
+      staffCount: safePayoutSummary.staffCount ?? 0,
+    },
+    invoiceSummary: invoiceSummary ?? {},
+  };
 }
 
 export const dashboardRouter = router({
@@ -48,168 +208,13 @@ export const dashboardRouter = router({
       const endDate = input?.endDate;
       const branchId = ctx.currentBranchId;
 
-      // Fetch all data in parallel for performance. Use fast path (MVs) for profit; fallback to getProfitReport if MVs missing.
-      const logErr = (label: string) => (err: unknown) => {
-        console.error(`[ceoOverview] ${label} failed:`, err instanceof Error ? err.message : err);
-        return undefined;
-      };
-
-      const hasDateRange = Boolean(startDate && endDate);
-      const [
-        fastProfitResult,
-        statusCountsWhenDated,
-        invoiceSummary,
-        marketingMetrics,
-        payoutSummary,
-        csWorkloads,
-      ] = await Promise.all([
-        financeService.getFastProfitReport(startDate, endDate).catch(() => null),
-        hasDateRange ? ordersService.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId).catch(logErr('statusCounts')) : Promise.resolve(undefined),
-        financeService.getInvoiceSummary().catch(logErr('invoiceSummary')),
-        marketingService.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId).catch(logErr('marketingMetrics')),
-        hrService.getPayoutSummary().catch(logErr('payoutSummary')),
-        ordersService.getCSAgentWorkloads(branchId).catch(logErr('csWorkloads')),
-      ]);
-
-      let profitReport: {
-        revenue: number;
-        landedCost: number;
-        deliveryFee: number;
-        adSpend: number;
-        commission: number;
-        fulfillmentCost: number;
-        operationalLoss: number;
-        trueProfit: number;
-        orderCount: number;
-        margin: number;
-      };
-      if (fastProfitResult) {
-        profitReport = {
-          revenue: fastProfitResult.revenue,
-          landedCost: fastProfitResult.landedCost,
-          deliveryFee: fastProfitResult.deliveryFee,
-          adSpend: fastProfitResult.adSpend,
-          commission: fastProfitResult.commission,
-          fulfillmentCost: fastProfitResult.fulfillmentCost ?? 0,
-          operationalLoss: fastProfitResult.operationalLoss ?? 0,
-          trueProfit: fastProfitResult.trueProfit,
-          orderCount: fastProfitResult.orderCount,
-          margin: fastProfitResult.margin,
-        };
-      } else {
-        const fullReport = await financeService.getProfitReport({ groupBy: 'product', startDate, endDate, branchId }).catch(logErr('profitReport'));
-        profitReport = fullReport ?? {
-          revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0,
-          commission: 0, fulfillmentCost: 0, operationalLoss: 0,
-          trueProfit: 0, orderCount: 0, margin: 0,
-        };
+      if (cacheService) {
+        const cacheKey = `cache:ceo:${branchId ?? 'global'}:${CacheService.hashInput({ startDate, endDate })}`;
+        return cacheService.getOrSet(cacheKey, 60, () => _ceoOverviewFetch({ startDate, endDate, branchId }));
       }
 
-      const safeProfitReport = profitReport;
-
-      // Status counts: when date range or branch-scoped use explicit query; when all-time global use fast path MVs
-      let statusCounts: Record<string, number>;
-      if (hasDateRange) {
-        statusCounts = (statusCountsWhenDated ?? {}) as Record<string, number>;
-      } else if (!branchId && fastProfitResult?.statusCounts && Object.keys(fastProfitResult.statusCounts).length > 0) {
-        // MV-based counts are only valid for global (no branch filter)
-        statusCounts = fastProfitResult.statusCounts as Record<string, number>;
-      } else {
-        const allTimeCounts = await ordersService.getStatusCounts(undefined, undefined, undefined, undefined, undefined, branchId).catch(logErr('statusCounts'));
-        statusCounts = (allTimeCounts ?? {}) as Record<string, number>;
-      }
-      const safeMarketingMetrics = marketingMetrics ?? {
-        totalSpend: 0, totalOrders: 0, deliveredOrders: 0,
-        deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0,
-        cpa: 0, trueRoas: 0, deliveryRate: 0,
-      };
-      const safePayoutSummary = payoutSummary ?? { totalPaid: 0, totalPending: 0, staffCount: 0 };
-      const safeCSWorkloads = csWorkloads ?? [];
-
-    // Calculate order pipeline counts
-    const totalOrders = Object.values(statusCounts).reduce(
-      (sum, count) => sum + (count ?? 0),
-      0,
-    );
-
-    const activeOrders =
-      (statusCounts['UNPROCESSED'] ?? 0) +
-      (statusCounts['CS_ASSIGNED'] ?? 0) +
-      (statusCounts['CS_ENGAGED'] ?? 0) +
-      (statusCounts['CONFIRMED'] ?? 0) +
-      (statusCounts['ALLOCATED'] ?? 0) +
-      (statusCounts['DISPATCHED'] ?? 0) +
-      (statusCounts['IN_TRANSIT'] ?? 0);
-
-    const deliveredOrders = statusCounts['DELIVERED'] ?? 0;
-    const cancelledOrders = statusCounts['CANCELLED'] ?? 0;
-    const returnedOrders = statusCounts['RETURNED'] ?? 0;
-
-    // CS team metrics
-    const totalCSAgents = safeCSWorkloads.length;
-    const totalCSPending = safeCSWorkloads.reduce(
-      (sum: number, w: { pendingCount: number }) => sum + w.pendingCount,
-      0,
-    );
-    const csUtilization =
-      safeCSWorkloads.length > 0
-        ? safeCSWorkloads.reduce(
-            (sum: number, w: { pendingCount: number; capacity: number }) =>
-              sum + w.pendingCount / Math.max(w.capacity, 1),
-            0,
-          ) / safeCSWorkloads.length
-        : 0;
-
-    return {
-      // Revenue & Profit
-      revenue: safeProfitReport.revenue ?? 0,
-      trueProfit: safeProfitReport.trueProfit ?? 0,
-      margin: safeProfitReport.margin ?? 0,
-      costBreakdown: {
-        landedCost: safeProfitReport.landedCost ?? 0,
-        deliveryFee: safeProfitReport.deliveryFee ?? 0,
-        adSpend: safeProfitReport.adSpend ?? 0,
-        commission: safeProfitReport.commission ?? 0,
-        fulfillmentCost: safeProfitReport.fulfillmentCost ?? 0,
-        operationalLoss: safeProfitReport.operationalLoss ?? 0,
-      },
-
-      // Order Pipeline
-      orderPipeline: {
-        total: totalOrders,
-        active: activeOrders,
-        delivered: deliveredOrders,
-        cancelled: cancelledOrders,
-        returned: returnedOrders,
-        statusCounts,
-      },
-
-      // Marketing
-      marketing: {
-        totalSpend: safeMarketingMetrics.totalSpend ?? 0,
-        cpa: safeMarketingMetrics.cpa ?? 0,
-        roas: safeMarketingMetrics.trueRoas ?? 0,
-        deliveryRate: safeMarketingMetrics.deliveryRate ?? 0,
-      },
-
-      // CS Team
-      csTeam: {
-        agentCount: totalCSAgents,
-        pendingOrders: totalCSPending,
-        utilization: Math.round(csUtilization * 100),
-      },
-
-      // HR / Payroll
-      payroll: {
-        totalPaid: safePayoutSummary.totalPaid ?? 0,
-        totalPending: safePayoutSummary.totalPending ?? 0,
-        staffCount: safePayoutSummary.staffCount ?? 0,
-      },
-
-      // Invoices
-      invoiceSummary: invoiceSummary ?? {},
-    };
-  }),
+      return _ceoOverviewFetch({ startDate, endDate, branchId });
+    }),
 
   /**
    * CEO Overview time-series — daily revenue, delivered orders, and order volume (created) for chart.

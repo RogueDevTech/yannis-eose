@@ -22,6 +22,7 @@ import {
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { SettingsService } from '../settings/settings.service';
+import { CacheService } from '../common/cache/cache.service';
 import type webPushType from 'web-push';
 
 // Lazy-loaded web-push — avoids CJS interop issues at startup
@@ -38,6 +39,7 @@ export class NotificationsService {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
     private readonly settings: SettingsService,
+    private readonly cache: CacheService,
   ) {
     const apiKey = process.env['SENDGRID_API_KEY'];
     if (apiKey) {
@@ -396,58 +398,71 @@ export class NotificationsService {
       ).catch((err) => this.logger.warn(`Mirror web push failed for user ${input.userId}: ${err}`));
     }
 
+    // Invalidate this user's notification list cache so next request is fresh
+    this.cache.delPattern(`cache:notif:${input.userId}:*`).catch(() => undefined);
+
     return notification;
   }
 
   /**
    * List notifications for a user with optional unread filter.
    */
+  /** Cache key for a user's notification list page. */
+  private notifListCacheKey(userId: string, input: ListNotificationsInput): string {
+    return `cache:notif:${userId}:p${input.page}:l${input.limit}:u${input.unreadOnly ? '1' : '0'}`;
+  }
+
   async list(userId: string, input: ListNotificationsInput) {
-    const conditions = [eq(schema.notifications.userId, userId)];
+    const cacheKey = this.notifListCacheKey(userId, input);
+    const TTL = 15; // seconds
 
-    if (input.unreadOnly) {
-      conditions.push(eq(schema.notifications.read, false));
-    }
+    return this.cache.getOrSet(cacheKey, TTL, async () => {
+      const conditions = [eq(schema.notifications.userId, userId)];
 
-    const whereClause = and(...conditions);
-    const offset = (input.page - 1) * input.limit;
+      if (input.unreadOnly) {
+        conditions.push(eq(schema.notifications.read, false));
+      }
 
-    const [notifications, totalRows, unreadRows] = await Promise.all([
-      this.db
-        .select()
-        .from(schema.notifications)
-        .where(whereClause)
-        .orderBy(desc(schema.notifications.createdAt))
-        .limit(input.limit)
-        .offset(offset),
-      this.db
-        .select({ count: count() })
-        .from(schema.notifications)
-        .where(whereClause),
-      this.db
-        .select({ count: count() })
-        .from(schema.notifications)
-        .where(
-          and(
-            eq(schema.notifications.userId, userId),
-            eq(schema.notifications.read, false),
+      const whereClause = and(...conditions);
+      const offset = (input.page - 1) * input.limit;
+
+      const [notifications, totalRows, unreadRows] = await Promise.all([
+        this.db
+          .select()
+          .from(schema.notifications)
+          .where(whereClause)
+          .orderBy(desc(schema.notifications.createdAt))
+          .limit(input.limit)
+          .offset(offset),
+        this.db
+          .select({ count: count() })
+          .from(schema.notifications)
+          .where(whereClause),
+        this.db
+          .select({ count: count() })
+          .from(schema.notifications)
+          .where(
+            and(
+              eq(schema.notifications.userId, userId),
+              eq(schema.notifications.read, false),
+            ),
           ),
-        ),
-    ]);
+      ]);
 
-    const total = totalRows[0]?.count ?? 0;
-    const unreadCount = unreadRows[0]?.count ?? 0;
+      const total = totalRows[0]?.count ?? 0;
+      const unreadCount = unreadRows[0]?.count ?? 0;
 
-    return {
-      notifications,
-      unreadCount,
-      pagination: {
-        page: input.page,
-        limit: input.limit,
-        total,
-        totalPages: Math.ceil(total / input.limit),
-      },
-    };
+      return {
+        notifications,
+        unreadCount,
+        pagination: {
+          page: input.page,
+          limit: input.limit,
+          total,
+          totalPages: Math.ceil(total / input.limit),
+        },
+      };
+    });
   }
 
   /**
@@ -481,6 +496,7 @@ export class NotificationsService {
         ),
       );
 
+    this.cache.delPattern(`cache:notif:${userId}:*`).catch(() => undefined);
     return { success: true };
   }
 
@@ -498,6 +514,7 @@ export class NotificationsService {
         ),
       );
 
+    this.cache.delPattern(`cache:notif:${userId}:*`).catch(() => undefined);
     return { success: true };
   }
 
