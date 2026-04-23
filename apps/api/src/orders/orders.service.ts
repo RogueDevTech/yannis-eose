@@ -2783,6 +2783,20 @@ export class OrdersService {
         // Look up the logistics provider's rate card and set deliveryFee
         const locationId = order.logisticsLocationId;
         if (locationId) {
+          // Per-item ALLOCATION movement — earmarks the reserved stock against a specific 3PL
+          // location so the inventory detail drawer can show "intaken → allocated → delivered".
+          for (const item of orderItems) {
+            await this.db.insert(schema.stockMovements).values({
+              productId: item.productId,
+              movementType: 'ALLOCATION',
+              quantity: item.quantity,
+              toLocationId: locationId,
+              referenceId: order.id,
+              reason: `Allocated to 3PL for order ${order.id}`,
+              actorId,
+            });
+          }
+
           const locationRows = await this.db
             .select()
             .from(schema.logisticsLocations)

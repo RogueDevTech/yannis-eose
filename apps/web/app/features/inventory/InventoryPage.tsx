@@ -432,6 +432,14 @@ export function InventoryPage({
                       m.movementType === 'TRANSFER_IN' ||
                       m.movementType === 'RESTOCK' ||
                       (m.movementType === 'ADJUSTMENT' && m.quantity > 0);
+                    // ALLOCATION is an earmark, not a real stock change — render neutral.
+                    const isNeutral = m.movementType === 'ALLOCATION' || m.movementType === 'RESERVATION';
+                    const qtyColor = isNeutral
+                      ? 'text-app-fg-muted'
+                      : isIncoming
+                        ? 'text-success-600 dark:text-success-400'
+                        : 'text-danger-600 dark:text-danger-400';
+                    const qtyPrefix = isNeutral ? '→' : isIncoming ? '+' : '';
                     const arrow = (m.fromLocationId || m.toLocationId)
                       ? `${locationName(m.fromLocationId)} → ${locationName(m.toLocationId)}`
                       : null;
@@ -445,8 +453,8 @@ export function InventoryPage({
                             <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
                               {formatMovementType(m.movementType)}
                             </span>
-                            <span className={`font-medium ${isIncoming ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
-                              {isIncoming ? '+' : ''}{m.quantity}
+                            <span className={`font-medium ${qtyColor}`}>
+                              {qtyPrefix}{Math.abs(m.quantity)}
                             </span>
                           </div>
                           <span className="text-xs text-app-fg-muted whitespace-nowrap">
