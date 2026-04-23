@@ -218,6 +218,8 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/inventory',
         icon: SidebarIcons.inventory,
         permission: 'inventory.read',
+        // Heads see inventory read-only by role so they can plan against stock.
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
       },
       {
         label: 'Transfers',
@@ -254,7 +256,10 @@ const navStructure: NavGroupDef[] = [
     group: 'HR',
     items: [
       { label: 'Payroll', href: '/hr/payroll', icon: SidebarIcons.hr, permission: 'hr.read' },
-      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'users.read' },
+      // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
+      // Head of Marketing / Head of CS hold `users.read` for other features but must not see
+      // this link — they manage their team from the Marketing / CS team pages instead.
+      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
     ],
   },
   {
@@ -413,7 +418,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/finance/delivery-remittances',
     '/admin/finance/disbursements',
   ],
-  WAREHOUSE_MANAGER: ['/admin', '/admin/inventory', '/admin/transfers', '/admin/returns'],
+  STOCK_MANAGER: ['/admin', '/admin/inventory', '/admin/transfers', '/admin/returns'],
   HR_MANAGER: ['/admin', '/hr/payroll', '/hr/users'],
 };
 

@@ -1,7 +1,7 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption } from '~/features/inventory/types';
@@ -11,7 +11,12 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'inventory.read');
+  // Heads (HoM, HoCS) get inventory visibility by role so they can see stock levels
+  // when planning campaigns / CS priorities, even without the inventory.read permission.
+  const user = await requirePermissionOrRoles(request, {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
+    permission: 'inventory.read',
+  });
   const cookie = getSessionCookie(request);
 
   // Start fetches concurrently
