@@ -21,7 +21,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'inventory.read' });
+  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'inventory.read' });
   const cookie = getSessionCookie(request);
 
   const locationId = user.role === 'TPL_MANAGER' && user.logisticsLocationId ? user.logisticsLocationId : undefined;

@@ -64,7 +64,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true }> => {
     const perms = currentUser?.permissions ?? [];
-    const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+    // Treat ADMIN the same as SUPER_ADMIN for admin-level capabilities on this page.
+    const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ADMIN';
     const isViewerHeadOfMarketing = currentUser?.role === 'HEAD_OF_MARKETING';
     const isViewerHeadOfCS = currentUser?.role === 'HEAD_OF_CS';
     // Disbursements page is Finance → HoM only; HoM distributes to Media Buyers from Marketing → Funding.
@@ -353,8 +354,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!target) {
       return json({ error: 'User not found' }, { status: 404 });
     }
-    if (target.role === 'SUPER_ADMIN') {
-      return json({ error: 'SuperAdmin accounts cannot be updated from this page. Use Settings to edit your own profile.' }, { status: 403 });
+    // Protect admin-level accounts from HR-side edits. Admins manage admins via their own flows.
+    if (target.role === 'SUPER_ADMIN' || target.role === 'ADMIN') {
+      return json({ error: 'SuperAdmin/Admin accounts cannot be updated from this page. Use Settings to edit your own profile.' }, { status: 403 });
     }
 
     const body: Record<string, unknown> = { userId };
@@ -460,8 +462,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'deactivate') {
     const currentUser = await getCurrentUser(request);
-    if (currentUser?.role !== 'SUPER_ADMIN') {
-      return json({ error: 'Only Super Admins can deactivate users.' }, { status: 403 });
+    if (currentUser?.role !== 'SUPER_ADMIN' && currentUser?.role !== 'ADMIN') {
+      return json({ error: 'Only Super Admins and Admins can deactivate users.' }, { status: 403 });
     }
 
     const targetRes = await apiRequest<unknown>(
@@ -469,8 +471,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
       { method: 'GET', cookie },
     );
     const targetData = targetRes.data as { result?: { data?: { role: string } } };
-    if (targetData?.result?.data?.role === 'SUPER_ADMIN') {
+    if (targetData?.result?.data?.role === 'SUPER_ADMIN' || targetData?.result?.data?.role === 'ADMIN') {
       return json({ error: 'SuperAdmin accounts cannot be deactivated.' }, { status: 403 });
+    }
+    // Admins cannot deactivate another admin-level user. Only SuperAdmin can.
+    if (targetData?.result?.data?.role === 'ADMIN' && currentUser?.role !== 'SUPER_ADMIN') {
+      return json({ error: 'Only the SuperAdmin can deactivate another Admin.' }, { status: 403 });
     }
 
     const res = await apiRequest<unknown>('/trpc/users.deactivate', {
@@ -491,8 +497,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       { method: 'GET', cookie },
     );
     const targetData = targetRes.data as { result?: { data?: { role: string } } };
-    if (targetData?.result?.data?.role === 'SUPER_ADMIN') {
-      return json({ error: 'SuperAdmin accounts cannot be reactivated from this page.' }, { status: 403 });
+    if (targetData?.result?.data?.role === 'SUPER_ADMIN' || targetData?.result?.data?.role === 'ADMIN') {
+      return json({ error: 'SuperAdmin/Admin accounts cannot be reactivated from this page.' }, { status: 403 });
     }
 
     const res = await apiRequest<unknown>('/trpc/users.update', {
@@ -534,8 +540,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       { method: 'GET', cookie },
     );
     const targetData = targetRes.data as { result?: { data?: { role: string } } };
-    if (targetData?.result?.data?.role === 'SUPER_ADMIN') {
-      return json({ error: 'SuperAdmin must reset password from Settings.' }, { status: 403 });
+    if (targetData?.result?.data?.role === 'SUPER_ADMIN' || targetData?.result?.data?.role === 'ADMIN') {
+      return json({ error: 'SuperAdmin/Admin must reset password from Settings.' }, { status: 403 });
     }
 
     const newPassword = formData.get('newPassword')?.toString() ?? '';

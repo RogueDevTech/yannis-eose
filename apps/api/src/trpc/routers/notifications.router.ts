@@ -127,7 +127,7 @@ export const notificationsRouter = router({
     .mutation(async ({ input, ctx }) => {
       // Scope enforcement: non-SuperAdmin cannot target ALL across branches
       if (
-        ctx.user.role !== 'SUPER_ADMIN' &&
+        (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') &&
         input.targetType === 'ALL' &&
         !ctx.user.currentBranchId
       ) {
@@ -138,7 +138,7 @@ export const notificationsRouter = router({
       }
 
       const branchId =
-        ctx.user.role === 'SUPER_ADMIN' ? null : (ctx.user.currentBranchId ?? null);
+        (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN') ? null : (ctx.user.currentBranchId ?? null);
 
       return getNotificationsService().broadcastPush(ctx.user.id, branchId, input);
     }),
@@ -192,7 +192,7 @@ export const notificationsRouter = router({
    */
   getAutomationRules: authedProcedure.query(async ({ ctx }) => {
     const branchId =
-      ctx.user.role === 'SUPER_ADMIN' ? null : (ctx.user.currentBranchId ?? null);
+      (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN') ? null : (ctx.user.currentBranchId ?? null);
     return getNotificationsService().getAutomationRules(branchId);
   }),
 
@@ -204,7 +204,7 @@ export const notificationsRouter = router({
     .input(createAutomationRuleSchema)
     .mutation(async ({ input, ctx }) => {
       const branchId =
-        ctx.user.role === 'SUPER_ADMIN' ? null : (ctx.user.currentBranchId ?? null);
+        (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN') ? null : (ctx.user.currentBranchId ?? null);
 
       const rule = await getNotificationsService().createAutomationRule(
         ctx.user.id,

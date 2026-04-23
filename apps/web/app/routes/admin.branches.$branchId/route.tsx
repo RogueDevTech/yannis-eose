@@ -174,7 +174,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!overview) throw new Response('Branch not found', { status: 404 });
 
   const allUsers: UserOption[] = (usersRes.data?.result?.data?.users ?? []).filter(
-    (u) => u.role !== 'SUPER_ADMIN',
+    (u) => u.role !== 'SUPER_ADMIN' && u.role !== 'ADMIN',
   );
 
   return { overview, allUsers };

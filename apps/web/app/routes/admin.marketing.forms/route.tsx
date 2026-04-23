@@ -63,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     products,
     productsLoadError,
     isMediaBuyer,
-    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN',
+    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
     currentUserId: user.id,
     currentUserName: user.name,
   } satisfies FormsStreamData;

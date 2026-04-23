@@ -124,7 +124,7 @@ export class VoipService {
     }
 
     // 3. Verify the agent is assigned to this order (or has elevated role)
-    const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+    const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
     if (!isElevated && order.assignedCsId !== actor.id) {
       throw new TRPCError({
         code: 'FORBIDDEN',

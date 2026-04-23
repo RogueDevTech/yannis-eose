@@ -36,7 +36,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'cs.teamOverview');
   const cookie = getSessionCookie(request);
   const canCreateOffline = true;
-  const canDeleteCart = user.role === 'SUPER_ADMIN' || user.role === 'HEAD_OF_CS';
+  const canDeleteCart = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
   let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
   {
     const productsRes = await apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(

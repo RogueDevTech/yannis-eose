@@ -46,7 +46,7 @@ function parseCSTeamList(res: { ok: boolean; status: number; data: unknown }): A
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'HEAD_OF_CS'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
     permission: 'cs.teamOverview',
   });
   const cookie = getSessionCookie(request);
@@ -95,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const idleCount = inactiveAgents.length;
 
   // Role-based: only these roles can redistribute (permission-based checks only when decided otherwise)
-  const canReassign = user.role === 'SUPER_ADMIN' || user.role === 'HEAD_OF_CS';
+  const canReassign = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
 
   return {
     teamMembers,
@@ -111,7 +111,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'HEAD_OF_CS'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
     permission: 'cs.teamOverview',
   });
   const cookie = getSessionCookie(request);

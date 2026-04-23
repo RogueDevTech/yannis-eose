@@ -2,6 +2,9 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 
 export const userRoleEnum = pgEnum('user_role', [
   'SUPER_ADMIN',
+  // ADMIN = SuperAdmin-equivalent privileges EXCEPT cannot manage another Admin or the SuperAdmin.
+  // Multiple ADMINs can exist; SUPER_ADMIN is a singleton.
+  'ADMIN',
   'BRANCH_ADMIN',
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',

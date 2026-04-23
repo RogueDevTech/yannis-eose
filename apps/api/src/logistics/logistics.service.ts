@@ -460,7 +460,7 @@ export class LogisticsService {
 
     if (actor.role === 'TPL_MANAGER' && actor.logisticsLocationId) {
       conditions.push(eq(schema.transferRemittances.fromLocationId, actor.logisticsLocationId));
-    } else if (actor.role === 'HEAD_OF_LOGISTICS' || actor.role === 'SUPER_ADMIN') {
+    } else if (actor.role === 'HEAD_OF_LOGISTICS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN')) {
       if (input.locationId) {
         conditions.push(eq(schema.transferRemittances.toLocationId, input.locationId));
       }
@@ -519,7 +519,7 @@ export class LogisticsService {
    * HEAD_OF_LOGISTICS marks a remittance as received. Updates inventory at toLocationId and notifies 3PL.
    */
   async markRemittanceReceived(input: MarkRemittanceReceivedInput, actor: SessionUser) {
-    if (actor.role !== 'HEAD_OF_LOGISTICS' && actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Logistics can mark remittances as received' });
     }
 
@@ -704,7 +704,7 @@ export class LogisticsService {
       actor.role === 'TPL_MANAGER' ||
       actor.role === 'HEAD_OF_LOGISTICS' ||
       actor.role === 'FINANCE_OFFICER' ||
-      actor.role === 'SUPER_ADMIN';
+      (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
     if (!canList) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot list delivery remittances' });
     }
@@ -808,7 +808,7 @@ export class LogisticsService {
    * Finance marks a delivery remittance as received (payment confirmed). Notifies 3PL location.
    */
   async markDeliveryRemittanceReceived(input: MarkDeliveryRemittanceReceivedInput, actor: SessionUser) {
-    if (actor.role !== 'FINANCE_OFFICER' && actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'FINANCE_OFFICER' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Finance or Super Admin can mark delivery remittances as received',
@@ -858,7 +858,7 @@ export class LogisticsService {
    * Finance disputes a delivery remittance (payment not received / receipt invalid). Notifies 3PL location.
    */
   async disputeDeliveryRemittance(input: DisputeDeliveryRemittanceInput, actor: SessionUser) {
-    if (actor.role !== 'FINANCE_OFFICER' && actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'FINANCE_OFFICER' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Finance or Super Admin can dispute delivery remittances',
@@ -954,7 +954,7 @@ export class LogisticsService {
       actor.role === 'TPL_MANAGER' ||
       actor.role === 'HEAD_OF_LOGISTICS' ||
       actor.role === 'FINANCE_OFFICER' ||
-      actor.role === 'SUPER_ADMIN';
+      (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
     if (!canView) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot view delivery remittances' });
     }
@@ -1020,7 +1020,7 @@ export class LogisticsService {
   // ============================================
 
   async submitDeliveryConfirmation(input: SubmitDeliveryConfirmationInput, actor: SessionUser) {
-    if (actor.role !== 'TPL_RIDER' && actor.role !== 'TPL_MANAGER' && actor.role !== 'HEAD_OF_LOGISTICS' && actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'TPL_RIDER' && actor.role !== 'TPL_MANAGER' && actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only riders or 3PL managers can submit delivery confirmations',
@@ -1092,7 +1092,7 @@ export class LogisticsService {
   }
 
   async listDeliveryConfirmationRequests(input: ListDeliveryConfirmationRequestsInput, actor: SessionUser) {
-    if (actor.role !== 'HEAD_OF_LOGISTICS' && actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can list delivery confirmation requests',
@@ -1156,7 +1156,7 @@ export class LogisticsService {
   }
 
   async approveDeliveryConfirmation(input: ApproveDeliveryConfirmationInput, actor: SessionUser) {
-    if (actor.role !== 'HEAD_OF_LOGISTICS' && actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can approve delivery confirmations',
@@ -1222,7 +1222,7 @@ export class LogisticsService {
   }
 
   async rejectDeliveryConfirmation(input: RejectDeliveryConfirmationInput, actor: SessionUser) {
-    if (actor.role !== 'HEAD_OF_LOGISTICS' && actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can reject delivery confirmations',

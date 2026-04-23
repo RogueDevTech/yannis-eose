@@ -100,7 +100,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusFilter: status,
     searchFilter: search,
     isMediaBuyer,
-    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN',
+    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
     filters,
     cpa: metricsData?.cpa ?? null,
     totalAdSpend: metricsData?.totalSpend ?? null,

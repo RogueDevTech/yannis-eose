@@ -271,8 +271,8 @@ export class AuthService {
 
     const user: SessionUser = sessionData;
 
-    // SuperAdmin can switch to any branch; others must be a member
-    if (user.role !== 'SUPER_ADMIN') {
+    // SUPER_ADMIN and ADMIN can switch to any branch; others must be a member
+    if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
       const membership = await this.db
         .select({ branchId: schema.userBranches.branchId })
         .from(schema.userBranches)

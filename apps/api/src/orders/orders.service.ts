@@ -650,7 +650,7 @@ export class OrdersService {
       });
     }
 
-    const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+    const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
     if (!isElevated && order.assignedCsId !== actor.id) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -823,7 +823,7 @@ export class OrdersService {
       (currentStatus === 'CS_ASSIGNED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
       (currentStatus === 'CS_ENGAGED' && (newStatus === 'CONFIRMED' || newStatus === 'CANCELLED'));
     if (csOnlyTransitions) {
-      const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+      const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
       if ((currentStatus === 'UNPROCESSED' || currentStatus === 'CS_ASSIGNED') && newStatus === 'CS_ENGAGED') {
         if (!isElevated && actor.role !== 'CS_AGENT') {
           throw new TRPCError({
@@ -853,7 +853,7 @@ export class OrdersService {
       const tplManagerMayDeliver = actor.role === 'TPL_MANAGER' && hasResolveReceipt;
       if (
         actor.role !== 'HEAD_OF_LOGISTICS' &&
-        actor.role !== 'SUPER_ADMIN' &&
+        (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN') &&
         !tplManagerMayDeliver
       ) {
         throw new TRPCError({
@@ -3453,7 +3453,7 @@ export class OrdersService {
 
     return mergedRows.filter((row) => {
       const eventType = row.eventType as string;
-      if (actor.role === 'SUPER_ADMIN' || actor.role === 'FINANCE_OFFICER' || actor.role === 'HR_MANAGER') {
+      if ((actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN') || actor.role === 'FINANCE_OFFICER' || actor.role === 'HR_MANAGER') {
         return true;
       }
       if (csRoles.has(actor.role)) {

@@ -38,7 +38,7 @@ export class ProductsService {
     viewerId: string,
     role: string,
   ): Promise<{ allowedProductIds: string[] | null }> {
-    if (role === 'SUPER_ADMIN') {
+    if ((role === 'SUPER_ADMIN' || role === 'ADMIN')) {
       return { allowedProductIds: null };
     }
 

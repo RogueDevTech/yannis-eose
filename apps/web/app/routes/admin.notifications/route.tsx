@@ -28,7 +28,7 @@ export const meta: MetaFunction = () => [{ title: 'Notifications — Yannis EOSE
 
 /** Matches sidebar visibility for broadcast / automation admin tools. */
 const PUSH_AND_AUTOMATION_ROLES = new Set([
-  'SUPER_ADMIN',
+  'SUPER_ADMIN', 'ADMIN',
   'BRANCH_ADMIN',
   'HEAD_OF_CS',
   'HEAD_OF_MARKETING',

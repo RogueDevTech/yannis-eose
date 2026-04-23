@@ -24,8 +24,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? ((res.data as { result?: { data?: PermissionRequest[] } })?.result?.data ?? [])
     : [];
 
-  // Only SuperAdmin and users with audit.read can approve/reject
-  const canApprove = user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('audit.read');
+  // SUPER_ADMIN + ADMIN and users with audit.read can approve/reject.
+  // NOTE: true approval of Admin-level roles is still enforced server-side to SuperAdmin only.
+  const canApprove = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('audit.read');
 
   return { requests, canApprove };
 }

@@ -85,7 +85,7 @@ export const marketingRouter = router({
    * Super Admin and Head of Marketing allowed by role (no permission required); others need permission. */
   listFundingBalances: authedProcedure
     .use(async ({ ctx, next }) => {
-      if (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'HEAD_OF_MARKETING') {
+      if ((ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN') || ctx.user.role === 'HEAD_OF_MARKETING') {
         return next({ ctx });
       }
       const perms = ctx.user.permissions ?? [];
@@ -141,7 +141,7 @@ export const marketingRouter = router({
   approveFundingRequest: authedProcedure
     .input(approveFundingRequestSchema)
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'FINANCE_OFFICER') {
+      if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.role !== 'FINANCE_OFFICER') {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing, Finance Officer, or Super Admin can approve funding requests' });
       }
       return getMarketingService().approveFundingRequest(input.requestId, input.receiptUrl, ctx.user.id);
@@ -151,7 +151,7 @@ export const marketingRouter = router({
   rejectFundingRequest: authedProcedure
     .input(rejectFundingRequestSchema)
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'FINANCE_OFFICER') {
+      if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.role !== 'FINANCE_OFFICER') {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing, Finance Officer, or Super Admin can reject funding requests' });
       }
       return getMarketingService().rejectFundingRequest(input.requestId, input.reason, ctx.user.id);
@@ -185,7 +185,7 @@ export const marketingRouter = router({
   approveAdSpend: authedProcedure
     .input(approveAdSpendSchema)
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && ctx.user.role !== 'SUPER_ADMIN') {
+      if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can approve ad spend' });
       }
       return getMarketingService().approveAdSpend(input.adSpendId, ctx.user.id);

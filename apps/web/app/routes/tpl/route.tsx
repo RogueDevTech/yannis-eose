@@ -27,7 +27,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect(`/auth${redirectTo}`);
   }
 
-  if (user.role !== 'TPL_MANAGER' && user.role !== 'SUPER_ADMIN') {
+  if (user.role !== 'TPL_MANAGER' && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
     return redirect('/admin');
   }
 

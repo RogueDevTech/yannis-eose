@@ -47,7 +47,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Fetch notification email config (SuperAdmin only)
   let notificationEmailConfig: NotificationEmailConfig | null = null;
-  if (user?.role === 'SUPER_ADMIN') {
+  if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') {
     const configRes = await apiRequest<unknown>(
       '/trpc/settings.getNotificationEmailConfig',
       { method: 'GET', cookie },

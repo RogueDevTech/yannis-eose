@@ -70,7 +70,7 @@ export class MarketingService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Sender or receiver not found' });
     }
     if (receiverRole === 'HEAD_OF_MARKETING') {
-      if (senderRole !== 'SUPER_ADMIN' && senderRole !== 'FINANCE_OFFICER') {
+      if (senderRole !== 'SUPER_ADMIN' && senderRole !== 'ADMIN' && senderRole !== 'FINANCE_OFFICER') {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Super Admin or Finance Officer can disburse to Head of Marketing' });
       }
     } else if (receiverRole === 'MEDIA_BUYER') {
@@ -566,7 +566,7 @@ export class MarketingService {
     if (caller.id === userId) {
       return this.getFundingBalance(userId, branchId);
     }
-    if (caller.role === 'SUPER_ADMIN' || caller.role === 'FINANCE_OFFICER') {
+    if ((caller.role === 'SUPER_ADMIN' || caller.role === 'ADMIN') || caller.role === 'FINANCE_OFFICER') {
       return this.getFundingBalance(userId, branchId);
     }
     if (caller.role === 'HEAD_OF_MARKETING' && targetRole === 'MEDIA_BUYER') {

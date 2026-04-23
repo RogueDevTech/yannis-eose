@@ -242,6 +242,7 @@ function AttachedFileDisplay({ url, onPreview }: { url: string; onPreview?: (url
 // ── Role labels ──────────────────────────────────────────────────
 const ROLE_LABELS: Record<string, string> = {
   SUPER_ADMIN: 'Super Admin',
+  ADMIN: 'Admin',
   HEAD_OF_MARKETING: 'Head of Marketing',
   MEDIA_BUYER: 'Media Buyer',
   HEAD_OF_CS: 'Head of CS',

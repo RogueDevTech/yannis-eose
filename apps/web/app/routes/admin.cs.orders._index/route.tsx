@@ -49,7 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const isCSAgent = user.role === 'CS_AGENT';
   const assignedCsId = isCSAgent ? user.id : csAgentIdParam;
-  const canCreateOffline = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'].includes(user.role);
+  const canCreateOffline = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(user.role);
 
   const listInput = {
     page,
@@ -82,7 +82,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const total = trpcData?.pagination?.total ?? 0;
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
-  const showCSAgentColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN';
+  const showCSAgentColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
   const myWorkload =
     isCSAgent && myWorkloadRes && (myWorkloadRes as { ok: boolean }).ok
       ? ((myWorkloadRes as { data?: { result?: { data?: { agentId: string; agentName: string; capacity: number; pendingCount: number; lastActionAt: string | null } } } }).data?.result?.data ??
@@ -122,7 +122,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     searchFilter: search,
     isCSAgent,
     showCSAgentColumn,
-    canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN',
+    canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
     currentUserId: user.id,
     myWorkload,
     csAgentsForFilter,
@@ -146,7 +146,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'createOffline') {
     const createOfflineUser = await requirePermission(request, 'orders.read');
-    if (!['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'].includes(createOfflineUser.role)) {
+    if (!['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(createOfflineUser.role)) {
       return json({ error: 'Only closers and Head of CS can create offline orders' }, { status: 403 });
     }
     const customerName = form.get('customerName')?.toString()?.trim() ?? '';

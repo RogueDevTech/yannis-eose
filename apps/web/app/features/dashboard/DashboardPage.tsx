@@ -51,7 +51,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
       {!role && <GenericFallbackDashboard />}
 
       {/* Role-specific dashboard */}
-      {(role === 'SUPER_ADMIN') && <SuperAdminDashboard data={data} naira={naira} />}
+      {(role === 'SUPER_ADMIN' || role === 'ADMIN') && <SuperAdminDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_CS' || role === 'CS_AGENT') && <CSDashboard data={data} role={role} />}
       {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} naira={naira} />}
       {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}
@@ -688,6 +688,7 @@ function getQuickActions(role: string, unprocessed: number) {
 
   switch (role) {
     case 'SUPER_ADMIN':
+    case 'ADMIN':
       return [
         { href: '/admin/products/new', label: 'Add Product', description: 'Create a new product', icon: 'add', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
         { href: '/hr/users/new', label: 'Add Staff', description: 'Invite a team member', icon: 'users', bg: 'bg-success-50 dark:bg-success-700/20 text-success-600 dark:text-success-400' },

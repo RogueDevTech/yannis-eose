@@ -142,6 +142,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
 
     switch (user.role) {
       case 'SUPER_ADMIN':
+      case 'ADMIN':
         void client.join('admin');
         void client.join('finance');
         void client.join('cs-all');

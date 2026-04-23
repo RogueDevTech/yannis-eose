@@ -268,7 +268,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'adjustOrderItems') {
-    const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'];
+    const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
     if (!allowedRoles.includes(user.role)) {
       return json({ error: 'Only CS or Head of CS can adjust order items' }, { status: 403 });
     }
@@ -341,7 +341,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
     if (csOnlyStatuses.includes(newStatus)) {
-      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'];
+      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
       if (!allowedRoles.includes(user.role)) {
         return json({ error: 'Only CS or Head of CS can perform this action' }, { status: 403 });
       }

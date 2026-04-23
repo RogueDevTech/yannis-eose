@@ -6,7 +6,7 @@ import type { UserRole } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 
 /** Roles that HR cannot assign directly — require SuperAdmin approval */
-export const SENSITIVE_ROLES = ['SUPER_ADMIN', 'FINANCE_OFFICER'] as const;
+export const SENSITIVE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'] as const;
 
 /** Permissions that HR cannot grant directly — require SuperAdmin approval */
 export const SENSITIVE_PERMISSIONS = [
@@ -29,11 +29,11 @@ export class PermissionsService {
 
   /**
    * Get effective permissions for a user.
-   * SuperAdmin bypasses all checks at the procedure level — this returns empty set for SuperAdmin
-   * since we never need to check. For other roles: role_permissions ∪ user grants − user revokes.
+   * SUPER_ADMIN and ADMIN bypass all checks at the procedure level — this returns empty set
+   * for them since we never need to check. For other roles: role_permissions ∪ user grants − user revokes.
    */
   async getEffectivePermissions(userId: string, role: string): Promise<Set<string>> {
-    if (role === 'SUPER_ADMIN') {
+    if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
       return new Set();
     }
 
@@ -74,10 +74,10 @@ export class PermissionsService {
   }
 
   /**
-   * Check if user has a permission. SuperAdmin always returns true.
+   * Check if user has a permission. SUPER_ADMIN and ADMIN always return true.
    */
   async hasPermission(userId: string, role: string, permissionCode: string): Promise<boolean> {
-    if (role === 'SUPER_ADMIN') return true;
+    if (role === 'SUPER_ADMIN' || role === 'ADMIN') return true;
     const perms = await this.getEffectivePermissions(userId, role);
     return perms.has(permissionCode);
   }

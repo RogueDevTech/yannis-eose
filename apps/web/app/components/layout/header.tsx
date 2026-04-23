@@ -703,7 +703,7 @@ export function Header({
 
 /* ── Header Branch Switcher ───────────────────────────────────────────── */
 
-const ALL_BRANCHES_ROLES = new Set(['SUPER_ADMIN']);
+const ALL_BRANCHES_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 
 function HeaderBranchSwitcher({
   branches,

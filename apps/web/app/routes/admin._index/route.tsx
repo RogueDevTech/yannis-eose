@@ -29,15 +29,15 @@ const defaultCEOData: CEODashboardData = {
 };
 
 /** Roles that need marketing.metrics */
-const ROLES_NEED_METRICS = ['SUPER_ADMIN', 'HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'];
+const ROLES_NEED_METRICS = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'];
 /** Roles that need finance.profitReport */
-const ROLES_NEED_PROFIT = ['SUPER_ADMIN', 'FINANCE_OFFICER'];
+const ROLES_NEED_PROFIT = ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'];
 /** Roles that need users.list (totalUsers) */
-const ROLES_NEED_USERS = ['SUPER_ADMIN', 'HR_MANAGER'];
+const ROLES_NEED_USERS = ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'];
 /** Roles that need products.list (totalProducts) */
-const ROLES_NEED_PRODUCTS = ['SUPER_ADMIN', 'WAREHOUSE_MANAGER'];
+const ROLES_NEED_PRODUCTS = ['SUPER_ADMIN', 'ADMIN', 'WAREHOUSE_MANAGER'];
 /** Roles that need hr.payoutSummary */
-const ROLES_NEED_PAYOUT = ['SUPER_ADMIN', 'HR_MANAGER'];
+const ROLES_NEED_PAYOUT = ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -70,8 +70,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 
-  // SuperAdmin: CEO Executive Overview — deferred for navigate-first
-  if (role === 'SUPER_ADMIN') {
+  // SUPER_ADMIN + ADMIN: CEO Executive Overview — deferred for navigate-first
+  if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
     const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
     const ceoPromise = apiRequest<{ result?: { data?: CEODashboardData } }>(
       `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(ceoInput)}`,

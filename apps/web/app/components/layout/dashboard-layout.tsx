@@ -79,14 +79,14 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/marketing/overview',
         icon: SidebarIcons.marketing,
         permission: 'marketing.teamOverview',
-        roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Team',
         href: '/admin/marketing/team',
         icon: SidebarIcons.marketing,
         permission: 'marketing.teamOverview',
-        roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Marketing Orders',
@@ -135,7 +135,7 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/cs/team',
         icon: SidebarIcons.cs,
         permission: 'cs.teamOverview',
-        roles: ['SUPER_ADMIN', 'HEAD_OF_CS'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
         label: 'CS Orders',
@@ -310,7 +310,8 @@ function getNavGroupsForUser(
   options?: { forMobile?: boolean },
 ): SidebarGroup[] {
   const result: SidebarGroup[] = [];
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  // ADMIN shares SUPER_ADMIN sidebar visibility.
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
   const perms = user?.permissions ?? [];
   const role = user?.role ?? '';
   const forMobile = options?.forMobile === true;
@@ -357,6 +358,13 @@ function getNavGroupsForUser(
 /** Priority hrefs for bottom nav per role (max 5). Order matters. */
 const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
   SUPER_ADMIN: [
+    '/admin',
+    '/admin/marketing/overview',
+    '/admin/cs/queue',
+    '/admin/logistics/orders',
+    '/admin/finance/overview',
+  ],
+  ADMIN: [
     '/admin',
     '/admin/marketing/overview',
     '/admin/cs/queue',
@@ -418,7 +426,7 @@ function getBottomNavItemsForUser(
   const role = user.role ?? '';
   const priorityHrefs = BOTTOM_NAV_PRIORITY_BY_ROLE[role];
   if (priorityHrefs) {
-    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
     const perms = user.permissions ?? [];
     const result: BottomNavItem[] = [];
     const hrefToItem = new Map(FLAT_NAV_ITEMS.map((item) => [item.href, item]));

@@ -206,7 +206,8 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   const [searchParams, setSearchParams] = useSearchParams();
   const installAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  // Treat SUPER_ADMIN and ADMIN identically for settings visibility (System + OrgEmails tabs).
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
 
   const allowedTabs = useMemo((): SettingsTabId[] => {
     return isSuperAdmin ? ['profile', 'security', 'push', 'system', 'orgEmails'] : ['profile', 'security', 'push'];

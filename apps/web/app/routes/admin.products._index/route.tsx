@@ -18,9 +18,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
 
   const canEditProduct =
-    user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.update');
+    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('products.update');
   const canCreateProduct =
-    user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.create');
+    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('products.create');
 
   const input = { page, limit: 20, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
   const productsPromise = apiRequest<unknown>(

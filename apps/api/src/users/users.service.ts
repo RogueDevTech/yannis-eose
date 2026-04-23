@@ -170,11 +170,21 @@ export class UsersService {
     // Set actor for audit trail
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
 
-    // HR scope check: if HR (has users.create but not SuperAdmin) and role is sensitive, create request
+    // Preserve SuperAdmin singleton invariant: SUPER_ADMIN can ONLY be created via the public
+    // /auth/setup flow (setupSuperAdmin), never via createStaff. Anyone attempting it is blocked.
+    if (input.role === 'SUPER_ADMIN') {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message:
+          'SUPER_ADMIN is a singleton and cannot be created via staff management. Use the initial setup flow.',
+      });
+    }
+
+    // Sensitive-role approval flow: anyone other than SuperAdmin attempting to create a sensitive
+    // role (ADMIN, FINANCE_OFFICER, etc.) generates a permission_request the SuperAdmin must approve.
+    // This covers: HR creating any sensitive role, AND ADMIN creating another ADMIN.
     const isSuperAdmin = actor.role === 'SUPER_ADMIN';
-    const hasUsersCreate =
-      isSuperAdmin || (actor.permissions ?? []).includes('users.create');
-    if (hasUsersCreate && !isSuperAdmin && this.permissionsService.isSensitiveRole(input.role)) {
+    if (!isSuperAdmin && this.permissionsService.isSensitiveRole(input.role)) {
       const [req] = await this.db
         .insert(schema.permissionRequests)
         .values({
@@ -258,7 +268,7 @@ export class UsersService {
       }
     }
 
-    if (input.role !== 'SUPER_ADMIN') {
+    if (input.role !== 'SUPER_ADMIN' && input.role !== 'ADMIN') {
       if (!input.primaryBranchId) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -722,12 +732,17 @@ export class UsersService {
       });
     }
 
-    // HR scope check: if HR and role change to sensitive, create request
+    // Sensitive-role approval flow on update — anyone other than SuperAdmin promoting someone to
+    // a sensitive role (ADMIN, FINANCE_OFFICER, etc.) creates a permission_request for approval.
     const isSuperAdmin = actor.role === 'SUPER_ADMIN';
-    const hasUsersUpdate =
-      isSuperAdmin || (actor.permissions ?? []).includes('users.update');
+    // Additionally block non-SuperAdmins from promoting anyone to SUPER_ADMIN (singleton invariant).
+    if (!isSuperAdmin && input.role === 'SUPER_ADMIN') {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the current SuperAdmin can transfer the SUPER_ADMIN role.',
+      });
+    }
     if (
-      hasUsersUpdate &&
       !isSuperAdmin &&
       input.role &&
       this.permissionsService.isSensitiveRole(input.role)
@@ -975,13 +990,16 @@ export class UsersService {
   }
 
   /**
-   * Deactivate a staff member. SuperAdmin only; permanent (no reactivation).
+   * Deactivate a staff member. Permanent (no reactivation).
+   * - SuperAdmin may deactivate anyone (except themselves).
+   * - Admin may deactivate non-admin-level users only.
+   * - Others: forbidden.
    */
   async deactivate(userId: string, actor: SessionUser) {
-    if (actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN') {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins can deactivate users.',
+        message: 'Only Super Admins and Admins can deactivate users.',
       });
     }
     if (userId === actor.id) {
@@ -989,6 +1007,20 @@ export class UsersService {
         code: 'BAD_REQUEST',
         message: 'Cannot deactivate your own account',
       });
+    }
+    // Admins cannot deactivate other admin-level users. Only SuperAdmin can do that.
+    if (actor.role === 'ADMIN') {
+      const [target] = await this.db
+        .select({ role: schema.users.role })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+      if (target && (target.role === 'SUPER_ADMIN' || target.role === 'ADMIN')) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Admins cannot deactivate another Admin or the SuperAdmin. Only the SuperAdmin can.',
+        });
+      }
     }
 
     await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;

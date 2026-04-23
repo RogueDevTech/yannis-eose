@@ -13,7 +13,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
+  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
   const cookie = getSessionCookie(request);
   const orderId = params['id'];
 
@@ -101,7 +101,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'allocate') {
-    await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
+    await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
     const logisticsLocationId = formData.get('logisticsLocationId')?.toString();
     if (!logisticsLocationId) {
       return json({ error: 'Location is required' }, { status: 400 });
@@ -123,7 +123,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'dispatch') {
-    await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
+    await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
     const riderId = formData.get('riderId')?.toString();
     if (!riderId) {
       return json({ error: 'Rider is required' }, { status: 400 });
@@ -177,7 +177,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const isDeliveryConfirmation = newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED';
-    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN';
+    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
 
     if (isDeliveryConfirmation && !canTransitionDirect) {
       const res = await apiRequest<unknown>('/trpc/logistics.submitDeliveryConfirmation', {

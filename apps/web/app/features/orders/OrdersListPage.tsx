@@ -281,7 +281,7 @@ export function OrdersListPage({
     );
   };
 
-  const canBulkAction = userRole === 'SUPER_ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'WAREHOUSE_MANAGER';
+  const canBulkAction = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'WAREHOUSE_MANAGER';
 
   const statusOptions = STATUS_OPTIONS.map((status) => ({
     value: status,

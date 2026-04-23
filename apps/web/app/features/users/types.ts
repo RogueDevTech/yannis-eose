@@ -19,6 +19,7 @@ export interface User {
 
 export const ROLE_COLORS: Record<string, string> = {
   SUPER_ADMIN: 'badge-danger',
+  ADMIN: 'badge-danger',
   HEAD_OF_MARKETING: 'badge-brand',
   MEDIA_BUYER: 'badge-info',
   HEAD_OF_CS: 'badge-brand',
@@ -42,6 +43,7 @@ export const USER_STATUS_COLORS: Record<string, string> = {
 export const ROLE_OPTIONS = [
   'ALL',
   'SUPER_ADMIN',
+  'ADMIN',
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
   'HEAD_OF_CS',
@@ -242,6 +244,7 @@ export interface UserDetailLoaderData {
 
 export const ROLE_AVATAR_GRADIENTS: Record<string, string> = {
   SUPER_ADMIN: 'from-red-500 to-rose-600',
+  ADMIN: 'from-red-400 to-orange-500',
   HEAD_OF_MARKETING: 'from-brand-500 to-brand-700',
   MEDIA_BUYER: 'from-sky-400 to-blue-600',
   HEAD_OF_CS: 'from-brand-500 to-indigo-600',
@@ -256,6 +259,7 @@ export const ROLE_AVATAR_GRADIENTS: Record<string, string> = {
 
 export const ROLE_ICONS: Record<string, string> = {
   SUPER_ADMIN: 'shield',
+  ADMIN: 'shield',
   HEAD_OF_MARKETING: 'megaphone',
   MEDIA_BUYER: 'chart-bar',
   HEAD_OF_CS: 'headset',

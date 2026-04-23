@@ -120,7 +120,7 @@ export const messagingRouter = router({
       }
 
       // Branch scoping: non-SuperAdmin sees own branch templates only
-      if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.currentBranchId) {
+      if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.currentBranchId) {
         conditions.push(eq(schema.messageTemplates.branchId, ctx.user.currentBranchId));
       }
 

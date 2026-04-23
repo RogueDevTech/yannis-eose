@@ -246,6 +246,16 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 - Legacy migration: map `'neutral'` → `'dim'` and `'contrast'` → `'light'` on any read from localStorage
 - Server persistence: call `users.updateMyAppTheme(appTheme)` via `trpc-browser.ts` (session-less fetch)
 
+### When Building the Font Scale System
+- 3 scale IDs: `base` (14 px root, default), `large` (15.75 px, ×1.125), `xlarge` (17.5 px, ×1.25).
+- `users.font_scale` is nullable — `null` means `base`.
+- Implemented by scaling the root `html` `font-size`; every Tailwind utility is rem-based so text + spacing scale together (behaves like browser zoom but persisted per-user).
+- Inline `getFontScaleBootScript()` in `root.tsx` next to the theme script — both MUST be the first `<script>` tags in `<head>` (before any stylesheet link) to prevent a pixel-size flash on paint.
+- `applyFontScale(id)` sets `data-font-scale` on `<html>` and writes `documentElement.style.fontSize = <px>`. The inline style wins over the `html { font-size: 14px }` CSS fallback in `tailwind.css`.
+- `useFontScale()` hook mirrors `useAppTheme()` (localStorage + cross-tab `yannis-font-scale-change` event + server sync).
+- Server sync: `useServerFontScaleSync(isLoggedInArea)` in `root.tsx` pulls `settings.getClientConfig.effectiveFontScale` on login so preference follows the user across devices.
+- Do NOT add media queries for font scaling — it's a root-relative rem scale that works mobile + desktop identically.
+
 ### When Building the Push Notification Center
 The push system has four layers — all must be consistent:
 
@@ -317,9 +327,12 @@ The push system has four layers — all must be consistent:
 
 ## RBAC Role Matrix
 
+**Admin tier:** Two roles sit at the top. `SUPER_ADMIN` is a singleton (exactly one per org, created via `/auth/setup`). `ADMIN` is multi-instance and has equivalent operational authority EXCEPT the ability to manage other admin-level accounts.
+
 | Role | Dashboard Scope | Can See COGS? | Can See Full Phone? | Can Approve Finance? | Can Edit Commission Rules? |
 |---|---|---|---|---|---|
 | SuperAdmin | Everything (all branches) | Yes | Via audit log only | Yes | Yes |
+| Admin | Everything (all branches) | Yes | Via audit log only | Yes | Yes |
 | Branch Admin | Own branch — users, settings, reports | No | No | Branch only | No |
 | Head of Marketing | Marketing + Media Buyer performance | No | No | No | No |
 | Media Buyer | Own campaigns, own orders, own payouts | No | No | No | No |
@@ -332,6 +345,20 @@ The push system has four layers — all must be consistent:
 | 3PL Rider | Own assigned deliveries only | No | No (masked) | No | No |
 | Warehouse Manager | Inventory, stock movements, procurement | No | No | No | No |
 | HR Manager | All staff payouts, commission configs | No | No | No | Yes |
+
+**SuperAdmin-only (Admin cannot):**
+- Create, promote, demote, or deactivate another `ADMIN` or `SUPER_ADMIN` (Admin → non-admin-level staff only; ADMIN creating another ADMIN triggers the `permission_requests` approval flow, not a direct create).
+- Kill sessions of another admin-level user (`DELETE /auth/sessions/:userId` blocks ADMIN targeting ADMIN/SUPER_ADMIN).
+- Transfer the SUPER_ADMIN role (enforced in `users.service.update` — promotion to SUPER_ADMIN is rejected for all non-SuperAdmin callers).
+- Access the initial `/auth/setup` flow (only creates when zero users exist).
+
+**Implementation source of truth (do NOT inline `role === 'SUPER_ADMIN'` for admin-class checks):**
+- Backend: `apps/api/src/common/authz.ts` → `isAdminLevel(user)`, `isSuperAdminOnly(user)`, `ADMIN_LEVEL_ROLES`.
+- Frontend: `apps/web/app/lib/rbac.ts` → same helpers mirrored.
+- Permission bypass: `PermissionsService.getEffectivePermissions` and `permissionProcedure` short-circuit for BOTH `SUPER_ADMIN` and `ADMIN` (they carry `permissions: []` in the session).
+- Finance field stripping: `hasFinanceAccess` returns true for both.
+- Branch visibility: `canViewAllBranches` returns true for both.
+- `SENSITIVE_ROLES` includes both `SUPER_ADMIN` and `ADMIN` — creating/promoting anyone into an admin-level role generates a `permission_request` for SuperAdmin approval.
 
 ---
 
@@ -472,6 +499,10 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT delete a `push_delivery_log` row on failure — mark as `FAILED` and use resend flow
 - Do NOT apply app theme changes only on the client — always sync to server via `users.updateMyAppTheme` so the preference survives session restoration
 - Do NOT inline theme script AFTER stylesheets — it must be the first `<script>` in `<head>` to prevent flash of wrong theme
+- Do NOT inline `user.role === 'SUPER_ADMIN'` when granting admin-class privilege — use `isAdminLevel(user)` from `apps/api/src/common/authz.ts` (backend) or `apps/web/app/lib/rbac.ts` (frontend). Inline literal checks silently lock `ADMIN` users out.
+- Do NOT create a user with role `SUPER_ADMIN` through any path other than the public `/auth/setup` endpoint. `createStaff` rejects it; the enum exists only to persist the initial singleton. If you need to transfer ownership, implement an explicit transfer mutation — do not reuse `createStaff` or `update`.
+- Do NOT let an `ADMIN` directly create or deactivate another `ADMIN`/`SUPER_ADMIN`. The service layer (`users.service.ts`) funnels such attempts through the `permission_requests` approval flow so the SuperAdmin retains unique authority over who holds admin-level access. Do not add shortcut code paths around this.
+- Do NOT set `font-size` directly on any element when you mean "scale the app" — the root font-size is controlled by `applyFontScale()` / the inline boot script and every Tailwind utility is rem-based. Per-element `font-size` will break the scale.
 
 ---
 
