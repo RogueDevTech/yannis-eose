@@ -102,7 +102,7 @@ function AgentWorkloadCard({
 
   const viewOrdersLink = (
     <Link
-      to={`/admin/cs/orders?csAgentId=${agent.agentId}`}
+      to={`/admin/cs/orders?csAgentId=${agent.agentId}&period=all_time`}
       prefetch="intent"
       className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-lg text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/25 hover:bg-brand-100 dark:hover:bg-brand-900/40 border border-brand-200/80 dark:border-brand-700/50 transition-colors"
       onClick={(e) => e.stopPropagation()}
@@ -237,7 +237,7 @@ function AgentWorkloadDetailModal({
 
       <div className="px-5 pb-5">
         <Link
-          to={`/admin/cs/orders?csAgentId=${agent.agentId}`}
+          to={`/admin/cs/orders?csAgentId=${agent.agentId}&period=all_time`}
           prefetch="intent"
           onClick={onClose}
           className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 transition-colors"
@@ -286,14 +286,14 @@ const STAGE_CONFIG: Record<ActivityStage, {
   badgeColor: string;
   textColor: string;
 }> = {
-  browsing:     { label: 'Browsing',      dotColor: 'bg-warning-400',  ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-app-border',  badgeColor: 'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400',  textColor: 'text-warning-600 dark:text-warning-400' },
-  abandoned:    { label: 'Dropped off',   dotColor: 'bg-surface-400',  ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-app-border',  badgeColor: 'bg-app-hover text-app-fg-muted',  textColor: 'text-app-fg-muted' },
-  order_placed: { label: 'Order placed',  dotColor: 'bg-brand-400',    ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-brand-200 dark:border-brand-800',  badgeColor: 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400',  textColor: 'text-brand-600 dark:text-brand-400' },
-  with_cs:      { label: 'With CS',       dotColor: 'bg-indigo-400',   ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-indigo-200 dark:border-indigo-800',  badgeColor: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400',  textColor: 'text-indigo-600 dark:text-indigo-400' },
-  confirmed:    { label: 'Confirmed',     dotColor: 'bg-brand-500',    ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-brand-300 dark:border-brand-700',  badgeColor: 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400',  textColor: 'text-brand-600 dark:text-brand-400' },
-  in_delivery:  { label: 'Out for delivery', dotColor: 'bg-info-400',  ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-info-200 dark:border-info-800',  badgeColor: 'bg-info-100 dark:bg-info-900/30 text-info-700 dark:text-info-400',  textColor: 'text-info-600 dark:text-info-400' },
-  delivered:    { label: 'Delivered ✓',   dotColor: 'bg-success-500',  ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-success-200 dark:border-success-800',  badgeColor: 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400',  textColor: 'text-success-600 dark:text-success-400' },
-  returned:     { label: 'Returned',      dotColor: 'bg-danger-400',   ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-danger-200 dark:border-danger-800',  badgeColor: 'bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400',  textColor: 'text-danger-600 dark:text-danger-400' },
+  browsing:     { label: 'Browsing',         dotColor: 'bg-amber-400',   ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-amber-200 dark:border-amber-800',     badgeColor: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',       textColor: 'text-amber-600 dark:text-amber-400' },
+  abandoned:    { label: 'Dropped off',      dotColor: 'bg-surface-400', ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-app-border',                          badgeColor: 'bg-app-hover text-app-fg-muted',                                             textColor: 'text-app-fg-muted' },
+  order_placed: { label: 'Order placed',     dotColor: 'bg-blue-500',    ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-blue-200 dark:border-blue-800',       badgeColor: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',           textColor: 'text-blue-600 dark:text-blue-400' },
+  with_cs:      { label: 'With CS',          dotColor: 'bg-purple-500',  ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-purple-200 dark:border-purple-800',   badgeColor: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',   textColor: 'text-purple-600 dark:text-purple-400' },
+  confirmed:    { label: 'Confirmed',        dotColor: 'bg-cyan-500',    ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-cyan-200 dark:border-cyan-800',       badgeColor: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400',           textColor: 'text-cyan-600 dark:text-cyan-400' },
+  in_delivery:  { label: 'Out for delivery', dotColor: 'bg-orange-500',  ping: true,  cardBg: 'bg-app-elevated',  borderColor: 'border-orange-200 dark:border-orange-800',   badgeColor: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',   textColor: 'text-orange-600 dark:text-orange-400' },
+  delivered:    { label: 'Delivered ✓',      dotColor: 'bg-emerald-500', ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-emerald-200 dark:border-emerald-800', badgeColor: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400', textColor: 'text-emerald-600 dark:text-emerald-400' },
+  returned:     { label: 'Returned',         dotColor: 'bg-rose-500',    ping: false, cardBg: 'bg-app-elevated',  borderColor: 'border-rose-200 dark:border-rose-800',       badgeColor: 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400',           textColor: 'text-rose-600 dark:text-rose-400' },
 };
 
 // ─── Live activity card ───
@@ -358,24 +358,20 @@ function LiveActivityCard({
           </p>
         </div>
 
-        {/* Product pill + amount */}
-        {(item.productName || item.totalAmount) && (
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            {item.productName && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-app-hover text-app-fg-muted">
-                <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                </svg>
-                <span className="truncate">{item.productName}</span>
-              </span>
-            )}
-            {item.totalAmount && (
-              <span className="text-[11px] font-bold text-app-fg shrink-0">
-                &#8358;{Number(item.totalAmount).toLocaleString('en-NG')}
-              </span>
-            )}
-          </div>
-        )}
+        {/* Product pill — always rendered on its own line; name truncates */}
+        <div className="mb-1.5 min-w-0">
+          <span className="inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-app-hover text-app-fg-muted">
+            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+            <span className="truncate min-w-0">{item.productName ?? '—'}</span>
+          </span>
+        </div>
+
+        {/* Amount — always on its own new line so card height is uniform */}
+        <div className="mb-2 text-[11px] font-bold text-app-fg">
+          {item.totalAmount ? `₦${Number(item.totalAmount).toLocaleString('en-NG')}` : '—'}
+        </div>
 
         {/* Timestamp */}
         <div className="text-[11px] font-medium text-app-fg-muted">
@@ -414,18 +410,6 @@ function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityItem | n
   const stage = item ? resolveStage(item) : 'browsing';
   const cfg = item ? STAGE_CONFIG[stage] : STAGE_CONFIG.browsing;
 
-  // Journey steps with filled/active/empty states
-  const JOURNEY: { stage: ActivityStage; label: string }[] = [
-    { stage: 'browsing',     label: 'Browsing' },
-    { stage: 'order_placed', label: 'Order placed' },
-    { stage: 'with_cs',      label: 'With CS' },
-    { stage: 'confirmed',    label: 'Confirmed' },
-    { stage: 'in_delivery',  label: 'Delivery' },
-    { stage: 'delivered',    label: 'Delivered' },
-  ];
-  const ORDER_STAGES: ActivityStage[] = ['order_placed', 'with_cs', 'confirmed', 'in_delivery', 'delivered'];
-  const stageIndex = JOURNEY.findIndex((j) => j.stage === stage);
-
   return (
     <Modal open={item != null} onClose={onClose} maxWidth="max-w-sm" backdropBlur>
       {item && (
@@ -452,25 +436,17 @@ function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityItem | n
             </div>
           </div>
 
-          {/* Journey progress bar */}
+          {/* Current status indicator — only shows the live stage, not the full journey */}
           {stage !== 'abandoned' && stage !== 'returned' && (
             <div className="px-5 pt-4 pb-0 -mt-2">
-              <div className="bg-app-elevated rounded-xl border border-app-border px-4 py-3">
-                <div className="flex items-center justify-between gap-1">
-                  {JOURNEY.map((j, i) => {
-                    const isPast = i < stageIndex;
-                    const isActive = i === stageIndex;
-                    const needsOrder = ORDER_STAGES.includes(j.stage);
-                    if (needsOrder && item.cartStatus !== 'CONVERTED') return null;
-                    return (
-                      <div key={j.stage} className="flex flex-col items-center gap-1 flex-1">
-                        <div className={`w-2 h-2 rounded-full transition-colors ${isPast ? 'bg-success-500' : isActive ? cfg.dotColor : 'bg-app-hover'}`} />
-                        <span className={`text-[9px] font-medium text-center leading-tight ${isActive ? cfg.textColor : isPast ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>
-                          {j.label}
-                        </span>
-                      </div>
-                    );
-                  })}
+              <div className="bg-app-elevated rounded-xl border border-app-border px-4 py-3 flex items-center gap-3">
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${cfg.dotColor} opacity-60`} />
+                  <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${cfg.dotColor}`} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted">Current status</p>
+                  <p className={`text-sm font-bold leading-tight ${cfg.textColor}`}>{cfg.label}</p>
                 </div>
               </div>
             </div>
@@ -539,7 +515,7 @@ function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityItem | n
                 </Link>
               )}
               <Link
-                to="/admin/cs/orders"
+                to="/admin/cs/orders?period=all_time"
                 prefetch="intent"
                 onClick={onClose}
                 className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-app-fg bg-app-hover hover:bg-app-hover/80 border border-app-border transition-colors"
@@ -1557,7 +1533,7 @@ export function CSDashboardPage({
           </Button>
         ) : (
           <Link
-            to="/admin/cs/orders"
+            to="/admin/cs/orders?period=all_time"
             className="btn-primary btn-sm shrink-0 -mb-px inline-flex items-center justify-center"
           >
             Go to Orders
