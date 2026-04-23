@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -28,7 +28,7 @@ import {
 } from './types';
 
 export function InventoryPage({
-  levels, totalLevels, movements, totalMovements, products, locations, canIntake = false,
+  levels, totalLevels, movements, totalMovements, products, locations, canIntake = false, canExport = false,
   transfers, returnedOrders, reconciliations, locationsWithLock,
 }: InventoryStreamData) {
   const hasTransfers = !!transfers;
@@ -37,8 +37,29 @@ export function InventoryPage({
   type TabValue = 'levels' | 'movements' | 'transfers' | 'returns' | 'reconciliation';
   const [activeTab, setActiveTab] = useState<TabValue>('levels');
 
+  // Stock Levels tab: filter by product + sort by available stock (lowest/highest).
+  type LevelsSort = 'default' | 'lowestAvailable' | 'highestAvailable';
+  const [levelsProductFilter, setLevelsProductFilter] = useState<string>('ALL');
+  const [levelsSort, setLevelsSort] = useState<LevelsSort>('default');
+
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
   const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…') : '—';
+
+  const displayedLevels = useMemo(() => {
+    let rows = levels;
+    if (levelsProductFilter !== 'ALL') {
+      rows = rows.filter((l) => l.productId === levelsProductFilter);
+    }
+    if (levelsSort !== 'default') {
+      const available = (l: InventoryLevel) => l.stockCount - l.reservedCount;
+      rows = [...rows].sort((a, b) =>
+        levelsSort === 'lowestAvailable'
+          ? available(a) - available(b)
+          : available(b) - available(a),
+      );
+    }
+    return rows;
+  }, [levels, levelsProductFilter, levelsSort]);
   const [showIntakeForm, setShowIntakeForm] = useState(false);
   const fetcher = useFetcher();
 
@@ -88,89 +109,98 @@ export function InventoryPage({
                 )}
               </Button>
             )}
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => exportToCsv(
-                levels.map((inv) => ({
-                  product: productName(inv.productId),
-                  location: locationName(inv.locationId),
-                  stock: inv.stockCount,
-                  reserved: inv.reservedCount,
-                  available: inv.stockCount - inv.reservedCount,
-                  status: inv.status,
-                  updated: new Date(inv.updatedAt).toLocaleDateString(),
-                })),
-                [
-                  { key: 'product', label: 'Product' },
-                  { key: 'location', label: 'Location' },
-                  { key: 'stock', label: 'Stock Count' },
-                  { key: 'reserved', label: 'Reserved' },
-                  { key: 'available', label: 'Available' },
-                  { key: 'status', label: 'Status' },
-                  { key: 'updated', label: 'Last Updated' },
-                ],
-                `inventory-${new Date().toISOString().split('T')[0]}.csv`,
-              )}
-            >
-              Export CSV
-            </Button>
+            {canExport && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => exportToCsv(
+                  levels.map((inv) => ({
+                    product: productName(inv.productId),
+                    location: locationName(inv.locationId),
+                    stock: inv.stockCount,
+                    reserved: inv.reservedCount,
+                    available: inv.stockCount - inv.reservedCount,
+                    status: inv.status,
+                    updated: new Date(inv.updatedAt).toLocaleDateString(),
+                  })),
+                  [
+                    { key: 'product', label: 'Product' },
+                    { key: 'location', label: 'Location' },
+                    { key: 'stock', label: 'Stock Count' },
+                    { key: 'reserved', label: 'Reserved' },
+                    { key: 'available', label: 'Available' },
+                    { key: 'status', label: 'Status' },
+                    { key: 'updated', label: 'Last Updated' },
+                  ],
+                  `inventory-${new Date().toISOString().split('T')[0]}.csv`,
+                )}
+              >
+                Export CSV
+              </Button>
+            )}
           </>
         }
       />
 
-      {/* Stock Intake form (only when user has inventory.intake) */}
-      {canIntake && (
-        <ResponsiveFormPanel open={showIntakeForm} onClose={() => setShowIntakeForm(false)}>
-          <div className="card space-y-4">
-            <div className="flex items-center justify-between">
+      {/* Stock Intake modal (only when user has inventory.intake) */}
+      {canIntake && showIntakeForm && (
+        <Modal
+          open
+          onClose={() => setShowIntakeForm(false)}
+          maxWidth="max-w-2xl"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
               <h3 className="text-lg font-semibold text-app-fg">Receive Stock (Stock Intake)</h3>
-              <button
-                type="button"
-                onClick={() => setShowIntakeForm(false)}
-                className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <p className="text-sm text-app-fg-muted mt-1">
+                Add a new FIFO batch. Each intake creates a batch with its own factory and landing cost.
+              </p>
             </div>
-            <p className="text-sm text-app-fg-muted">
-              Add a new FIFO batch. Each intake creates a batch with its own factory and landing cost. Requires Warehouse Manager or SuperAdmin role.
-            </p>
-            {intakeError && !dismissedIntakeError && (
-              <div ref={intakeErrorRef}>
-                <PageNotification
-                  variant="error"
-                  message={intakeError}
-                  durationMs={5000}
-                  onDismiss={() => setDismissedIntakeError(true)}
-                />
-              </div>
-            )}
-            {(products.length === 0 || locations.length === 0) ? (
-              <InlineNotification
-                variant="warning"
-                message={
-                  products.length === 0 && locations.length === 0
-                    ? 'Create products and logistics locations first.'
-                    : products.length === 0
-                      ? 'Create products first via Products → Add Product.'
-                      : 'Create logistics locations first via Logistics.'
-                }
-                actions={
-                  products.length === 0 && locations.length === 0
-                    ? [
-                        { label: 'Add Product', href: '/admin/products/new' },
-                        { label: 'Go to Logistics', href: '/admin/logistics' },
-                      ]
-                    : products.length === 0
-                      ? [{ label: 'Add Product', href: '/admin/products/new' }]
-                      : [{ label: 'Go to Logistics', href: '/admin/logistics' }]
-                }
+            <button
+              type="button"
+              onClick={() => setShowIntakeForm(false)}
+              aria-label="Close"
+              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {intakeError && !dismissedIntakeError && (
+            <div ref={intakeErrorRef}>
+              <PageNotification
+                variant="error"
+                message={intakeError}
+                durationMs={5000}
+                onDismiss={() => setDismissedIntakeError(true)}
               />
-            ) : (
-            <fetcher.Form method="post" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            </div>
+          )}
+          {(products.length === 0 || locations.length === 0) ? (
+            <InlineNotification
+              variant="warning"
+              message={
+                products.length === 0 && locations.length === 0
+                  ? 'Create products and logistics locations first.'
+                  : products.length === 0
+                    ? 'Create products first via Products → Add Product.'
+                    : 'Create logistics locations first via Logistics.'
+              }
+              actions={
+                products.length === 0 && locations.length === 0
+                  ? [
+                      { label: 'Add Product', href: '/admin/products/new' },
+                      { label: 'Go to Logistics', href: '/admin/logistics' },
+                    ]
+                  : products.length === 0
+                    ? [{ label: 'Add Product', href: '/admin/products/new' }]
+                    : [{ label: 'Go to Logistics', href: '/admin/logistics' }]
+              }
+            />
+          ) : (
+            <fetcher.Form method="post" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <input type="hidden" name="intent" value="stockIntake" />
               <FormSelect
                 label="Product"
@@ -179,6 +209,7 @@ export function InventoryPage({
                 required
                 placeholder="Select product..."
                 options={products.map((p: ProductOption) => ({ value: p.id, label: p.name }))}
+                wrapperClassName="sm:col-span-2"
               />
               <FormSelect
                 label="Location"
@@ -187,6 +218,7 @@ export function InventoryPage({
                 required
                 placeholder="Select location..."
                 options={locations.map((l: LocationOption) => ({ value: l.id, label: l.name }))}
+                wrapperClassName="sm:col-span-2"
               />
               <TextInput
                 label="Quantity"
@@ -209,7 +241,7 @@ export function InventoryPage({
                   placeholder="0.00"
                 />
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <label htmlFor="intake-landingCost" className="block text-sm font-medium text-app-fg-muted mb-1">
                   Landing Cost (&#8358;)
                 </label>
@@ -224,7 +256,10 @@ export function InventoryPage({
                   Freight, duty, etc. Default 0.
                 </p>
               </div>
-              <div className="sm:col-span-2 lg:col-span-5 flex justify-end">
+              <div className="sm:col-span-2 flex justify-end gap-2 pt-2 border-t border-app-border">
+                <Button type="button" variant="secondary" onClick={() => setShowIntakeForm(false)}>
+                  Cancel
+                </Button>
                 <Button
                   type="submit"
                   variant="primary"
@@ -235,9 +270,8 @@ export function InventoryPage({
                 </Button>
               </div>
             </fetcher.Form>
-            )}
-          </div>
-        </ResponsiveFormPanel>
+          )}
+        </Modal>
       )}
 
       <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={4} />}>
@@ -271,6 +305,48 @@ export function InventoryPage({
 
       {/* Content */}
       {activeTab === 'levels' ? (
+        <>
+        {/* Filter + sort row — only shown when there is data to filter */}
+        {levels.length > 0 && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <FormSelect
+              label=""
+              id="levels-product-filter"
+              name="productFilter"
+              value={levelsProductFilter}
+              onChange={(e) => setLevelsProductFilter(e.target.value)}
+              wrapperClassName="w-full sm:w-64"
+              options={[
+                { value: 'ALL', label: 'All products' },
+                ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
+              ]}
+              aria-label="Filter by product"
+            />
+            <FormSelect
+              label=""
+              id="levels-sort"
+              name="levelsSort"
+              value={levelsSort}
+              onChange={(e) => setLevelsSort(e.target.value as LevelsSort)}
+              wrapperClassName="w-full sm:w-56"
+              options={[
+                { value: 'default', label: 'Default order' },
+                { value: 'lowestAvailable', label: 'Lowest available first' },
+                { value: 'highestAvailable', label: 'Highest available first' },
+              ]}
+              aria-label="Sort order"
+            />
+            {(levelsProductFilter !== 'ALL' || levelsSort !== 'default') && (
+              <button
+                type="button"
+                onClick={() => { setLevelsProductFilter('ALL'); setLevelsSort('default'); }}
+                className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        )}
         <div className="card p-0 overflow-hidden">
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
@@ -286,7 +362,7 @@ export function InventoryPage({
                 </tr>
               </thead>
               <tbody>
-                {levels.map((level) => (
+                {displayedLevels.map((level) => (
                   <tr key={level.id} className="table-row">
                     <td className="table-cell font-medium text-app-fg">{productName(level.productId)}</td>
                     <td className="table-cell text-app-fg-muted">{locationName(level.locationId)}</td>
@@ -305,10 +381,13 @@ export function InventoryPage({
                     </td>
                   </tr>
                 ))}
-                {levels.length === 0 && (
+                {displayedLevels.length === 0 && (
                   <tr>
                     <td colSpan={7}>
-                      <EmptyState title="No inventory data yet" description="Add products and receive stock to get started." />
+                      <EmptyState
+                        title={levels.length === 0 ? 'No inventory data yet' : 'No inventory matches your filter'}
+                        description={levels.length === 0 ? 'Add products and receive stock to get started.' : 'Try changing the product filter or sort.'}
+                      />
                     </td>
                   </tr>
                 )}
@@ -318,7 +397,7 @@ export function InventoryPage({
 
           {/* Mobile */}
           <div className="md:hidden space-y-3 px-1">
-            {levels.map((level) => (
+            {displayedLevels.map((level) => (
               <div key={level.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-center justify-between mb-2">
                   <div>
@@ -343,11 +422,12 @@ export function InventoryPage({
                 </div>
               </div>
             ))}
-            {levels.length === 0 && (
-              <EmptyState title="No inventory data yet" />
+            {displayedLevels.length === 0 && (
+              <EmptyState title={levels.length === 0 ? 'No inventory data yet' : 'No inventory matches your filter'} />
             )}
           </div>
         </div>
+        </>
       ) : (
         <DeferredSection resolve={movements} skeleton="table">
           {(resolvedMovements) => (
