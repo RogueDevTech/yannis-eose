@@ -2,7 +2,6 @@ import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, and, or, asc, desc, count, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
 import type {
   StockIntakeInput,
@@ -14,7 +13,7 @@ import type {
   CreateReconciliationInput,
   ResolveReconciliationInput,
 } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -27,7 +26,6 @@ const VIRTUAL_BUFFER_RATIO = 0.10;
 export class InventoryService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -133,86 +131,88 @@ export class InventoryService {
    * Dual-Entry: stock is IN_TRANSIT until 3PL confirms receipt.
    */
   async initiateTransfer(input: StockTransferInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const transfer = await withActor(this.db, actor, async (tx) => {
+      // Check source has enough stock
+      const sourceLevel = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, input.productId),
+            eq(schema.inventoryLevels.locationId, input.fromLocationId),
+          ),
+        )
+        .limit(1);
 
-    // Check source has enough stock
-    const sourceLevel = await this.db
-      .select()
-      .from(schema.inventoryLevels)
-      .where(
-        and(
-          eq(schema.inventoryLevels.productId, input.productId),
-          eq(schema.inventoryLevels.locationId, input.fromLocationId),
-        ),
-      )
-      .limit(1);
+      const available = (sourceLevel[0]?.stockCount ?? 0) - (sourceLevel[0]?.reservedCount ?? 0);
+      if (available < input.quantity) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Insufficient stock. Available: ${available}, Requested: ${input.quantity}`,
+        });
+      }
 
-    const available = (sourceLevel[0]?.stockCount ?? 0) - (sourceLevel[0]?.reservedCount ?? 0);
-    if (available < input.quantity) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `Insufficient stock. Available: ${available}, Requested: ${input.quantity}`,
-      });
-    }
+      // Deduct from source
+      if (sourceLevel[0]) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} - ${input.quantity}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
+      }
 
-    // Deduct from source
-    if (sourceLevel[0]) {
-      await this.db
-        .update(schema.inventoryLevels)
-        .set({
-          stockCount: sql`${schema.inventoryLevels.stockCount} - ${input.quantity}`,
-          updatedAt: new Date(),
+      // Calculate transfer cost from FIFO batch costing
+      const costBatches = await tx
+        .select()
+        .from(schema.stockBatches)
+        .where(eq(schema.stockBatches.productId, input.productId))
+        .orderBy(schema.stockBatches.receivedAt);
+
+      let transferCostTotal = 0;
+      let costRemaining = input.quantity;
+      for (const batch of costBatches) {
+        if (costRemaining <= 0) break;
+        const batchRemaining = batch.remainingQuantity ?? 0;
+        if (batchRemaining <= 0) continue;
+
+        const units = Math.min(costRemaining, batchRemaining);
+        const costPerUnit = parseFloat(batch.totalLandedCost ?? '0');
+        transferCostTotal += units * costPerUnit;
+        costRemaining -= units;
+      }
+
+      // Create transfer record with computed transfer cost
+      const transferRows = await tx
+        .insert(schema.stockTransfers)
+        .values({
+          productId: input.productId,
+          quantitySent: input.quantity,
+          fromLocationId: input.fromLocationId,
+          toLocationId: input.toLocationId,
+          transferStatus: 'IN_TRANSIT',
+          transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
         })
-        .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
-    }
+        .returning();
 
-    // Calculate transfer cost from FIFO batch costing
-    const costBatches = await this.db
-      .select()
-      .from(schema.stockBatches)
-      .where(eq(schema.stockBatches.productId, input.productId))
-      .orderBy(schema.stockBatches.receivedAt);
+      const newTransfer = transferRows[0];
+      if (!newTransfer) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create transfer' });
+      }
 
-    let transferCostTotal = 0;
-    let costRemaining = input.quantity;
-    for (const batch of costBatches) {
-      if (costRemaining <= 0) break;
-      const batchRemaining = batch.remainingQuantity ?? 0;
-      if (batchRemaining <= 0) continue;
-
-      const units = Math.min(costRemaining, batchRemaining);
-      const costPerUnit = parseFloat(batch.totalLandedCost ?? '0');
-      transferCostTotal += units * costPerUnit;
-      costRemaining -= units;
-    }
-
-    // Create transfer record with computed transfer cost
-    const transferRows = await this.db
-      .insert(schema.stockTransfers)
-      .values({
+      // Log movement: OUT from source
+      await tx.insert(schema.stockMovements).values({
         productId: input.productId,
-        quantitySent: input.quantity,
+        movementType: 'TRANSFER_OUT',
+        quantity: input.quantity,
         fromLocationId: input.fromLocationId,
         toLocationId: input.toLocationId,
-        transferStatus: 'IN_TRANSIT',
-        transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
-      })
-      .returning();
+        referenceId: newTransfer.id,
+        actorId: actor.id,
+      });
 
-    const transfer = transferRows[0];
-    if (!transfer) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create transfer' });
-    }
-
-    // Log movement: OUT from source
-    await this.db.insert(schema.stockMovements).values({
-      productId: input.productId,
-      movementType: 'TRANSFER_OUT',
-      quantity: input.quantity,
-      fromLocationId: input.fromLocationId,
-      toLocationId: input.toLocationId,
-      referenceId: transfer.id,
-      actorId: actor.id,
+      return newTransfer;
     });
 
     this.events.emitToRoom('inventory', 'transfer:created', {
@@ -358,51 +358,51 @@ export class InventoryService {
   // ============================================
 
   async adjust(input: StockAdjustmentInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    return withActor(this.db, actor, async (tx) => {
+      const levelRows = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, input.productId),
+            eq(schema.inventoryLevels.locationId, input.locationId),
+          ),
+        )
+        .limit(1);
 
-    const levelRows = await this.db
-      .select()
-      .from(schema.inventoryLevels)
-      .where(
-        and(
-          eq(schema.inventoryLevels.productId, input.productId),
-          eq(schema.inventoryLevels.locationId, input.locationId),
-        ),
-      )
-      .limit(1);
+      const level = levelRows[0];
+      if (!level) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'No inventory record found for this product at this location',
+        });
+      }
 
-    const level = levelRows[0];
-    if (!level) {
-      throw new TRPCError({
-        code: 'NOT_FOUND',
-        message: 'No inventory record found for this product at this location',
+      const newCount = level.stockCount + input.adjustmentQuantity;
+      if (newCount < 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Adjustment would result in negative stock (current: ${level.stockCount})`,
+        });
+      }
+
+      await tx
+        .update(schema.inventoryLevels)
+        .set({ stockCount: newCount, updatedAt: new Date() })
+        .where(eq(schema.inventoryLevels.id, level.id));
+
+      await tx.insert(schema.stockMovements).values({
+        productId: input.productId,
+        movementType: 'ADJUSTMENT',
+        quantity: input.adjustmentQuantity,
+        fromLocationId: input.adjustmentQuantity < 0 ? input.locationId : undefined,
+        toLocationId: input.adjustmentQuantity > 0 ? input.locationId : undefined,
+        reason: input.reason,
+        actorId: actor.id,
       });
-    }
 
-    const newCount = level.stockCount + input.adjustmentQuantity;
-    if (newCount < 0) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `Adjustment would result in negative stock (current: ${level.stockCount})`,
-      });
-    }
-
-    await this.db
-      .update(schema.inventoryLevels)
-      .set({ stockCount: newCount, updatedAt: new Date() })
-      .where(eq(schema.inventoryLevels.id, level.id));
-
-    await this.db.insert(schema.stockMovements).values({
-      productId: input.productId,
-      movementType: 'ADJUSTMENT',
-      quantity: input.adjustmentQuantity,
-      fromLocationId: input.adjustmentQuantity < 0 ? input.locationId : undefined,
-      toLocationId: input.adjustmentQuantity > 0 ? input.locationId : undefined,
-      reason: input.reason,
-      actorId: actor.id,
+      return { stockCount: newCount };
     });
-
-    return { stockCount: newCount };
   }
 
   // ============================================
@@ -460,6 +460,89 @@ export class InventoryService {
         total,
         totalPages: Math.ceil(total / input.limit),
       },
+    };
+  }
+
+  /**
+   * Detail view for a single (productId, locationId) inventory level.
+   *
+   * Returns:
+   *  - `batches`: stock_batches that had an INTAKE at this location, newest first, with
+   *    factoryCost / landingCost / totalLandedCost / quantity / remainingQuantity.
+   *  - `movements`: the complete audit trail affecting stock at this location, newest first.
+   *    Matches rows where `fromLocationId = X` OR `toLocationId = X` OR the row references
+   *    an order whose `logisticsLocationId = X` (rescues historical DELIVERY / RETURN /
+   *    WRITE_OFF rows that were written before location fields were stamped).
+   */
+  async levelDetail(productId: string, locationId: string, limit = 100) {
+    // Batches: any stock_batch that was intaken at this location.
+    const batches = await this.db.execute<{
+      id: string;
+      factoryCost: string;
+      landingCost: string;
+      totalLandedCost: string;
+      quantity: number;
+      remainingQuantity: number;
+      receivedAt: Date;
+    }>(sql`
+      SELECT DISTINCT ON (sb.id)
+        sb.id,
+        sb.factory_cost       AS "factoryCost",
+        sb.landing_cost       AS "landingCost",
+        sb.total_landed_cost  AS "totalLandedCost",
+        sb.quantity,
+        sb.remaining_quantity AS "remainingQuantity",
+        sb.received_at        AS "receivedAt"
+      FROM stock_batches sb
+      INNER JOIN stock_movements sm
+        ON sm.reference_id = sb.id
+        AND sm.movement_type = 'INTAKE'
+        AND sm.to_location_id = ${locationId}
+      WHERE sb.product_id = ${productId}
+      ORDER BY sb.id, sb.received_at DESC
+    `);
+
+    // Movements: fromLocation or toLocation match, OR the movement references an order
+    // at this location (rescues legacy rows without location stamping).
+    const movements = await this.db.execute<{
+      id: string;
+      productId: string;
+      movementType: string;
+      quantity: number;
+      fromLocationId: string | null;
+      toLocationId: string | null;
+      referenceId: string | null;
+      reason: string | null;
+      actorId: string | null;
+      createdAt: Date;
+    }>(sql`
+      SELECT
+        sm.id,
+        sm.product_id        AS "productId",
+        sm.movement_type     AS "movementType",
+        sm.quantity,
+        sm.from_location_id  AS "fromLocationId",
+        sm.to_location_id    AS "toLocationId",
+        sm.reference_id      AS "referenceId",
+        sm.reason,
+        sm.actor_id          AS "actorId",
+        sm.created_at        AS "createdAt"
+      FROM stock_movements sm
+      LEFT JOIN orders o ON o.id = sm.reference_id
+      WHERE sm.product_id = ${productId}
+        AND (
+          sm.from_location_id = ${locationId}
+          OR sm.to_location_id = ${locationId}
+          OR o.logistics_location_id = ${locationId}
+        )
+      ORDER BY sm.created_at DESC
+      LIMIT ${limit}
+    `);
+
+    return {
+      batches,
+      movements,
+      total: movements.length,
     };
   }
 
@@ -603,61 +686,65 @@ export class InventoryService {
    * If physical count !== digital count, locks dispatch at that location.
    */
   async createReconciliation(input: CreateReconciliationInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const result = await withActor(this.db, actor, async (tx) => {
+      // Get the current digital count
+      const levelRows = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, input.productId),
+            eq(schema.inventoryLevels.locationId, input.locationId),
+          ),
+        )
+        .limit(1);
 
-    // Get the current digital count
-    const levelRows = await this.db
-      .select()
-      .from(schema.inventoryLevels)
-      .where(
-        and(
-          eq(schema.inventoryLevels.productId, input.productId),
-          eq(schema.inventoryLevels.locationId, input.locationId),
-        ),
-      )
-      .limit(1);
+      const digitalCount = levelRows[0]?.stockCount ?? 0;
+      const discrepancy = input.physicalCount - digitalCount;
 
-    const digitalCount = levelRows[0]?.stockCount ?? 0;
-    const discrepancy = input.physicalCount - digitalCount;
+      const rows = await tx
+        .insert(schema.stockReconciliations)
+        .values({
+          locationId: input.locationId,
+          productId: input.productId,
+          digitalCount,
+          physicalCount: input.physicalCount,
+          discrepancy,
+          reasonCode: input.reasonCode,
+          notes: input.notes ?? null,
+          submittedBy: actor.id,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.stockReconciliations)
-      .values({
-        locationId: input.locationId,
-        productId: input.productId,
-        digitalCount,
-        physicalCount: input.physicalCount,
-        discrepancy,
-        reasonCode: input.reasonCode,
-        notes: input.notes ?? null,
-        submittedBy: actor.id,
-      })
-      .returning();
+      const reconciliation = rows[0];
+      if (!reconciliation) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create reconciliation' });
+      }
 
-    const reconciliation = rows[0];
-    if (!reconciliation) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create reconciliation' });
-    }
+      // If there's a discrepancy, lock dispatch at this location
+      if (discrepancy !== 0) {
+        await tx
+          .update(schema.logisticsLocations)
+          .set({ dispatchLocked: true })
+          .where(eq(schema.logisticsLocations.id, input.locationId));
+      }
 
-    // If there's a discrepancy, lock dispatch at this location
-    if (discrepancy !== 0) {
-      await this.db
-        .update(schema.logisticsLocations)
-        .set({ dispatchLocked: true })
-        .where(eq(schema.logisticsLocations.id, input.locationId));
+      return { reconciliation, discrepancy, digitalCount };
+    });
 
+    if (result.discrepancy !== 0) {
       this.events.emitToRoom('alerts', 'ghost-stock:detected', {
-        reconciliationId: reconciliation.id,
+        reconciliationId: result.reconciliation.id,
         locationId: input.locationId,
         productId: input.productId,
-        digitalCount,
+        digitalCount: result.digitalCount,
         physicalCount: input.physicalCount,
-        discrepancy,
+        discrepancy: result.discrepancy,
         reasonCode: input.reasonCode,
       });
     }
 
-    return reconciliation;
+    return result.reconciliation;
   }
 
   /**
@@ -665,91 +752,91 @@ export class InventoryService {
    * Unlocks dispatch at the location.
    */
   async resolveReconciliation(input: ResolveReconciliationInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    const rows = await this.db
-      .select()
-      .from(schema.stockReconciliations)
-      .where(eq(schema.stockReconciliations.id, input.reconciliationId))
-      .limit(1);
-
-    const reconciliation = rows[0];
-    if (!reconciliation) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation not found' });
-    }
-
-    if (reconciliation.reconciliationStatus !== 'PENDING') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Reconciliation already resolved' });
-    }
-
-    if (input.approved) {
-      // Adjust inventory to match physical count
-      const levelRows = await this.db
+    return withActor(this.db, actor, async (tx) => {
+      const rows = await tx
         .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, reconciliation.productId),
-            eq(schema.inventoryLevels.locationId, reconciliation.locationId),
-          ),
-        )
+        .from(schema.stockReconciliations)
+        .where(eq(schema.stockReconciliations.id, input.reconciliationId))
         .limit(1);
 
-      if (levelRows[0]) {
-        await this.db
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: reconciliation.physicalCount,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.inventoryLevels.id, levelRows[0].id));
+      const reconciliation = rows[0];
+      if (!reconciliation) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation not found' });
       }
 
-      // Log adjustment movement
-      await this.db.insert(schema.stockMovements).values({
-        productId: reconciliation.productId,
-        movementType: 'ADJUSTMENT',
-        quantity: reconciliation.discrepancy,
-        fromLocationId: reconciliation.discrepancy < 0 ? reconciliation.locationId : undefined,
-        toLocationId: reconciliation.discrepancy > 0 ? reconciliation.locationId : undefined,
-        referenceId: reconciliation.id,
-        reason: `Stock reconciliation: ${reconciliation.reasonCode}. ${reconciliation.notes ?? ''}`.trim(),
-        actorId: actor.id,
-      });
-    }
+      if (reconciliation.reconciliationStatus !== 'PENDING') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Reconciliation already resolved' });
+      }
 
-    // Update reconciliation status
-    await this.db
-      .update(schema.stockReconciliations)
-      .set({
-        reconciliationStatus: input.approved ? 'APPROVED' : 'REJECTED',
-        approvedBy: actor.id,
-        resolvedAt: new Date(),
-      })
-      .where(eq(schema.stockReconciliations.id, input.reconciliationId));
+      if (input.approved) {
+        // Adjust inventory to match physical count
+        const levelRows = await tx
+          .select()
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, reconciliation.productId),
+              eq(schema.inventoryLevels.locationId, reconciliation.locationId),
+            ),
+          )
+          .limit(1);
 
-    // Check if there are other pending reconciliations for this location
-    const pendingRows = await this.db
-      .select({ count: count() })
-      .from(schema.stockReconciliations)
-      .where(
-        and(
-          eq(schema.stockReconciliations.locationId, reconciliation.locationId),
-          eq(schema.stockReconciliations.reconciliationStatus, 'PENDING'),
-        ),
-      );
+        if (levelRows[0]) {
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              stockCount: reconciliation.physicalCount,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.inventoryLevels.id, levelRows[0].id));
+        }
 
-    const pendingCount = pendingRows[0]?.count ?? 0;
+        // Log adjustment movement
+        await tx.insert(schema.stockMovements).values({
+          productId: reconciliation.productId,
+          movementType: 'ADJUSTMENT',
+          quantity: reconciliation.discrepancy,
+          fromLocationId: reconciliation.discrepancy < 0 ? reconciliation.locationId : undefined,
+          toLocationId: reconciliation.discrepancy > 0 ? reconciliation.locationId : undefined,
+          referenceId: reconciliation.id,
+          reason: `Stock reconciliation: ${reconciliation.reasonCode}. ${reconciliation.notes ?? ''}`.trim(),
+          actorId: actor.id,
+        });
+      }
 
-    // Unlock dispatch if no more pending reconciliations
-    if (pendingCount === 0) {
-      await this.db
-        .update(schema.logisticsLocations)
-        .set({ dispatchLocked: false })
-        .where(eq(schema.logisticsLocations.id, reconciliation.locationId));
-    }
+      // Update reconciliation status
+      await tx
+        .update(schema.stockReconciliations)
+        .set({
+          reconciliationStatus: input.approved ? 'APPROVED' : 'REJECTED',
+          approvedBy: actor.id,
+          resolvedAt: new Date(),
+        })
+        .where(eq(schema.stockReconciliations.id, input.reconciliationId));
 
-    return { success: true, dispatchUnlocked: pendingCount === 0 };
+      // Check if there are other pending reconciliations for this location
+      const pendingRows = await tx
+        .select({ count: count() })
+        .from(schema.stockReconciliations)
+        .where(
+          and(
+            eq(schema.stockReconciliations.locationId, reconciliation.locationId),
+            eq(schema.stockReconciliations.reconciliationStatus, 'PENDING'),
+          ),
+        );
+
+      const pendingCount = pendingRows[0]?.count ?? 0;
+
+      // Unlock dispatch if no more pending reconciliations
+      if (pendingCount === 0) {
+        await tx
+          .update(schema.logisticsLocations)
+          .set({ dispatchLocked: false })
+          .where(eq(schema.logisticsLocations.id, reconciliation.locationId));
+      }
+
+      return { success: true, dispatchUnlocked: pendingCount === 0 };
+    });
   }
 
   /**

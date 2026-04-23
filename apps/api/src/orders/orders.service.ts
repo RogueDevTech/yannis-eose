@@ -2852,6 +2852,8 @@ export class OrdersService {
               productId: item.productId,
               movementType: 'DELIVERY',
               quantity: -item.quantity,
+              // Stock leaves the 3PL that fulfilled the order — attribute the reduction to that location.
+              fromLocationId: order.logisticsLocationId ?? undefined,
               referenceId: order.id,
               reason: `Delivered: order ${order.id}`,
               actorId,
@@ -2887,6 +2889,8 @@ export class OrdersService {
               productId: item.productId,
               movementType: 'RETURN',
               quantity: item.quantity,
+              // Units come back to the 3PL that attempted delivery (pending Restock vs WriteOff decision).
+              toLocationId: order.logisticsLocationId ?? undefined,
               referenceId: order.id,
               reason: `Returned: order ${order.id}`,
               actorId,
@@ -2920,6 +2924,8 @@ export class OrdersService {
               productId: item.productId,
               movementType: 'WRITE_OFF',
               quantity: -item.quantity,
+              // Units disappear from the 3PL that was holding them.
+              fromLocationId: order.logisticsLocationId ?? undefined,
               referenceId: order.id,
               reason: `Written off: order ${order.id}`,
               actorId,
@@ -3490,7 +3496,7 @@ export class OrdersService {
 
     // Role-based filtering
     const csRoles = new Set(['CS_AGENT', 'HEAD_OF_CS']);
-    const logisticsRoles = new Set(['HEAD_OF_LOGISTICS', 'WAREHOUSE_MANAGER', 'TPL_MANAGER', 'TPL_RIDER']);
+    const logisticsRoles = new Set(['HEAD_OF_LOGISTICS', 'STOCK_MANAGER', 'TPL_MANAGER', 'TPL_RIDER']);
 
     return mergedRows.filter((row) => {
       const eventType = row.eventType as string;

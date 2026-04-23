@@ -74,10 +74,22 @@ export function InventoryPage({
   const currentSort: LevelsSort = serverSort;
   const [showIntakeForm, setShowIntakeForm] = useState(false);
 
-  // Detail drawer: opened by clicking a level row. Loads movement history via the
-  // /admin/inventory/level-detail resource route (debounced by useFetcher.load).
+  // Detail drawer: opened by clicking a level row. Loads FIFO batches + movement history
+  // via the /admin/inventory/level-detail resource route (debounced by useFetcher.load).
   const [selectedLevel, setSelectedLevel] = useState<InventoryLevel | null>(null);
-  const detailFetcher = useFetcher<{ movements: StockMovement[]; total: number }>();
+  const detailFetcher = useFetcher<{
+    batches: Array<{
+      id: string;
+      factoryCost: string;
+      landingCost: string;
+      totalLandedCost: string;
+      quantity: number;
+      remainingQuantity: number;
+      receivedAt: string;
+    }>;
+    movements: StockMovement[];
+    total: number;
+  }>();
 
   useEffect(() => {
     if (!selectedLevel) return;
@@ -354,8 +366,58 @@ export function InventoryPage({
             </div>
           </div>
 
-          {/* Movement history */}
           <div className="flex-1 min-h-0 overflow-y-auto">
+            {/* FIFO batches at this location */}
+            <div className="px-6 pt-4">
+              <h4 className="text-sm font-semibold text-app-fg mb-3">FIFO batches at this location</h4>
+              {detailFetcher.state !== 'idle' && !detailFetcher.data ? (
+                <p className="text-sm text-app-fg-muted">Loading batches…</p>
+              ) : (detailFetcher.data?.batches ?? []).length === 0 ? (
+                <p className="text-sm text-app-fg-muted italic">No batches received at this location yet.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-app-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-app-hover">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Received</th>
+                        <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Intake qty</th>
+                        <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Remaining</th>
+                        <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Factory ₦</th>
+                        <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Landing ₦</th>
+                        <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Landed ₦</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(detailFetcher.data?.batches ?? []).map((b) => {
+                        const depleted = b.remainingQuantity === 0;
+                        return (
+                          <tr key={b.id} className={`border-t border-app-border ${depleted ? 'opacity-60' : ''}`}>
+                            <td className="px-3 py-2 text-app-fg-muted">
+                              {new Date(b.receivedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium text-app-fg">{b.quantity}</td>
+                            <td className={`px-3 py-2 text-right font-medium ${depleted ? 'text-app-fg-muted' : 'text-success-600 dark:text-success-400'}`}>
+                              {b.remainingQuantity}
+                            </td>
+                            <td className="px-3 py-2 text-right text-app-fg-muted">
+                              {Number(b.factoryCost).toLocaleString()}
+                            </td>
+                            <td className="px-3 py-2 text-right text-app-fg-muted">
+                              {Number(b.landingCost).toLocaleString()}
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium text-app-fg">
+                              {Number(b.totalLandedCost).toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Movement history */}
             <div className="px-6 py-4">
               <h4 className="text-sm font-semibold text-app-fg mb-3">Movement history</h4>
               {detailFetcher.state !== 'idle' && !detailFetcher.data ? (
