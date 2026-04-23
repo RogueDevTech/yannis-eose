@@ -20,8 +20,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   const cookie = getSessionCookie(request);
 
+  // Parse Stock-Levels filter + sort + pagination from URL search params.
+  // `sort=lowestAvailable|highestAvailable` maps to backend sortBy/sortOrder pairs.
+  const url = new URL(request.url);
+  const rawProductFilter = url.searchParams.get('productId') ?? '';
+  const rawSort = url.searchParams.get('sort') ?? '';
+  const rawPage = Number(url.searchParams.get('page') ?? '1');
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+  const LEVELS_LIMIT = 20;
+
+  const levelsInput: {
+    productId?: string;
+    sortBy?: 'available' | 'updatedAt';
+    sortOrder?: 'asc' | 'desc';
+    page: number;
+    limit: number;
+  } = { page, limit: LEVELS_LIMIT };
+  if (rawProductFilter) levelsInput.productId = rawProductFilter;
+  if (rawSort === 'lowestAvailable') {
+    levelsInput.sortBy = 'available';
+    levelsInput.sortOrder = 'asc';
+  } else if (rawSort === 'highestAvailable') {
+    levelsInput.sortBy = 'available';
+    levelsInput.sortOrder = 'desc';
+  }
+
   // Start fetches concurrently
-  const levelsPromise = apiRequest<unknown>('/trpc/inventory.levels', { method: 'GET', cookie });
+  const levelsPromise = apiRequest<unknown>(
+    `/trpc/inventory.levels?input=${encodeURIComponent(JSON.stringify(levelsInput))}`,
+    { method: 'GET', cookie },
+  );
   const movementsPromise = apiRequest<unknown>('/trpc/inventory.movements', { method: 'GET', cookie });
   const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 20, status: 'ACTIVE' }))}`, { method: 'GET', cookie });
   const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 20 }))}`, { method: 'GET', cookie });
@@ -30,7 +58,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const levelsRes = await levelsPromise;
 
   const levelsData = levelsRes.ok
-    ? (levelsRes.data as { result?: { data?: { levels: InventoryLevel[]; pagination: { total: number } } } })?.result?.data
+    ? (levelsRes.data as { result?: { data?: { levels: InventoryLevel[]; pagination: { total: number; totalPages: number } } } })?.result?.data
     : null;
 
   // Await movements data
@@ -58,6 +86,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     levels: levelsData?.levels ?? [],
     totalLevels: levelsData?.pagination?.total ?? 0,
+    levelsPage: page,
+    levelsTotalPages: levelsData?.pagination?.totalPages ?? 1,
+    levelsLimit: LEVELS_LIMIT,
+    levelsProductFilter: rawProductFilter,
+    levelsSort: rawSort === 'lowestAvailable' || rawSort === 'highestAvailable' ? rawSort : 'default',
     movements: movementsData.movements,
     totalMovements: movementsData.total,
     products,
@@ -65,6 +98,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Admin-level users bypass permission lookups at the middleware layer (permissions: []),
     // so we must also bypass here — otherwise the Stock Intake button is hidden from SuperAdmin / Admin.
     canIntake: isAdminLevel(user) || (user.permissions?.includes('inventory.intake') ?? false),
+    // Inventory CSV export is restricted to admin-level users and STOCK_MANAGER — the same
+    // roles that own the stock data. Everyone else reading inventory (logistics, TPL managers,
+    // finance) still sees the table but cannot download the raw levels.
+    canExport: isAdminLevel(user) || user.role === 'STOCK_MANAGER',
   };
 }
 

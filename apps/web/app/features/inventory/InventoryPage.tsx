@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useState, useEffect, useRef } from 'react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
@@ -18,6 +18,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
+import { Pagination } from '~/components/ui/pagination';
 import type {
   InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption,
   Transfer, ReturnedOrder, Reconciliation, LocationWithLock,
@@ -28,7 +29,9 @@ import {
 } from './types';
 
 export function InventoryPage({
-  levels, totalLevels, movements, totalMovements, products, locations, canIntake = false, canExport = false,
+  levels, totalLevels, levelsPage = 1, levelsTotalPages = 1, levelsLimit = 20,
+  levelsProductFilter: serverProductFilter = '', levelsSort: serverSort = 'default',
+  movements, totalMovements, products, locations, canIntake = false, canExport = false,
   transfers, returnedOrders, reconciliations, locationsWithLock,
 }: InventoryStreamData) {
   const hasTransfers = !!transfers;
@@ -37,29 +40,38 @@ export function InventoryPage({
   type TabValue = 'levels' | 'movements' | 'transfers' | 'returns' | 'reconciliation';
   const [activeTab, setActiveTab] = useState<TabValue>('levels');
 
-  // Stock Levels tab: filter by product + sort by available stock (lowest/highest).
+  // Stock Levels filter + sort are URL-driven so the backend can do the actual filter/sort/paginate.
+  // `levelsProductFilter` empty string = no filter (backend default).
   type LevelsSort = 'default' | 'lowestAvailable' | 'highestAvailable';
-  const [levelsProductFilter, setLevelsProductFilter] = useState<string>('ALL');
-  const [levelsSort, setLevelsSort] = useState<LevelsSort>('default');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const updateLevelsParam = (key: 'productId' | 'sort', value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (!value || value === 'ALL' || value === 'default') next.delete(key);
+      else next.set(key, value);
+      // Any filter/sort change resets to page 1.
+      next.delete('page');
+      return next;
+    }, { preventScrollReset: true });
+  };
+
+  const resetLevelsFilters = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('productId');
+      next.delete('sort');
+      next.delete('page');
+      return next;
+    }, { preventScrollReset: true });
+  };
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
   const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…') : '—';
 
-  const displayedLevels = useMemo(() => {
-    let rows = levels;
-    if (levelsProductFilter !== 'ALL') {
-      rows = rows.filter((l) => l.productId === levelsProductFilter);
-    }
-    if (levelsSort !== 'default') {
-      const available = (l: InventoryLevel) => l.stockCount - l.reservedCount;
-      rows = [...rows].sort((a, b) =>
-        levelsSort === 'lowestAvailable'
-          ? available(a) - available(b)
-          : available(b) - available(a),
-      );
-    }
-    return rows;
-  }, [levels, levelsProductFilter, levelsSort]);
+  const displayedLevels = levels;
+  const currentProductFilter = serverProductFilter || 'ALL';
+  const currentSort: LevelsSort = serverSort;
   const [showIntakeForm, setShowIntakeForm] = useState(false);
   const fetcher = useFetcher();
 
@@ -306,15 +318,16 @@ export function InventoryPage({
       {/* Content */}
       {activeTab === 'levels' ? (
         <>
-        {/* Filter + sort row — only shown when there is data to filter */}
-        {levels.length > 0 && (
+        {/* Filter + sort row — always render the filter so it stays visible when an empty filter
+            returns zero rows. Hide it only when there is no data AND no active filter. */}
+        {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentSort !== 'default') && (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <FormSelect
               label=""
               id="levels-product-filter"
               name="productFilter"
-              value={levelsProductFilter}
-              onChange={(e) => setLevelsProductFilter(e.target.value)}
+              value={currentProductFilter}
+              onChange={(e) => updateLevelsParam('productId', e.target.value)}
               wrapperClassName="w-full sm:w-64"
               options={[
                 { value: 'ALL', label: 'All products' },
@@ -326,8 +339,8 @@ export function InventoryPage({
               label=""
               id="levels-sort"
               name="levelsSort"
-              value={levelsSort}
-              onChange={(e) => setLevelsSort(e.target.value as LevelsSort)}
+              value={currentSort}
+              onChange={(e) => updateLevelsParam('sort', e.target.value)}
               wrapperClassName="w-full sm:w-56"
               options={[
                 { value: 'default', label: 'Default order' },
@@ -336,10 +349,10 @@ export function InventoryPage({
               ]}
               aria-label="Sort order"
             />
-            {(levelsProductFilter !== 'ALL' || levelsSort !== 'default') && (
+            {(currentProductFilter !== 'ALL' || currentSort !== 'default') && (
               <button
                 type="button"
-                onClick={() => { setLevelsProductFilter('ALL'); setLevelsSort('default'); }}
+                onClick={resetLevelsFilters}
                 className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center"
               >
                 Reset
@@ -423,10 +436,22 @@ export function InventoryPage({
               </div>
             ))}
             {displayedLevels.length === 0 && (
-              <EmptyState title={levels.length === 0 ? 'No inventory data yet' : 'No inventory matches your filter'} />
+              <EmptyState title={totalLevels === 0 && currentProductFilter === 'ALL' ? 'No inventory data yet' : 'No inventory matches your filter'} />
             )}
           </div>
         </div>
+
+        {/* Pagination — server-side, drives `page` URL param. */}
+        {levelsTotalPages > 1 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-sm text-app-fg-muted">
+              {totalLevels > 0
+                ? `Showing ${(levelsPage - 1) * levelsLimit + 1}–${Math.min(levelsPage * levelsLimit, totalLevels)} of ${totalLevels} rows`
+                : 'No rows'}
+            </p>
+            <Pagination page={levelsPage} totalPages={levelsTotalPages} pageParam="page" />
+          </div>
+        )}
         </>
       ) : (
         <DeferredSection resolve={movements} skeleton="table">

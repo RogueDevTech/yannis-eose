@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, desc, count, sql } from 'drizzle-orm';
+import { eq, and, or, asc, desc, count, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -18,6 +18,7 @@ import { DRIZZLE, PG_CLIENT } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { withActor } from '../common/db/with-actor';
 
 /** Virtual buffer: show 10% less stock to prevent overselling during bursts */
 const VIRTUAL_BUFFER_RATIO = 0.10;
@@ -40,70 +41,79 @@ export class InventoryService {
    * Creates a stock_batch, updates inventory_levels, logs the movement.
    */
   async intake(input: StockIntakeInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     const totalLandedCost = (input.factoryCost + input.landingCost).toFixed(2);
 
-    // Create the FIFO batch
-    const batchRows = await this.db
-      .insert(schema.stockBatches)
-      .values({
-        productId: input.productId,
-        factoryCost: String(input.factoryCost),
-        landingCost: String(input.landingCost),
-        totalLandedCost,
-        quantity: input.quantity,
-        remainingQuantity: input.quantity,
-      })
-      .returning();
+    // All writes wrapped in a single transaction with SET LOCAL yannis.current_user_id so the
+    // temporal-history triggers can attribute every row to the actor. A bare
+    // `pgClient\`SELECT set_config(..., true)\`` on a 5-connection pool does NOT persist across
+    // the follow-up drizzle queries (they land on different pooled connections), which is why
+    // stock movements were showing "System" as the actor in the audit trail.
+    const batch = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actor.id}`);
 
-    const batch = batchRows[0];
-    if (!batch) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create stock batch' });
-    }
-
-    // Upsert inventory level at the location
-    const existingLevel = await this.db
-      .select()
-      .from(schema.inventoryLevels)
-      .where(
-        and(
-          eq(schema.inventoryLevels.productId, input.productId),
-          eq(schema.inventoryLevels.locationId, input.locationId),
-        ),
-      )
-      .limit(1);
-
-    if (existingLevel[0]) {
-      await this.db
-        .update(schema.inventoryLevels)
-        .set({
-          stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantity}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.inventoryLevels.id, existingLevel[0].id));
-    } else {
-      await this.db
-        .insert(schema.inventoryLevels)
+      // Create the FIFO batch
+      const batchRows = await tx
+        .insert(schema.stockBatches)
         .values({
           productId: input.productId,
-          locationId: input.locationId,
-          batchId: batch.id,
-          stockCount: input.quantity,
-          reservedCount: 0,
-          status: 'AVAILABLE',
-        });
-    }
+          factoryCost: String(input.factoryCost),
+          landingCost: String(input.landingCost),
+          totalLandedCost,
+          quantity: input.quantity,
+          remainingQuantity: input.quantity,
+        })
+        .returning();
 
-    // Log the movement
-    await this.db.insert(schema.stockMovements).values({
-      productId: input.productId,
-      movementType: 'INTAKE',
-      quantity: input.quantity,
-      toLocationId: input.locationId,
-      referenceId: batch.id,
-      reason: `Stock intake: ${input.quantity} units at ${totalLandedCost}/unit landed cost`,
-      actorId: actor.id,
+      const createdBatch = batchRows[0];
+      if (!createdBatch) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create stock batch' });
+      }
+
+      // Upsert inventory level at the location
+      const existingLevel = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, input.productId),
+            eq(schema.inventoryLevels.locationId, input.locationId),
+          ),
+        )
+        .limit(1);
+
+      if (existingLevel[0]) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantity}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.inventoryLevels.id, existingLevel[0].id));
+      } else {
+        await tx
+          .insert(schema.inventoryLevels)
+          .values({
+            productId: input.productId,
+            locationId: input.locationId,
+            batchId: createdBatch.id,
+            stockCount: input.quantity,
+            reservedCount: 0,
+            status: 'AVAILABLE',
+          });
+      }
+
+      // Log the movement
+      await tx.insert(schema.stockMovements).values({
+        productId: input.productId,
+        movementType: 'INTAKE',
+        quantity: input.quantity,
+        toLocationId: input.locationId,
+        referenceId: createdBatch.id,
+        reason: `Stock intake: ${input.quantity} units at ${totalLandedCost}/unit landed cost`,
+        actorId: actor.id,
+      });
+
+      return createdBatch;
     });
 
     this.events.emitToRoom('inventory', 'stock:updated', {
@@ -228,9 +238,8 @@ export class InventoryService {
    * If received < sent, auto-generates a Shrinkage Alert.
    */
   async verifyTransfer(input: VerifyTransferInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    const transferRows = await this.db
+   return withActor(this.db, actor, async (tx) => {
+    const transferRows = await tx
       .select()
       .from(schema.stockTransfers)
       .where(eq(schema.stockTransfers.id, input.transferId))
@@ -251,7 +260,7 @@ export class InventoryService {
     const hasShrinkage = input.quantityReceived < transfer.quantitySent;
 
     // Update transfer record
-    await this.db
+    await tx
       .update(schema.stockTransfers)
       .set({
         quantityReceived: input.quantityReceived,
@@ -284,7 +293,7 @@ export class InventoryService {
 
     // Add stock to destination location
     if (input.quantityReceived > 0) {
-      const destLevel = await this.db
+      const destLevel = await tx
         .select()
         .from(schema.inventoryLevels)
         .where(
@@ -296,7 +305,7 @@ export class InventoryService {
         .limit(1);
 
       if (destLevel[0]) {
-        await this.db
+        await tx
           .update(schema.inventoryLevels)
           .set({
             stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantityReceived}`,
@@ -304,7 +313,7 @@ export class InventoryService {
           })
           .where(eq(schema.inventoryLevels.id, destLevel[0].id));
       } else {
-        await this.db
+        await tx
           .insert(schema.inventoryLevels)
           .values({
             productId: transfer.productId,
@@ -316,7 +325,7 @@ export class InventoryService {
       }
 
       // Log movement: IN to destination
-      await this.db.insert(schema.stockMovements).values({
+      await tx.insert(schema.stockMovements).values({
         productId: transfer.productId,
         movementType: 'TRANSFER_IN',
         quantity: input.quantityReceived,
@@ -341,6 +350,7 @@ export class InventoryService {
     }
 
     return { success: true, hasShrinkage };
+   });
   }
 
   // ============================================
@@ -416,12 +426,22 @@ export class InventoryService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
+    // Build ORDER BY based on sortBy + sortOrder. `available` sorts by (stock_count - reserved_count)
+    // so low-stock SKUs surface naturally when viewing "lowest available first".
+    const direction = input.sortOrder === 'asc' ? asc : desc;
+    const orderBy =
+      input.sortBy === 'available'
+        ? input.sortOrder === 'asc'
+          ? sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}) ASC`
+          : sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}) DESC`
+        : direction(schema.inventoryLevels.updatedAt);
+
     const [levels, totalRows] = await Promise.all([
       this.db
         .select()
         .from(schema.inventoryLevels)
         .where(whereClause)
-        .orderBy(desc(schema.inventoryLevels.updatedAt))
+        .orderBy(orderBy)
         .limit(input.limit)
         .offset(offset),
       this.db
