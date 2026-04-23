@@ -23,6 +23,10 @@ export type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];
 
 export const USER_ROLE = {
   SUPER_ADMIN: 'SUPER_ADMIN',
+  // ADMIN = SuperAdmin-equivalent privileges EXCEPT cannot manage another Admin or the SuperAdmin.
+  // Multiple ADMINs can exist; SUPER_ADMIN is a singleton.
+  ADMIN: 'ADMIN',
+  BRANCH_ADMIN: 'BRANCH_ADMIN',
   HEAD_OF_MARKETING: 'HEAD_OF_MARKETING',
   MEDIA_BUYER: 'MEDIA_BUYER',
   HEAD_OF_CS: 'HEAD_OF_CS',

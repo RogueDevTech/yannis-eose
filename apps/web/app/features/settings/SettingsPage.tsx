@@ -243,9 +243,15 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   // CS dispatch strategy: derived from settings, local state for form selection
   const csDispatchSetting = systemSettings.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
   const rawStrategy = csDispatchSetting?.value?.strategy;
-  const dispatchStrategyFromSettings: 'load_balanced' | 'performance' | 'claim' =
-    rawStrategy === 'performance' ? 'performance' : rawStrategy === 'claim' ? 'claim' : 'load_balanced';
-  const [selectedDispatchStrategy, setSelectedDispatchStrategy] = useState<'load_balanced' | 'performance' | 'claim'>(dispatchStrategyFromSettings);
+  const dispatchStrategyFromSettings: 'manual' | 'load_balanced' | 'performance' | 'claim' =
+    rawStrategy === 'performance'
+      ? 'performance'
+      : rawStrategy === 'claim'
+        ? 'claim'
+        : rawStrategy === 'load_balanced'
+          ? 'load_balanced'
+          : 'manual';
+  const [selectedDispatchStrategy, setSelectedDispatchStrategy] = useState<'manual' | 'load_balanced' | 'performance' | 'claim'>(dispatchStrategyFromSettings);
 
   // Claim cap setting
   const claimCapSetting = systemSettings.find((s) => s.key === 'CS_CLAIM_CAP');
@@ -618,6 +624,22 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                       <input
                         type="radio"
                         name="strategy"
+                        value="manual"
+                        checked={selectedDispatchStrategy === 'manual'}
+                        onChange={() => setSelectedDispatchStrategy('manual')}
+                        className="mt-1 text-brand-600 border-app-border focus:ring-brand-500"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-app-fg">Manual assignment</p>
+                        <p className="text-xs text-app-fg-muted mt-0.5">
+                          No auto-assignment. New orders sit in the Unassigned queue until Head of CS assigns them. Agents cannot claim or pull orders themselves.
+                        </p>
+                      </div>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-app-border p-4 hover:bg-app-hover/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
+                      <input
+                        type="radio"
+                        name="strategy"
                         value="load_balanced"
                         checked={selectedDispatchStrategy === 'load_balanced'}
                         onChange={() => setSelectedDispatchStrategy('load_balanced')}
@@ -689,7 +711,15 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   )}
 
                   <p className="text-xs text-app-fg-muted mt-3">
-                    Saved: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : dispatchStrategyFromSettings === 'claim' ? `Claim (cap: ${claimCapFromSettings})` : 'Load balanced'}</strong>
+                    Saved: <strong>{
+                      dispatchStrategyFromSettings === 'performance'
+                        ? 'Performance'
+                        : dispatchStrategyFromSettings === 'claim'
+                          ? `Claim (cap: ${claimCapFromSettings})`
+                          : dispatchStrategyFromSettings === 'load_balanced'
+                            ? 'Load balanced'
+                            : 'Manual assignment'
+                    }</strong>
                     {hasSystemChanges && ' — you have unsaved changes'}
                   </p>
                 </div>
@@ -772,7 +802,15 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                 </div>
                 <div className="rounded-lg border border-app-border p-4">
                   <p className="text-sm text-app-fg-muted">
-                    Only Super Admin can configure CS order distribution. Current: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : dispatchStrategyFromSettings === 'claim' ? `Claim (cap: ${claimCapFromSettings})` : 'Load balanced'}</strong>.
+                    Only Super Admin can configure CS order distribution. Current: <strong>{
+                      dispatchStrategyFromSettings === 'performance'
+                        ? 'Performance'
+                        : dispatchStrategyFromSettings === 'claim'
+                          ? `Claim (cap: ${claimCapFromSettings})`
+                          : dispatchStrategyFromSettings === 'load_balanced'
+                            ? 'Load balanced'
+                            : 'Manual assignment'
+                    }</strong>.
                   </p>
                 </div>
               </div>

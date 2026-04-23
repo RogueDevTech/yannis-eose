@@ -842,25 +842,53 @@ export class OrdersService {
       }
     }
 
-    // Role check: only Head of Logistics or SuperAdmin can transition IN_TRANSIT → DELIVERED/PARTIALLY_DELIVERED.
-    // TPL_MANAGER may mark delivered when the order has been resolved (resolveReceiptUrl set) via Resolve order.
-    // Riders must still submit a delivery confirmation request for HOL approval.
+    // Role check: CONFIRMED → ALLOCATED can be triggered by the assigned CS agent (the one who
+    // confirmed the order), by Head of Logistics / Logistics Manager, or by Super Admin / Admin.
+    // CS agents "share" orders to a 3PL location the same way HoLogistics does from the logistics dashboard.
+    if (currentStatus === 'CONFIRMED' && newStatus === 'ALLOCATED') {
+      const isAssignedCs = actor.role === 'CS_AGENT' && order.assignedCsId === actor.id;
+      const isLogistics = actor.role === 'HEAD_OF_LOGISTICS' || actor.role === 'LOGISTICS_MANAGER';
+      const isElevated = actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN' || actor.role === 'HEAD_OF_CS';
+      if (!isAssignedCs && !isLogistics && !isElevated) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only the assigned CS agent, Logistics, or an Admin can allocate this order to a 3PL location.',
+        });
+      }
+    }
+
+    // Role check: IN_TRANSIT → DELIVERED/PARTIALLY_DELIVERED can be triggered by:
+    //   - Head of Logistics / SuperAdmin / Admin (unrestricted).
+    //   - TPL_MANAGER, but only when the order was resolved (resolveReceiptUrl set) via Resolve order.
+    //   - The assigned CS agent, but only with a mandatory deliveryNote (>= 10 chars) since they
+    //     are confirming delivery via a follow-up call rather than rider OTP/GPS.
+    //   Riders still submit a delivery confirmation request for HOL approval (not this path).
     if (
       currentStatus === 'IN_TRANSIT' &&
       (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED')
     ) {
       const hasResolveReceipt = !!order.resolveReceiptUrl?.trim();
       const tplManagerMayDeliver = actor.role === 'TPL_MANAGER' && hasResolveReceipt;
-      if (
-        actor.role !== 'HEAD_OF_LOGISTICS' &&
-        (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN') &&
-        !tplManagerMayDeliver
-      ) {
+      const isAssignedCs = actor.role === 'CS_AGENT' && order.assignedCsId === actor.id;
+      const isElevated =
+        actor.role === 'HEAD_OF_LOGISTICS' ||
+        actor.role === 'SUPER_ADMIN' ||
+        actor.role === 'ADMIN';
+      if (!isElevated && !tplManagerMayDeliver && !isAssignedCs) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message:
             'Delivery confirmation requires Head of Logistics approval. Submit a delivery confirmation request instead.',
         });
+      }
+      if (isAssignedCs) {
+        const note = typeof input.metadata?.deliveryNote === 'string' ? input.metadata.deliveryNote.trim() : '';
+        if (note.length < 10) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'A delivery note of at least 10 characters is required when CS marks an order delivered.',
+          });
+        }
       }
     }
 
@@ -928,6 +956,12 @@ export class OrdersService {
     // v1: persist delivery proof URL when 3PL marks DELIVERED or PARTIALLY_DELIVERED
     if ((newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED') && input.metadata?.deliveryProofUrl) {
       updateFields['deliveryProofUrl'] = String(input.metadata.deliveryProofUrl).trim();
+    }
+
+    // Persist the delivery note when provided on DELIVERED/PARTIALLY_DELIVERED (currently required
+    // for CS-triggered confirmations; optional when elevated roles mark it).
+    if ((newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED') && input.metadata?.deliveryNote) {
+      updateFields['deliveryNotes'] = String(input.metadata.deliveryNote).trim();
     }
 
     // Delivery fee add-on when marking DELIVERED or PARTIALLY_DELIVERED (3PL records delivery cost; required in v1)
@@ -2324,15 +2358,22 @@ export class OrdersService {
   /**
    * Auto-dispatch a new order to a CS agent.
    * Strategy is configurable via system setting CS_DISPATCH_STRATEGY:
-   * - load_balanced (default): lowest pending count first, then most idle.
+   * - manual (default): no auto-assignment; orders sit UNPROCESSED until HoCS assigns them.
+   * - load_balanced: lowest pending count first, then most idle.
    * - performance: prioritise agents with higher delivery rate and confirmation rate (this month).
-   * - claim: no auto-assignment; orders stay UNPROCESSED in the claim queue.
+   * - claim: no auto-assignment; orders stay UNPROCESSED in the claim queue for agents to grab.
    */
   private async autoDispatchToCS(orderId: string) {
     await this.releaseExpiredLocks();
 
     const dispatchSetting = await this.settingsService.get('CS_DISPATCH_STRATEGY');
-    const strategy = (dispatchSetting?.strategy as string | undefined) ?? 'load_balanced';
+    const strategy = (dispatchSetting?.strategy as string | undefined) ?? 'manual';
+
+    if (strategy === 'manual') {
+      // Manual mode: no auto-assignment and no claim broadcast. Order remains UNPROCESSED
+      // in the HoCS unassigned queue for manual assignment via Hot Swap.
+      return;
+    }
 
     if (strategy === 'claim') {
       // Claim mode: leave order in UNPROCESSED, broadcast to claim queue

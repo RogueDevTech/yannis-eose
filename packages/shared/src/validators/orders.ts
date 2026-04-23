@@ -129,6 +129,8 @@ export const transitionOrderSchema = z.object({
     deliveryDiscountAmount: z.number().min(0).optional(),
     /** Scheduled delivery date set by CS agent when confirming the order */
     preferredDeliveryDate: z.string().optional(),
+    /** Mandatory note when CS marks an order DELIVERED (e.g. "Customer confirmed receipt on call at 3:42pm"). */
+    deliveryNote: z.string().min(10).max(500).optional(),
   }).optional(),
 });
 

@@ -75,6 +75,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
+  // Logistics locations — used by the "Allocate to 3PL" action available to the assigned
+  // CS agent, Logistics, and admins when the order is CONFIRMED.
+  let logisticsLocations: Array<{ id: string; name: string; address: string | null }> = [];
+  const locationsRes = await apiRequest<unknown>(
+    `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
+    { method: 'GET', cookie },
+  );
+  if (locationsRes.ok) {
+    const locationsData = locationsRes.data as {
+      result?: { data?: { locations?: Array<{ id: string; name: string; address: string | null }> } };
+    };
+    logisticsLocations = locationsData?.result?.data?.locations ?? [];
+  }
+
   return defer({
     orderDetail: orderDetailPromise,
     canEditOrder: user.role !== 'MEDIA_BUYER',
@@ -82,6 +96,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     userId: user.id,
     permissions: user.permissions ?? [],
     csAgentsForAssign: csAgentsForAssign,
+    logisticsLocations,
   });
 }
 
@@ -356,6 +371,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const deliveryDiscountAmountStr = formData.get('deliveryDiscountAmount')?.toString();
 
     const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString() || undefined;
+    const deliveryNote = formData.get('deliveryNote')?.toString() || undefined;
+    const deliveryProofUrl = formData.get('deliveryProofUrl')?.toString() || undefined;
 
     const metadata: Record<string, unknown> = {};
     if (reason) metadata['reason'] = reason;
@@ -363,6 +380,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (logisticsProviderId) metadata['logisticsProviderId'] = logisticsProviderId;
     if (riderId) metadata['riderId'] = riderId;
     if (preferredDeliveryDate) metadata['preferredDeliveryDate'] = preferredDeliveryDate;
+    if (deliveryNote) metadata['deliveryNote'] = deliveryNote;
+    if (deliveryProofUrl) metadata['deliveryProofUrl'] = deliveryProofUrl;
     const deliveredQty = deliveredQtyStr != null ? parseInt(deliveredQtyStr, 10) : NaN;
     if (!Number.isNaN(deliveredQty) && Number.isInteger(deliveredQty) && deliveredQty >= 0) {
       metadata['deliveredQuantity'] = deliveredQty;
@@ -405,7 +424,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed', 'order:assigned', 'order:transfer_accepted', 'order:transfer_rejected'] as const;
 
 export default function OrderDetailRoute() {
-  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign } = useLoaderData<typeof loader>();
+  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign, logisticsLocations } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
   return (
@@ -433,6 +452,7 @@ export default function OrderDetailRoute() {
             userId={userId}
             permissions={permissions}
             csAgentsForAssign={csAgentsForAssign}
+            logisticsLocations={logisticsLocations}
           />
         )
       }

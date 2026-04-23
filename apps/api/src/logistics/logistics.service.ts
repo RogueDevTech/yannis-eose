@@ -154,6 +154,7 @@ export class LogisticsService {
         name: input.name,
         address: input.address,
         coordinates: input.coordinates ?? null,
+        whatsappGroupLink: input.whatsappGroupLink ?? null,
       })
       .returning();
 
@@ -172,6 +173,7 @@ export class LogisticsService {
     if (input.address !== undefined) updateFields['address'] = input.address;
     if (input.coordinates !== undefined) updateFields['coordinates'] = input.coordinates;
     if (input.status !== undefined) updateFields['status'] = input.status;
+    if (input.whatsappGroupLink !== undefined) updateFields['whatsappGroupLink'] = input.whatsappGroupLink;
 
     const rows = await this.db
       .update(schema.logisticsLocations)

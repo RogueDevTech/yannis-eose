@@ -268,7 +268,8 @@ export class UsersService {
       }
     }
 
-    if (input.role !== 'SUPER_ADMIN' && input.role !== 'ADMIN') {
+    // SUPER_ADMIN already rejected above; ADMIN is global (no primary branch required).
+    if (input.role !== 'ADMIN') {
       if (!input.primaryBranchId) {
         throw new TRPCError({
           code: 'BAD_REQUEST',

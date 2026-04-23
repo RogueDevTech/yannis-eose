@@ -141,4 +141,5 @@ export interface OrderDetailPageExtraProps {
   userId: string;
   permissions: string[];
   csAgentsForAssign?: Array<{ id: string; name: string }>;
+  logisticsLocations?: Array<{ id: string; name: string; address: string | null }>;
 }

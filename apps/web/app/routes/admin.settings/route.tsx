@@ -107,8 +107,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'updateSystemSettings') {
     const voipEnabled = formData.get('voipEnabled')?.toString() === 'true';
-    const csDispatchStrategy = formData.get('csDispatchStrategy')?.toString() ?? 'load_balanced';
-    if (csDispatchStrategy !== 'load_balanced' && csDispatchStrategy !== 'performance' && csDispatchStrategy !== 'claim') {
+    const csDispatchStrategy = formData.get('csDispatchStrategy')?.toString() ?? 'manual';
+    if (
+      csDispatchStrategy !== 'manual' &&
+      csDispatchStrategy !== 'load_balanced' &&
+      csDispatchStrategy !== 'performance' &&
+      csDispatchStrategy !== 'claim'
+    ) {
       return json({ error: 'Invalid CS dispatch strategy' }, { status: 400 });
     }
     const claimCapRaw = formData.get('claimCap')?.toString();

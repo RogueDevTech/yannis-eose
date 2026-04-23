@@ -17,7 +17,6 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/config/package.json packages/config/package.json
-COPY packages/ui/package.json packages/ui/package.json
 
 RUN pnpm install --frozen-lockfile
 
@@ -41,7 +40,6 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=build /app/packages/shared ./packages/shared
-COPY --from=build /app/packages/ui ./packages/ui
 COPY --from=build /app/apps/web/build ./apps/web/build
 COPY --from=build /app/apps/web/package.json ./apps/web/package.json
 

@@ -61,6 +61,7 @@
     { "idx": 56, "version": "7", "when": 1772431000000, "tag": "0054_backfill_orders_branch_id", "breakpoints": true },
     { "idx": 57, "version": "7", "when": 1772432000000, "tag": "0055_users_app_theme", "breakpoints": true },
     { "idx": 58, "version": "7", "when": 1772433000000, "tag": "0056_unique_head_per_branch", "breakpoints": true },
-    { "idx": 59, "version": "7", "when": 1772434000000, "tag": "0057_users_font_scale", "breakpoints": true }
+    { "idx": 59, "version": "7", "when": 1772434000000, "tag": "0057_users_font_scale", "breakpoints": true },
+    { "idx": 60, "version": "7", "when": 1772435000000, "tag": "0058_logistics_whatsapp_share", "breakpoints": true }
   ]
 }

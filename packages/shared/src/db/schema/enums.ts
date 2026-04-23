@@ -197,10 +197,11 @@ export const branchStatusEnum = pgEnum('branch_status', [
   'INACTIVE',
 ]);
 
-/** Channel for outbound CS messages to customers. */
+/** Channel for outbound messages (customer-facing CS comms + 3PL dispatch coordination). */
 export const messageChannelEnum = pgEnum('message_channel', [
   'SMS',
   'WHATSAPP',
+  'WHATSAPP_GROUP',
 ]);
 
 /** Status of an outbound CS message. */

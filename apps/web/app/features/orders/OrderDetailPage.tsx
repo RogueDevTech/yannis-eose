@@ -13,6 +13,8 @@ import { useAgentStateBroadcast } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
 import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
+import { FileUpload } from '~/components/ui/file-upload';
+import { S3_FOLDERS } from '~/lib/s3-upload';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
@@ -708,6 +710,7 @@ export function OrderDetailPage({
   userId,
   permissions,
   csAgentsForAssign = [],
+  logisticsLocations = [],
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
   const revealFetcher = useFetcher();
@@ -736,6 +739,11 @@ export function OrderDetailPage({
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number }>>([]);
   const [callDebugLog, setCallDebugLog] = useState<string[]>([]);
+  const [allocateModalOpen, setAllocateModalOpen] = useState(false);
+  const [allocateLocationId, setAllocateLocationId] = useState('');
+  const [deliverModalOpen, setDeliverModalOpen] = useState(false);
+  const [deliverNote, setDeliverNote] = useState('');
+  const [deliverProofUrl, setDeliverProofUrl] = useState('');
 
   const currentStatusIndex = STATUS_FLOW.indexOf(order.status as (typeof STATUS_FLOW)[number]);
   const actionError = (fetcher.data as { error?: string })?.error;
@@ -1234,6 +1242,47 @@ export function OrderDetailPage({
               </div>
             )}
 
+            {/* Logistics Actions — share to 3PL (CONFIRMED) or confirm delivery (IN_TRANSIT). */}
+            {(
+              (order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0) ||
+              (order.status === 'IN_TRANSIT' && canTransitionTo('DELIVERED'))
+            ) && (
+              <div className="card">
+                <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
+                <div className="space-y-2">
+                  {order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => {
+                        setAllocateLocationId('');
+                        setAllocateModalOpen(true);
+                      }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Allocate to 3PL
+                    </Button>
+                  )}
+                  {order.status === 'IN_TRANSIT' && canTransitionTo('DELIVERED') && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => {
+                        setDeliverNote('');
+                        setDeliverProofUrl('');
+                        setDeliverModalOpen(true);
+                      }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Mark delivered
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS agents */}
             {canEditOrder && canPerformCSActionsOnOrder && (
               <CSMessagingPanel
@@ -1470,6 +1519,111 @@ export function OrderDetailPage({
                 </Button>
               </fetcher.Form>
             </div>
+        </Modal>
+      )}
+
+      {/* Allocate to 3PL modal — CONFIRMED → ALLOCATED */}
+      {allocateModalOpen && (
+        <Modal open onClose={() => setAllocateModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Allocate to 3PL</h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            Select the 3PL location that will fulfil this order. Stock must be available at that location.
+          </p>
+          <label htmlFor="allocate-location-id" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+            Logistics location
+          </label>
+          <select
+            id="allocate-location-id"
+            value={allocateLocationId}
+            onChange={(e) => setAllocateLocationId(e.target.value)}
+            className="input w-full"
+          >
+            <option value="">Select a location...</option>
+            {logisticsLocations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                {loc.name}{loc.address ? ` — ${loc.address}` : ''}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2 mt-4 justify-end">
+            <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
+              Back
+            </Button>
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="transition" />
+              <input type="hidden" name="newStatus" value="ALLOCATED" />
+              <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!allocateLocationId || fetcher.state === 'submitting'}
+                loading={fetcher.state === 'submitting'}
+                loadingText="Allocating..."
+                onClick={() => setAllocateModalOpen(false)}
+              >
+                Allocate
+              </Button>
+            </fetcher.Form>
+          </div>
+        </Modal>
+      )}
+
+      {/* Mark delivered modal — IN_TRANSIT → DELIVERED. Mandatory note + optional proof screenshot. */}
+      {deliverModalOpen && (
+        <Modal
+          open
+          onClose={() => setDeliverModalOpen(false)}
+          maxWidth="max-w-md"
+          contentClassName="p-6 max-h-[90dvh] overflow-y-auto"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Mark order delivered</h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            Confirm that the customer received the order. Add a short note describing how you confirmed delivery (minimum 10 characters). Attaching a screenshot is optional.
+          </p>
+          <label htmlFor="delivery-note" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+            Delivery note <span className="text-danger-600">*</span>
+          </label>
+          <textarea
+            id="delivery-note"
+            value={deliverNote}
+            onChange={(e) => setDeliverNote(e.target.value)}
+            placeholder="e.g. Customer confirmed receipt on follow-up call at 3:42pm."
+            className="input w-full min-h-[80px]"
+            rows={3}
+          />
+          <p className="text-xs text-app-fg-muted mt-1">{deliverNote.trim().length}/10 min</p>
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+              Screenshot (optional)
+            </label>
+            <FileUpload
+              folder={S3_FOLDERS.DELIVERY_PROOF}
+              onUpload={(url) => setDeliverProofUrl(url)}
+              accept="image/*"
+              maxSizeMB={10}
+            />
+          </div>
+          <div className="flex gap-2 mt-5 justify-end">
+            <Button type="button" variant="secondary" onClick={() => setDeliverModalOpen(false)}>
+              Back
+            </Button>
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="transition" />
+              <input type="hidden" name="newStatus" value="DELIVERED" />
+              <input type="hidden" name="deliveryNote" value={deliverNote.trim()} />
+              {deliverProofUrl && <input type="hidden" name="deliveryProofUrl" value={deliverProofUrl} />}
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={deliverNote.trim().length < 10 || fetcher.state === 'submitting'}
+                loading={fetcher.state === 'submitting'}
+                loadingText="Marking..."
+                onClick={() => setDeliverModalOpen(false)}
+              >
+                Mark delivered
+              </Button>
+            </fetcher.Form>
+          </div>
         </Modal>
       )}
 

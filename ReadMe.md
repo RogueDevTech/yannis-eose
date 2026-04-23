@@ -103,7 +103,6 @@ apps/api/          NestJS backend (21 modules, 18 tRPC routers)
 apps/web/          Remix PWA frontend (65+ routes, 29 feature modules)
 apps/edge-worker/  Cloudflare Worker (form submission + circuit breaker)
 packages/shared/   Drizzle schema (18 files), Zod validators (14 files), types
-packages/ui/       Shared Tailwind components
 packages/config/   ESLint, TypeScript, Tailwind configs
 docs/              Developer Guide, Runbook, ADRs
 ```
