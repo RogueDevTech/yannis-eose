@@ -679,6 +679,7 @@ function getFormScript(
           document.querySelectorAll('.offer-group').forEach(function(g) { g.style.display = 'none'; });
           var offerGroup = document.getElementById('offers-' + selectedProduct);
           if (offerGroup) { offerGroup.style.display = 'flex'; }
+          maybeSaveCart();
         });
       });
 
@@ -692,6 +693,7 @@ function getFormScript(
             parent.querySelectorAll('.offer-option').forEach(function(o) { o.classList.remove('selected'); });
             radio.closest('.offer-option').classList.add('selected');
           }
+          maybeSaveCart();
         });
       });
 

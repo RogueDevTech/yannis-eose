@@ -84,6 +84,7 @@ async function handleLogin(request: Request, formData: FormData) {
     }>('/auth/login', {
       method: 'POST',
       body: { email, password },
+      timeoutMs: 20_000,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Request failed';

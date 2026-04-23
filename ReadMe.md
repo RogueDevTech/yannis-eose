@@ -1,5 +1,16 @@
 # Yannis EOSE
 
+START APP
+cd apps/api && pnpm dev
+cd apps/web && pnpm dev
+
+
+LOCAL REDIS
+brew services list           # see status
+brew services stop redis     # stop now (does not unregister)
+brew services restart redis  # restart
+
+
 ```bash
 pnpm install
 cp apps/api/.env.example apps/api/.env    # Configure database + Redis
