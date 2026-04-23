@@ -793,7 +793,7 @@ export function OrderDetailPage({
 
   const isAssignedToMe = order.assignedCsId === userId;
   const isCSOrHoS = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(userRole);
-  const isElevated = userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN', 'ADMIN';
+  const isElevated = userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
   // CS agent can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
@@ -806,7 +806,7 @@ export function OrderDetailPage({
     const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
     if (!csOnlyStatuses.includes(newStatus)) return true;
     if (!isCSOrHoS) return false;
-    if (userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN', 'ADMIN') return true;
+    if (userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN') return true;
     if (userRole === 'CS_AGENT') {
       if (newStatus === 'CS_ENGAGED') {
         return isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId);
