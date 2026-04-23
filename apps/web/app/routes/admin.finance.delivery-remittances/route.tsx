@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
 import type { DeliveryRemittanceListItem, DeliveryRemittanceDetail } from '~/features/finance/DeliveryRemittancesPage';
 
@@ -103,7 +104,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  const hasApprovePermission = user?.permissions?.includes('finance.approve') ?? false;
+  // SA + ADMIN carry an empty permissions array (bypass at middleware); include them explicitly.
+  const hasApprovePermission = isAdminLevel(user) || (user?.permissions?.includes('finance.approve') ?? false);
 
   return {
     remittances,

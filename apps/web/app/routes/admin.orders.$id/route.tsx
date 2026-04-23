@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { defer, json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import type { CallLogEntry, OrderDetail, OrderDetailStreamData, TimelineEvent } from '~/features/orders/types';
@@ -66,7 +67,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   })();
 
   let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
-  if (user.permissions?.includes('orders.reassign')) {
+  // SA + ADMIN bypass permission checks at middleware (permissions: []); include them explicitly.
+  if (isAdminLevel(user) || user.permissions?.includes('orders.reassign')) {
     const agentsRes = await apiRequest<unknown>('/trpc/orders.listCSAgents', { method: 'GET', cookie });
     if (agentsRes.ok) {
       const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
@@ -77,16 +79,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Logistics locations — used by the "Allocate to 3PL" action available to the assigned
   // CS agent, Logistics, and admins when the order is CONFIRMED.
-  let logisticsLocations: Array<{ id: string; name: string; address: string | null }> = [];
+  let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> = [];
   const locationsRes = await apiRequest<unknown>(
     `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
     { method: 'GET', cookie },
   );
   if (locationsRes.ok) {
     const locationsData = locationsRes.data as {
-      result?: { data?: { locations?: Array<{ id: string; name: string; address: string | null }> } };
+      result?: { data?: { locations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> } };
     };
     logisticsLocations = locationsData?.result?.data?.locations ?? [];
+  }
+
+  // Dispatch templates for the "Share to 3PL" WhatsApp flow.
+  let logisticsDispatchTemplates: Array<{ id: string; name: string; body: string }> = [];
+  const templatesRes = await apiRequest<unknown>(
+    `/trpc/messaging.templates.list?input=${encodeURIComponent(JSON.stringify({ channel: 'WHATSAPP_GROUP' }))}`,
+    { method: 'GET', cookie },
+  );
+  if (templatesRes.ok) {
+    const templatesData = templatesRes.data as { result?: { data?: Array<{ id: string; name: string; body: string }> } };
+    logisticsDispatchTemplates = templatesData?.result?.data ?? [];
   }
 
   return defer({
@@ -97,6 +110,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     permissions: user.permissions ?? [],
     csAgentsForAssign: csAgentsForAssign,
     logisticsLocations,
+    logisticsDispatchTemplates,
   });
 }
 
@@ -424,7 +438,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed', 'order:assigned', 'order:transfer_accepted', 'order:transfer_rejected'] as const;
 
 export default function OrderDetailRoute() {
-  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign, logisticsLocations } = useLoaderData<typeof loader>();
+  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign, logisticsLocations, logisticsDispatchTemplates } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
   return (
@@ -453,6 +467,7 @@ export default function OrderDetailRoute() {
             permissions={permissions}
             csAgentsForAssign={csAgentsForAssign}
             logisticsLocations={logisticsLocations}
+            logisticsDispatchTemplates={logisticsDispatchTemplates}
           />
         )
       }

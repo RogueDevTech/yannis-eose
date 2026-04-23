@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption } from '~/features/inventory/types';
@@ -61,7 +62,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalMovements: movementsData.total,
     products,
     locations,
-    canIntake: user.permissions?.includes('inventory.intake') ?? false,
+    // Admin-level users bypass permission lookups at the middleware layer (permissions: []),
+    // so we must also bypass here — otherwise the Stock Intake button is hidden from SuperAdmin / Admin.
+    canIntake: isAdminLevel(user) || (user.permissions?.includes('inventory.intake') ?? false),
   };
 }
 
