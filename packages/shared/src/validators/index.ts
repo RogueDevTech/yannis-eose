@@ -252,9 +252,12 @@ export {
   clientUiConfigSchema,
   updateMyAppThemeSchema,
   updateClientUiConfigSchema,
+  FONT_SCALE_IDS,
+  fontScaleIdSchema,
+  updateMyFontScaleSchema,
 } from './ui';
 
-export type { AppThemeId, ClientUiConfig, UpdateMyAppThemeInput } from './ui';
+export type { AppThemeId, ClientUiConfig, UpdateMyAppThemeInput, FontScaleId, UpdateMyFontScaleInput } from './ui';
 
 // HR & Payroll validators
 export {

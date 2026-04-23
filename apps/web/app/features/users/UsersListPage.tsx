@@ -7,6 +7,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Pagination } from '~/components/ui/pagination';
+import { Spinner } from '~/components/ui/spinner';
 import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
@@ -136,6 +137,11 @@ export function UsersListPage({
             options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
             className="w-full sm:w-48"
           />
+          {isFilterLoading && (
+            <span className="flex items-center text-app-fg-muted" aria-hidden>
+              <Spinner size="sm" className="shrink-0" />
+            </span>
+          )}
         </div>
       </div>
 

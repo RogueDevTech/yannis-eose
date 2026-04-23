@@ -8,6 +8,7 @@ import {
   resetPasswordSchema,
   processEmailChangeSchema,
   updateMyAppThemeSchema,
+  updateMyFontScaleSchema,
 } from '@yannis/shared';
 import type { UsersService } from '../../users/users.service';
 import type { SessionStoreService } from '../../auth/session-store.service';
@@ -71,6 +72,14 @@ export const usersRouter = router({
   }),
 
   /**
+   * List active HEAD_OF_* users (with their primary branch) so the user
+   * create/edit forms can warn about duplicate heads per branch.
+   */
+  listActiveHeads: permissionProcedure('users.read', 'users.create', 'users.update').query(async () => {
+    return getUsersService().listActiveHeads();
+  }),
+
+  /**
    * Get a single user by ID.
    */
   getById: authedProcedure
@@ -96,6 +105,30 @@ export const usersRouter = router({
           await store.updateSession(
             sessionToken,
             { ...current, appTheme: result.appTheme },
+            ttl,
+          );
+        }
+      }
+      return result;
+    }),
+
+  /**
+   * Save font scale for the current user. `null` = reset to base.
+   * Updates Redis session so the next request sees the new preference.
+   */
+  updateMyFontScale: authedProcedure
+    .input(updateMyFontScaleSchema)
+    .mutation(async ({ input, ctx }) => {
+      const result = await getUsersService().updateMyFontScale(input.fontScale, ctx.user);
+      const sessionToken = ctx.sessionToken ?? undefined;
+      if (sessionToken) {
+        const store = getSessionStore();
+        const current = await store.getSession(sessionToken);
+        if (current) {
+          const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
+          await store.updateSession(
+            sessionToken,
+            { ...current, fontScale: result.fontScale },
             ttl,
           );
         }

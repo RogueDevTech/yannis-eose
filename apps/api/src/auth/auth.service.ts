@@ -122,6 +122,7 @@ export class AuthService {
       logisticsLocationId: user.logisticsLocationId,
       currentBranchId,
       appTheme: user.appTheme ?? null,
+      fontScale: user.fontScale ?? null,
     };
 
     // Persist session in DB, then cache in Redis when available.

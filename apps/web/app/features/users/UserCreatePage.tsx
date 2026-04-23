@@ -17,6 +17,9 @@ import type {
   UserCreateCommissionPlan,
   UserCreateBranch,
 } from './types';
+import { formatRole } from './types';
+
+const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'];
 
 // ─── Constants ──────────────────────────────────────────
 
@@ -35,7 +38,7 @@ const ROLES = [
 
 // ─── Component ──────────────────────────────────────────
 
-export function UserCreatePage({ products, locations, plans, branches }: UserCreateLoaderData) {
+export function UserCreatePage({ products, locations, plans, branches, activeHeads }: UserCreateLoaderData) {
   const actionData = useActionData<{ error?: string; success?: boolean; requiresApproval?: boolean; message?: string }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
@@ -53,8 +56,19 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
   }, [actionData?.error]);
 
   const [selectedRole, setSelectedRole] = useState('');
+  const [selectedBranchId, setSelectedBranchId] = useState('');
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
+
+  const conflictingHead =
+    HEAD_ROLES.includes(selectedRole) && selectedBranchId
+      ? activeHeads.find(
+          (h) => h.role === selectedRole && h.primaryBranchId === selectedBranchId,
+        )
+      : undefined;
+  const conflictingBranch = conflictingHead
+    ? branches.find((b) => b.id === conflictingHead.primaryBranchId)
+    : undefined;
 
   // Role-conditional visibility
   const showCapacity = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
@@ -162,6 +176,8 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
                 label="Primary Branch"
                 required
                 placeholder="Select primary branch"
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
                 options={branches
                   .filter((branch: UserCreateBranch) => branch.status === 'ACTIVE')
                   .map((branch: UserCreateBranch) => ({
@@ -173,6 +189,15 @@ export function UserCreatePage({ products, locations, plans, branches }: UserCre
                 Determines the default branch context and data scope on first login.
               </p>
             </div>
+
+            {conflictingHead && (
+              <div className="sm:col-span-2">
+                <InlineNotification
+                  variant="warning"
+                  message={`${conflictingBranch ? conflictingBranch.name : 'This branch'} already has an active ${formatRole(selectedRole)} (${conflictingHead.name}). Creating another will be rejected — deactivate them first.`}
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1.5">

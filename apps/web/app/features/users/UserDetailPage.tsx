@@ -26,8 +26,11 @@ import type {
   UserStockMovement,
   UserApprovalRecord,
   UserPushStatus,
+  ActiveHeadUser,
 } from './types';
 import { ROLE_COLORS, USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
+
+const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'];
 
 // ─── Constants ──────────────────────────────────────────
 
@@ -90,6 +93,8 @@ export function UserDetailPage({
   stockMovements,
   financeActivity,
   pushStatus,
+  activeHeads,
+  branchesList,
   canDisburseToThisUser = false,
   isSuperAdmin = false,
   isViewerHeadOfMarketing = false,
@@ -986,6 +991,35 @@ export function UserDetailPage({
                     <option key={role.value} value={role.value}>{role.label}</option>
                   ))}
                 </select>
+                {HEAD_ROLES.includes(selectedRole) && selectedRole !== user.role && user.primaryBranchId && activeHeads && (
+                  <DeferredSection resolve={activeHeads} skeleton="inline">
+                    {(heads: ActiveHeadUser[]) => {
+                      const conflict = heads.find(
+                        (h) =>
+                          h.role === selectedRole &&
+                          h.primaryBranchId === user.primaryBranchId &&
+                          h.id !== user.id,
+                      );
+                      if (!conflict) return null;
+                      return (
+                        <DeferredSection resolve={branchesList ?? Promise.resolve([])} skeleton="inline">
+                          {(branches: Array<{ id: string; name: string }>) => {
+                            const branchName =
+                              branches.find((b) => b.id === user.primaryBranchId)?.name ?? 'This branch';
+                            return (
+                              <div className="mt-2">
+                                <InlineNotification
+                                  variant="warning"
+                                  message={`${branchName} already has an active ${formatRole(selectedRole)} (${conflict.name}). Saving this change will be rejected — deactivate them first.`}
+                                />
+                              </div>
+                            );
+                          }}
+                        </DeferredSection>
+                      );
+                    }}
+                  </DeferredSection>
+                )}
               </div>
               <div>
                 <label htmlFor="name" className="block text-sm font-medium text-app-fg-muted mb-1.5">Full Name</label>

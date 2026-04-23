@@ -89,11 +89,19 @@ export interface UserCreateBranch {
   status: string;
 }
 
+export interface ActiveHeadUser {
+  id: string;
+  name: string;
+  role: string;
+  primaryBranchId: string | null;
+}
+
 export interface UserCreateLoaderData {
   products: UserCreateProduct[];
   locations: UserCreateLocation[];
   plans: UserCreateCommissionPlan[];
   branches: UserCreateBranch[];
+  activeHeads: ActiveHeadUser[];
 }
 
 // ─── User Detail Page Types ──────────────────────────────
@@ -112,6 +120,7 @@ export interface UserDetail {
   /** Product IDs from user_product_assignments (for edit form + save diff). */
   assignedProductIds?: string[];
   commissionPlanId: string | null;
+  primaryBranchId: string | null;
   createdAt: string;
   updatedAt: string;
   branchMemberships?: UserBranchMembership[];
@@ -221,6 +230,8 @@ export interface UserDetailLoaderData {
   stockMovements: Promise<{ movements: UserStockMovement[]; total: number }> | null;
   financeActivity: Promise<{ approvals: UserApprovalRecord[]; total: number }> | null;
   pushStatus?: Promise<UserPushStatus | null>;
+  activeHeads?: Promise<ActiveHeadUser[]>;
+  branchesList?: Promise<Array<{ id: string; name: string; code: string; status: string }>>;
   canDisburseToThisUser?: boolean;
   isSuperAdmin?: boolean;
   isViewerHeadOfMarketing?: boolean;

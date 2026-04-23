@@ -19,6 +19,7 @@ import type {
   UserStockMovement,
   UserApprovalRecord,
   UserPushStatus,
+  ActiveHeadUser,
 } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -272,6 +273,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => ({ approvals: [], total: 0 }))
     : null;
 
+  // Active HEAD_OF_* users so the edit form can warn about duplicate heads in the same branch.
+  const activeHeads: Promise<ActiveHeadUser[]> = apiRequest<unknown>(
+    '/trpc/users.listActiveHeads',
+    { method: 'GET', cookie },
+  )
+    .then((res) => {
+      if (!res.ok) return [];
+      const d = res.data as { result?: { data?: ActiveHeadUser[] } };
+      return d?.result?.data ?? [];
+    })
+    .catch(() => []);
+
+  // Active branches for the edit form's warning (to show branch name in the message).
+  const branchesList: Promise<Array<{ id: string; name: string; code: string; status: string }>> =
+    apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie })
+      .then((res) => {
+        if (!res.ok) return [];
+        const d = res.data as { result?: { data?: Array<{ id: string; name: string; code: string; status: string }> } };
+        return d?.result?.data ?? [];
+      })
+      .catch(() => []);
+
   // Push notification status (SuperAdmin only — requires users.read permission)
   const pushStatus: Promise<UserPushStatus | null> = isSuperAdmin
     ? apiRequest<unknown>(
@@ -286,7 +309,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => null)
     : Promise.resolve(null);
 
-    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS };
+    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS };
   })();
 
   return defer({ userDetail: userDetailPromise });

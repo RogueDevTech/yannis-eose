@@ -19,9 +19,11 @@ import { PwaInstallPrompt } from '~/components/ui/pwa-install-prompt';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { useRevalidateOnAppResume } from '~/hooks/useRevalidateOnAppResume';
 import { useServerAppThemeSync } from '~/hooks/useServerAppThemeSync';
+import { useServerFontScaleSync } from '~/hooks/useServerFontScaleSync';
 import { ScrollToTopButton } from '~/components/ui/scroll-to-top-button';
 import stylesheet from '~/tailwind.css?url';
 import { getThemeBootScript } from '~/lib/theme';
+import { getFontScaleBootScript } from '~/lib/font-scale';
 
 declare global {
   interface Window {
@@ -53,6 +55,7 @@ export async function loader() {
 }
 
 const THEME_SCRIPT = getThemeBootScript();
+const FONT_SCALE_SCRIPT = getFontScaleBootScript();
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
@@ -134,6 +137,7 @@ export default function App() {
 
   useRevalidateOnAppResume(isLoggedInArea);
   useServerAppThemeSync(isLoggedInArea);
+  useServerFontScaleSync(isLoggedInArea);
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
@@ -195,6 +199,7 @@ export default function App() {
         <meta name="apple-mobile-web-app-title" content="Yannis" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: FONT_SCALE_SCRIPT }} />
         <Meta />
         <Links />
       </head>
@@ -299,6 +304,7 @@ export function ErrorBoundary() {
         <title>{`${title} | Yannis EOSE`}</title>
         <link rel="stylesheet" href={stylesheet} />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: FONT_SCALE_SCRIPT }} />
         <Links />
       </head>
       <body className="h-full flex items-center justify-center bg-app-canvas">

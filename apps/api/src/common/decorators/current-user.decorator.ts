@@ -12,6 +12,8 @@ export interface SessionUser {
   currentBranchId?: string | null;
   /** Saved appearance id; undefined/null = use org default (`client_ui_config`). */
   appTheme?: string | null;
+  /** Saved font scale id; undefined/null = base. */
+  fontScale?: string | null;
 }
 
 /**

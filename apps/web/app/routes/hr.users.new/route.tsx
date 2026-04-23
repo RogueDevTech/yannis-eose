@@ -9,6 +9,7 @@ import type {
   UserCreateCommissionPlan,
   UserCreateBranch,
   UserCreateLoaderData,
+  ActiveHeadUser,
 } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -25,11 +26,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
-  const [productsRes, locationsRes, plansRes, branchesRes] = await Promise.all([
+  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/products.list?input=${productsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie }),
   ]);
 
   const extractData = (res: { ok: boolean; data: unknown }, key: string) => {
@@ -47,6 +49,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     branches: ((branchesRes.ok
       ? (branchesRes.data as { result?: { data?: unknown[] } })?.result?.data
       : []) ?? []) as UserCreateBranch[],
+    activeHeads: ((activeHeadsRes.ok
+      ? (activeHeadsRes.data as { result?: { data?: unknown[] } })?.result?.data
+      : []) ?? []) as ActiveHeadUser[],
   };
 }
 
