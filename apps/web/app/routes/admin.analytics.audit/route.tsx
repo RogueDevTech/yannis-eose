@@ -1,7 +1,7 @@
-import { json } from '@remix-run/node';
+import { json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getCurrentUser, getSessionCookie, safeStatus } from '~/lib/api.server';
 import { AuditPage } from '~/features/audit/AuditPage';
 import type { AuditEntry, AuditStreamData } from '~/features/audit/types';
 
@@ -10,7 +10,10 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'audit.read');
+  // Audit trail is visible to every authenticated user (Pillar 4: transparency).
+  // Column-level security still applies — hasFinanceAccess strips cost/margin keys.
+  const user = await getCurrentUser(request);
+  if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
 

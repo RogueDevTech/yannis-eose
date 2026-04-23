@@ -286,7 +286,7 @@ const navStructure: NavGroupDef[] = [
         label: 'Audit Trail',
         href: '/admin/analytics/audit',
         icon: SidebarIcons.audit,
-        permission: 'audit.read',
+        // No permission — transparency policy: every authenticated user can view the audit trail.
       },
     ],
   },
