@@ -304,7 +304,7 @@ export function OrdersListPage({
         />
       )}
 
-      {/* Page header */}
+      {/* Page header — primary actions only on mobile; Export CSV + Live indicator lifted to secondary bar below */}
       <PageHeader
         title={isCSAgent ? 'My Orders' : 'CS Orders'}
         description={isCSAgent ? 'Track your assigned orders' : 'Manage and track all customer orders'}
@@ -313,51 +313,49 @@ export function OrdersListPage({
             <PageRefreshButton />
             {canCreateOffline && (
               <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
-                Create offline order
+                <span className="hidden sm:inline">Create offline order</span>
+                <span className="sm:hidden">+ Order</span>
               </Button>
             )}
-            {liveEvents != null && liveEvents.length > 0 && (
-              <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-            )}
-            {filters != null && (
-              <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                <DateFilterBar
-                  startDate={filters.startDate ?? ''}
-                  endDate={filters.endDate ?? ''}
-                  periodAllTime={filters.periodAllTime ?? false}
-                />
-              </div>
-            )}
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => exportToCsv(
-                filteredOrders.map((o) => ({
-                  id: o.id,
-                  customer: o.customerName,
-                  ...(showCSAgentColumn && { assignedCs: o.assignedCsName ?? '—' }),
-                  phone: o.customerPhoneDisplay,
-                  status: o.status,
-                  amount: o.totalAmount ?? '',
-                  created: new Date(o.createdAt).toLocaleDateString(),
-                })),
-                [
-                  { key: 'id', label: 'Order ID' },
-                  { key: 'customer', label: 'Customer' },
-                  ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
-                  { key: 'phone', label: 'Phone' },
-                  { key: 'status', label: 'Status' },
-                  { key: 'amount', label: 'Amount' },
-                  { key: 'created', label: 'Created' },
-                ],
-                `orders-${new Date().toISOString().split('T')[0]}.csv`,
-              )}
-            >
-              Export CSV
-            </Button>
           </div>
         }
       />
+
+      {/* Secondary action row — Live indicator + Export (date filter lives in the filters card below) */}
+      <div className="flex flex-wrap items-center gap-2 -mt-2">
+        {liveEvents != null && liveEvents.length > 0 && (
+          <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+        )}
+        <div className="ml-auto">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => exportToCsv(
+              filteredOrders.map((o) => ({
+                id: o.id,
+                customer: o.customerName,
+                ...(showCSAgentColumn && { assignedCs: o.assignedCsName ?? '—' }),
+                phone: o.customerPhoneDisplay,
+                status: o.status,
+                amount: o.totalAmount ?? '',
+                created: new Date(o.createdAt).toLocaleDateString(),
+              })),
+              [
+                { key: 'id', label: 'Order ID' },
+                { key: 'customer', label: 'Customer' },
+                ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
+                { key: 'phone', label: 'Phone' },
+                { key: 'status', label: 'Status' },
+                { key: 'amount', label: 'Amount' },
+                { key: 'created', label: 'Created' },
+              ],
+              `orders-${new Date().toISOString().split('T')[0]}.csv`,
+            )}
+          >
+            Export CSV
+          </Button>
+        </div>
+      </div>
 
       {/* My workload (CS agent only) */}
       {isCSAgent && myWorkload && (
