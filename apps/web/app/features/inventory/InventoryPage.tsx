@@ -73,6 +73,23 @@ export function InventoryPage({
   const currentProductFilter = serverProductFilter || 'ALL';
   const currentSort: LevelsSort = serverSort;
   const [showIntakeForm, setShowIntakeForm] = useState(false);
+
+  // Detail drawer: opened by clicking a level row. Loads movement history via the
+  // /admin/inventory/level-detail resource route (debounced by useFetcher.load).
+  const [selectedLevel, setSelectedLevel] = useState<InventoryLevel | null>(null);
+  const detailFetcher = useFetcher<{ movements: StockMovement[]; total: number }>();
+
+  useEffect(() => {
+    if (!selectedLevel) return;
+    const q = new URLSearchParams({
+      productId: selectedLevel.productId,
+      locationId: selectedLevel.locationId,
+    });
+    detailFetcher.load(`/admin/inventory/level-detail?${q.toString()}`);
+    // detailFetcher ref is stable; intentionally not in deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLevel?.id]);
+
   const fetcher = useFetcher();
 
   const intakeError = (fetcher.data as { error?: string } | undefined)?.error;
@@ -286,6 +303,117 @@ export function InventoryPage({
         </Modal>
       )}
 
+      {/* Stock Level detail drawer — shows movement history for a clicked (product, location). */}
+      {selectedLevel && (
+        <Modal
+          open
+          onClose={() => setSelectedLevel(null)}
+          maxWidth="max-w-3xl"
+          contentClassName="p-0 max-h-[85dvh] overflow-hidden flex flex-col bg-app-elevated"
+        >
+          <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-app-border shrink-0">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-app-fg truncate">
+                {productName(selectedLevel.productId)}
+              </h3>
+              <p className="text-sm text-app-fg-muted mt-0.5 truncate">
+                {locationName(selectedLevel.locationId)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedLevel(null)}
+              aria-label="Close"
+              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Current snapshot */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 py-4 border-b border-app-border shrink-0">
+            <div>
+              <p className="text-xs text-app-fg-muted">Stock</p>
+              <p className="text-lg font-semibold text-app-fg">{selectedLevel.stockCount}</p>
+            </div>
+            <div>
+              <p className="text-xs text-app-fg-muted">Reserved</p>
+              <p className="text-lg font-semibold text-warning-600 dark:text-warning-400">{selectedLevel.reservedCount}</p>
+            </div>
+            <div>
+              <p className="text-xs text-app-fg-muted">Available</p>
+              <p className="text-lg font-semibold text-success-600 dark:text-success-400">
+                {selectedLevel.stockCount - selectedLevel.reservedCount}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-app-fg-muted">Status</p>
+              <div className="mt-1"><StatusBadge status={selectedLevel.status} /></div>
+            </div>
+          </div>
+
+          {/* Movement history */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="px-6 py-4">
+              <h4 className="text-sm font-semibold text-app-fg mb-3">Movement history</h4>
+              {detailFetcher.state !== 'idle' && !detailFetcher.data ? (
+                <p className="text-sm text-app-fg-muted">Loading history…</p>
+              ) : (detailFetcher.data?.movements ?? []).length === 0 ? (
+                <EmptyState title="No movements yet" description="Stock intakes, transfers, and other events will appear here." />
+              ) : (
+                <ul className="space-y-2">
+                  {(detailFetcher.data?.movements ?? []).map((m) => {
+                    const isIncoming =
+                      m.movementType === 'INTAKE' ||
+                      m.movementType === 'TRANSFER_IN' ||
+                      m.movementType === 'RESTOCK' ||
+                      (m.movementType === 'ADJUSTMENT' && m.quantity > 0);
+                    const arrow = (m.fromLocationId || m.toLocationId)
+                      ? `${locationName(m.fromLocationId)} → ${locationName(m.toLocationId)}`
+                      : null;
+                    return (
+                      <li
+                        key={m.id}
+                        className="rounded-lg border border-app-border bg-app-canvas px-3 py-2.5 text-sm"
+                      >
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
+                              {formatMovementType(m.movementType)}
+                            </span>
+                            <span className={`font-medium ${isIncoming ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
+                              {isIncoming ? '+' : ''}{m.quantity}
+                            </span>
+                          </div>
+                          <span className="text-xs text-app-fg-muted whitespace-nowrap">
+                            {new Date(m.createdAt).toLocaleString('en-NG', {
+                              month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        {arrow && (
+                          <p className="text-xs text-app-fg-muted mt-1 truncate">{arrow}</p>
+                        )}
+                        {m.reason && (
+                          <p className="text-xs text-app-fg-muted mt-1 italic">{m.reason}</p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {detailFetcher.data && detailFetcher.data.total > detailFetcher.data.movements.length && (
+                <p className="text-xs text-app-fg-muted mt-3">
+                  Showing latest {detailFetcher.data.movements.length} of {detailFetcher.data.total} movements.
+                </p>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
       <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={4} />}>
         {(count) => (
           <OverviewStatStrip
@@ -376,7 +504,19 @@ export function InventoryPage({
               </thead>
               <tbody>
                 {displayedLevels.map((level) => (
-                  <tr key={level.id} className="table-row">
+                  <tr
+                    key={level.id}
+                    className="table-row cursor-pointer hover:bg-app-hover/60"
+                    onClick={() => setSelectedLevel(level)}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedLevel(level);
+                      }
+                    }}
+                    aria-label={`View history for ${productName(level.productId)} at ${locationName(level.locationId)}`}
+                  >
                     <td className="table-cell font-medium text-app-fg">{productName(level.productId)}</td>
                     <td className="table-cell text-app-fg-muted">{locationName(level.locationId)}</td>
                     <td className="table-cell text-right font-medium">{level.stockCount}</td>
@@ -411,7 +551,13 @@ export function InventoryPage({
           {/* Mobile */}
           <div className="md:hidden space-y-3 px-1">
             {displayedLevels.map((level) => (
-              <div key={level.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+              <button
+                key={level.id}
+                type="button"
+                onClick={() => setSelectedLevel(level)}
+                className="w-full text-left rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 hover:bg-app-hover/60 active:scale-[0.99] transition"
+                aria-label={`View history for ${productName(level.productId)} at ${locationName(level.locationId)}`}
+              >
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className="font-medium text-sm text-app-fg">{productName(level.productId)}</p>
@@ -433,7 +579,7 @@ export function InventoryPage({
                     <p className="font-medium text-success-600 dark:text-success-400">{level.stockCount - level.reservedCount}</p>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
             {displayedLevels.length === 0 && (
               <EmptyState title={totalLevels === 0 && currentProductFilter === 'ALL' ? 'No inventory data yet' : 'No inventory matches your filter'} />
