@@ -7,7 +7,9 @@ import { Tabs } from '~/components/ui/tabs';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { ROLE_LABELS } from './types';
 import { useAppTheme } from '~/hooks/useAppTheme';
+import { useFontScale } from '~/hooks/useFontScale';
 import { APP_THEMES, previewRgb, THEME_PREVIEW_BRAND_HEX, THEME_PREVIEW_RGB } from '~/lib/theme';
+import { FONT_SCALES } from '~/lib/font-scale';
 import { SettingsPushPanel } from './SettingsPushPanel';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
@@ -234,6 +236,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   );
   const [profileName, setProfileName] = useState(user?.name ?? '');
   const { themeId, setTheme, activeTheme } = useAppTheme();
+  const { fontScaleId, setFontScale, activeScale } = useFontScale();
   const { canInstall, install, canPromptInstall, isIosManualInstall, isInstalled } = usePwaInstall();
 
   // CS dispatch strategy: derived from settings, local state for form selection
@@ -409,6 +412,39 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   onSelect={() => setTheme(t.id)}
                 />
               ))}
+            </div>
+          </div>
+
+          <div className="card lg:col-span-2">
+            <h3 className="text-lg font-semibold text-app-fg mb-4">Text size</h3>
+            <p className="text-xs text-app-fg-muted mb-3">
+              Adjusts text and spacing across the app on this device and any device you sign in to. Current: <span className="font-medium text-app-fg">{activeScale.label}</span>
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {FONT_SCALES.map((s) => {
+                const selected = fontScaleId === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setFontScale(s.id)}
+                    className={`flex flex-col items-center justify-center gap-1.5 rounded-lg border px-3 py-4 transition ${
+                      selected
+                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 ring-2 ring-brand-500/30'
+                        : 'border-app-border bg-app-elevated hover:border-app-border-strong'
+                    }`}
+                    aria-pressed={selected}
+                  >
+                    <span
+                      className="font-semibold text-app-fg leading-none"
+                      style={{ fontSize: `${s.rootPx + 6}px` }}
+                    >
+                      {s.sample}
+                    </span>
+                    <span className="text-xs text-app-fg-muted">{s.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

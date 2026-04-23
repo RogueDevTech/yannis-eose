@@ -30,6 +30,8 @@ export const users = pgTable('users', {
   primaryBranchId: text('primary_branch_id'),
   /** Explicit appearance theme; NULL = use org default from `client_ui_config`. */
   appTheme: text('app_theme'),
+  /** Explicit font scale; NULL = base (default). One of 'base' | 'large' | 'xlarge'. */
+  fontScale: text('font_scale'),
   ...temporalColumns,
   ...timestampColumns,
 });

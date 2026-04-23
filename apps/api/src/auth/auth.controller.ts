@@ -218,7 +218,8 @@ export class AuthController {
       user = { ...user, permissions: [] };
     }
     const appTheme = await this.usersService.getAppThemePreference(user.id);
-    user = { ...user, appTheme };
+    const fontScale = await this.usersService.getFontScalePreference(user.id);
+    user = { ...user, appTheme, fontScale };
     return { user };
   }
 

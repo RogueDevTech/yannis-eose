@@ -1,4 +1,5 @@
 import type { AppThemeId } from '~/lib/theme';
+import type { FontScaleId } from '~/lib/font-scale';
 
 type TrpcEnvelope<T> = { result?: { data?: T } };
 
@@ -18,6 +19,8 @@ export type ClientConfigPayload = {
   defaultAppTheme: string;
   appThemePreference: string | null;
   effectiveAppTheme: string;
+  fontScalePreference: string | null;
+  effectiveFontScale: string;
 };
 
 export async function fetchClientConfig(): Promise<ClientConfigPayload | null> {
@@ -39,5 +42,17 @@ export async function postUpdateMyAppTheme(appTheme: AppThemeId): Promise<void> 
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ appTheme }),
+  });
+}
+
+/** Persists font scale for the logged-in user; no-op on failure (e.g. logged out). */
+export async function postUpdateMyFontScale(fontScale: FontScaleId): Promise<void> {
+  const base = getApiBaseUrl();
+  if (!base) return;
+  await fetch(`${base}/trpc/users.updateMyFontScale`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fontScale }),
   });
 }

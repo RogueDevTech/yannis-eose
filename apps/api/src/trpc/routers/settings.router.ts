@@ -58,19 +58,24 @@ export const settingsRouter = router({
     const raw = await getSettingsService().get(CLIENT_UI_CONFIG_KEY);
     const defaultAppTheme = resolveDefaultAppTheme(raw);
     let appThemePreference: string | null = null;
+    let fontScalePreference: string | null = null;
     if (ctx.user) {
       const [row] = await getSettingsDb()
-        .select({ appTheme: schema.users.appTheme })
+        .select({ appTheme: schema.users.appTheme, fontScale: schema.users.fontScale })
         .from(schema.users)
         .where(eq(schema.users.id, ctx.user.id))
         .limit(1);
       appThemePreference = row?.appTheme ?? null;
+      fontScalePreference = row?.fontScale ?? null;
     }
     const effectiveAppTheme = appThemePreference ?? defaultAppTheme;
+    const effectiveFontScale = fontScalePreference ?? 'base';
     return {
       defaultAppTheme,
       appThemePreference,
       effectiveAppTheme,
+      fontScalePreference,
+      effectiveFontScale,
     };
   }),
 

@@ -23,3 +23,16 @@ export const updateMyAppThemeSchema = z.object({
 export type UpdateMyAppThemeInput = z.infer<typeof updateMyAppThemeSchema>;
 
 export const updateClientUiConfigSchema = clientUiConfigSchema;
+
+/** Per-user font scale. `base` = default 14px root, `large` ≈ 1.125×, `xlarge` ≈ 1.25×. */
+export const FONT_SCALE_IDS = ['base', 'large', 'xlarge'] as const;
+export type FontScaleId = (typeof FONT_SCALE_IDS)[number];
+
+export const fontScaleIdSchema = z.enum(FONT_SCALE_IDS);
+
+/** `null` = reset to base. */
+export const updateMyFontScaleSchema = z.object({
+  fontScale: fontScaleIdSchema.nullable(),
+});
+
+export type UpdateMyFontScaleInput = z.infer<typeof updateMyFontScaleSchema>;

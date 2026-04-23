@@ -447,6 +447,7 @@ export class UsersService {
         visibleOrderStatuses: schema.users.visibleOrderStatuses,
         restrictProductAccess: schema.users.restrictProductAccess,
         commissionPlanId: schema.users.commissionPlanId,
+        primaryBranchId: schema.users.primaryBranchId,
         createdAt: schema.users.createdAt,
         updatedAt: schema.users.updatedAt,
       })
@@ -634,6 +635,35 @@ export class UsersService {
       role: r.role,
       branchMemberships: membershipsByUser.get(r.id) ?? [],
     }));
+  }
+
+  /**
+   * List active users holding a HEAD_OF_* role.
+   * Used by the user create/edit forms to warn admins about duplicate heads
+   * per branch before submit (the service already blocks the write, this is
+   * a proactive UI hint).
+   */
+  async listActiveHeads(): Promise<Array<{
+    id: string;
+    name: string;
+    role: string;
+    primaryBranchId: string | null;
+  }>> {
+    return this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        role: schema.users.role,
+        primaryBranchId: schema.users.primaryBranchId,
+      })
+      .from(schema.users)
+      .where(
+        and(
+          inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS']),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      )
+      .orderBy(asc(schema.users.name));
   }
 
   /**
@@ -1254,5 +1284,34 @@ export class UsersService {
     }
 
     return { appTheme: row.appTheme ?? null };
+  }
+
+  /** Current saved font scale preference from DB (null = base). */
+  async getFontScalePreference(userId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ fontScale: schema.users.fontScale })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    return row?.fontScale ?? null;
+  }
+
+  /**
+   * Persists the current user's font scale. `null` = reset to base.
+   */
+  async updateMyFontScale(fontScale: string | null, actor: SessionUser): Promise<{ fontScale: string | null }> {
+    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+
+    const [row] = await this.db
+      .update(schema.users)
+      .set({ fontScale, updatedAt: new Date() })
+      .where(eq(schema.users.id, actor.id))
+      .returning({ fontScale: schema.users.fontScale });
+
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+
+    return { fontScale: row.fontScale ?? null };
   }
 }
