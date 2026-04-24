@@ -23,6 +23,10 @@ describe('isTransitionAllowed — valid transitions', () => {
     ['CS_ENGAGED', 'CANCELLED'],
     ['CONFIRMED', 'ALLOCATED'],
     ['ALLOCATED', 'DISPATCHED'],
+    // CS rider-proxy path: CS / HoLogistics can mark delivered or returned directly from
+    // ALLOCATED while 3PL isn't in-app (DISPATCHED + IN_TRANSIT happen offline).
+    ['ALLOCATED', 'DELIVERED'],
+    ['ALLOCATED', 'RETURNED'],
     ['DISPATCHED', 'IN_TRANSIT'],
     ['IN_TRANSIT', 'DELIVERED'],
     ['IN_TRANSIT', 'PARTIALLY_DELIVERED'],
@@ -59,7 +63,6 @@ describe('isTransitionAllowed — forbidden skips', () => {
     ['CONFIRMED', 'IN_TRANSIT'],
     ['CONFIRMED', 'DELIVERED'],
     ['ALLOCATED', 'IN_TRANSIT'],
-    ['ALLOCATED', 'DELIVERED'],
     ['DISPATCHED', 'DELIVERED'],
     // Backward transitions
     ['DELIVERED', 'UNPROCESSED'],
