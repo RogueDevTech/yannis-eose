@@ -3,6 +3,7 @@ import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
+import { Spinner } from '~/components/ui/spinner';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -22,8 +23,20 @@ import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, O
 
 const STATUS_FLOW = [
   'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED',
-  'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'COMPLETED',
+  'DELIVERED', 'COMPLETED',
 ] as const;
+
+const STATUS_DISPLAY_LABELS: Partial<Record<(typeof STATUS_FLOW)[number], string>> = {};
+
+// Everything between ALLOCATED and DELIVERED happens offline (rider with the parcel).
+// DISPATCHED + IN_TRANSIT therefore collapse back into the ALLOCATED step — the order is
+// still "in 3PL hands" from the CS perspective until someone marks it delivered.
+function getProgressIndex(status: string): number {
+  if (status === 'DISPATCHED' || status === 'IN_TRANSIT') {
+    return STATUS_FLOW.indexOf('ALLOCATED');
+  }
+  return STATUS_FLOW.indexOf(status as (typeof STATUS_FLOW)[number]);
+}
 
 const CALL_STATUS_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
   INITIATED: { bg: 'bg-info-50 dark:bg-info-700/20', text: 'text-info-600 dark:text-info-400', icon: 'text-info-500' },
@@ -752,7 +765,7 @@ export function OrderDetailPage({
   const [sharePending, setSharePending] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
 
-  const currentStatusIndex = STATUS_FLOW.indexOf(order.status as (typeof STATUS_FLOW)[number]);
+  const currentStatusIndex = getProgressIndex(order.status);
   const actionError = (fetcher.data as { error?: string })?.error;
   const callInitiated = (fetcher.data as { callInitiated?: boolean })?.callInitiated;
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
@@ -768,20 +781,19 @@ export function OrderDetailPage({
     if (fetcher.state === 'submitting') setDismissedError(false);
   }, [fetcher.state]);
 
-  // When call customer modal opens and order is not yet engaged, transition to CS_ENGAGED so user only clicks once
+  // When call customer modal opens (VOIP off), auto-reveal the phone in one shot.
+  // `revealPhoneForManualCall` on the server handles the CS_ENGAGED transition itself,
+  // so the user skips the "Reveal number" middle step and lands straight on the dialer buttons.
   useEffect(() => {
     if (
       callCustomerModalOpen &&
-      (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') &&
-      canTransitionTo('CS_ENGAGED') &&
-      fetcher.state === 'idle'
+      !voipEnabled &&
+      revealFetcher.state === 'idle' &&
+      !revealFetcher.data
     ) {
-      fetcher.submit(
-        { intent: 'transition', newStatus: 'CS_ENGAGED' },
-        { method: 'post' },
-      );
+      revealFetcher.submit({ intent: 'revealPhone' }, { method: 'post' });
     }
-  }, [callCustomerModalOpen, order.status, fetcher.state]);
+  }, [callCustomerModalOpen, voipEnabled, revealFetcher.state, revealFetcher.data]);
 
   // Reset call debug log when opening the call modal (VOIP path)
   useEffect(() => {
@@ -905,9 +917,18 @@ export function OrderDetailPage({
         setCancelModalOpen(false);
         setCancelReason('');
       }
+      if (allocateModalOpen) {
+        setAllocateModalOpen(false);
+        setAllocateLocationId('');
+      }
+      if (deliverModalOpen) {
+        setDeliverModalOpen(false);
+        setDeliverNote('');
+        setDeliverProofUrl('');
+      }
     }
     prevFetcherState.current = fetcher.state;
-  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen]);
+  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen, allocateModalOpen, deliverModalOpen]);
 
   // Close confirm modal and revalidate when schedule callback succeeds
   const scheduleData = scheduleFetcher.data as { success?: boolean; scheduled?: boolean; error?: string } | undefined;
@@ -1013,7 +1034,7 @@ export function OrderDetailPage({
                         <span className={`text-2xs mt-1 whitespace-nowrap lg:whitespace-normal lg:text-center lg:leading-tight ${
                           isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-app-fg-muted'
                         }`}>
-                          {status.replace(/_/g, ' ')}
+                          {STATUS_DISPLAY_LABELS[status] ?? status.replace(/_/g, ' ')}
                         </span>
                       </div>
                       {idx < STATUS_FLOW.length - 1 && (
@@ -1132,8 +1153,18 @@ export function OrderDetailPage({
 
           {/* Right column */}
           <div className="space-y-4">
-            {/* Order Actions — CS / Head of CS only, role-based */}
-            {canEditOrder && isCSOrHoS && (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || order.status === 'CS_ENGAGED') && (
+            {/* Order Actions — CS / Head of CS only, role-based.
+                CS still owns Adjust/Call/Delete after CS_ENGAGED while goods are pre-delivery so
+                they can manage upsells, delivery-coordination calls, and cancellations. */}
+            {canEditOrder && isCSOrHoS && (
+              order.status === 'UNPROCESSED' ||
+              order.status === 'CS_ASSIGNED' ||
+              order.status === 'CS_ENGAGED' ||
+              order.status === 'CONFIRMED' ||
+              order.status === 'ALLOCATED' ||
+              order.status === 'DISPATCHED' ||
+              order.status === 'IN_TRANSIT'
+            ) && (
               <div className="card">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {!canPerformCSActionsOnOrder && (
@@ -1178,12 +1209,13 @@ export function OrderDetailPage({
                     </Button>
                   )}
 
-                  {/* Call customer + helper — one button opens modal; transition to CS_ENGAGED runs when modal opens if needed (VOIP off) */}
-                  {!voipEnabled &&
-                  (((order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && canTransitionTo('CS_ENGAGED')) ||
-                    order.status === 'CS_ENGAGED') ? (
+                  {/* Call customer — available pre-delivery. For pre-CS_ENGAGED statuses, opening
+                      the modal also triggers CS_ENGAGED on the server (one click to dial).
+                      Post-CS_ENGAGED statuses (CONFIRMED/ALLOCATED/…) use the same modal for
+                      delivery-coordination / follow-up calls without changing order state. */}
+                  {!voipEnabled ? (
                     <div className="space-y-2">
-                      {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || !canConfirm) && (
+                      {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || !canConfirm) && order.status !== 'CS_ENGAGED' && !(order.status === 'CONFIRMED' || order.status === 'ALLOCATED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
                         <p className="text-xs text-warning-600 dark:text-warning-400 text-center">
                           Call the customer manually, then confirm the order.
                         </p>
@@ -1256,9 +1288,12 @@ export function OrderDetailPage({
                 (order.status === 'CONFIRMED' || order.status === 'ALLOCATED') &&
                 locationsWithGroup.length > 0 &&
                 logisticsDispatchTemplates.length > 0;
+              const canMarkDelivered =
+                (order.status === 'ALLOCATED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') &&
+                canTransitionTo('DELIVERED');
               const showCard =
                 (order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0) ||
-                (order.status === 'IN_TRANSIT' && canTransitionTo('DELIVERED')) ||
+                canMarkDelivered ||
                 canShareToWhatsApp;
               if (!showCard) return null;
               return (
@@ -1300,7 +1335,7 @@ export function OrderDetailPage({
                         Share to 3PL (WhatsApp)
                       </Button>
                     )}
-                    {order.status === 'IN_TRANSIT' && canTransitionTo('DELIVERED') && (
+                    {canMarkDelivered && (
                       <Button
                         type="button"
                         variant="primary"
@@ -1596,7 +1631,6 @@ export function OrderDetailPage({
                 disabled={!allocateLocationId || fetcher.state === 'submitting'}
                 loading={fetcher.state === 'submitting'}
                 loadingText="Allocating..."
-                onClick={() => setAllocateModalOpen(false)}
               >
                 Allocate
               </Button>
@@ -1615,10 +1649,10 @@ export function OrderDetailPage({
         >
           <h3 className="text-lg font-semibold text-app-fg mb-1">Mark order delivered</h3>
           <p className="text-sm text-app-fg-muted mb-3">
-            Confirm that the customer received the order. Add a short note describing how you confirmed delivery (minimum 10 characters). Attaching a screenshot is optional.
+            Confirm that the customer received the order. A note and screenshot are optional.
           </p>
           <label htmlFor="delivery-note" className="block text-sm font-medium text-app-fg-muted mb-1.5">
-            Delivery note <span className="text-danger-600">*</span>
+            Delivery note (optional)
           </label>
           <textarea
             id="delivery-note"
@@ -1628,7 +1662,6 @@ export function OrderDetailPage({
             className="input w-full min-h-[80px]"
             rows={3}
           />
-          <p className="text-xs text-app-fg-muted mt-1">{deliverNote.trim().length}/10 min</p>
           <div className="mt-4">
             <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
               Screenshot (optional)
@@ -1647,15 +1680,14 @@ export function OrderDetailPage({
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
               <input type="hidden" name="newStatus" value="DELIVERED" />
-              <input type="hidden" name="deliveryNote" value={deliverNote.trim()} />
+              {deliverNote.trim() && <input type="hidden" name="deliveryNote" value={deliverNote.trim()} />}
               {deliverProofUrl && <input type="hidden" name="deliveryProofUrl" value={deliverProofUrl} />}
               <Button
                 type="submit"
                 variant="primary"
-                disabled={deliverNote.trim().length < 10 || fetcher.state === 'submitting'}
+                disabled={fetcher.state === 'submitting'}
                 loading={fetcher.state === 'submitting'}
                 loadingText="Marking..."
-                onClick={() => setDeliverModalOpen(false)}
               >
                 Mark delivered
               </Button>
@@ -1910,33 +1942,33 @@ export function OrderDetailPage({
               </>
             ) : !revealData?.phoneRevealed ? (
               <>
-                <p className="text-sm text-app-fg-muted mb-4">
-                  Reveal the customer&apos;s number to call them manually. The call is recorded when you click &quot;Copy number&quot; or &quot;Call on my phone&quot;.
-                </p>
-                {revealData?.error && (
-                  <p className="text-sm text-danger-600 dark:text-danger-400 mb-3">{revealData.error}</p>
+                {revealData?.error ? (
+                  <>
+                    <p className="text-sm text-danger-600 dark:text-danger-400 mb-3">{revealData.error}</p>
+                    <div className="flex gap-2 justify-end">
+                      <Button type="button" variant="secondary" onClick={() => setCallCustomerModalOpen(false)}>
+                        Close
+                      </Button>
+                      <revealFetcher.Form method="post">
+                        <input type="hidden" name="intent" value="revealPhone" />
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          disabled={revealFetcher.state === 'submitting'}
+                          loading={revealFetcher.state === 'submitting'}
+                          loadingText="Retrying..."
+                        >
+                          Retry
+                        </Button>
+                      </revealFetcher.Form>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-center py-6">
+                    <Spinner size="sm" />
+                    <span className="ml-3 text-sm text-app-fg-muted">Preparing call…</span>
+                  </div>
                 )}
-                <div className="flex gap-2 justify-end">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setCallCustomerModalOpen(false)}
-                  >
-                    Close
-                  </Button>
-                  <revealFetcher.Form method="post">
-                    <input type="hidden" name="intent" value="revealPhone" />
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      disabled={revealFetcher.state === 'submitting'}
-                      loading={revealFetcher.state === 'submitting'}
-                      loadingText="Revealing..."
-                    >
-                      Reveal number
-                    </Button>
-                  </revealFetcher.Form>
-                </div>
               </>
             ) : !revealData?.isDialable ? (
               <>

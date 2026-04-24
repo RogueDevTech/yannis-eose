@@ -653,7 +653,11 @@ export class OrdersService {
       order = refreshed;
     }
 
-    if (order.status !== 'CS_ENGAGED') {
+    // CS can call the customer at any pre-delivery stage: initial engagement, post-confirm
+    // upsell/adjustment, or delivery-coordination follow-up after allocation/dispatch.
+    // Blocked only once the order is closed out (DELIVERED / RETURNED / CANCELLED / etc.).
+    const callableStatuses = ['CS_ENGAGED', 'CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT'];
+    if (!callableStatuses.includes(order.status)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: `Cannot reveal phone: order is in ${order.status} status`,
@@ -864,14 +868,16 @@ export class OrdersService {
       }
     }
 
-    // Role check: IN_TRANSIT → DELIVERED/PARTIALLY_DELIVERED can be triggered by:
+    // Role check: {ALLOCATED|DISPATCHED|IN_TRANSIT} → DELIVERED/PARTIALLY_DELIVERED can be triggered by:
     //   - Head of Logistics / SuperAdmin / Admin (unrestricted).
     //   - TPL_MANAGER, but only when the order was resolved (resolveReceiptUrl set) via Resolve order.
     //   - The assigned CS agent, but only with a mandatory deliveryNote (>= 10 chars) since they
     //     are confirming delivery via a follow-up call rather than rider OTP/GPS.
-    //   Riders still submit a delivery confirmation request for HOL approval (not this path).
+    //   ALLOCATED is included because 3PL isn't in-app yet — CS / HoLogistics marks delivered
+    //   directly after ALLOCATED without the order ever physically transitioning through
+    //   DISPATCHED / IN_TRANSIT. Riders still submit a delivery confirmation request for HOL approval (not this path).
     if (
-      currentStatus === 'IN_TRANSIT' &&
+      (currentStatus === 'ALLOCATED' || currentStatus === 'DISPATCHED' || currentStatus === 'IN_TRANSIT') &&
       (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED')
     ) {
       const hasResolveReceipt = !!order.resolveReceiptUrl?.trim();
@@ -888,15 +894,8 @@ export class OrdersService {
             'Delivery confirmation requires Head of Logistics approval. Submit a delivery confirmation request instead.',
         });
       }
-      if (isAssignedCs) {
-        const note = typeof input.metadata?.deliveryNote === 'string' ? input.metadata.deliveryNote.trim() : '';
-        if (note.length < 10) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'A delivery note of at least 10 characters is required when CS marks an order delivered.',
-          });
-        }
-      }
+      // Delivery note is optional (CEO directive 2026-04-24 reversed the prior mandatory rule).
+      // The note + screenshot fields are still persisted when provided.
     }
 
     // Validate gates based on the transition
@@ -1044,6 +1043,17 @@ export class OrdersService {
     const timelineType = timelineEventMap[newStatus];
     if (timelineType) {
       const reason = typeof input.metadata?.reason === 'string' ? input.metadata.reason : undefined;
+      // Resolve the 3PL location name so the timeline reads
+      // "Order allocated to <Location>" instead of the generic "…logistics".
+      let logisticsLocationName: string | undefined;
+      if (newStatus === 'ALLOCATED' && typeof input.metadata?.logisticsLocationId === 'string') {
+        const locRows = await this.db
+          .select({ name: schema.logisticsLocations.name })
+          .from(schema.logisticsLocations)
+          .where(eq(schema.logisticsLocations.id, input.metadata.logisticsLocationId))
+          .limit(1);
+        logisticsLocationName = locRows[0]?.name ?? undefined;
+      }
       this.writeTimelineEvent({
         orderId: input.orderId,
         eventType: timelineType,
@@ -1055,6 +1065,7 @@ export class OrdersService {
             typeof input.metadata?.preferredDeliveryDate === 'string'
               ? input.metadata.preferredDeliveryDate
               : undefined,
+          logisticsLocationName,
         }),
         metadata: input.metadata as Record<string, unknown> | undefined,
       });
@@ -1119,11 +1130,13 @@ export class OrdersService {
     }
 
     if (input.items !== undefined) {
-      const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'];
+      // Items may be adjusted any time before the goods physically leave the 3PL (DISPATCHED+).
+      // Post-dispatch adjustments would conflict with the rider's pick list / stock already in-transit.
+      const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED'];
       if (!allowedStatuses.includes(order.status)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'Order items can only be adjusted when order is UNPROCESSED, CS_ASSIGNED, or CS_ENGAGED.',
+          message: 'Order items cannot be adjusted once the order has been dispatched.',
         });
       }
     }
@@ -3593,12 +3606,12 @@ export class OrdersService {
 
   private buildTransitionActivityDescription(
     newStatus: string,
-    options?: { reason?: string; preferredDeliveryDate?: string },
+    options?: { reason?: string; preferredDeliveryDate?: string; logisticsLocationName?: string },
   ): string {
     const reasonSuffix = options?.reason ? ` (${options.reason})` : '';
     switch (newStatus) {
       case 'CS_ENGAGED':
-        return 'Agent started customer engagement';
+        return 'CS started customer engagement';
       case 'CONFIRMED':
         return options?.preferredDeliveryDate
           ? `Order confirmed for delivery on ${options.preferredDeliveryDate}`
@@ -3606,7 +3619,9 @@ export class OrdersService {
       case 'CANCELLED':
         return `Order cancelled${reasonSuffix}`;
       case 'ALLOCATED':
-        return 'Order allocated to logistics';
+        return options?.logisticsLocationName
+          ? `Order allocated to ${options.logisticsLocationName}`
+          : 'Order allocated to logistics';
       case 'DISPATCHED':
         return 'Order dispatched to rider';
       case 'IN_TRANSIT':

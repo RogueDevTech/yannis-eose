@@ -199,7 +199,7 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 | CONFIRMED | ALLOCATED | **Assigned CS agent**, Logistics, or admin assigns to 3PL | 3PL location must have available stock | Stock: Reserved → Allocated_to_3PL |
 | ALLOCATED | DISPATCHED | 3PL rider picks up | Rider must be assigned | Stock: Allocated → In_Transit |
 | DISPATCHED | IN_TRANSIT | Rider confirms departure | GPS ping logged | Delivery timer starts |
-| IN_TRANSIT | DELIVERED | Rider confirms delivery **OR** assigned CS agent confirms via follow-up call | Rider path: OTP/signature/GPS; CS path: mandatory delivery note ≥10 chars (screenshot optional). 3PL not in-app yet — CS is the de facto rider-proxy. | Stock: Deducted. Commission: Triggered. Revenue: Recognized |
+| ALLOCATED / DISPATCHED / IN_TRANSIT | DELIVERED | Rider confirms delivery **OR** assigned CS agent / HoLogistics confirms via follow-up call | Rider path: OTP/signature/GPS; CS/HoLogistics path: delivery note + screenshot both optional. 3PL not in-app yet — CS is the de facto rider-proxy and normally marks from ALLOCATED directly. | Stock: Deducted. Commission: Triggered. Revenue: Recognized |
 | IN_TRANSIT | PARTIALLY_DELIVERED | Rider marks partial | Must specify delivered qty vs returned qty | Split: delivered portion completes, returned portion enters return flow |
 | IN_TRANSIT | RETURNED | Rider marks rejected | Mandatory return reason | Return flow begins |
 | RETURNED | RESTOCKED | 3PL marks sellable | Quality check by 3PL manager | Stock: +1 at 3PL local inventory |
@@ -241,7 +241,7 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 **CS owns the order end-to-end (rider-proxy model):**
 Because the 3PL partners are not in-app yet, the assigned CS agent is the de facto operator through delivery. They:
 - Allocate to a 3PL (`CONFIRMED → ALLOCATED`) themselves — see "Share to 3PL" below. Authorized: assigned CS agent, HoCS, HoLogistics, LogisticsManager, SuperAdmin, Admin.
-- Confirm delivery via follow-up call (`IN_TRANSIT → DELIVERED`). Authorized: assigned CS agent, HoLogistics, SuperAdmin, Admin (plus TPL_MANAGER with resolveReceiptUrl). When CS is the actor, a `deliveryNote` of at least 10 characters is mandatory; a screenshot (`deliveryProofUrl`) is optional. Both are stored on the order (`delivery_notes`, `delivery_proof_url`).
+- Confirm delivery via follow-up call (`ALLOCATED → DELIVERED`, or from DISPATCHED / IN_TRANSIT if the order passed through those). Authorized: assigned CS agent, HoLogistics, SuperAdmin, Admin (plus TPL_MANAGER with resolveReceiptUrl). Both `deliveryNote` and `deliveryProofUrl` are optional (CEO directive 2026-04-24 reversed the prior mandatory-note rule). When provided, they're stored on the order (`delivery_notes`, `delivery_proof_url`).
 - COMPLETED stays with the accountant — set only when remittance is received/reconciled. CS never marks COMPLETED. Do not shortcut this.
 
 **Share to 3PL (WhatsApp group flow):**
@@ -575,7 +575,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT set `font-size` directly on any element when you mean "scale the app" — the root font-size is controlled by `applyFontScale()` / the inline boot script and every Tailwind utility is rem-based. Per-element `font-size` will break the scale.
 - Do NOT change the default dispatch mode from `manual` without an explicit product decision. CEO wants HoCS in full control of distribution; `manual` is the default and must be listed first in the Settings UI.
 - Do NOT let CS mark orders as `COMPLETED`. COMPLETED is the accountant's signal that remittance was received + reconciled. CS's last action in the lifecycle is `DELIVERED`.
-- Do NOT remove the mandatory `deliveryNote` (min 10 chars) when CS marks an order delivered. It's the paper trail against COD dispute ("customer says they didn't receive it"). The screenshot (`deliveryProofUrl`) stays optional.
+- The `deliveryNote` and `deliveryProofUrl` fields on CS/HoLogistics Mark Delivered are both optional (CEO directive 2026-04-24 reversed the prior "min 10 chars note" mandatory rule). If they supply either, persist it; never block the transition on them. Do NOT reintroduce the length gate without a new CEO directive.
 - Do NOT attempt to pre-fill a WhatsApp **group** invite link with `?text=` — WhatsApp ignores it for groups. Only `wa.me/<number>` links support pre-fill. The Share-to-3PL flow intentionally copies to clipboard + opens the group; do not try to "fix" this with a deep-link.
 - Do NOT use `message_channel = 'WHATSAPP'` for 3PL dispatch messages. `WHATSAPP` is customer-facing DMs; use `WHATSAPP_GROUP` for 3PL coordination so outbound_messages analytics stay meaningful.
 - Do NOT add placeholders to templates outside `ALLOWED_TEMPLATE_PLACEHOLDERS` in `messaging.router.ts`. Unknown placeholders are rejected at template save time; adding them elsewhere will silently pass through unrendered.

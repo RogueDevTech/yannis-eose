@@ -36,6 +36,11 @@ const ALLOWED_TRANSITIONS: TransitionRule[] = [
   { from: 'DISPATCHED', to: 'IN_TRANSIT', gate: 'Rider confirms departure' },
 
   // Delivery outcomes
+  // ALLOCATED → DELIVERED is the CS rider-proxy path: once the 3PL is in-app this step will be
+  // the rider's, but for now CS / HoLogistics confirms delivery via follow-up call from the
+  // ALLOCATED state directly (DISPATCHED + IN_TRANSIT happen offline and are skipped).
+  { from: 'ALLOCATED', to: 'DELIVERED', gate: 'Mandatory delivery note (min 10 chars)' },
+  { from: 'ALLOCATED', to: 'RETURNED', gate: 'Mandatory return reason' },
   { from: 'IN_TRANSIT', to: 'DELIVERED', gate: 'OTP match required (SuperAdmin override allowed)' },
   { from: 'IN_TRANSIT', to: 'PARTIALLY_DELIVERED', gate: 'Must specify delivered qty vs returned qty' },
   { from: 'IN_TRANSIT', to: 'RETURNED', gate: 'Mandatory return reason' },
