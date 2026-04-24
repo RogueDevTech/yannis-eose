@@ -25,18 +25,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const rawProductFilter = url.searchParams.get('productId') ?? '';
   const rawSort = url.searchParams.get('sort') ?? '';
+  const rawSearch = (url.searchParams.get('search') ?? '').trim();
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
   const LEVELS_LIMIT = 20;
 
   const levelsInput: {
     productId?: string;
+    search?: string;
     sortBy?: 'available' | 'updatedAt';
     sortOrder?: 'asc' | 'desc';
     page: number;
     limit: number;
   } = { page, limit: LEVELS_LIMIT };
   if (rawProductFilter) levelsInput.productId = rawProductFilter;
+  if (rawSearch) levelsInput.search = rawSearch;
   if (rawSort === 'lowestAvailable') {
     levelsInput.sortBy = 'available';
     levelsInput.sortOrder = 'asc';
@@ -90,6 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     levelsTotalPages: levelsData?.pagination?.totalPages ?? 1,
     levelsLimit: LEVELS_LIMIT,
     levelsProductFilter: rawProductFilter,
+    levelsSearch: rawSearch,
     levelsSort: rawSort === 'lowestAvailable' || rawSort === 'highestAvailable' ? rawSort : 'default',
     movements: movementsData.movements,
     totalMovements: movementsData.total,

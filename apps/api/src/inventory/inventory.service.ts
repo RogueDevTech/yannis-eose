@@ -422,6 +422,13 @@ export class InventoryService {
     if (input.locationId) {
       conditions.push(eq(schema.inventoryLevels.locationId, input.locationId));
     }
+    if (input.search) {
+      // Substring match against the product name. Subquery keeps the outer query simple
+      // (no JOIN rewrite) while still letting Postgres use the products(name) index.
+      conditions.push(
+        sql`${schema.inventoryLevels.productId} IN (SELECT id FROM products WHERE name ILIKE ${'%' + input.search + '%'})`,
+      );
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
@@ -16,6 +16,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
@@ -30,7 +31,8 @@ import {
 
 export function InventoryPage({
   levels, totalLevels, levelsPage = 1, levelsTotalPages = 1, levelsLimit = 20,
-  levelsProductFilter: serverProductFilter = '', levelsSort: serverSort = 'default',
+  levelsProductFilter: serverProductFilter = '', levelsSearch: serverSearch = '',
+  levelsSort: serverSort = 'default',
   movements, totalMovements, products, locations, canIntake = false, canExport = false,
   transfers, returnedOrders, reconciliations, locationsWithLock,
 }: InventoryStreamData) {
@@ -45,12 +47,12 @@ export function InventoryPage({
   type LevelsSort = 'default' | 'lowestAvailable' | 'highestAvailable';
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const updateLevelsParam = (key: 'productId' | 'sort', value: string) => {
+  const updateLevelsParam = (key: 'productId' | 'sort' | 'search', value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (!value || value === 'ALL' || value === 'default') next.delete(key);
       else next.set(key, value);
-      // Any filter/sort change resets to page 1.
+      // Any filter/sort/search change resets to page 1.
       next.delete('page');
       return next;
     }, { preventScrollReset: true });
@@ -61,10 +63,26 @@ export function InventoryPage({
       const next = new URLSearchParams(prev);
       next.delete('productId');
       next.delete('sort');
+      next.delete('search');
       next.delete('page');
       return next;
     }, { preventScrollReset: true });
   };
+
+  // Controlled search input — submitted on form submit (Enter) or when the user clears it.
+  const [searchInput, setSearchInput] = useState(serverSearch);
+  useEffect(() => { setSearchInput(serverSearch); }, [serverSearch]);
+
+  const submitSearch = (next: string) => {
+    const trimmed = next.trim();
+    if (trimmed === serverSearch) return;
+    updateLevelsParam('search', trimmed);
+  };
+
+  // useNavigation: state is 'loading' while the page's loader re-runs after a
+  // search-param change. Used to render the inline spinner beside the filters.
+  const navigation = useNavigation();
+  const isLoadingLevels = navigation.state === 'loading';
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
   const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…') : '—';
@@ -319,9 +337,8 @@ export function InventoryPage({
       {/* Content */}
       {activeTab === 'levels' ? (
         <>
-        {/* Filter + sort row — always render the filter so it stays visible when an empty filter
-            returns zero rows. Hide it only when there is no data AND no active filter. */}
-        {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentSort !== 'default') && (
+        {/* Filter + search + sort row. Hidden only when there is no data AND no active filter. */}
+        {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <FormSelect
               label=""
@@ -329,20 +346,40 @@ export function InventoryPage({
               name="productFilter"
               value={currentProductFilter}
               onChange={(e) => updateLevelsParam('productId', e.target.value)}
-              wrapperClassName="w-full sm:w-64"
+              wrapperClassName="w-full sm:w-48"
               options={[
                 { value: 'ALL', label: 'All products' },
                 ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
               ]}
               aria-label="Filter by product"
             />
+            <form
+              method="get"
+              className="flex-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitSearch(searchInput);
+              }}
+            >
+              <SearchInput
+                name="search"
+                placeholder="Search by product name…"
+                value={searchInput}
+                onChange={(val) => {
+                  setSearchInput(val);
+                  // Clearing the field commits the reset immediately so the list doesn't look stuck.
+                  if (val === '') submitSearch('');
+                }}
+                wrapperClassName="w-full"
+              />
+            </form>
             <FormSelect
               label=""
               id="levels-sort"
               name="levelsSort"
               value={currentSort}
               onChange={(e) => updateLevelsParam('sort', e.target.value)}
-              wrapperClassName="w-full sm:w-56"
+              wrapperClassName="w-full sm:w-48"
               options={[
                 { value: 'default', label: 'Default order' },
                 { value: 'lowestAvailable', label: 'Lowest available first' },
@@ -350,11 +387,28 @@ export function InventoryPage({
               ]}
               aria-label="Sort order"
             />
-            {(currentProductFilter !== 'ALL' || currentSort !== 'default') && (
+            {isLoadingLevels && (
+              <span
+                className="inline-flex items-center gap-1.5 text-xs text-app-fg-muted shrink-0"
+                aria-live="polite"
+              >
+                <svg
+                  className="w-3.5 h-3.5 animate-spin text-brand-500"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" />
+                  <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+                <span className="hidden sm:inline">Loading…</span>
+              </span>
+            )}
+            {(currentProductFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
               <button
                 type="button"
                 onClick={resetLevelsFilters}
-                className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center"
+                className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center shrink-0"
               >
                 Reset
               </button>
