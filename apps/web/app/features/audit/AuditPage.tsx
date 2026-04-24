@@ -839,7 +839,7 @@ function formatLeafValue(
       return (
         <Link
           to={`/admin/products/${strVal}`}
-          className="underline decoration-app-fg-muted underline-offset-2 hover:decoration-app-fg hover:text-app-fg"
+          className="text-blue-600 underline underline-offset-2 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           title={strVal}
         >
           {strVal.slice(0, 8)}...
