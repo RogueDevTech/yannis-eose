@@ -11,6 +11,7 @@ import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Checkbox } from '~/components/ui/checkbox';
 import { PageHeader } from '~/components/ui/page-header';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { Tabs } from '~/components/ui/tabs';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -258,29 +259,9 @@ export function FormsPage({
             : 'Create and manage order forms for your products'
         }
         actions={
-          <div className="flex items-center gap-2">
-            {!isMediaBuyer && currentUserId && (
-              <div className="flex items-center gap-1 rounded-md border border-app-border bg-app-hover p-1">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('all')}
-                  className={`text-xs font-medium px-2.5 py-1 rounded transition-colors ${viewMode === 'all' ? 'bg-app-elevated text-app-fg shadow-sm' : 'text-app-fg-muted hover:text-app-fg'}`}
-                >
-                  All forms
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('mine')}
-                  className={`text-xs font-medium px-2.5 py-1 rounded transition-colors ${viewMode === 'mine' ? 'bg-app-elevated text-app-fg shadow-sm' : 'text-app-fg-muted hover:text-app-fg'}`}
-                >
-                  My forms
-                </button>
-              </div>
-            )}
-            <Button variant="primary" size="sm" onClick={() => setShowAddForm(!showAddForm)}>
-              {showAddForm ? 'Close' : '+ New Form'}
-            </Button>
-          </div>
+          <Button variant="primary" size="sm" onClick={() => setShowAddForm(!showAddForm)}>
+            {showAddForm ? 'Close' : '+ New Form'}
+          </Button>
         }
       />
 
@@ -411,6 +392,18 @@ export function FormsPage({
           </div>
         </fetcher.Form>
       </ResponsiveFormPanel>
+
+      {/* All / Mine tabs (HoM/SuperAdmin only — Media Buyer always sees own forms) */}
+      {!isMediaBuyer && currentUserId && (
+        <Tabs
+          value={viewMode}
+          onChange={(v) => setViewMode(v as typeof viewMode)}
+          tabs={[
+            { value: 'all', label: `All forms (${(forms as Campaign[]).length})` },
+            { value: 'mine', label: `My forms (${(forms as Campaign[]).filter((c) => c.mediaBuyerId === currentUserId).length})` },
+          ]}
+        />
+      )}
 
       {/* ── Forms Cards ───────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

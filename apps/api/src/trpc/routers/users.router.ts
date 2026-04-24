@@ -145,6 +145,42 @@ export const usersRouter = router({
     }),
 
   /**
+   * Self-edit on Settings → Account: update the caller's own display name.
+   * Mirrors the cached session so the new name shows up immediately in the header.
+   */
+  updateMyProfile: authedProcedure
+    .input(z.object({ name: z.string().min(2, 'Name must be at least 2 characters').max(120) }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await getUsersService().updateMyProfile(input, ctx.user);
+      const sessionToken = ctx.sessionToken ?? undefined;
+      if (sessionToken) {
+        const store = getSessionStore();
+        const current = await store.getSession(sessionToken);
+        if (current) {
+          const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
+          await store.updateSession(sessionToken, { ...current, name: result.name }, ttl);
+        }
+      }
+      return result;
+    }),
+
+  /**
+   * Self-edit on Settings → Security: change the caller's own password.
+   * Verifies current password server-side; the service writes the new hash through `withActor`
+   * so the audit trail captures who changed it.
+   */
+  changeMyPassword: authedProcedure
+    .input(
+      z.object({
+        currentPassword: z.string().min(1, 'Current password is required'),
+        newPassword: z.string().min(8, 'New password must be at least 8 characters').max(200),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return getUsersService().changeMyPassword(input, ctx.user);
+    }),
+
+  /**
    * Create a new staff member (SuperAdmin only).
    */
   create: permissionProcedure('users.create')

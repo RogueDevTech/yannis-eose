@@ -22,7 +22,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import type {
   InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption,
-  Transfer, ReturnedOrder, Reconciliation, LocationWithLock,
+  Transfer, ReturnedOrder, Reconciliation, LocationWithLock, LowStockAlertsResult,
 } from './types';
 import {
   MOVEMENT_COLORS, formatMovementType,
@@ -35,6 +35,7 @@ export function InventoryPage({
   levelsSort: serverSort = 'default',
   movements, totalMovements, products, locations, canIntake = false, canAdjust = false, canExport = false,
   transfers, returnedOrders, reconciliations, locationsWithLock,
+  lowStockThreshold = 10, canEditLowStock = false, lowStockAlerts,
 }: InventoryStreamData) {
   const hasTransfers = !!transfers;
   const hasReturns = !!returnedOrders;
@@ -126,6 +127,18 @@ export function InventoryPage({
 
   if (intakeSuccess && showIntakeForm) setShowIntakeForm(false);
 
+  // Low-stock threshold editor (admin-only)
+  const [showThresholdModal, setShowThresholdModal] = useState(false);
+  const [draftThreshold, setDraftThreshold] = useState<number>(lowStockThreshold);
+  useEffect(() => { setDraftThreshold(lowStockThreshold); }, [lowStockThreshold]);
+  const thresholdFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(thresholdFetcher.data, { successMessage: 'Low-stock threshold updated' });
+  useEffect(() => {
+    if (thresholdFetcher.state === 'idle' && thresholdFetcher.data?.success) {
+      setShowThresholdModal(false);
+    }
+  }, [thresholdFetcher.state, thresholdFetcher.data]);
+
   const totalStock = levels.reduce((sum, l) => sum + l.stockCount, 0);
   const totalReserved = levels.reduce((sum, l) => sum + l.reservedCount, 0);
 
@@ -138,6 +151,22 @@ export function InventoryPage({
         actions={
           <>
             <PageRefreshButton />
+            <button
+              type="button"
+              onClick={() => canEditLowStock && setShowThresholdModal(true)}
+              disabled={!canEditLowStock}
+              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-app-border bg-app-elevated transition-colors ${
+                canEditLowStock ? 'text-app-fg-muted hover:text-app-fg hover:border-app-border-strong cursor-pointer' : 'text-app-fg-muted cursor-default'
+              }`}
+              title={canEditLowStock ? 'Click to change low-stock alert threshold' : 'Low-stock alert threshold (read-only)'}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              <span>
+                Alert &lt; <strong className="text-app-fg">{lowStockThreshold}</strong> units
+              </span>
+            </button>
             {canIntake && (
               <Button
                 variant="primary"
@@ -398,6 +427,64 @@ export function InventoryPage({
         </Modal>
       )}
 
+      {/* Low-stock threshold modal — admin-only */}
+      {canEditLowStock && showThresholdModal && (
+        <Modal
+          open
+          onClose={() => setShowThresholdModal(false)}
+          maxWidth="max-w-sm"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <div>
+            <h3 className="text-lg font-semibold text-app-fg">Low-stock alert threshold</h3>
+            <p className="text-sm text-app-fg-muted mt-1">
+              When a product's available stock at any location drops below this number, SuperAdmins, Admins, and Stock Managers get an in-app + push notification. Rate-limited to one alert per location per 6 hours.
+            </p>
+          </div>
+          {thresholdFetcher.data?.error && (
+            <PageNotification
+              variant="error"
+              message={thresholdFetcher.data.error}
+              onDismiss={() => { /* transient — clears with modal close */ }}
+            />
+          )}
+          <thresholdFetcher.Form method="post" className="space-y-4">
+            <input type="hidden" name="intent" value="updateLowStockThreshold" />
+            <div className="flex items-center gap-3">
+              <TextInput
+                id="low-stock-threshold-input"
+                name="lowStockThreshold"
+                type="number"
+                min={1}
+                max={10000}
+                value={draftThreshold}
+                onChange={(e) => setDraftThreshold(Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 1)))}
+                wrapperClassName="w-32"
+              />
+              <span className="text-xs text-app-fg-muted">units</span>
+            </div>
+            <p className="text-xs text-app-fg-muted">
+              Saved: <strong>{lowStockThreshold} units</strong>
+            </p>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowThresholdModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                disabled={draftThreshold === lowStockThreshold || thresholdFetcher.state === 'submitting'}
+                loading={thresholdFetcher.state === 'submitting'}
+                loadingText="Saving..."
+              >
+                Save threshold
+              </Button>
+            </div>
+          </thresholdFetcher.Form>
+        </Modal>
+      )}
+
       <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={4} />}>
         {(count) => (
           <OverviewStatStrip
@@ -430,6 +517,58 @@ export function InventoryPage({
       {/* Content */}
       {activeTab === 'levels' ? (
         <>
+        {/* Low-stock banner — surfaces all items below the configured threshold (NOT bound to current page). */}
+        {lowStockAlerts && (
+          <DeferredSection resolve={lowStockAlerts} skeleton="card">
+            {(alerts) => {
+              const a = alerts as LowStockAlertsResult;
+              if (a.items.length === 0) return null;
+              const preview = a.items.slice(0, 5);
+              const extra = a.items.length - preview.length;
+              return (
+                <div className="rounded-lg border border-warning-300 dark:border-warning-700 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <svg className="w-5 h-5 text-warning-600 dark:text-warning-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-warning-800 dark:text-warning-200">
+                        {a.items.length} {a.items.length === 1 ? 'product is' : 'products are'} below the {a.threshold}-unit alert threshold
+                      </p>
+                      <ul className="mt-2 space-y-1">
+                        {preview.map((item) => (
+                          <li key={item.levelId} className="flex items-center justify-between gap-3 text-xs">
+                            <Link
+                              to={`/admin/inventory/${item.levelId}`}
+                              prefetch="intent"
+                              className="text-warning-800 dark:text-warning-200 hover:underline truncate min-w-0"
+                            >
+                              <span className="font-medium">{item.productName}</span>
+                              <span className="text-warning-700/80 dark:text-warning-300/80"> · {item.locationName}</span>
+                            </Link>
+                            <span className={`tabular-nums whitespace-nowrap font-semibold ${item.availableCount <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-warning-700 dark:text-warning-300'}`}>
+                              {item.availableCount} avail
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      {extra > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => updateLevelsParam('sort', 'lowestAvailable')}
+                          className="mt-2 text-xs text-warning-700 dark:text-warning-300 underline hover:text-warning-800 dark:hover:text-warning-200"
+                        >
+                          + {extra} more — sort table by lowest available →
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }}
+          </DeferredSection>
+        )}
+
         {/* Filter + search + sort row. Hidden only when there is no data AND no active filter. */}
         {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -546,7 +685,7 @@ export function InventoryPage({
                         <Link
                           to={`/admin/inventory/${level.id}`}
                           prefetch="intent"
-                          className="btn-secondary btn-sm text-xs inline-flex items-center justify-center"
+                          className="btn-primary btn-sm text-xs inline-flex items-center justify-center"
                         >
                           View
                         </Link>
@@ -609,7 +748,7 @@ export function InventoryPage({
                   <Link
                     to={`/admin/inventory/${level.id}`}
                     prefetch="intent"
-                    className="btn-secondary btn-sm"
+                    className="btn-primary btn-sm"
                   >
                     View
                   </Link>

@@ -8,7 +8,6 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
@@ -73,9 +72,8 @@ function AddProviderForm({
   const filledCount = rows.filter((r) => r.name.trim()).length;
 
   return (
-    <fetcher.Form method="post" className="card space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-app-fg">Add Provider{rows.length > 1 ? 's' : ''}</h3>
+    <fetcher.Form method="post" className="px-6 py-4 space-y-3">
+      <div className="flex items-center justify-end">
         <Button type="button" variant="secondary" size="sm" onClick={addRow}>
           + Add another
         </Button>
@@ -373,11 +371,11 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         actions={
           <div className="flex gap-2">
             <PageRefreshButton />
-            <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(!showAddProvider)}>
-              {showAddProvider ? 'Close' : '+ Provider'}
+            <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(true)}>
+              + Provider
             </Button>
-            <Button variant="primary" size="sm" onClick={() => setShowAddLocation(!showAddLocation)}>
-              {showAddLocation ? 'Close' : '+ Location'}
+            <Button variant="primary" size="sm" onClick={() => setShowAddLocation(true)}>
+              + Location
             </Button>
           </div>
         }
@@ -421,45 +419,74 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         />
       )}
 
-      {/* Add Provider Form */}
-      <ResponsiveFormPanel open={showAddProvider} onClose={() => setShowAddProvider(false)}>
-        <AddProviderForm
-          fetcher={fetcher}
-          onCancel={() => setShowAddProvider(false)}
-        />
-      </ResponsiveFormPanel>
+      {/* Add Provider Modal */}
+      {showAddProvider && (
+        <Modal open onClose={() => setShowAddProvider(false)} maxWidth="max-w-2xl" backdropBlur contentClassName="p-0">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
+            <h3 className="text-lg font-semibold text-app-fg">Add Provider</h3>
+            <button
+              type="button"
+              onClick={() => setShowAddProvider(false)}
+              className="text-app-fg-muted hover:text-app-fg transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <AddProviderForm
+            fetcher={fetcher}
+            onCancel={() => setShowAddProvider(false)}
+          />
+        </Modal>
+      )}
 
-      {/* Add Location Form */}
-      <ResponsiveFormPanel open={showAddLocation} onClose={() => setShowAddLocation(false)}>
-        <fetcher.Form method="post" className="card space-y-3">
-          <h3 className="text-lg font-semibold text-app-fg">Add Location</h3>
-          <input type="hidden" name="intent" value="createLocation" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FormSelect
-              name="providerId"
-              required
-              options={providers.map((p: Provider) => ({ value: p.id, label: p.name }))}
-              placeholder="Select provider..."
-            />
-            <TextInput name="name" type="text" required placeholder="Location name" />
-            <TextInput name="address" type="text" required placeholder="Address" />
-            <TextInput name="coordinates" type="text" placeholder="GPS coordinates (optional)" />
-            <TextInput
-              name="whatsappGroupLink"
-              type="url"
-              placeholder="https://chat.whatsapp.com/... (optional)"
-              hint="WhatsApp group invite link used by the CS 'Share to 3PL' flow."
-              wrapperClassName="sm:col-span-2"
-            />
+      {/* Add Location Modal */}
+      {showAddLocation && (
+        <Modal open onClose={() => setShowAddLocation(false)} maxWidth="max-w-2xl" backdropBlur contentClassName="p-0">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
+            <h3 className="text-lg font-semibold text-app-fg">Add Location</h3>
+            <button
+              type="button"
+              onClick={() => setShowAddLocation(false)}
+              className="text-app-fg-muted hover:text-app-fg transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-          <div className="flex gap-2">
-            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
-              Create Location
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddLocation(false)}>Cancel</Button>
-          </div>
-        </fetcher.Form>
-      </ResponsiveFormPanel>
+          <fetcher.Form method="post" className="px-6 py-4 space-y-3">
+            <input type="hidden" name="intent" value="createLocation" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <FormSelect
+                name="providerId"
+                required
+                options={providers.map((p: Provider) => ({ value: p.id, label: p.name }))}
+                placeholder="Select provider..."
+              />
+              <TextInput name="name" type="text" required placeholder="Location name" />
+              <TextInput name="address" type="text" required placeholder="Address" />
+              <TextInput name="coordinates" type="text" placeholder="GPS coordinates (optional)" />
+              <TextInput
+                name="whatsappGroupLink"
+                type="url"
+                placeholder="https://chat.whatsapp.com/... (optional)"
+                hint="WhatsApp group invite link used by the CS 'Share to 3PL' flow."
+                wrapperClassName="sm:col-span-2"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddLocation(false)}>Cancel</Button>
+              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
+                Create Location
+              </Button>
+            </div>
+          </fetcher.Form>
+        </Modal>
+      )}
 
       {/* Edit Provider Modal */}
       {editingProvider && (

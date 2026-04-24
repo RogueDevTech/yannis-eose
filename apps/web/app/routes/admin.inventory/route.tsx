@@ -56,6 +56,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const movementsPromise = apiRequest<unknown>('/trpc/inventory.movements', { method: 'GET', cookie });
   const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 20, status: 'ACTIVE' }))}`, { method: 'GET', cookie });
   const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 20 }))}`, { method: 'GET', cookie });
+  const lowStockPromise = apiRequest<unknown>(
+    '/trpc/settings.getSystemSettings',
+    { method: 'GET', cookie },
+  );
+  const lowStockAlertsPromise = apiRequest<unknown>(
+    '/trpc/inventory.lowStockAlerts',
+    { method: 'GET', cookie },
+  );
 
   // Await levels (critical for stats)
   const levelsRes = await levelsPromise;
@@ -86,6 +94,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     locations = (data?.locations ?? []).map((l) => ({ id: l.id, name: l.name }));
   }
 
+  // Low-stock alert threshold (org-wide setting). Default 10 if unset.
+  let lowStockThreshold = 10;
+  const lowStockRes = await lowStockPromise.catch(() => null);
+  if (lowStockRes?.ok) {
+    const settingsRows = (lowStockRes.data as { result?: { data?: { key: string; value: unknown }[] } })?.result?.data ?? [];
+    const row = settingsRows.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
+    const threshold = (row?.value as { threshold?: number } | null)?.threshold;
+    if (typeof threshold === 'number' && threshold > 0) lowStockThreshold = threshold;
+  }
+
+  // Stream low-stock alerts as a deferred promise — silently empty if no permission.
+  const lowStockAlerts = lowStockAlertsPromise.then((res) => {
+    if (!res.ok) return { threshold: lowStockThreshold, items: [] };
+    const data = (res.data as { result?: { data?: { threshold: number; items: unknown[] } } })?.result?.data;
+    return data ?? { threshold: lowStockThreshold, items: [] };
+  }).catch(() => ({ threshold: lowStockThreshold, items: [] as unknown[] }));
+
   return {
     levels: levelsData?.levels ?? [],
     totalLevels: levelsData?.pagination?.total ?? 0,
@@ -107,6 +132,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // roles that own the stock data. Everyone else reading inventory (logistics, TPL managers,
     // finance) still sees the table but cannot download the raw levels.
     canExport: isAdminLevel(user) || user.role === 'STOCK_MANAGER',
+    lowStockThreshold,
+    canEditLowStock: isAdminLevel(user),
+    lowStockAlerts,
   };
 }
 
@@ -173,11 +201,29 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'updateLowStockThreshold') {
+    const raw = formData.get('lowStockThreshold')?.toString() ?? '';
+    const threshold = parseInt(raw, 10);
+    if (!Number.isFinite(threshold) || threshold < 1 || threshold > 10000) {
+      return json({ error: 'Threshold must be between 1 and 10000' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
+      method: 'POST',
+      cookie,
+      body: { key: 'INVENTORY_LOW_STOCK_CONFIG', value: { threshold } },
+    });
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to update threshold' }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
 export default function InventoryRoute() {
-  const data = useLoaderData<typeof loader>() as InventoryStreamData;
+  const data = useLoaderData<typeof loader>() as unknown as InventoryStreamData;
   usePageRefreshOnEvent(['stock:updated', 'transfer:created']);
   return <InventoryPage {...data} />;
 }

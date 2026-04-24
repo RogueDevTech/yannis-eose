@@ -10,6 +10,7 @@ export interface Product {
   description: string | null;
   offers: ProductOffer[];
   baseSalePrice: string;
+  /** Cost is stripped from API responses unless viewer has finance access. */
   costPrice: string | null;
   category: string | null;
   categoryId: string | null;
@@ -17,6 +18,8 @@ export interface Product {
   brandName: string | null;
   status: string;
   createdAt: string;
+  /** Total available stock summed across all locations (stock - reserved). */
+  totalStock?: number;
 }
 
 export const PRODUCT_STATUS_COLORS: Record<string, string> = {

@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
@@ -35,6 +35,8 @@ const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     @Inject(REDIS) private readonly redis: Redis,
@@ -1025,6 +1027,18 @@ export class OrdersService {
 
     // Execute side effects (stock reservation, deduction, etc.)
     await this.executeTransitionSideEffects(newStatus, order, actor.id);
+
+    // Auto-generate a draft invoice the first time an order is CONFIRMED. Idempotent
+    // (skips if an invoice for this orderId already exists). Failures don't block the
+    // status transition — they're logged so an admin can manually create the invoice.
+    if (newStatus === 'CONFIRMED') {
+      try {
+        await this.autoCreateInvoiceForOrder(order.id, actor);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Auto-invoice for order ${order.id} failed: ${message}`);
+      }
+    }
 
     // Timeline event for this status transition
     const timelineEventMap: Partial<Record<string, string>> = {
@@ -2754,6 +2768,76 @@ export class OrdersService {
    * Execute side effects after a successful state transition.
    * Stock reservation on CONFIRMED, deduction on DELIVERED, etc.
    */
+  /**
+   * Generate a draft invoice for an order on first CONFIRMED transition.
+   * Idempotent: checks for an existing invoice tied to the orderId before inserting.
+   * Pulls customer info + line items from the order; tax rate/due date stay null
+   * (an admin can edit the draft from the Finance page before sending).
+   */
+  private async autoCreateInvoiceForOrder(
+    orderId: string,
+    actor: SessionUser,
+  ): Promise<void> {
+    // Idempotency check
+    const existingRows = await this.db
+      .select({ id: schema.invoices.id })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.orderId, orderId))
+      .limit(1);
+    if (existingRows[0]) return;
+
+    // Hydrate the order + items + product names for descriptive line items.
+    const orderRows = await this.db
+      .select()
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    const ord = orderRows[0];
+    if (!ord) return;
+
+    const items = await this.db
+      .select({
+        quantity: schema.orderItems.quantity,
+        unitPrice: schema.orderItems.unitPrice,
+        offerLabel: schema.orderItems.offerLabel,
+        productName: schema.products.name,
+      })
+      .from(schema.orderItems)
+      .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+      .where(eq(schema.orderItems.orderId, orderId));
+
+    if (items.length === 0) {
+      this.logger.warn(`autoCreateInvoiceForOrder: order ${orderId} has no items, skipping`);
+      return;
+    }
+
+    const lineItems = items.map((it) => ({
+      description: `${it.productName ?? 'Product'}${it.offerLabel ? ` (${it.offerLabel})` : ''}`,
+      quantity: it.quantity,
+      unitPrice: String(it.unitPrice),
+    }));
+
+    const totalAmount = items.reduce(
+      (sum, it) => sum + it.quantity * Number(it.unitPrice),
+      0,
+    );
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx.insert(schema.invoices).values({
+        orderId: ord.id,
+        recipientInfo: {
+          name: ord.customerName,
+          address: ord.customerAddress ?? undefined,
+        },
+        lineItems,
+        taxRate: null,
+        totalAmount: totalAmount.toFixed(2),
+        dueDate: null,
+        status: 'DRAFT',
+      });
+    });
+  }
+
   private async executeTransitionSideEffects(
     newStatus: OrderStatus,
     order: typeof schema.orders.$inferSelect,

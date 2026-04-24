@@ -144,4 +144,20 @@ export interface OrderDetailPageExtraProps {
   logisticsLocations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }>;
   /** WhatsApp group dispatch templates — loaded for the CS "Share to 3PL" flow. */
   logisticsDispatchTemplates?: Array<{ id: string; name: string; body: string }>;
+  /** Auto-generated invoice for the order (CONFIRMED side effect). null if none yet. Streamed. */
+  invoice?: Promise<OrderInvoice | null> | OrderInvoice | null;
+}
+
+export interface OrderInvoice {
+  id: string;
+  orderId: string | null;
+  referenceNumber: number;
+  referenceFormatted: string;
+  recipientInfo: { name: string; address?: string; email?: string; phone?: string };
+  lineItems: { description: string; quantity: number; unitPrice: string }[];
+  totalAmount: string;
+  taxRate: string | null;
+  status: string;
+  dueDate: string | null;
+  createdAt: string;
 }

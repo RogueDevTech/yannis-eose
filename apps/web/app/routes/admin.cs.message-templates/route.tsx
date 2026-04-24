@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
+import { PageHeader } from '~/components/ui/page-header';
+import { Tabs } from '~/components/ui/tabs';
 import { useFetcherToast } from '~/components/ui/toast';
 
 export const meta: MetaFunction = () => [{ title: 'Message Templates — Yannis EOSE' }];
@@ -284,37 +286,34 @@ export default function MessageTemplatesRoute() {
     setSubmittingIntent(null);
   }, [fetcher.state, fetcherResult?.success, submittingIntent]);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-app-fg">Message Templates</h1>
-          <p className="text-sm text-app-fg-muted mt-0.5">
-            Pre-configured SMS and WhatsApp templates for closers. Type plain variable tokens like @customer_name.
-          </p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => { setCreateBody(''); setCreateOpen(true); }}>
-          + New Template
-        </Button>
-      </div>
+  const channelCounts = {
+    ALL: templates.length,
+    SMS: templates.filter((t) => t.channel === 'SMS').length,
+    WHATSAPP: templates.filter((t) => t.channel === 'WHATSAPP').length,
+  };
 
-      {/* Channel filter */}
-      <div className="flex gap-2">
-        {(['ALL', 'SMS', 'WHATSAPP'] as const).map((ch) => (
-          <button
-            key={ch}
-            type="button"
-            onClick={() => setFilterChannel(ch)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors duration-150 ${
-              filterChannel === ch
-                ? 'bg-primary-600 text-white'
-                : 'bg-app-hover text-app-fg-muted hover:bg-app-hover'
-            }`}
-          >
-            {ch === 'ALL' ? 'All Channels' : ch}
-          </button>
-        ))}
-      </div>
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Message Templates"
+        description="Pre-configured SMS and WhatsApp templates for closers. Type plain variable tokens like @customer_name."
+        actions={
+          <Button variant="primary" size="sm" onClick={() => { setCreateBody(''); setCreateOpen(true); }}>
+            + New Template
+          </Button>
+        }
+      />
+
+      {/* Channel tabs */}
+      <Tabs
+        value={filterChannel}
+        onChange={(v) => setFilterChannel(v as typeof filterChannel)}
+        tabs={[
+          { value: 'ALL', label: `All (${channelCounts.ALL})` },
+          { value: 'SMS', label: `SMS (${channelCounts.SMS})` },
+          { value: 'WHATSAPP', label: `WhatsApp (${channelCounts.WHATSAPP})` },
+        ]}
+      />
 
       {/* Templates table */}
       <div className="card overflow-hidden p-0">

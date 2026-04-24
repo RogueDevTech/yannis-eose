@@ -194,8 +194,18 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
     return { valid: false, error: 'Customer name is required (min 2 characters)' };
   }
 
-  if (!b['customerPhone'] || typeof b['customerPhone'] !== 'string' || (b['customerPhone'] as string).replace(/\D/g, '').length < 10) {
-    return { valid: false, error: 'Valid phone number is required' };
+  // Nigerian phone format only — same regex used everywhere else in the system.
+  // Accepts `0XXXXXXXXXX` (11 digits, leading 0 + 7/8/9) or `+234XXXXXXXXXX` (13 chars).
+  // Reject anything longer (e.g. `08031234567899`) so we don't store trailing junk.
+  {
+    const phoneStr = typeof b['customerPhone'] === 'string' ? (b['customerPhone'] as string).trim() : '';
+    if (!/^(?:0[789]\d{9}|\+234[789]\d{9})$/.test(phoneStr)) {
+      return {
+        valid: false,
+        error: 'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567).',
+      };
+    }
+    b['customerPhone'] = phoneStr;
   }
 
   if (!Array.isArray(b['items']) || (b['items'] as unknown[]).length === 0) {
@@ -592,7 +602,15 @@ function getFormScript(
         selectedProduct = singleProductId || null;
         document.querySelectorAll('.product-option').forEach(function(o) { o.classList.remove('selected'); });
         document.querySelectorAll('.offer-option').forEach(function(o) { o.classList.remove('selected'); });
+        // Hide all offer groups, then re-show the one for the active product so the user
+        // can immediately pick another offer. For single-product forms that's the only
+        // group (always visible). For multi-product flows, groups stay hidden until the
+        // user clicks a product card again.
         document.querySelectorAll('.offer-group').forEach(function(g) { g.style.display = 'none'; });
+        if (selectedProduct) {
+          var activeOffers = document.getElementById('offers-' + selectedProduct);
+          if (activeOffers) { activeOffers.style.display = 'flex'; }
+        }
         var paymentMethodEl = form.querySelector('#paymentMethod');
         if (paymentMethodEl) {
           var evt = document.createEvent('HTMLEvents');
@@ -1056,7 +1074,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
       <label for="customerName">Full Name</label>
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
       <label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678">
+      <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
       ${fc.showGender ? `<label for="customerGender">Gender <span class="required">*</span></label>
       <select id="customerGender" name="customerGender" required>
         <option value="">Select gender...</option>
@@ -1143,7 +1161,7 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
       <label for="customerName">Full Name</label>
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
       <label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678">
+      <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
       <label for="deliveryAddress">Delivery Address</label>
       <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"></textarea>
       <label for="deliveryNotes">Delivery Notes (optional)</label>
@@ -1400,8 +1418,18 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
     return { valid: false, error: 'Customer name is required (min 2 characters)' };
   }
 
-  if (!b['customerPhone'] || typeof b['customerPhone'] !== 'string' || (b['customerPhone'] as string).replace(/\D/g, '').length < 10) {
-    return { valid: false, error: 'Valid phone number is required' };
+  // Nigerian phone format only — same regex used everywhere else in the system.
+  // Accepts `0XXXXXXXXXX` (11 digits, leading 0 + 7/8/9) or `+234XXXXXXXXXX` (13 chars).
+  // Reject anything longer (e.g. `08031234567899`) so we don't store trailing junk.
+  {
+    const phoneStr = typeof b['customerPhone'] === 'string' ? (b['customerPhone'] as string).trim() : '';
+    if (!/^(?:0[789]\d{9}|\+234[789]\d{9})$/.test(phoneStr)) {
+      return {
+        valid: false,
+        error: 'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567).',
+      };
+    }
+    b['customerPhone'] = phoneStr;
   }
 
   if (!b['productId'] || typeof b['productId'] !== 'string') {

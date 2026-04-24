@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 const MAX_WIDTH_CLASSES: Record<string, string> = {
@@ -69,16 +69,30 @@ export function Modal({
 
   const maxWidthClass = MAX_WIDTH_CLASSES[maxWidth] ?? 'md:max-w-lg';
 
+  // Only close when the press STARTS and ENDS on the backdrop itself.
+  // This survives:
+  // - drag-select that begins inside the modal and releases over the backdrop
+  // - phantom click events fired after native pickers (date / select) dismiss on iOS
+  const downOnBackdropRef = useRef(false);
+  const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    downOnBackdropRef.current = e.target === e.currentTarget;
+  };
+  const handleBackdropMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
+    const wasDown = downOnBackdropRef.current;
+    downOnBackdropRef.current = false;
+    if (wasDown && e.target === e.currentTarget) onClose();
+  };
+
   return createPortal(
     <div className="fixed inset-0 z-[90] min-h-dvh w-full">
       <div
         className={`absolute inset-0 min-h-dvh w-full ${backdropBlur ? 'backdrop-blur-sm ' : ''}bg-black/50`}
-        onClick={onClose}
         aria-hidden
       />
       <div
         className="relative z-[1] flex min-h-dvh w-full items-end md:items-center justify-center p-0 md:p-4"
-        onClick={onClose}
+        onMouseDown={handleBackdropMouseDown}
+        onMouseUp={handleBackdropMouseUp}
         aria-modal="true"
         role={role}
         aria-labelledby={ariaLabelledby}
@@ -94,7 +108,6 @@ export function Modal({
             maxWidthClass,
             contentClassName,
           ].join(' ')}
-          onClick={(e) => e.stopPropagation()}
         >
           {children}
         </div>

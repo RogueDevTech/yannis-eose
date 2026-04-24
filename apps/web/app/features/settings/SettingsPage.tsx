@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useFetcher, useLocation, useSearchParams } from '@remix-run/react';
 import { APP_THEME_IDS, CLIENT_UI_CONFIG_KEY } from '@yannis/shared';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Tabs } from '~/components/ui/tabs';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
@@ -258,11 +259,6 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   const claimCapFromSettings = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
   const [localClaimCap, setLocalClaimCap] = useState<number>(claimCapFromSettings);
 
-  // Low-stock threshold setting — admins get a notification when available < threshold.
-  const lowStockSetting = systemSettings.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
-  const lowStockFromSettings = typeof lowStockSetting?.value?.threshold === 'number' ? lowStockSetting.value.threshold : 10;
-  const [localLowStockThreshold, setLocalLowStockThreshold] = useState<number>(lowStockFromSettings);
-
   // Local state for notification email toggles (configurable types only)
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>({});
 
@@ -276,12 +272,22 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
 
   const actionData = fetcher.data as { error?: string; success?: boolean; message?: string } | undefined;
   const [dismissedError, setDismissedError] = useState(false);
+  const [confirmSystemOpen, setConfirmSystemOpen] = useState(false);
+  const systemFormRef = useRef<HTMLFormElement | null>(null);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
 
   useEffect(() => {
     if (actionData?.error) setDismissedError(false);
     if (actionData?.success) setDismissedSuccess(false);
   }, [actionData?.error, actionData?.success]);
+
+  // Close the system-settings confirmation modal once the save resolves (success OR error).
+  // Keeping it open on error would just hide the page-level toast/notification underneath it.
+  useEffect(() => {
+    if (fetcher.state === 'idle' && (actionData?.success || actionData?.error)) {
+      setConfirmSystemOpen(false);
+    }
+  }, [fetcher.state, actionData?.success, actionData?.error]);
 
   // Derive feature flag states from system settings
   const voipSetting = systemSettings.find((s) => s.key === 'VOIP_ENABLED');
@@ -298,9 +304,6 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   useEffect(() => {
     setLocalClaimCap(claimCapFromSettings);
   }, [claimCapFromSettings]);
-  useEffect(() => {
-    setLocalLowStockThreshold(lowStockFromSettings);
-  }, [lowStockFromSettings]);
 
   const orgDefaultSaved = useMemo(
     () =>
@@ -327,7 +330,6 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
     localVoipEnabled !== isVoipEnabled ||
     selectedDispatchStrategy !== dispatchStrategyFromSettings ||
     localClaimCap !== claimCapFromSettings ||
-    localLowStockThreshold !== lowStockFromSettings ||
     orgDefaultAppTheme !== orgDefaultSaved;
 
   return (
@@ -552,12 +554,11 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
       {activeTab === 'system' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {isSuperAdmin ? (
-            <fetcher.Form method="post" className="contents">
+            <fetcher.Form method="post" className="contents" ref={systemFormRef}>
               <input type="hidden" name="intent" value="updateSystemSettings" />
               <input type="hidden" name="voipEnabled" value={localVoipEnabled ? 'true' : 'false'} />
               <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
               <input type="hidden" name="claimCap" value={String(localClaimCap)} />
-              <input type="hidden" name="lowStockThreshold" value={String(localLowStockThreshold)} />
               <input type="hidden" name="defaultAppTheme" value={orgDefaultAppTheme} />
 
               {/* VOIP Integration */}
@@ -736,29 +737,6 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
               </div>
 
               <div className="card lg:col-span-2">
-                <h3 className="text-lg font-semibold text-app-fg mb-1">Low-stock alert threshold</h3>
-                <p className="text-sm text-app-fg-muted mb-3">
-                  When a product's available stock at any location drops below this number, SuperAdmins, Admins, and Stock Managers get an in-app + push notification. Rate-limited to one alert per location per 6 hours.
-                </p>
-                <div className="flex items-center gap-3">
-                  <TextInput
-                    id="low-stock-threshold-input"
-                    type="number"
-                    min={1}
-                    max={10000}
-                    value={localLowStockThreshold}
-                    onChange={(e) => setLocalLowStockThreshold(Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 10)))}
-                    wrapperClassName="w-28"
-                  />
-                  <span className="text-xs text-app-fg-muted">units</span>
-                </div>
-                <p className="text-xs text-app-fg-muted mt-3">
-                  Saved: <strong>{lowStockFromSettings} units</strong>
-                  {hasSystemChanges && localLowStockThreshold !== lowStockFromSettings && ' — you have unsaved changes'}
-                </p>
-              </div>
-
-              <div className="card lg:col-span-2">
                 <h3 className="text-lg font-semibold text-app-fg mb-1">Default appearance</h3>
                 <p className="text-sm text-app-fg-muted mb-3">
                   Theme for users who have not set a personal preference. Personal choices in Profile still override this.
@@ -778,12 +756,13 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
 
               <div className="card lg:col-span-2 pt-4 border-t border-app-border">
                 <Button
-                  type="submit"
+                  type="button"
                   variant="primary"
                   size="sm"
                   disabled={!hasSystemChanges || fetcher.state === 'submitting'}
                   loading={fetcher.state === 'submitting'}
                   loadingText="Saving..."
+                  onClick={() => setConfirmSystemOpen(true)}
                 >
                   Save system settings
                 </Button>
@@ -979,6 +958,42 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             </div>
           )}
         </div>
+      )}
+
+      {confirmSystemOpen && (
+        <Modal
+          open
+          onClose={() => {
+            if (fetcher.state !== 'submitting') setConfirmSystemOpen(false);
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Apply system settings?</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            These changes affect everyone in the org — VOIP availability, the CS dispatch strategy,
+            and the default app theme. Are you sure you want to apply them now?
+          </p>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setConfirmSystemOpen(false)}
+              disabled={fetcher.state === 'submitting'}
+            >
+              Back
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              loading={fetcher.state === 'submitting'}
+              loadingText="Saving..."
+              onClick={() => systemFormRef.current?.requestSubmit()}
+            >
+              Yes, apply
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   );

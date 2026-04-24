@@ -48,6 +48,15 @@ export interface Budget {
   periodEnd: string;
 }
 
+export interface BudgetWithUtilization extends Budget {
+  approved: number;
+  committed: number;
+  remaining: number;
+  total: number;
+  utilizationPct: number;
+  isActive: boolean;
+}
+
 export interface FinancePageData {
   invoices: Invoice[];
   totalInvoices: number;
@@ -78,5 +87,6 @@ export interface FinanceStreamData {
   approvals: Promise<ApprovalRequest[]> | ApprovalRequest[];
   totalApprovals: Promise<number> | number;
   pendingApprovals: Promise<number> | number;
-  budgets: Promise<Budget[]> | Budget[];
+  pendingApprovalsValue: Promise<number> | number;
+  budgets: Promise<BudgetWithUtilization[]> | BudgetWithUtilization[];
 }

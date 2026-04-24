@@ -293,6 +293,15 @@
     @apply border-b border-app-border hover:bg-app-hover/80 transition-colors duration-100;
   }
 
+  /* HR Payroll page only — tighter row density to match the CS Orders table feel.
+     Scoped to .hr-payroll-table so it doesn't affect any other tables in the app. */
+  .hr-payroll-table .table-header {
+    @apply px-3 py-2;
+  }
+  .hr-payroll-table .table-cell {
+    @apply px-3 py-2;
+  }
+
   /* Status dot indicators */
   .status-dot {
     @apply w-2 h-2 rounded-full inline-block mr-2;

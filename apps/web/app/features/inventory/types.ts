@@ -80,6 +80,28 @@ export interface InventoryStreamData {
   reconciliations?: Promise<Reconciliation[]> | Reconciliation[];
   /** Locations with dispatchLocked info (for returns) */
   locationsWithLock?: LocationWithLock[];
+  /** Org-wide low-stock alert threshold (units). Drives auto-notifications. */
+  lowStockThreshold?: number;
+  /** When true, the threshold control is editable (SuperAdmin / Admin). Otherwise read-only. */
+  canEditLowStock?: boolean;
+  /** Low-stock items currently below threshold — drives the inline banner. Streamed. */
+  lowStockAlerts?: Promise<LowStockAlertsResult> | LowStockAlertsResult;
+}
+
+export interface LowStockAlertItem {
+  levelId: string;
+  productId: string;
+  productName: string;
+  locationId: string;
+  locationName: string;
+  stockCount: number;
+  reservedCount: number;
+  availableCount: number;
+}
+
+export interface LowStockAlertsResult {
+  threshold: number;
+  items: LowStockAlertItem[];
 }
 
 /* ── Transfer & Returns types (for combined TPL inventory view) ── */

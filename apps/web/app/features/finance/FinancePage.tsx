@@ -3,7 +3,7 @@ import { useFetcher, useSearchParams, useNavigation } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
-import { generateInvoicePdf } from '~/lib/invoice-pdf';
+import { previewInvoicePdf } from '~/lib/invoice-pdf';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -22,7 +22,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { formatNaira } from '~/lib/format-amount';
-import type { FinanceStreamData, Invoice, ApprovalRequest } from './types';
+import type { FinanceStreamData, Invoice, ApprovalRequest, BudgetWithUtilization } from './types';
 
 const ITEMS_PER_PAGE = 15;
 
@@ -90,6 +90,16 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
     [profit],
   );
   const getBarWidth = (value: number) => profit.revenue > 0 ? Math.max((value / profit.revenue) * 100, 2) : 0;
+
+  const perOrder = useMemo(() => {
+    const n = profit.orderCount;
+    if (n <= 0) return { aov: 0, costPerOrder: 0, profitPerOrder: 0 };
+    return {
+      aov: profit.revenue / n,
+      costPerOrder: totalCosts / n,
+      profitPerOrder: profit.trueProfit / n,
+    };
+  }, [profit, totalCosts]);
 
   // Client-side invoice pagination
   const invoiceTotalPages = Math.ceil(invoices.length / ITEMS_PER_PAGE);
@@ -207,6 +217,35 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
             title: 'All cost layers',
           },
+          {
+            label: 'AOV',
+            value: formatNaira(Math.round(perOrder.aov)),
+            valueClassName: 'text-app-fg tabular-nums',
+            title: 'Average order value',
+          },
+          {
+            label: 'Cost / Order',
+            value: formatNaira(Math.round(perOrder.costPerOrder)),
+            valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
+            title: 'Total costs / orders',
+          },
+          {
+            label: 'Profit / Order',
+            value: formatNaira(Math.round(perOrder.profitPerOrder)),
+            valueClassName:
+              perOrder.profitPerOrder >= 0 ? 'text-success-600 dark:text-success-400 tabular-nums' : 'text-danger-600 dark:text-danger-400 tabular-nums',
+            title: 'True profit / orders',
+          },
+          {
+            label: 'Pending Approvals',
+            value: (
+              <DeferredSection resolve={data.pendingApprovalsValue} skeleton="inline">
+                {(v) => <>{formatNaira(Math.round(v as number))}</>}
+              </DeferredSection>
+            ),
+            valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
+            title: 'Total amount waiting on finance approval',
+          },
         ]}
       />
 
@@ -319,7 +358,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
               </div>
             </div>
 
-            {/* Invoice Summary — Deferred */}
+            {/* Receivables — Deferred (replaces simple invoice summary) */}
             <DeferredSection resolve={data.invoiceSummary} skeleton="card">
               {(invoiceSummary) => {
                 const summary = invoiceSummary as Record<string, { count: number; total: string }>;
@@ -327,36 +366,133 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                 const outstandingTotal = Number(summary['SENT']?.total ?? 0);
                 const overdueTotal = Number(summary['OVERDUE']?.total ?? 0);
                 const draftTotal = Number(summary['DRAFT']?.total ?? 0);
+                const billed = paidTotal + outstandingTotal + overdueTotal;
+                const collectionRate = billed > 0 ? (paidTotal / billed) * 100 : 0;
+                const buckets = [
+                  { key: 'PAID', label: 'Paid', total: paidTotal, count: summary['PAID']?.count ?? 0, color: 'bg-success-500', text: 'text-success-600 dark:text-success-400' },
+                  { key: 'SENT', label: 'Outstanding', total: outstandingTotal, count: summary['SENT']?.count ?? 0, color: 'bg-warning-500', text: 'text-warning-600 dark:text-warning-400' },
+                  { key: 'OVERDUE', label: 'Overdue', total: overdueTotal, count: summary['OVERDUE']?.count ?? 0, color: 'bg-danger-500', text: 'text-danger-600 dark:text-danger-400' },
+                  { key: 'DRAFT', label: 'Draft', total: draftTotal, count: summary['DRAFT']?.count ?? 0, color: 'bg-surface-400', text: 'text-app-fg-muted' },
+                ];
 
                 return (
                   <div className="card">
-                    <h3 className="text-lg font-semibold text-app-fg mb-4">Invoice Summary</h3>
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-app-fg-muted">Draft</span>
-                        <span className="text-sm font-medium text-app-fg-muted">
-                          {formatNaira(draftTotal)} ({summary['DRAFT']?.count ?? 0})
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-app-fg-muted">Paid</span>
-                        <span className="text-sm font-medium text-success-600 dark:text-success-400">
-                          {formatNaira(paidTotal)} ({summary['PAID']?.count ?? 0})
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-app-fg-muted">Outstanding</span>
-                        <span className="text-sm font-medium text-warning-600 dark:text-warning-400">
-                          {formatNaira(outstandingTotal)} ({summary['SENT']?.count ?? 0})
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-app-fg-muted">Overdue</span>
-                        <span className="text-sm font-medium text-danger-600 dark:text-danger-400">
-                          {formatNaira(overdueTotal)} ({summary['OVERDUE']?.count ?? 0})
-                        </span>
-                      </div>
+                    <div className="flex items-baseline justify-between mb-3">
+                      <h3 className="text-lg font-semibold text-app-fg">Receivables</h3>
+                      <span
+                        className={`text-xs font-medium tabular-nums ${
+                          collectionRate >= 80
+                            ? 'text-success-600 dark:text-success-400'
+                            : collectionRate >= 50
+                              ? 'text-warning-600 dark:text-warning-400'
+                              : 'text-danger-600 dark:text-danger-400'
+                        }`}
+                        title="Paid / (Paid + Outstanding + Overdue)"
+                      >
+                        {collectionRate.toFixed(1)}% collected
+                      </span>
                     </div>
+
+                    {/* Collection progress bar */}
+                    {billed > 0 && (
+                      <div className="w-full flex rounded-full h-2 overflow-hidden mb-4">
+                        <div className="bg-success-500" style={{ width: `${(paidTotal / billed) * 100}%` }} />
+                        <div className="bg-warning-500" style={{ width: `${(outstandingTotal / billed) * 100}%` }} />
+                        <div className="bg-danger-500" style={{ width: `${(overdueTotal / billed) * 100}%` }} />
+                      </div>
+                    )}
+
+                    <div className="space-y-2.5">
+                      {buckets.map((b) => (
+                        <div key={b.key} className="flex justify-between items-center">
+                          <span className="flex items-center gap-2 text-sm text-app-fg-muted">
+                            <span className={`w-2 h-2 rounded-full ${b.color}`} />
+                            {b.label}
+                          </span>
+                          <span className={`text-sm font-medium tabular-nums ${b.text}`}>
+                            {formatNaira(b.total)}
+                            <span className="text-xs text-app-fg-muted ml-1">({b.count})</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }}
+            </DeferredSection>
+
+            {/* Budget Utilization — NEW (surfaces previously orphaned data) */}
+            <DeferredSection resolve={data.budgets} skeleton="card">
+              {(budgets) => {
+                const list = budgets as BudgetWithUtilization[];
+                const active = list.filter((b) => b.isActive);
+                const display = active.length > 0 ? active : list.slice(0, 3);
+
+                return (
+                  <div className="card">
+                    <div className="flex items-baseline justify-between mb-3">
+                      <h3 className="text-lg font-semibold text-app-fg">Budgets</h3>
+                      <span className="text-xs text-app-fg-muted">
+                        {active.length} active{list.length > active.length ? ` · ${list.length - active.length} ended` : ''}
+                      </span>
+                    </div>
+
+                    {display.length === 0 ? (
+                      <p className="text-sm text-app-fg-muted">No budgets configured.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {display.slice(0, 4).map((b) => {
+                          const pct = Math.min(b.utilizationPct, 100);
+                          const overBudget = b.remaining < 0;
+                          const barColor = overBudget
+                            ? 'bg-danger-500'
+                            : pct >= 90
+                              ? 'bg-warning-500'
+                              : pct >= 70
+                                ? 'bg-warning-400'
+                                : 'bg-brand-500';
+                          return (
+                            <div key={b.id}>
+                              <div className="flex justify-between items-baseline mb-1">
+                                <span className="text-sm font-medium text-app-fg truncate mr-2" title={b.name}>
+                                  {b.name}
+                                </span>
+                                <span
+                                  className={`text-xs font-medium tabular-nums whitespace-nowrap ${
+                                    overBudget
+                                      ? 'text-danger-600 dark:text-danger-400'
+                                      : pct >= 90
+                                        ? 'text-warning-600 dark:text-warning-400'
+                                        : 'text-app-fg-muted'
+                                  }`}
+                                >
+                                  {formatNaira(Math.round(b.approved + b.committed))} / {formatNaira(Math.round(b.total))}
+                                </span>
+                              </div>
+                              <div className="w-full bg-app-hover rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className={`h-full ${barColor} transition-all`}
+                                  style={{ width: `${Math.max(pct, 2)}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between mt-1 text-[11px] text-app-fg-muted tabular-nums">
+                                <span>
+                                  Approved {formatNaira(Math.round(b.approved))} · Pending {formatNaira(Math.round(b.committed))}
+                                </span>
+                                <span className={overBudget ? 'text-danger-600 dark:text-danger-400 font-medium' : ''}>
+                                  {overBudget ? `Over by ${formatNaira(Math.round(-b.remaining))}` : `${formatNaira(Math.round(b.remaining))} left`}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {display.length > 4 && (
+                          <p className="text-xs text-app-fg-muted text-center pt-1">
+                            +{display.length - 4} more
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               }}
@@ -500,12 +636,13 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                       <td className="table-cell">
                         <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => generateInvoicePdf(inv)}
+                            onClick={() => previewInvoicePdf(inv)}
                             className="p-1 rounded text-app-fg-muted hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
-                            title="Download PDF"
+                            title="Preview PDF"
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                             </svg>
                           </button>
                           {inv.status === 'DRAFT' && (
@@ -567,12 +704,13 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     <span className="font-mono font-medium text-app-fg text-sm">{inv.referenceFormatted}</span>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => generateInvoicePdf(inv)}
+                        onClick={() => previewInvoicePdf(inv)}
                         className="p-1 rounded text-app-fg-muted hover:text-brand-500 transition-colors"
-                        title="Download PDF"
+                        title="Preview PDF"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         </svg>
                       </button>
                       <StatusBadge status={inv.status} />
