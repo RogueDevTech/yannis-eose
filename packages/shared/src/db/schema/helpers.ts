@@ -1,4 +1,4 @@
-import { text, timestamp } from 'drizzle-orm/pg-core';
+import { text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from 'uuidv7';
 
 /**
@@ -19,7 +19,7 @@ import { uuidv7 } from 'uuidv7';
  * explicit `id` — the `$defaultFn` only fires when the field is omitted.
  */
 export const uuidv7Pk = () =>
-  text('id')
+  uuid('id')
     .primaryKey()
     .$defaultFn(() => uuidv7())
     .notNull();

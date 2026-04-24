@@ -1,4 +1,4 @@
-import { pgTable, text, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, recordStatusEnum, adSpendStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -8,7 +8,7 @@ import { branches } from './branches';
 // Table 7: offer_templates — pre-configured sale offers
 export const offerTemplates = pgTable('offer_templates', {
   id: uuidv7Pk(),
-  productId: text('product_id')
+  productId: uuid('product_id')
     .notNull()
     .references(() => products.id),
   name: text('name').notNull(),
@@ -25,17 +25,17 @@ export const offerTemplates = pgTable('offer_templates', {
 // Table 8: campaigns — media buyer campaigns
 export const campaigns = pgTable('campaigns', {
   id: uuidv7Pk(),
-  mediaBuyerId: text('media_buyer_id')
+  mediaBuyerId: uuid('media_buyer_id')
     .notNull()
     .references(() => users.id),
   name: text('name').notNull(),
   productIds: jsonb('product_ids'),
-  offerTemplateId: text('offer_template_id').references(() => offerTemplates.id),
+  offerTemplateId: uuid('offer_template_id').references(() => offerTemplates.id),
   formConfig: jsonb('form_config'),
   deploymentType: deploymentTypeEnum('deployment_type').default('HOSTED').notNull(),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   /** Branch this campaign belongs to; aligns with orders and RLS. */
-  branchId: text('branch_id').references(() => branches.id),
+  branchId: uuid('branch_id').references(() => branches.id),
   ...temporalColumns,
   ...timestampColumns,
 });
@@ -43,10 +43,10 @@ export const campaigns = pgTable('campaigns', {
 // Table 14: marketing_funding — HoM funding to Media Buyers
 export const marketingFunding = pgTable('marketing_funding', {
   id: uuidv7Pk(),
-  senderId: text('sender_id')
+  senderId: uuid('sender_id')
     .notNull()
     .references(() => users.id),
-  receiverId: text('receiver_id')
+  receiverId: uuid('receiver_id')
     .notNull()
     .references(() => users.id),
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
@@ -60,7 +60,7 @@ export const marketingFunding = pgTable('marketing_funding', {
 // Table: marketing_funding_requests — Media Buyer requests for funds (HoM approves by sending actual funding)
 export const marketingFundingRequests = pgTable('marketing_funding_requests', {
   id: uuidv7Pk(),
-  requesterId: text('requester_id')
+  requesterId: uuid('requester_id')
     .notNull()
     .references(() => users.id),
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
@@ -76,13 +76,13 @@ export const marketingFundingRequests = pgTable('marketing_funding_requests', {
 // Table 15: ad_spend_logs — daily ad spend records
 export const adSpendLogs = pgTable('ad_spend_logs', {
   id: uuidv7Pk(),
-  mediaBuyerId: text('media_buyer_id')
+  mediaBuyerId: uuid('media_buyer_id')
     .notNull()
     .references(() => users.id),
-  productId: text('product_id')
+  productId: uuid('product_id')
     .notNull()
     .references(() => products.id),
-  campaignId: text('campaign_id')
+  campaignId: uuid('campaign_id')
     .notNull()
     .references(() => campaigns.id),
   spendAmount: numeric('spend_amount', { precision: 12, scale: 2 }).notNull(),

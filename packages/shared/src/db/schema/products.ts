@@ -1,4 +1,4 @@
-import { pgTable, text, numeric, jsonb } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb } from 'drizzle-orm/pg-core';
 import { recordStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 
@@ -10,7 +10,7 @@ export const productCategories = pgTable('product_categories', {
   brandPhone: text('brand_phone'),
   brandEmail: text('brand_email'),
   brandWhatsapp: text('brand_whatsapp'),
-  smsSenderId: text('sms_sender_id'),
+  smsSenderId: uuid('sms_sender_id'),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,
@@ -25,7 +25,7 @@ export const products = pgTable('products', {
   baseSalePrice: numeric('base_sale_price', { precision: 12, scale: 2 }).notNull(),
   costPrice: numeric('cost_price', { precision: 12, scale: 2 }).notNull(),
   category: text('category'),
-  categoryId: text('category_id').references(() => productCategories.id),
+  categoryId: uuid('category_id').references(() => productCategories.id),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,

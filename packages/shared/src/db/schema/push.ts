@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, boolean, timestamp } from 'drizzle-orm/pg-core';
 import { uuidv7Pk, temporalColumns } from './helpers';
 import { users } from './users';
 import {
@@ -15,7 +15,7 @@ import { branches } from './branches';
  */
 export const pushSubscriptions = pgTable('push_subscriptions', {
   id: uuidv7Pk(),
-  userId: text('user_id')
+  userId: uuid('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   endpoint: text('endpoint').notNull().unique(),
@@ -37,10 +37,10 @@ export const pushBroadcasts = pgTable('push_broadcasts', {
   targetType: pushTargetTypeEnum('target_type').notNull(),
   /** Stores a userRoleEnum value as plain text — avoids circular dependency. */
   targetRole: text('target_role'),
-  targetUserId: text('target_user_id').references(() => users.id),
+  targetUserId: uuid('target_user_id').references(() => users.id),
   title: text('title').notNull(),
   body: text('body').notNull(),
-  branchId: text('branch_id').references(() => branches.id),
+  branchId: uuid('branch_id').references(() => branches.id),
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -58,11 +58,11 @@ export const pushAutomationRules = pgTable('push_automation_rules', {
   eventKey: text('event_key'),
   targetType: pushTargetTypeEnum('target_type').notNull(),
   targetRole: text('target_role'),
-  targetUserId: text('target_user_id').references(() => users.id),
+  targetUserId: uuid('target_user_id').references(() => users.id),
   titleTemplate: text('title_template').notNull(),
   bodyTemplate: text('body_template').notNull(),
   isActive: boolean('is_active').default(true).notNull(),
-  branchId: text('branch_id').references(() => branches.id),
+  branchId: uuid('branch_id').references(() => branches.id),
   createdBy: text('created_by')
     .notNull()
     .references(() => users.id),
@@ -76,11 +76,11 @@ export const pushAutomationRules = pgTable('push_automation_rules', {
  */
 export const pushDeliveryLog = pgTable('push_delivery_log', {
   id: uuidv7Pk(),
-  userId: text('user_id')
+  userId: uuid('user_id')
     .notNull()
     .references(() => users.id),
-  broadcastId: text('broadcast_id').references(() => pushBroadcasts.id),
-  automationRuleId: text('automation_rule_id').references(() => pushAutomationRules.id),
+  broadcastId: uuid('broadcast_id').references(() => pushBroadcasts.id),
+  automationRuleId: uuid('automation_rule_id').references(() => pushAutomationRules.id),
   title: text('title').notNull(),
   body: text('body').notNull(),
   triggerType: pushTriggerTypeEnum('trigger_type').notNull(),

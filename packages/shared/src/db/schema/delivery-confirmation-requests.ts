@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { deliveryConfirmationRequestStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns } from './helpers';
 import { orders } from './orders';
@@ -10,7 +10,7 @@ import { users } from './users';
  */
 export const deliveryConfirmationRequests = pgTable('delivery_confirmation_requests', {
   id: uuidv7Pk(),
-  orderId: text('order_id')
+  orderId: uuid('order_id')
     .notNull()
     .references(() => orders.id),
   requestedBy: text('requested_by')

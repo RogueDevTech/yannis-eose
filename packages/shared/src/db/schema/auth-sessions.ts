@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { uuidv7Pk, timestampColumns } from './helpers';
 import { users } from './users';
 
@@ -9,7 +9,7 @@ export const authSessions = pgTable(
   {
     id: uuidv7Pk(),
     token: text('token').notNull().unique(),
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
     sessionData: jsonb('session_data').notNull().$type<Record<string, unknown>>(),

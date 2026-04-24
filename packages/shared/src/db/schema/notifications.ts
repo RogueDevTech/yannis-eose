@@ -1,11 +1,11 @@
-import { pgTable, text, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { uuidv7Pk } from './helpers';
 import { users } from './users';
 
 // Table 20: notifications — in-app & push notifications
 export const notifications = pgTable('notifications', {
   id: uuidv7Pk(),
-  userId: text('user_id')
+  userId: uuid('user_id')
     .notNull()
     .references(() => users.id),
   type: text('type').notNull(),

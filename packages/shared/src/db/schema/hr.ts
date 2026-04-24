@@ -1,4 +1,4 @@
-import { pgTable, text, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { payoutStatusEnum, adjustmentCategoryEnum, userRoleEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -21,7 +21,7 @@ export const commissionPlans = pgTable('commission_plans', {
 // Table 18: payout_records — staff settlement periods
 export const payoutRecords = pgTable('payout_records', {
   id: uuidv7Pk(),
-  staffId: text('staff_id')
+  staffId: uuid('staff_id')
     .notNull()
     .references(() => users.id),
   periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
@@ -39,10 +39,10 @@ export const payoutRecords = pgTable('payout_records', {
 // Table 19: earnings_adjustments — manual bonuses/deductions
 export const earningsAdjustments = pgTable('earnings_adjustments', {
   id: uuidv7Pk(),
-  staffId: text('staff_id')
+  staffId: uuid('staff_id')
     .notNull()
     .references(() => users.id),
-  payoutId: text('payout_id').references(() => payoutRecords.id),
+  payoutId: uuid('payout_id').references(() => payoutRecords.id),
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
   category: adjustmentCategoryEnum('category').notNull(),
   reason: text('reason').notNull(),

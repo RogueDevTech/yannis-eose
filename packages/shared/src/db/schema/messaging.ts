@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { messageChannelEnum, outboundMessageStatusEnum, templateStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -20,7 +20,7 @@ export const messageTemplates = pgTable('message_templates', {
   createdBy: text('created_by')
     .notNull()
     .references(() => users.id),
-  branchId: text('branch_id').references(() => branches.id),
+  branchId: uuid('branch_id').references(() => branches.id),
   status: templateStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,
@@ -33,20 +33,20 @@ export const messageTemplates = pgTable('message_templates', {
  */
 export const outboundMessages = pgTable('outbound_messages', {
   id: uuidv7Pk(),
-  orderId: text('order_id')
+  orderId: uuid('order_id')
     .notNull()
     .references(() => orders.id),
-  agentId: text('agent_id')
+  agentId: uuid('agent_id')
     .notNull()
     .references(() => users.id),
   channel: messageChannelEnum('channel').notNull(),
   /** Null if the agent typed a freeform SMS rather than using a template. */
-  templateId: text('template_id').references(() => messageTemplates.id),
+  templateId: uuid('template_id').references(() => messageTemplates.id),
   /** The final rendered message after placeholder substitution. */
   renderedBody: text('rendered_body').notNull(),
   status: outboundMessageStatusEnum('status').default('SENT').notNull(),
   /** Error detail if status = FAILED. */
   errorMessage: text('error_message'),
-  branchId: text('branch_id').references(() => branches.id),
+  branchId: uuid('branch_id').references(() => branches.id),
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
 });
