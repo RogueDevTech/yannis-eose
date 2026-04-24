@@ -1,15 +1,27 @@
-import { sql } from 'drizzle-orm';
-import { text, timestamp } from 'drizzle-orm/pg-core';
+import { text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { uuidv7 } from 'uuidv7';
 
 /**
  * UUIDv7 primary key — timestamp-ordered for B-tree performance.
- * Uses gen_random_uuid() as fallback; actual UUIDv7 generation
- * will be handled by a Postgres extension or application layer.
+ *
+ * Generated app-side at insert time with the `uuidv7` package (RFC 9562).
+ * UUIDv7's first 48 bits are the Unix millisecond timestamp, so rows land
+ * at the end of the B-tree in near-insertion-order — no random page splits,
+ * better cache locality, and you can do range scans like
+ *   WHERE id >= '018cd000-0000-7000-8000-000000000000'
+ * to find "all rows created after X" without touching created_at.
+ *
+ * Column type is currently `text` (36-char UUID string). A future migration
+ * will swap to native `uuid` for 16-byte storage + faster B-tree compares;
+ * v7 values we generate now will carry over unchanged and retain ordering.
+ *
+ * If you need to override at insert time (migrations, seeds), just pass an
+ * explicit `id` — the `$defaultFn` only fires when the field is omitted.
  */
 export const uuidv7Pk = () =>
-  text('id')
+  uuid('id')
     .primaryKey()
-    .default(sql`gen_random_uuid()`)
+    .$defaultFn(() => uuidv7())
     .notNull();
 
 /**

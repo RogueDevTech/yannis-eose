@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, boolean, uniqueIndex } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, jsonb, boolean, uniqueIndex } from 'drizzle-orm/pg-core';
 import { branchStatusEnum, userRoleEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -27,10 +27,10 @@ export const branches = pgTable('branches', {
 export const userBranches = pgTable(
   'user_branches',
   {
-    userId: text('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    branchId: text('branch_id')
+    branchId: uuid('branch_id')
       .notNull()
       .references(() => branches.id),
     /** If set, this role overrides the user's global role when they are in this branch context. */

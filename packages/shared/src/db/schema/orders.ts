@@ -1,4 +1,4 @@
-import { pgTable, text, integer, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, integer, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { orderStatusEnum, callStatusEnum, timelineEventTypeEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -10,12 +10,12 @@ import { campaigns } from './marketing';
 // Table 9: orders — core order records
 export const orders = pgTable('orders', {
   id: uuidv7Pk(),
-  campaignId: text('campaign_id').references(() => campaigns.id),
-  mediaBuyerId: text('media_buyer_id').references(() => users.id),
-  assignedCsId: text('assigned_cs_id').references(() => users.id),
-  logisticsProviderId: text('logistics_provider_id').references(() => logisticsProviders.id),
-  logisticsLocationId: text('logistics_location_id').references(() => logisticsLocations.id),
-  riderId: text('rider_id').references(() => users.id),
+  campaignId: uuid('campaign_id').references(() => campaigns.id),
+  mediaBuyerId: uuid('media_buyer_id').references(() => users.id),
+  assignedCsId: uuid('assigned_cs_id').references(() => users.id),
+  logisticsProviderId: uuid('logistics_provider_id').references(() => logisticsProviders.id),
+  logisticsLocationId: uuid('logistics_location_id').references(() => logisticsLocations.id),
+  riderId: uuid('rider_id').references(() => users.id),
   status: orderStatusEnum('status').default('UNPROCESSED').notNull(),
   items: jsonb('items'),
   customerName: text('customer_name').notNull(),
@@ -40,7 +40,7 @@ export const orders = pgTable('orders', {
   deliveryDiscountAmount: numeric('delivery_discount_amount', { precision: 12, scale: 2 }),
   /** Required receipt URL when 3PL resolves order (Resolve order modal). */
   resolveReceiptUrl: text('resolve_receipt_url'),
-  parentOrderId: text('parent_order_id'),
+  parentOrderId: uuid('parent_order_id'),
   // Payment: method (PAY_ON_DELIVERY | PAY_ONLINE), status when online (PENDING | PAID | FAILED), Paystack reference
   paymentMethod: text('payment_method'),
   paymentStatus: text('payment_status'),
@@ -53,14 +53,14 @@ export const orders = pgTable('orders', {
   callbackNotes: text('callback_notes'),
   // Duplicate order tracking: agent can merge or dismiss flagged duplicates
   isDuplicate: text('is_duplicate'), // null = normal, 'FLAGGED' = potential duplicate, 'MERGED' = merged into another, 'DISMISSED' = agent cleared it
-  duplicateOfId: text('duplicate_of_id'), // links to the original order if flagged
+  duplicateOfId: uuid('duplicate_of_id'), // links to the original order if flagged
   // 15-min order lock: when an agent clicks Call, order is locked to them
   lockedUntil: timestamp('locked_until', { withTimezone: true }),
   lockedBy: text('locked_by').references(() => users.id),
   /** Order source for reporting: 'edge-form' (sales form) or 'offline' (CS manual entry) */
   orderSource: text('order_source'),
   /** Branch this order belongs to. Set on creation, enforced by RLS. */
-  branchId: text('branch_id'),
+  branchId: uuid('branch_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),
@@ -73,16 +73,16 @@ export const orders = pgTable('orders', {
 // Table 10: order_items — line items per order
 export const orderItems = pgTable('order_items', {
   id: uuidv7Pk(),
-  orderId: text('order_id')
+  orderId: uuid('order_id')
     .notNull()
     .references(() => orders.id),
-  productId: text('product_id')
+  productId: uuid('product_id')
     .notNull()
     .references(() => products.id),
   quantity: integer('quantity').notNull(),
   unitPrice: numeric('unit_price', { precision: 12, scale: 2 }).notNull(),
   offerLabel: text('offer_label'),
-  batchId: text('batch_id').references(() => stockBatches.id),
+  batchId: uuid('batch_id').references(() => stockBatches.id),
   ...temporalColumns,
   ...timestampColumns,
 });
@@ -90,10 +90,10 @@ export const orderItems = pgTable('order_items', {
 // Table 11: call_logs — VOIP call records
 export const callLogs = pgTable('call_logs', {
   id: uuidv7Pk(),
-  orderId: text('order_id')
+  orderId: uuid('order_id')
     .notNull()
     .references(() => orders.id),
-  agentId: text('agent_id')
+  agentId: uuid('agent_id')
     .notNull()
     .references(() => users.id),
   callToken: text('call_token'),
@@ -109,12 +109,12 @@ export const callLogs = pgTable('call_logs', {
 // Append-only. Written atomically with every state transition. Never modified after insert.
 export const orderTimelineEvents = pgTable('order_timeline_events', {
   id: uuidv7Pk(),
-  orderId: text('order_id')
+  orderId: uuid('order_id')
     .notNull()
     .references(() => orders.id),
   eventType: timelineEventTypeEnum('event_type').notNull(),
   /** UUID of the user who triggered this event. Null for system/edge events. */
-  actorId: text('actor_id').references(() => users.id),
+  actorId: uuid('actor_id').references(() => users.id),
   /** Denormalized name snapshot at event time — survives user renames without joins. */
   actorName: text('actor_name'),
   /** Human-readable sentence describing what happened. */
@@ -122,6 +122,6 @@ export const orderTimelineEvents = pgTable('order_timeline_events', {
   /** Extra contextual data: old/new values, durations, quantities, GPS, template names, etc. */
   metadata: jsonb('metadata'),
   /** Branch context — scopes the event to a branch for RLS filtering. */
-  branchId: text('branch_id'),
+  branchId: uuid('branch_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

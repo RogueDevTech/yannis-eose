@@ -107,6 +107,7 @@ export function UserDetailPage({
   isSuperAdmin = false,
   isViewerHeadOfMarketing = false,
   isViewerHeadOfCS = false,
+  canEditLimited = false,
 }: UserDetailLoaderData) {
   const actionData = useActionData<{ error?: string; success?: boolean; message?: string; requiresApproval?: boolean }>();
   const navigation = useNavigation();
@@ -118,6 +119,9 @@ export function UserDetailPage({
   const isUpdating = isSubmitting && formIntent === 'update';
   const isProcessingEmailChange = isSubmitting && formIntent === 'processEmailChange';
   const restrictHeadView = isViewerHeadOfMarketing || isViewerHeadOfCS;
+  // Team-leads see the Settings tab ONLY when editing a direct report (canEditLimited);
+  // admin-level users keep full Settings access unconditionally.
+  const canOpenSettingsTab = isSuperAdmin || (!restrictHeadView) || canEditLimited;
 
   type TabId = 'overview' | 'orders' | 'payroll' | 'stock' | 'finance' | 'audit' | 'edit';
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -127,6 +131,11 @@ export function UserDetailPage({
   const [emailChangeReason, setEmailChangeReason] = useState('');
   const [dismissedError, setDismissedError] = useState(false);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
+  const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  // Resolve the deferred `activeHeads` / `branchesList` into state so the submit handler can
+  // check synchronously whether the selected role+branch is already taken by another user.
+  const [resolvedActiveHeads, setResolvedActiveHeads] = useState<ActiveHeadUser[] | null>(null);
+  const [resolvedBranches, setResolvedBranches] = useState<Array<{ id: string; name: string }> | null>(null);
 
   useEffect(() => {
     if (actionData?.error) setDismissedError(false);
@@ -135,6 +144,31 @@ export function UserDetailPage({
 
   // Derived flags (must be before useEffects that reference them)
   const isSuperAdminProfile = user.role === 'SUPER_ADMIN';
+
+  useEffect(() => {
+    let cancelled = false;
+    if (activeHeads) {
+      activeHeads
+        .then((heads) => {
+          if (!cancelled) setResolvedActiveHeads(heads);
+        })
+        .catch(() => {
+          if (!cancelled) setResolvedActiveHeads([]);
+        });
+    }
+    if (branchesList) {
+      branchesList
+        .then((branches) => {
+          if (!cancelled) setResolvedBranches(branches);
+        })
+        .catch(() => {
+          if (!cancelled) setResolvedBranches([]);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [activeHeads, branchesList]);
 
   // Close reset modal on success
   useEffect(() => {
@@ -166,7 +200,7 @@ export function UserDetailPage({
     ...(showStockTab ? [{ id: 'stock' as const, label: 'Stock' }] : []),
     ...(showFinanceTab ? [{ id: 'finance' as const, label: 'Finance Activity' }] : []),
     { id: 'audit', label: 'Activity' },
-    ...(!isSuperAdminProfile && !restrictHeadView ? [{ id: 'edit' as const, label: 'Settings' }] : []),
+    ...((!isSuperAdminProfile && (canOpenSettingsTab || canEditLimited)) ? [{ id: 'edit' as const, label: 'Settings' }] : []),
   ];
 
   // When viewing a user, ensure activeTab is valid for their role
@@ -176,14 +210,31 @@ export function UserDetailPage({
     if (showPayrollTab) validIds.add('payroll');
     if (showStockTab) validIds.add('stock');
     if (showFinanceTab) validIds.add('finance');
-    if (!isSuperAdminProfile && !restrictHeadView) validIds.add('edit');
+    if (!isSuperAdminProfile && (canOpenSettingsTab || canEditLimited)) validIds.add('edit');
     if (!validIds.has(activeTab)) {
       setActiveTab('overview');
     }
-  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showStockTab, showFinanceTab, isSuperAdminProfile, restrictHeadView]);
+  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showStockTab, showFinanceTab, isSuperAdminProfile, canOpenSettingsTab, canEditLimited]);
 
   // Edit form state
   const [selectedRole, setSelectedRole] = useState(user.role);
+
+  const pendingConflict =
+    HEAD_ROLES.includes(selectedRole) &&
+    selectedRole !== user.role &&
+    user.primaryBranchId &&
+    resolvedActiveHeads
+      ? resolvedActiveHeads.find(
+          (h) =>
+            h.role === selectedRole &&
+            h.primaryBranchId === user.primaryBranchId &&
+            h.id !== user.id,
+        )
+      : undefined;
+  const pendingConflictBranchName = pendingConflict
+    ? resolvedBranches?.find((b) => b.id === user.primaryBranchId)?.name ?? 'This branch'
+    : null;
+
   const [assignFinanceHat, setAssignFinanceHat] = useState(user.isFinanceOfficer === true);
   useEffect(() => {
     setAssignFinanceHat(user.isFinanceOfficer === true);
@@ -196,11 +247,17 @@ export function UserDetailPage({
     setSelectedProductIds(user.assignedProductIds ? [...user.assignedProductIds] : []);
   }, [user.id, user.updatedAt, user.role, assignedProductIdsKey]);
 
-  const showCapacity = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
+  // Capacity is only meaningful for roles that work an individual workload — CS agents
+  // (max concurrent orders) and Media Buyers (max concurrent campaigns). Managers / heads
+  // don't carry a personal load, so hiding the field removes noise from their forms.
+  const showCapacity = ['CS_AGENT', 'MEDIA_BUYER'].includes(selectedRole);
   const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const showProductAssignment = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(selectedRole);
   const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
   const isCSRole = ['CS_AGENT', 'HEAD_OF_CS'].includes(user.role);
+  // Capacity is only a meaningful number for CS agents + Media Buyers (see `showCapacity`).
+  // This flag gates the read-only badge / InfoField in the overview, independent of CS-vs-MB role logic elsewhere.
+  const showCapacityReadonly = ['CS_AGENT', 'MEDIA_BUYER'].includes(user.role);
   const isLogisticsRole = ['TPL_MANAGER', 'TPL_RIDER', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'].includes(user.role);
 
   const toggleProduct = (id: string) => {
@@ -360,7 +417,7 @@ export function UserDetailPage({
                 {user.phone}
               </span>
             )}
-            {isCSRole && (
+            {showCapacityReadonly && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
@@ -434,7 +491,7 @@ export function UserDetailPage({
                 <InfoField label="Role" value={formatRole(user.role)} icon={<ShieldIcon />} />
                 <InfoField label="Status" value={user.status} icon={<StatusDot status={user.status} />} />
                 <InfoField label="Phone" value={user.phone ?? 'Not set'} icon={<PhoneIcon />} />
-                {isCSRole && <InfoField label="Order Capacity" value={String(user.capacity)} icon={<StackIcon />} />}
+                {showCapacityReadonly && <InfoField label="Order Capacity" value={String(user.capacity)} icon={<StackIcon />} />}
                 <InfoField
                   label="Member Since"
                   value={memberSince.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })}
@@ -644,10 +701,20 @@ export function UserDetailPage({
 
                     {status ? (
                       <div className="space-y-3">
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-3 gap-3">
                           <div className="rounded-lg bg-app-hover px-3 py-2">
                             <p className="text-[10px] text-app-fg-muted uppercase tracking-wider mb-0.5">Devices</p>
                             <p className="text-xl font-bold text-app-fg">{status.subscribedDevices}</p>
+                          </div>
+                          <div className="rounded-lg bg-app-hover px-3 py-2">
+                            <p className="text-[10px] text-app-fg-muted uppercase tracking-wider mb-0.5">Installed</p>
+                            <p className="text-xl font-bold text-app-fg">
+                              {status.installedDeviceCount}
+                              <span className="text-xs font-normal text-app-fg-muted">
+                                {' '}
+                                / {status.subscribedDevices}
+                              </span>
+                            </p>
                           </div>
                           <div className="rounded-lg bg-app-hover px-3 py-2">
                             <p className="text-[10px] text-app-fg-muted uppercase tracking-wider mb-0.5">Total sent</p>
@@ -672,7 +739,13 @@ export function UserDetailPage({
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 8.25h3m0 3.75h-3" />
                                 </svg>
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-xs text-app-fg truncate">{device.userAgent ?? 'Unknown device'}</p>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <InstallModeBadge
+                                      mode={device.installMode}
+                                      updatedAt={device.installModeUpdatedAt}
+                                    />
+                                  </div>
+                                  <p className="text-xs text-app-fg truncate mt-0.5">{device.userAgent ?? 'Unknown device'}</p>
                                   <p className="text-[11px] text-app-fg-muted">
                                     Added {new Date(device.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                                   </p>
@@ -993,13 +1066,34 @@ export function UserDetailPage({
 
       {/* ─── Settings / Edit Tab ─────────────────────────── */}
       {activeTab === 'edit' && (
-        <Form method="post" className="space-y-6">
+        <Form
+          method="post"
+          className="space-y-6"
+          onSubmit={(e) => {
+            if (pendingConflict) {
+              e.preventDefault();
+              setConflictModalOpen(true);
+            }
+          }}
+        >
           <input type="hidden" name="intent" value="update" />
           {showProductAssignment && selectedProductIds.length > 0 && (
             <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
           )}
 
-          {/* Account Details */}
+          {canEditLimited && (
+            <InlineNotification
+              variant="info"
+              message={
+                user.role === 'CS_AGENT'
+                  ? 'As Head of CS you can change this agent’s order capacity and assigned products. For role changes, account status, or password resets, contact an administrator.'
+                  : 'As Head of Marketing you can change this buyer’s assigned products. For role changes, account status, or password resets, contact an administrator.'
+              }
+            />
+          )}
+
+          {/* Account Details — admin-only; hidden for team-lead scoped edits */}
+          {!canEditLimited && (
           <div className="card space-y-4">
             <h2 className="text-base font-semibold text-app-fg">Account Details</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1071,9 +1165,10 @@ export function UserDetailPage({
               </div>
             </div>
           </div>
+          )}
 
-          {/* Finance hat — org-wide singleton. Skip for primary FINANCE_OFFICER users (role already covers it). */}
-          {selectedRole !== 'FINANCE_OFFICER' && (
+          {/* Finance hat — org-wide singleton. Admin-only; hidden for team-lead edits. */}
+          {!canEditLimited && selectedRole !== 'FINANCE_OFFICER' && (
             <div className="card space-y-3">
               <h2 className="text-base font-semibold text-app-fg">Finance hat</h2>
               <p className="text-sm text-app-fg-muted">
@@ -1121,7 +1216,7 @@ export function UserDetailPage({
                 </div>
               )}
 
-              {showLogisticsLocation && (
+              {showLogisticsLocation && !canEditLimited && (
                 <DeferredSection resolve={locations} skeleton="inline">
                   {(locs) => (
                     <div>
@@ -1321,11 +1416,85 @@ export function UserDetailPage({
             </div>
         </Modal>
       )}
+
+      {conflictModalOpen && pendingConflict && (
+        <Modal
+          open
+          onClose={() => setConflictModalOpen(false)}
+          maxWidth="max-w-md"
+          contentClassName="p-6"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Role already taken in this branch</h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            Only one active <strong>{formatRole(selectedRole)}</strong> is allowed per branch.{' '}
+            <strong>{pendingConflictBranchName}</strong> already has{' '}
+            <strong>{pendingConflict.name}</strong> in that role.
+          </p>
+          <p className="text-sm text-app-fg-muted mb-4">
+            To change {user.name}&apos;s role to {formatRole(selectedRole)}, first change{' '}
+            {pendingConflict.name}&apos;s role (or deactivate them) from their profile.
+          </p>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setConflictModalOpen(false)}
+            >
+              Back
+            </Button>
+            <Link
+              to={`/hr/users/${pendingConflict.id}`}
+              className="btn-primary"
+              onClick={() => setConflictModalOpen(false)}
+            >
+              Go to {pendingConflict.name}
+            </Link>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
 // ─── Sub-components ─────────────────────────────────────
+
+function InstallModeBadge({
+  mode,
+  updatedAt,
+}: {
+  mode: 'STANDALONE' | 'BROWSER' | 'UNKNOWN';
+  updatedAt: string | null;
+}) {
+  // Stale threshold: if the client heartbeat hasn't reported in 30 days, downgrade the badge
+  // to "Unknown" since we can't vouch for the current install state on that device.
+  const STALE_MS = 30 * 24 * 60 * 60 * 1000;
+  const isStale = updatedAt ? Date.now() - new Date(updatedAt).getTime() > STALE_MS : true;
+  const effectiveMode = mode === 'UNKNOWN' || isStale ? 'UNKNOWN' : mode;
+
+  const style =
+    effectiveMode === 'STANDALONE'
+      ? 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-300'
+      : effectiveMode === 'BROWSER'
+        ? 'bg-app-hover text-app-fg-muted'
+        : 'bg-app-hover text-app-fg-muted/70';
+  const label =
+    effectiveMode === 'STANDALONE'
+      ? 'Installed'
+      : effectiveMode === 'BROWSER'
+        ? 'Browser'
+        : 'Unknown';
+  const title = updatedAt
+    ? `Last reported ${new Date(updatedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+    : 'Never reported by this device';
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${style}`}
+    >
+      {label}
+    </span>
+  );
+}
 
 function InfoField({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (

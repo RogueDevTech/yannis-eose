@@ -154,9 +154,15 @@ export const usersRouter = router({
     }),
 
   /**
-   * Update a staff member's details (SuperAdmin only).
+   * Update a staff member's details.
+   *
+   * Gate widened so HoCS / HoM can make a narrow, scoped edit on their direct
+   * reports (capacity / productIds / visibleOrderStatuses — the "how they work"
+   * fields). UsersService.update enforces both the target-role + same-branch
+   * scope AND the field-level whitelist. Admin-level callers still go through
+   * the full admin path unchanged.
    */
-  update: permissionProcedure('users.update')
+  update: permissionProcedure('users.update', 'cs.teamOverview', 'marketing.teamOverview')
     .input(updateStaffSchema)
     .mutation(async ({ input, ctx }) => {
       return getUsersService().update(input, ctx.user);
@@ -198,5 +204,14 @@ export const usersRouter = router({
     .input(processEmailChangeSchema)
     .mutation(async ({ input, ctx }) => {
       return getUsersService().processEmailChange(input, ctx.user);
+    }),
+
+  /**
+   * Resend invite email for a PENDING user with fresh credentials.
+   */
+  resendInvite: permissionProcedure('users.create')
+    .input(z.object({ userId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getUsersService().resendInvite(input.userId, ctx.user);
     }),
 });

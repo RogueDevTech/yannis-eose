@@ -297,20 +297,26 @@ export class UsersService {
       }
     }
 
-    // Check for duplicate phone
-    if (input.phone) {
-      const phoneRows = await this.db
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(eq(schema.users.phone, input.phone))
-        .limit(1);
+    // Phone is required on create (CEO directive 2026-04-24) and must be unique across all users.
+    // The DB-level partial unique index `users_phone_unique_not_null` is the safety net; this
+    // service check returns a friendlier error that names the conflicting user.
+    if (!input.phone) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Phone number is required.',
+      });
+    }
+    const phoneRows = await this.db
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+      .from(schema.users)
+      .where(eq(schema.users.phone, input.phone))
+      .limit(1);
 
-      if (phoneRows[0]) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: 'A user with this phone number already exists',
-        });
-      }
+    if (phoneRows[0]) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `Phone number already in use by ${phoneRows[0].name} (${phoneRows[0].email}). Each user must have a unique number.`,
+      });
     }
 
     // SUPER_ADMIN already rejected above; ADMIN is global (no primary branch required).
@@ -579,8 +585,13 @@ export class UsersService {
   async list(input: ListUsersInput) {
     const conditions = [];
 
-    // Default: exclude DEACTIVATED (record stays in DB; only visible when filter status=DEACTIVATED)
-    if (!input.status) {
+    // When the caller asks for a specific set of IDs (e.g. resolving buyer names behind ad-spend
+    // rows), match exactly those — and bypass the default "hide DEACTIVATED" filter so names
+    // still render for historical records owned by since-removed users.
+    if (input.userIds && input.userIds.length > 0) {
+      conditions.push(inArray(schema.users.id, input.userIds));
+    } else if (!input.status) {
+      // Default: exclude DEACTIVATED (record stays in DB; only visible when filter status=DEACTIVATED)
       conditions.push(ne(schema.users.status, 'DEACTIVATED'));
     }
 
@@ -829,6 +840,56 @@ export class UsersService {
       });
     }
 
+    // Scoped team-lead edits: HoCS can edit CS Agents on their branch; HoM can edit Media
+    // Buyers on their branch. Restricted to three fields that are operational (not pay,
+    // not identity): capacity, productIds, visibleOrderStatuses. Cannot change role, status,
+    // email, phone, name, logistics location, commission plan, or the Finance hat.
+    // Team-leads cannot edit each other or themselves — that stays admin territory.
+    const actorIsTeamLead = actor.role === 'HEAD_OF_CS' || actor.role === 'HEAD_OF_MARKETING';
+    const targetFitsTeamLeadScope =
+      (actor.role === 'HEAD_OF_CS' && beforeRow.role === 'CS_AGENT') ||
+      (actor.role === 'HEAD_OF_MARKETING' && beforeRow.role === 'MEDIA_BUYER');
+    const sameBranch =
+      !!actor.currentBranchId &&
+      beforeRow.primaryBranchId === actor.currentBranchId;
+
+    if (actorIsTeamLead) {
+      if (!targetFitsTeamLeadScope) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            actor.role === 'HEAD_OF_CS'
+              ? 'You can only edit CS Agents on your team. Contact an administrator for anything else.'
+              : 'You can only edit Media Buyers on your team. Contact an administrator for anything else.',
+        });
+      }
+      if (!sameBranch) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You can only edit team members in your own branch.',
+        });
+      }
+      if (input.userId === actor.id) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot edit your own account here.' });
+      }
+
+      // Whitelist of fields a team-lead may change. Everything else must be undefined.
+      const allowedByTeamLead = new Set<keyof UpdateStaffInput>([
+        'userId', 'capacity', 'productIds', 'visibleOrderStatuses', 'restrictProductAccess',
+      ]);
+      for (const key of Object.keys(input) as Array<keyof UpdateStaffInput>) {
+        if (!allowedByTeamLead.has(key) && input[key] !== undefined) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: `Team leads cannot change "${String(key)}" — contact an administrator.`,
+          });
+        }
+      }
+      // Fall through to the main update logic below; the field-level whitelist above means
+      // downstream admin-only paths (role change, deactivation, email change, etc.) won't
+      // trigger because their triggering fields are all undefined for team-lead callers.
+    }
+
     // Sensitive-role approval flow on update — anyone other than SuperAdmin promoting someone to
     // a sensitive role (ADMIN, FINANCE_OFFICER, etc.) creates a permission_request for approval.
     const isSuperAdmin = actor.role === 'SUPER_ADMIN';
@@ -981,7 +1042,7 @@ export class UsersService {
     if (input.phone !== undefined) {
       if (input.phone) {
         const phoneRows = await this.db
-          .select({ id: schema.users.id })
+          .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
           .from(schema.users)
           .where(and(eq(schema.users.phone, input.phone), ne(schema.users.id, input.userId)))
           .limit(1);
@@ -989,7 +1050,7 @@ export class UsersService {
         if (phoneRows[0]) {
           throw new TRPCError({
             code: 'CONFLICT',
-            message: 'A user with this phone number already exists',
+            message: `Phone number already in use by ${phoneRows[0].name} (${phoneRows[0].email}). Each user must have a unique number.`,
           });
         }
       }
@@ -1228,6 +1289,70 @@ export class UsersService {
         data: { userId: input.userId, event: 'password_reset' },
       })
       .catch(() => {});
+
+    return { success: true };
+  }
+
+  /**
+   * Resend invite email for a PENDING user — generates a fresh password,
+   * updates the hash, and re-sends the invite email with new credentials.
+   */
+  async resendInvite(userId: string, actor: SessionUser) {
+    // Fetch the user and verify they are still PENDING
+    const existing = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        role: schema.users.role,
+        status: schema.users.status,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    const user = existing[0];
+    if (!user) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+    if (user.status !== 'PENDING') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Can only resend invite for users with PENDING status',
+      });
+    }
+
+    // Generate a new password and update the hash
+    const plainPassword = this.generatePassword();
+    const passwordHash = await this.authService.hashPassword(plainPassword);
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.users)
+        .set({ passwordHash, updatedAt: new Date() })
+        .where(eq(schema.users.id, userId));
+    });
+
+    // Send the invite email with the fresh credentials (non-blocking)
+    const loginUrl = process.env['APP_URL'] ?? 'http://localhost:4001';
+    this.notificationsService
+      .sendInviteEmail({
+        to: user.email,
+        name: user.name,
+        role: user.role,
+        password: plainPassword,
+        loginUrl: `${loginUrl}/auth`,
+      })
+      .then((sent) => {
+        if (sent) {
+          this.logger.log(`Invite email re-sent to ${user.email}`);
+        } else {
+          this.logger.warn(`Invite email not re-sent to ${user.email} (SendGrid may not be configured)`);
+        }
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to re-send invite email to ${user.email}: ${err}`);
+      });
 
     return { success: true };
   }

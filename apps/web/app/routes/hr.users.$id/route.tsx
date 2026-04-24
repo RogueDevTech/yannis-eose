@@ -81,6 +81,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ADMIN';
     const isViewerHeadOfMarketing = currentUser?.role === 'HEAD_OF_MARKETING';
     const isViewerHeadOfCS = currentUser?.role === 'HEAD_OF_CS';
+    // Team-lead scoped edit: HoCS can edit CS_AGENTs on their branch; HoM can edit MEDIA_BUYERs
+    // on their branch. Restricted to capacity / productIds / visibleOrderStatuses. Enforced
+    // server-side by UsersService.update; this flag just tells the UI to show the limited form.
+    const canEditLimited =
+      !!currentUser?.currentBranchId &&
+      profileUser.primaryBranchId === currentUser.currentBranchId &&
+      (
+        (isViewerHeadOfCS && profileUser.role === 'CS_AGENT') ||
+        (isViewerHeadOfMarketing && profileUser.role === 'MEDIA_BUYER')
+      );
     // Disbursements page is Finance → HoM only; HoM distributes to Media Buyers from Marketing → Funding.
     const canDisburseToThisUser =
       user.role === 'HEAD_OF_MARKETING' && (isSuperAdmin || perms.includes('finance.disburse'));
@@ -335,7 +345,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => null)
     : Promise.resolve(null);
 
-    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, currentFinanceOfficer, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS };
+    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, currentFinanceOfficer, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS, canEditLimited };
   })();
 
   return defer({ userDetail: userDetailPromise });

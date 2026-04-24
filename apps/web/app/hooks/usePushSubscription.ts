@@ -20,6 +20,20 @@ function isIOS(): boolean {
   return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
 }
 
+/**
+ * Detect whether the current window is running as an installed PWA (home-screen icon).
+ * `display-mode: standalone` is the cross-browser signal; `navigator.standalone` is the
+ * iOS-only variant Safari exposes. Returns 'UNKNOWN' on the server / pre-hydration.
+ */
+export type InstallMode = 'STANDALONE' | 'BROWSER' | 'UNKNOWN';
+export function detectInstallMode(): InstallMode {
+  if (typeof window === 'undefined') return 'UNKNOWN';
+  const standalone =
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return standalone ? 'STANDALONE' : 'BROWSER';
+}
+
 function getApiBase(): string {
   const w = window as Window & { __ENV?: Record<string, unknown> };
   const raw = typeof w.__ENV?.API_URL === 'string' ? w.__ENV.API_URL : 'http://localhost:4444';
@@ -67,15 +81,72 @@ export function usePushSubscription(): UsePushSubscriptionResult {
     const perm = Notification.permission as PermissionState;
     setPermissionState(perm === 'default' || perm === 'granted' || perm === 'denied' ? perm : 'default');
 
-    // Check if already subscribed
+    // Check if already subscribed, and heartbeat the current install mode so the dashboard
+    // tracks installs/uninstalls between sessions without requiring a fresh subscribe.
     navigator.serviceWorker.ready
       .then((registration) => registration.pushManager.getSubscription())
       .then((sub) => {
-        if (sub) setIsSubscribed(true);
+        if (sub) {
+          setIsSubscribed(true);
+          const mode = detectInstallMode();
+          if (mode !== 'UNKNOWN') {
+            fetch(`${getApiBase()}/trpc/notifications.updatePushInstallMode`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ endpoint: sub.endpoint, installMode: mode }),
+            }).catch(() => {
+              // Heartbeat is best-effort; next mount will try again.
+            });
+          }
+        }
       })
       .catch(() => {
         // Service worker not ready yet — ignore
       });
+  }, []);
+
+  // When the user installs the PWA mid-session, the `appinstalled` event fires in the
+  // browsing context and `display-mode` flips to `standalone`. Push the updated flag
+  // immediately so the admin dashboard reflects it without waiting for the next mount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    async function pushMode(mode: InstallMode) {
+      if (mode === 'UNKNOWN') return;
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const sub = await registration.pushManager.getSubscription();
+        if (!sub) return;
+        await fetch(`${getApiBase()}/trpc/notifications.updatePushInstallMode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ endpoint: sub.endpoint, installMode: mode }),
+        });
+      } catch {
+        // Best-effort.
+      }
+    }
+
+    const onInstalled = () => {
+      setIsStandalone(true);
+      pushMode('STANDALONE');
+    };
+    window.addEventListener('appinstalled', onInstalled);
+
+    // Some browsers flip display-mode without firing appinstalled (e.g. user manually
+    // added to home screen). Watch the media query so we catch that too.
+    const mq = window.matchMedia('(display-mode: standalone)');
+    const onDisplayModeChange = (e: MediaQueryListEvent) => {
+      setIsStandalone(e.matches);
+      pushMode(e.matches ? 'STANDALONE' : 'BROWSER');
+    };
+    mq.addEventListener('change', onDisplayModeChange);
+
+    return () => {
+      window.removeEventListener('appinstalled', onInstalled);
+      mq.removeEventListener('change', onDisplayModeChange);
+    };
   }, []);
 
   /**
@@ -96,6 +167,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
         auth: raw.keys.auth,
         p256dh: raw.keys.p256dh,
         userAgent: navigator.userAgent,
+        installMode: detectInstallMode(),
       }),
     });
     if (!res.ok) {

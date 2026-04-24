@@ -73,9 +73,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const metricsP = apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, { method: 'GET', cookie });
   const campaignsP = apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`, { method: 'GET', cookie });
   const productsP = apiRequest<unknown>('/trpc/products.list', { method: 'GET', cookie });
-  const usersP = isFundingAdmin
-    ? apiRequest<unknown>('/trpc/users.list', { method: 'GET', cookie })
-    : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
 
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
   const leaderboardP = apiRequest<unknown>(
@@ -88,6 +85,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const statusCounts = parseAdSpendStatusCounts(adSpendCountsRes);
   const totalRows = adSpendData?.pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalRows / AD_SPEND_PER_PAGE));
+
+  // Resolve names for every user ID actually referenced on this page (buyers + approvers),
+  // ignoring pagination and status filters so we still show names for deactivated users.
+  // Much cheaper than fetching the whole user list, and correct at any org size.
+  const userIdsOnPage = new Set<string>();
+  for (const row of adSpendData?.records ?? []) {
+    if (row.mediaBuyerId) userIdsOnPage.add(row.mediaBuyerId);
+    if (row.approvedBy) userIdsOnPage.add(row.approvedBy);
+  }
+  const usersP = isFundingAdmin && userIdsOnPage.size > 0
+    ? apiRequest<unknown>(
+        `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ userIds: Array.from(userIdsOnPage), limit: 100 }))}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
 
   const [metrics, leaderboard, usersData, productsData] = await Promise.all([
     metricsP.then(parseMetrics).catch(() => emptyMetrics()),

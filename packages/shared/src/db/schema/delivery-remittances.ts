@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { remittanceStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns } from './helpers';
 import { users } from './users';
@@ -11,7 +11,7 @@ import { orders } from './orders';
  */
 export const deliveryRemittances = pgTable('delivery_remittances', {
   id: uuidv7Pk(),
-  logisticsLocationId: text('logistics_location_id')
+  logisticsLocationId: uuid('logistics_location_id')
     .notNull()
     .references(() => logisticsLocations.id),
   sentBy: text('sent_by')
@@ -34,10 +34,10 @@ export const deliveryRemittances = pgTable('delivery_remittances', {
  */
 export const deliveryRemittanceOrders = pgTable('delivery_remittance_orders', {
   id: uuidv7Pk(),
-  deliveryRemittanceId: text('delivery_remittance_id')
+  deliveryRemittanceId: uuid('delivery_remittance_id')
     .notNull()
     .references(() => deliveryRemittances.id, { onDelete: 'cascade' }),
-  orderId: text('order_id')
+  orderId: uuid('order_id')
     .notNull()
     .references(() => orders.id)
     .unique(),

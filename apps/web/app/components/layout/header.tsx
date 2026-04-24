@@ -210,14 +210,20 @@ export function Header({
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
           </svg>
         </button>
-        {/* Logo — mobile only, after menu bar */}
+        {/* Logo — mobile only, after menu bar. Wrapped in the themed strip the
+            desktop sidebar uses (`bg-app-logo-strip-bg`) so the logo always sits
+            on a consistent light-ish background. Because the strip is always
+            light, we always use the light-mode asset (yannis-logo-white-bg.png)
+            instead of swapping by `isDarkTheme` — swapping was the bug, because
+            in Dark/Dim/Ink themes the function picked yannis-logo1.png, which
+            assumed a dark surface the strip wasn't giving it. */}
         <Link
           to="/admin"
-          className="lg:hidden flex items-center shrink-0"
+          className="lg:hidden flex items-center shrink-0 px-2 py-0.5 rounded-lg border border-app-logo-strip-border bg-app-logo-strip-bg"
           aria-label="Yannis home"
         >
           <img
-            src={isDarkTheme ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
+            src="/assets/yannis-logo-white-bg.png"
             alt="Yannis"
             className="h-[1.575rem] w-auto max-w-[108px] object-contain"
           />

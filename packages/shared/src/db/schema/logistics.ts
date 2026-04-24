@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, boolean, integer, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, jsonb, boolean, integer, timestamp } from 'drizzle-orm/pg-core';
 import { recordStatusEnum, reconciliationStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -19,7 +19,7 @@ export const logisticsProviders = pgTable('logistics_providers', {
 // Table 5: logistics_locations
 export const logisticsLocations = pgTable('logistics_locations', {
   id: uuidv7Pk(),
-  providerId: text('provider_id')
+  providerId: uuid('provider_id')
     .notNull()
     .references(() => logisticsProviders.id),
   name: text('name').notNull(),
@@ -42,10 +42,10 @@ export const logisticsLocations = pgTable('logistics_locations', {
 // Table: stock_reconciliations — Ghost Stock Prevention
 export const stockReconciliations = pgTable('stock_reconciliations', {
   id: uuidv7Pk(),
-  locationId: text('location_id')
+  locationId: uuid('location_id')
     .notNull()
     .references(() => logisticsLocations.id),
-  productId: text('product_id')
+  productId: uuid('product_id')
     .notNull()
     .references(() => products.id),
   digitalCount: integer('digital_count').notNull(),

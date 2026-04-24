@@ -4,11 +4,19 @@ import { z } from 'zod';
 // Save Push Subscription
 // ============================================
 
+export const pushInstallModeSchema = z.enum(['STANDALONE', 'BROWSER', 'UNKNOWN']);
+export type PushInstallMode = z.infer<typeof pushInstallModeSchema>;
+
 export const savePushSubscriptionSchema = z.object({
   endpoint: z.string().url(),
   auth: z.string().min(1),
   p256dh: z.string().min(1),
   userAgent: z.string().optional(),
+  /**
+   * Whether the client is running as an installed PWA (home-screen icon) or in a regular
+   * browser tab. Optional for back-compat with older clients — treated as UNKNOWN when omitted.
+   */
+  installMode: pushInstallModeSchema.optional(),
 });
 
 export type SavePushSubscriptionInput = z.infer<typeof savePushSubscriptionSchema>;
@@ -18,6 +26,13 @@ export const removePushSubscriptionSchema = z.object({
 });
 
 export type RemovePushSubscriptionInput = z.infer<typeof removePushSubscriptionSchema>;
+
+export const updatePushInstallModeSchema = z.object({
+  endpoint: z.string().url(),
+  installMode: pushInstallModeSchema,
+});
+
+export type UpdatePushInstallModeInput = z.infer<typeof updatePushInstallModeSchema>;
 
 // ============================================
 // Broadcast Push

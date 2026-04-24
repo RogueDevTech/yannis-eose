@@ -235,6 +235,14 @@ export const pushTargetTypeEnum = pgEnum('push_target_type', ['ALL', 'ROLE', 'US
 /** How a push automation rule is triggered — time-based cron or event-based. */
 export const pushAutomationTriggerEnum = pgEnum('push_automation_trigger', ['CRON', 'EVENT']);
 
+/**
+ * Device's PWA install mode at the time the subscription was saved / heartbeat ran.
+ * STANDALONE = installed to home screen (matchMedia('(display-mode: standalone)').matches === true
+ * on desktop/Android, or navigator.standalone === true on iOS). BROWSER = running in a regular tab.
+ * UNKNOWN = client never reported (legacy rows, or browser too old to expose the signal).
+ */
+export const pushInstallModeEnum = pgEnum('push_install_mode', ['STANDALONE', 'BROWSER', 'UNKNOWN']);
+
 /** Human-readable order lifecycle timeline event types. */
 export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'ORDER_RECEIVED',

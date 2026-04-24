@@ -1,4 +1,4 @@
-import { pgTable, text, numeric, jsonb, timestamp, serial, integer } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb, timestamp, serial, integer } from 'drizzle-orm/pg-core';
 import { invoiceStatusEnum, approvalRequestTypeEnum, approvalStatusEnum, settlementWindowEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { orders } from './orders';
@@ -8,7 +8,7 @@ import { users } from './users';
 export const invoices = pgTable('invoices', {
   id: uuidv7Pk(),
   referenceNumber: serial('reference_number').notNull().unique(),
-  orderId: text('order_id').references(() => orders.id),
+  orderId: uuid('order_id').references(() => orders.id),
   recipientInfo: jsonb('recipient_info'),
   lineItems: jsonb('line_items'),
   taxRate: numeric('tax_rate', { precision: 5, scale: 4 }),
@@ -23,14 +23,14 @@ export const invoices = pgTable('invoices', {
 export const approvalRequests = pgTable('approval_requests', {
   id: uuidv7Pk(),
   type: approvalRequestTypeEnum('type').notNull(),
-  requesterId: text('requester_id').notNull().references(() => users.id),
+  requesterId: uuid('requester_id').notNull().references(() => users.id),
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
   description: text('description').notNull(),
   status: approvalStatusEnum('status').default('PENDING').notNull(),
-  approverId: text('approver_id').references(() => users.id),
+  approverId: uuid('approver_id').references(() => users.id),
   approvalReason: text('approval_reason'),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
-  budgetId: text('budget_id'),
+  budgetId: uuid('budget_id'),
   ...temporalColumns,
   ...timestampColumns,
 });
