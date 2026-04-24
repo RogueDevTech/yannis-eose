@@ -10,13 +10,22 @@ export const meta: MetaFunction = () => [
   { title: 'Permission Requests — Yannis EOSE' },
 ];
 
+const ALLOWED_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
+type StatusFilter = (typeof ALLOWED_STATUSES)[number];
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   const cookie = getSessionCookie(request);
 
+  const url = new URL(request.url);
+  const rawStatus = url.searchParams.get('status')?.toUpperCase();
+  const status: StatusFilter = ALLOWED_STATUSES.includes(rawStatus as StatusFilter)
+    ? (rawStatus as StatusFilter)
+    : 'PENDING';
+
   const res = await apiRequest<unknown>(
-    '/trpc/permissionRequests.listPending?input=%7B%7D',
+    `/trpc/permissionRequests.list?input=${encodeURIComponent(JSON.stringify({ status }))}`,
     { method: 'GET', cookie },
   );
 
@@ -28,7 +37,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // NOTE: true approval of Admin-level roles is still enforced server-side to SuperAdmin only.
   const canApprove = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('audit.read');
 
-  return { requests, canApprove };
+  return { requests, canApprove, status };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -73,6 +82,6 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function PermissionRequestsRoute() {
-  const { requests, canApprove } = useLoaderData<typeof loader>();
-  return <PermissionRequestsPage requests={requests} canApprove={canApprove} />;
+  const { requests, canApprove, status } = useLoaderData<typeof loader>();
+  return <PermissionRequestsPage requests={requests} canApprove={canApprove} activeStatus={status} />;
 }

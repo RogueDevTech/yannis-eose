@@ -6,6 +6,7 @@ import {
   markNotificationsReadSchema,
   savePushSubscriptionSchema,
   removePushSubscriptionSchema,
+  updatePushInstallModeSchema,
   broadcastPushSchema,
   getPushDeliveryLogSchema,
   resendPushSchema,
@@ -111,6 +112,17 @@ export const notificationsRouter = router({
     .input(removePushSubscriptionSchema)
     .mutation(async ({ input, ctx }) => {
       await getNotificationsService().removePushSubscription(ctx.user.id, input);
+      return { success: true };
+    }),
+
+  /**
+   * Heartbeat: client tells us the current install mode (STANDALONE vs BROWSER) for this device.
+   * Called on app mount + on the `appinstalled` event so the admin dashboard shows the latest state.
+   */
+  updatePushInstallMode: authedProcedure
+    .input(updatePushInstallModeSchema)
+    .mutation(async ({ input, ctx }) => {
+      await getNotificationsService().updatePushInstallMode(ctx.user.id, input);
       return { success: true };
     }),
 

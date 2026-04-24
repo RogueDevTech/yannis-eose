@@ -3,6 +3,7 @@ import { Form, useActionData, useNavigation, Link } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
@@ -67,6 +68,7 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
   const [assignFinanceHat, setAssignFinanceHat] = useState(false);
+  const [conflictModalOpen, setConflictModalOpen] = useState(false);
 
   const conflictingHead =
     HEAD_ROLES.includes(selectedRole) && selectedBranchId
@@ -79,7 +81,10 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
     : undefined;
 
   // Role-conditional visibility
-  const showCapacity = ['CS_AGENT', 'HEAD_OF_CS'].includes(selectedRole);
+  // Capacity is only meaningful for roles that work an individual workload — CS agents
+  // (max concurrent orders they can handle) and Media Buyers (max concurrent campaigns).
+  // Managers / heads don't carry a personal load, so hiding it removes noise from their forms.
+  const showCapacity = ['CS_AGENT', 'MEDIA_BUYER'].includes(selectedRole);
   const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const is3PLRole = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const showProductAssignment = selectedRole === 'MEDIA_BUYER';
@@ -124,7 +129,16 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
         </div>
       )}
 
-      <Form method="post" className="space-y-6">
+      <Form
+        method="post"
+        className="space-y-6"
+        onSubmit={(e) => {
+          if (conflictingHead) {
+            e.preventDefault();
+            setConflictModalOpen(true);
+          }
+        }}
+      >
         {/* Hidden fields for JSON arrays */}
         {showProductAssignment && selectedProductIds.length > 0 && (
           <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
@@ -448,7 +462,8 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
                 placeholder="08031234567 or +2348031234567"
                 pattern="^(0[789]\d{9}|\+234[789]\d{9})$"
                 title="Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)"
-                hint="Never displayed publicly. Masked in all views."
+                hint="Must be unique across all staff. Never displayed publicly; masked in all views."
+                required
               />
             </div>
           </div>
@@ -464,6 +479,42 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
           </Button>
         </div>
       </Form>
+
+      {conflictModalOpen && conflictingHead && (
+        <Modal
+          open
+          onClose={() => setConflictModalOpen(false)}
+          maxWidth="max-w-md"
+          contentClassName="p-6"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Role already taken in this branch</h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            Only one active <strong>{formatRole(selectedRole)}</strong> is allowed per branch.{' '}
+            <strong>{conflictingBranch ? conflictingBranch.name : 'This branch'}</strong> already has{' '}
+            <strong>{conflictingHead.name}</strong> in that role.
+          </p>
+          <p className="text-sm text-app-fg-muted mb-4">
+            To add a new {formatRole(selectedRole)}, first change {conflictingHead.name}&apos;s role
+            (or deactivate them) from their profile page.
+          </p>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setConflictModalOpen(false)}
+            >
+              Back
+            </Button>
+            <Link
+              to={`/hr/users/${conflictingHead.id}`}
+              className="btn-primary"
+              onClick={() => setConflictModalOpen(false)}
+            >
+              Go to {conflictingHead.name}
+            </Link>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

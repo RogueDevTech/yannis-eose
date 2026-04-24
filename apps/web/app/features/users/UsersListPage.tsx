@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useSearchParams, useNavigation } from '@remix-run/react';
+import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { SearchInput } from '~/components/ui/search-input';
@@ -8,6 +8,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Pagination } from '~/components/ui/pagination';
 import { Spinner } from '~/components/ui/spinner';
+import { useFetcherToast } from '~/components/ui/toast';
 import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
@@ -34,6 +35,8 @@ export function UsersListPage({
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
   const safeTotalPages = Math.max(1, totalPages);
+  const resendFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
+  useFetcherToast(resendFetcher.data, { successMessage: 'Invite re-sent with new credentials' });
 
   const handleStatusChange = (value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -193,12 +196,27 @@ export function UsersListPage({
                     })}
                   </td>
                   <td className="table-cell text-right">
-                    <Link
-                      to={`/hr/users/${user.id}`}
-                      className="btn-secondary btn-sm"
-                    >
-                      View
-                    </Link>
+                    <div className="flex items-center justify-end gap-2">
+                      {user.status === 'PENDING' && (
+                        <resendFetcher.Form method="post">
+                          <input type="hidden" name="intent" value="resendInvite" />
+                          <input type="hidden" name="userId" value={user.id} />
+                          <button
+                            type="submit"
+                            className="btn-secondary btn-sm text-brand-600 dark:text-brand-400"
+                            disabled={resendFetcher.state !== 'idle'}
+                          >
+                            Resend Invite
+                          </button>
+                        </resendFetcher.Form>
+                      )}
+                      <Link
+                        to={`/hr/users/${user.id}`}
+                        className="btn-secondary btn-sm"
+                      >
+                        View
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -219,37 +237,56 @@ export function UsersListPage({
         {/* Mobile card list */}
         <div className="md:hidden space-y-3 px-1">
           {filteredUsers.map((user) => (
-            <Link
+            <div
               key={user.id}
-              to={`/hr/users/${user.id}`}
-              className="block rounded-lg border border-app-border bg-app-elevated p-4 hover:bg-app-hover/50 transition-colors"
+              className="rounded-lg border border-app-border bg-app-elevated p-4"
             >
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-9 h-9 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">
-                  <span className="text-sm font-semibold text-white">
-                    {user.name.charAt(0).toUpperCase()}
+              <Link
+                to={`/hr/users/${user.id}`}
+                className="block hover:bg-app-hover/50 transition-colors"
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-9 h-9 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-semibold text-white">
+                      {user.name.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-app-fg truncate">{user.name}</p>
+                    <p className="text-sm text-app-fg-muted truncate">{user.email}</p>
+                  </div>
+                  <StatusBadge status={user.status} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <StatusBadge status={user.role} label={formatRole(user.role)} />
+                  <span className="text-xs text-app-fg-muted">
+                    {new Date(user.createdAt).toLocaleDateString('en-NG', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
                   </span>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-app-fg truncate">{user.name}</p>
-                  <p className="text-sm text-app-fg-muted truncate">{user.email}</p>
+                <div className="mt-2">
+                  <UserBranchBadges branches={user.branchMemberships} compact />
                 </div>
-                <StatusBadge status={user.status} />
-              </div>
-              <div className="flex items-center justify-between">
-                <StatusBadge status={user.role} label={formatRole(user.role)} />
-                <span className="text-xs text-app-fg-muted">
-                  {new Date(user.createdAt).toLocaleDateString('en-NG', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
-                </span>
-              </div>
-              <div className="mt-2">
-                <UserBranchBadges branches={user.branchMemberships} compact />
-              </div>
-            </Link>
+              </Link>
+              {user.status === 'PENDING' && (
+                <div className="mt-3 pt-3 border-t border-app-border">
+                  <resendFetcher.Form method="post">
+                    <input type="hidden" name="intent" value="resendInvite" />
+                    <input type="hidden" name="userId" value={user.id} />
+                    <button
+                      type="submit"
+                      className="btn-secondary btn-sm w-full text-brand-600 dark:text-brand-400"
+                      disabled={resendFetcher.state !== 'idle'}
+                    >
+                      Resend Invite
+                    </button>
+                  </resendFetcher.Form>
+                </div>
+              )}
+            </div>
           ))}
           {filteredUsers.length === 0 && (
             <EmptyState

@@ -19,10 +19,22 @@ export class PermissionRequestsService {
   ) {}
 
   /**
-   * List all PENDING permission requests (SuperAdmin only).
+   * List all PENDING permission requests. Kept for backwards compatibility; thin wrapper
+   * around {@link list} — new callers should use `list({ status: 'PENDING' })` directly.
    */
   async listPending() {
-    const rows = await this.db
+    return this.list({ status: 'PENDING' });
+  }
+
+  /**
+   * List permission requests with an optional status filter.
+   * Returns the full history (PENDING + APPROVED + REJECTED) when `status` is 'ALL' or omitted.
+   * Enriched with requester, target, and approver names so the UI can show the full audit trail.
+   */
+  async list(options?: { status?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' }) {
+    const statusFilter = options?.status ?? 'PENDING';
+
+    const baseQuery = this.db
       .select({
         id: schema.permissionRequests.id,
         type: schema.permissionRequests.type,
@@ -33,16 +45,22 @@ export class PermissionRequestsService {
         permissionCode: schema.permissionRequests.permissionCode,
         reason: schema.permissionRequests.reason,
         payload: schema.permissionRequests.payload,
+        approverId: schema.permissionRequests.approverId,
+        approvalReason: schema.permissionRequests.approvalReason,
+        approvedAt: schema.permissionRequests.approvedAt,
         createdAt: schema.permissionRequests.createdAt,
       })
-      .from(schema.permissionRequests)
-      .where(eq(schema.permissionRequests.status, 'PENDING'))
-      .orderBy(desc(schema.permissionRequests.createdAt));
+      .from(schema.permissionRequests);
 
-    // Enrich with requester and target user names
+    const rows = statusFilter === 'ALL'
+      ? await baseQuery.orderBy(desc(schema.permissionRequests.createdAt))
+      : await baseQuery
+          .where(eq(schema.permissionRequests.status, statusFilter))
+          .orderBy(desc(schema.permissionRequests.createdAt));
+
     const enriched = await Promise.all(
       rows.map(async (row) => {
-        const [requester, targetUser] = await Promise.all([
+        const [requester, targetUser, approver] = await Promise.all([
           row.requesterId
             ? this.db
                 .select({ name: schema.users.name, email: schema.users.email })
@@ -57,6 +75,13 @@ export class PermissionRequestsService {
                 .where(eq(schema.users.id, row.targetUserId))
                 .limit(1)
             : [],
+          row.approverId
+            ? this.db
+                .select({ name: schema.users.name })
+                .from(schema.users)
+                .where(eq(schema.users.id, row.approverId))
+                .limit(1)
+            : [],
         ]);
 
         return {
@@ -65,6 +90,7 @@ export class PermissionRequestsService {
           requesterEmail: requester[0]?.email ?? '',
           targetUserName: targetUser[0]?.name ?? null,
           targetUserEmail: targetUser[0]?.email ?? null,
+          approverName: approver[0]?.name ?? null,
         };
       }),
     );

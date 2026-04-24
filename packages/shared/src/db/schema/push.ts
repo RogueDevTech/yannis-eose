@@ -6,6 +6,7 @@ import {
   pushTriggerTypeEnum,
   pushTargetTypeEnum,
   pushAutomationTriggerEnum,
+  pushInstallModeEnum,
 } from './enums';
 import { branches } from './branches';
 
@@ -22,6 +23,13 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   auth: text('auth').notNull(),
   p256dh: text('p256dh').notNull(),
   userAgent: text('user_agent'),
+  /**
+   * Whether the device was running as a home-screen PWA when the subscription was last reported.
+   * Set on save and refreshed via the `updateInstallMode` heartbeat on every app mount.
+   * See `pushInstallModeEnum` for semantics.
+   */
+  installMode: pushInstallModeEnum('install_mode').default('UNKNOWN').notNull(),
+  installModeUpdatedAt: timestamp('install_mode_updated_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 

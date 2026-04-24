@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
-import { Link } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageHeader } from '~/components/ui/page-header';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Textarea } from '~/components/ui/textarea';
-import type { PermissionRequest } from './types';
+import { FilterPills } from '~/components/ui/filter-pills';
+import type { PermissionRequest, PermissionRequestStatusFilter } from './types';
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
   USER_CREATION: 'User Creation',
@@ -17,12 +17,38 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
   PERMISSION_GRANT: 'Permission Grant',
 };
 
-export function PermissionRequestsPage({ requests, canApprove = false }: { requests: PermissionRequest[]; canApprove?: boolean }) {
+const STATUS_FILTERS: Array<{ value: PermissionRequestStatusFilter; label: string }> = [
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'APPROVED', label: 'Approved' },
+  { value: 'REJECTED', label: 'Rejected' },
+  { value: 'ALL', label: 'All' },
+];
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-NG', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export function PermissionRequestsPage({
+  requests,
+  canApprove = false,
+  activeStatus = 'PENDING',
+}: {
+  requests: PermissionRequest[];
+  canApprove?: boolean;
+  activeStatus?: PermissionRequestStatusFilter;
+}) {
   const fetcher = useFetcher();
   const [modal, setModal] = useState<{ requestId: string; action: 'APPROVED' | 'REJECTED' } | null>(null);
   const [reason, setReason] = useState('');
   const fetcherError = (fetcher.data as { error?: string })?.error;
   const [dismissedError, setDismissedError] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useFetcherToast(fetcher.data, { successMessage: 'Request processed' });
 
@@ -30,11 +56,21 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
     if (fetcherError) setDismissedError(false);
   }, [fetcherError]);
 
+  const handleStatusChange = (next: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'PENDING') {
+      params.delete('status');
+    } else {
+      params.set('status', next);
+    }
+    setSearchParams(params, { replace: true });
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Permission Requests"
-        description="HR requests for sensitive roles (Super Admin, Finance Officer) require your approval."
+        description="HR requests for sensitive roles (Super Admin, Finance Officer) require your approval. Approved and rejected requests are preserved for audit."
       />
 
       {fetcherError && !dismissedError && (
@@ -46,17 +82,25 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
         />
       )}
 
+      <FilterPills
+        options={STATUS_FILTERS}
+        value={activeStatus}
+        onChange={handleStatusChange}
+      />
+
       <div className="card p-0 overflow-hidden">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr>
                 <th className="table-header">Type</th>
+                <th className="table-header">Status</th>
                 <th className="table-header">Requester</th>
                 <th className="table-header">Target</th>
                 <th className="table-header">Requested</th>
                 <th className="table-header">Reason</th>
-                <th className="table-header">Date</th>
+                <th className="table-header">Submitted</th>
+                <th className="table-header">Decision</th>
                 {canApprove && <th className="table-header">Actions</th>}
               </tr>
             </thead>
@@ -65,6 +109,9 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
                 <tr key={req.id} className="table-row">
                   <td className="table-cell">
                     <StatusBadge status={REQUEST_TYPE_LABELS[req.type] ?? req.type} />
+                  </td>
+                  <td className="table-cell">
+                    <StatusBadge status={req.status} />
                   </td>
                   <td className="table-cell text-sm">
                     <span className="font-medium text-app-fg">{req.requesterName}</span>
@@ -100,40 +147,65 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
                     {req.reason}
                   </td>
                   <td className="table-cell text-app-fg-muted text-sm">
-                    {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    {formatDateTime(req.createdAt)}
+                  </td>
+                  <td className="table-cell text-sm">
+                    {req.status === 'PENDING' ? (
+                      <span className="text-app-fg-muted">—</span>
+                    ) : (
+                      <div className="space-y-0.5">
+                        <span className="block text-app-fg font-medium">{req.approverName ?? 'Unknown'}</span>
+                        <span className="block text-xs text-app-fg-muted">{formatDateTime(req.approvedAt)}</span>
+                        {req.approvalReason && (
+                          <span className="block text-xs text-app-fg-muted line-clamp-2 max-w-xs">{req.approvalReason}</span>
+                        )}
+                      </div>
+                    )}
                   </td>
                   {canApprove && (
                     <td className="table-cell">
-                      <div className="flex gap-1.5">
-                        <Button
-                          type="button"
-                          variant="success"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
-                        >
-                          Approve
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="danger"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
-                        >
-                          Reject
-                        </Button>
-                      </div>
+                      {req.status === 'PENDING' ? (
+                        <div className="flex gap-1.5">
+                          <Button
+                            type="button"
+                            variant="success"
+                            size="sm"
+                            className="text-xs"
+                            onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            className="text-xs"
+                            onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-app-fg-muted">—</span>
+                      )}
                     </td>
                   )}
                 </tr>
               ))}
               {requests.length === 0 && (
                 <tr>
-                  <td colSpan={canApprove ? 7 : 6} className="px-4 py-8">
+                  <td colSpan={canApprove ? 9 : 8} className="px-4 py-8">
                     <EmptyState
-                      title="No pending permission requests"
-                      description="New requests from HR will appear here for your review."
+                      title={
+                        activeStatus === 'PENDING'
+                          ? 'No pending permission requests'
+                          : `No ${activeStatus.toLowerCase()} permission requests`
+                      }
+                      description={
+                        activeStatus === 'PENDING'
+                          ? 'New requests from HR will appear here for your review.'
+                          : 'Try switching the filter to see requests in other states.'
+                      }
                       variant="inline"
                     />
                   </td>
@@ -147,14 +219,29 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
         <div className="md:hidden space-y-3 px-1">
           {requests.map((req) => (
             <div key={req.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <StatusBadge status={REQUEST_TYPE_LABELS[req.type] ?? req.type} />
+                <StatusBadge status={req.status} />
               </div>
               <p className="text-sm font-medium text-app-fg">
                 {req.requesterName} → {req.requestedRole?.replace(/_/g, ' ') ?? req.permissionCode ?? '—'}
               </p>
               <p className="text-sm text-app-fg-muted">{req.reason}</p>
-              {canApprove && (
+              <p className="text-xs text-app-fg-muted">Submitted {formatDateTime(req.createdAt)}</p>
+              {req.status !== 'PENDING' && (
+                <div className="rounded-md bg-app-hover px-3 py-2 space-y-0.5">
+                  <p className="text-xs text-app-fg-muted">
+                    {req.status === 'APPROVED' ? 'Approved' : 'Rejected'} by{' '}
+                    <span className="font-medium text-app-fg">{req.approverName ?? 'Unknown'}</span>
+                    {' · '}
+                    {formatDateTime(req.approvedAt)}
+                  </p>
+                  {req.approvalReason && (
+                    <p className="text-xs text-app-fg-muted">{req.approvalReason}</p>
+                  )}
+                </div>
+              )}
+              {canApprove && req.status === 'PENDING' && (
                 <div className="flex gap-2 pt-1">
                   <Button
                     type="button"
@@ -181,8 +268,16 @@ export function PermissionRequestsPage({ requests, canApprove = false }: { reque
           {requests.length === 0 && (
             <div className="py-6">
               <EmptyState
-                title="No pending permission requests"
-                description="New requests from HR will appear here for your review."
+                title={
+                  activeStatus === 'PENDING'
+                    ? 'No pending permission requests'
+                    : `No ${activeStatus.toLowerCase()} permission requests`
+                }
+                description={
+                  activeStatus === 'PENDING'
+                    ? 'New requests from HR will appear here for your review.'
+                    : 'Try switching the filter to see requests in other states.'
+                }
                 variant="inline"
               />
             </div>

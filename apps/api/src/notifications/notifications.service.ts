@@ -641,6 +641,8 @@ export class NotificationsService {
     userId: string,
     input: SavePushSubscriptionInput,
   ): Promise<void> {
+    const installMode = input.installMode ?? 'UNKNOWN';
+    const installModeUpdatedAt = input.installMode ? new Date() : null;
     await this.db
       .insert(schema.pushSubscriptions)
       .values({
@@ -649,6 +651,8 @@ export class NotificationsService {
         auth: input.auth,
         p256dh: input.p256dh,
         userAgent: input.userAgent ?? null,
+        installMode,
+        installModeUpdatedAt,
       })
       .onConflictDoUpdate({
         target: schema.pushSubscriptions.endpoint,
@@ -657,6 +661,8 @@ export class NotificationsService {
           auth: input.auth,
           p256dh: input.p256dh,
           userAgent: input.userAgent ?? null,
+          installMode,
+          installModeUpdatedAt,
         },
       });
   }
@@ -670,6 +676,30 @@ export class NotificationsService {
   ): Promise<void> {
     await this.db
       .delete(schema.pushSubscriptions)
+      .where(
+        and(
+          eq(schema.pushSubscriptions.userId, userId),
+          eq(schema.pushSubscriptions.endpoint, input.endpoint),
+        ),
+      );
+  }
+
+  /**
+   * Heartbeat: update the install_mode on an existing subscription by endpoint.
+   * Called from the client on every app mount so the dashboard reflects the latest state
+   * (e.g. user installed the PWA yesterday, removed it today). Idempotent; silently no-ops
+   * if no row matches — that's fine, they'll subscribe fresh via savePushSubscription.
+   */
+  async updatePushInstallMode(
+    userId: string,
+    input: { endpoint: string; installMode: 'STANDALONE' | 'BROWSER' | 'UNKNOWN' },
+  ): Promise<void> {
+    await this.db
+      .update(schema.pushSubscriptions)
+      .set({
+        installMode: input.installMode,
+        installModeUpdatedAt: new Date(),
+      })
       .where(
         and(
           eq(schema.pushSubscriptions.userId, userId),
@@ -1128,7 +1158,14 @@ export class NotificationsService {
    */
   async getPushStatusForUser(userId: string): Promise<{
     subscribedDevices: number;
-    devices: Array<{ id: string; userAgent: string | null; createdAt: Date }>;
+    devices: Array<{
+      id: string;
+      userAgent: string | null;
+      createdAt: Date;
+      installMode: 'STANDALONE' | 'BROWSER' | 'UNKNOWN';
+      installModeUpdatedAt: Date | null;
+    }>;
+    installedDeviceCount: number;
     lastPushSentAt: Date | null;
     totalPushSent: number;
   }> {
@@ -1138,6 +1175,8 @@ export class NotificationsService {
           id: schema.pushSubscriptions.id,
           userAgent: schema.pushSubscriptions.userAgent,
           createdAt: schema.pushSubscriptions.createdAt,
+          installMode: schema.pushSubscriptions.installMode,
+          installModeUpdatedAt: schema.pushSubscriptions.installModeUpdatedAt,
         })
         .from(schema.pushSubscriptions)
         .where(eq(schema.pushSubscriptions.userId, userId))
@@ -1162,6 +1201,7 @@ export class NotificationsService {
     return {
       subscribedDevices: devices.length,
       devices,
+      installedDeviceCount: devices.filter((d) => d.installMode === 'STANDALONE').length,
       lastPushSentAt: lastLog[0]?.sentAt ?? null,
       totalPushSent: Number(totalRes[0]?.total ?? 0),
     };

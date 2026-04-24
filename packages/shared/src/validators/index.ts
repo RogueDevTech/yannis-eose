@@ -289,6 +289,8 @@ export type {
 export {
   savePushSubscriptionSchema,
   removePushSubscriptionSchema,
+  updatePushInstallModeSchema,
+  pushInstallModeSchema,
   broadcastPushSchema,
   getPushDeliveryLogSchema,
   resendPushSchema,
@@ -302,6 +304,8 @@ export {
 export type {
   SavePushSubscriptionInput,
   RemovePushSubscriptionInput,
+  UpdatePushInstallModeInput,
+  PushInstallMode,
   BroadcastPushInput,
   GetPushDeliveryLogInput,
   ResendPushInput,

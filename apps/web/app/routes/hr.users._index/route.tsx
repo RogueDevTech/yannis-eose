@@ -1,4 +1,5 @@
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { UsersListPage } from '~/features/users/UsersListPage';
@@ -7,6 +8,33 @@ import type { User } from '~/features/users/types';
 export const meta: MetaFunction = () => [
   { title: 'Users — Yannis EOSE' },
 ];
+
+export async function action({ request }: ActionFunctionArgs) {
+  await requirePermission(request, 'users.create');
+  const cookie = getSessionCookie(request);
+  const formData = await request.formData();
+  const intent = formData.get('intent');
+
+  if (intent === 'resendInvite') {
+    const userId = formData.get('userId') as string;
+    if (!userId) return json({ error: 'Missing userId' }, { status: 400 });
+
+    const res = await apiRequest('/trpc/users.resendInvite', {
+      method: 'POST',
+      cookie,
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!res.ok) {
+      const msg = (res.data as Record<string, unknown>)?.message ?? 'Failed to resend invite';
+      return json({ error: msg, intent }, { status: 400 });
+    }
+
+    return json({ success: true, intent, message: 'Invite re-sent successfully' });
+  }
+
+  return json({ error: 'Unknown intent' }, { status: 400 });
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   // /hr/users is HR's org-wide directory — gated on `hr.read` (HR_MANAGER + admins). Head of

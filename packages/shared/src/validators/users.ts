@@ -101,11 +101,14 @@ export const createStaffSchema = z.object({
    */
   isFinanceOfficer: z.boolean().optional(),
 
-  // Contact — Nigerian phone: 0XXXXXXXXXX or +234XXXXXXXXXX
+  // Contact — Nigerian phone: 0XXXXXXXXXX or +234XXXXXXXXXX.
+  // Required on create (CEO directive 2026-04-24) — every staff member must have a reachable
+  // number and it must be unique across the org. Existing users without a phone can still be
+  // edited; the update validator keeps this optional for back-compat.
   phone: z.string().regex(
     /^(?:0[789]\d{9}|\+234[789]\d{9})$/,
     'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)',
-  ).optional(),
+  ),
 }).superRefine((data, ctx) => {
   // Every non-SuperAdmin user must have a primary branch at creation time.
   if (data.role !== 'SUPER_ADMIN' && !data.primaryBranchId) {
@@ -159,6 +162,12 @@ export const listUsersSchema = z.object({
   limit: z.number().int().min(1).max(100).default(20),
   sortBy: z.enum(['name', 'email', 'role', 'createdAt']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  /**
+   * Resolve names for an exact set of user IDs, bypassing pagination and the default
+   * "status != DEACTIVATED" filter. Used by feature pages (ad spend, orders) that need to
+   * display the name behind a foreign key no matter the current active/inactive state.
+   */
+  userIds: z.array(z.string().uuid()).max(500).optional(),
 });
 
 export type ListUsersInput = z.infer<typeof listUsersSchema>;

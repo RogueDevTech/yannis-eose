@@ -26,6 +26,18 @@ export const permissionRequestsRouter = router({
       return getService().listPending();
     }),
 
+  list: authedProcedure
+    .input(
+      z
+        .object({
+          status: z.enum(['ALL', 'PENDING', 'APPROVED', 'REJECTED']).optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input }) => {
+      return getService().list({ status: input?.status });
+    }),
+
   approve: permissionProcedure('audit.read')
     .input(
       z.object({
