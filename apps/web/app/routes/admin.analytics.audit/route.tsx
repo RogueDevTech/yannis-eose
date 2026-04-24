@@ -64,8 +64,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const trpcData = res.data as { result?: { data?: { rows: AuditEntry[]; total: number } } };
   const result = trpcData?.result?.data ?? { rows: [], total: 0 };
 
-  // Collect unique actor IDs from audit rows
-  const actorIds = [...new Set(result.rows.map((r) => r.changedBy).filter(Boolean))] as string[];
+  // Collect unique user IDs to resolve to names — actor (changedBy) PLUS any
+  // user-reference field inside each row's data (sender, receiver, requester, etc.).
+  // Lets the description renderer print "Sarah disbursed to John" instead of UUIDs.
+  const USER_REF_FIELDS = [
+    'sender_id', 'receiver_id', 'requester_id', 'requested_by', 'approver_id', 'approved_by',
+    'assigned_cs_id', 'assigned_rider_id', 'media_buyer_id', 'staff_id', 'user_id', 'created_by',
+    'cs_agent_id', 'rider_id',
+  ] as const;
+  const ids = new Set<string>();
+  for (const row of result.rows) {
+    if (row.changedBy) ids.add(row.changedBy);
+    const data = (row.data ?? {}) as Record<string, unknown>;
+    for (const field of USER_REF_FIELDS) {
+      const v = data[field];
+      if (typeof v === 'string' && v.length > 0) ids.add(v);
+    }
+  }
+  const actorIds = [...ids];
 
   // Start the actorNames fetch but DON'T await it — return as promise
   const actorNames = actorIds.length > 0

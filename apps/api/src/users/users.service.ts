@@ -1,5 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
+import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { eq, and, desc, asc, ilike, or, count, ne, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -1617,5 +1618,82 @@ export class UsersService {
     });
 
     return { fontScale: row.fontScale ?? null };
+  }
+
+  /**
+   * Update the calling user's display name. Self-edit on the Settings → Account tab.
+   * Phone / role / branch are NOT editable here — those go through admin update.
+   */
+  async updateMyProfile(input: { name: string }, actor: SessionUser): Promise<{ id: string; name: string }> {
+    const trimmed = input.name.trim();
+    if (trimmed.length < 2) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Name must be at least 2 characters',
+      });
+    }
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .update(schema.users)
+        .set({ name: trimmed, updatedAt: new Date() })
+        .where(eq(schema.users.id, actor.id))
+        .returning({ id: schema.users.id, name: schema.users.name });
+
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+      return row;
+    });
+  }
+
+  /**
+   * Change the calling user's password. Verifies the current password first; the new hash is
+   * written through `withActor` so the temporal-audit trigger records who changed it.
+   */
+  async changeMyPassword(
+    input: { currentPassword: string; newPassword: string },
+    actor: SessionUser,
+  ): Promise<{ success: true }> {
+    if (input.newPassword.length < 8) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'New password must be at least 8 characters',
+      });
+    }
+
+    const [current] = await this.db
+      .select({ passwordHash: schema.users.passwordHash })
+      .from(schema.users)
+      .where(eq(schema.users.id, actor.id))
+      .limit(1);
+
+    if (!current) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+
+    const ok = await bcrypt.compare(input.currentPassword, current.passwordHash);
+    if (!ok) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Current password is incorrect' });
+    }
+
+    const newHash = await this.authService.hashPassword(input.newPassword);
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.users)
+        .set({ passwordHash: newHash, updatedAt: new Date() })
+        .where(eq(schema.users.id, actor.id));
+    });
+
+    this.notificationsService
+      .create({
+        userId: actor.id,
+        type: 'account:security',
+        title: 'Password changed',
+        body: 'Your password was successfully changed. If this wasn’t you, contact your administrator immediately.',
+        data: {},
+      })
+      .catch(() => {});
+
+    return { success: true };
   }
 }

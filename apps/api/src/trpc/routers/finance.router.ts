@@ -45,6 +45,16 @@ export const financeRouter = router({
       return getFinanceService().getInvoiceById(input.invoiceId);
     }),
 
+  /**
+   * Fetch the invoice attached to a given order. Returns null when none exists.
+   * Used by CS / Logistics order-detail pages to show & preview the auto-generated invoice.
+   */
+  getInvoiceByOrder: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getFinanceService().getInvoiceByOrderId(input.orderId);
+    }),
+
   listInvoices: authedProcedure
     .input(listInvoicesSchema)
     .query(async ({ input }) => {
@@ -97,6 +107,11 @@ export const financeRouter = router({
   listBudgets: permissionProcedure('finance.read')
     .query(async () => {
       return getFinanceService().listBudgets();
+    }),
+
+  listBudgetsWithUtilization: permissionProcedure('finance.read')
+    .query(async () => {
+      return getFinanceService().listBudgetsWithUtilization();
     }),
 
   budgetUtilization: permissionProcedure('finance.read')

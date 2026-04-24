@@ -37,9 +37,12 @@ function renderMediaBuyerLeaderboardCard(
     : 'hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md';
 
   return (
-    <div
+    <Link
       key={buyer.mediaBuyerId}
-      className={`card transition-all duration-200 ${isHighCpa ? 'ring-2 ring-warning-400 dark:ring-warning-500' : ''} ${newClass} ${className}`}
+      to={`/admin/marketing/orders?mediaBuyerId=${buyer.mediaBuyerId}`}
+      prefetch="intent"
+      className={`card block transition-all duration-200 cursor-pointer ${isHighCpa ? 'ring-2 ring-warning-400 dark:ring-warning-500' : ''} ${newClass} ${className}`}
+      title={`View ${buyer.name}'s orders`}
     >
       {/* Avatar + name */}
       <div className="flex items-center gap-3 mb-3">
@@ -80,7 +83,7 @@ function renderMediaBuyerLeaderboardCard(
           </span>
         </div>
       )}
-    </div>
+    </Link>
   );
 }
 

@@ -1,7 +1,7 @@
-import { defer } from '@remix-run/node';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { ProductsListPage } from '~/features/products/ProductsListPage';
 import type { Product } from '~/features/products/types';
@@ -41,6 +41,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }).catch(() => ({ products: [] as Product[], total: 0, page, totalPages: 0 }));
 
   return defer({ products: productsPromise, canEditProduct, canCreateProduct });
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const cookie = getSessionCookie(request);
+  const formData = await request.formData();
+  const intent = formData.get('intent')?.toString();
+
+  if (intent === 'archiveProduct') {
+    const id = formData.get('id')?.toString() ?? '';
+    if (!id) return json({ error: 'Product id required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/products.update', {
+      method: 'POST',
+      cookie,
+      body: { id, status: 'ARCHIVED' },
+    });
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json(
+        { error: errorData?.error?.message ?? 'Failed to archive product' },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
+  return json({ error: 'Unknown action' }, { status: 400 });
 }
 
 export default function ProductsRoute() {

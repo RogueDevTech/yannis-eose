@@ -132,7 +132,7 @@ function ReceiptModal({
           <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
             <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Disbursement amount</p>
             <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-              <NairaPrice value={Number(amount)} />
+              <NairaPrice amount={Number(amount)} />
             </p>
             <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
               <span>{senderName} &rarr; {receiverName}</span>
@@ -585,7 +585,7 @@ export function DisbursementsPage({
                         </Link>
                       </td>
                       <td className="table-cell text-right font-medium text-app-fg">
-                        <NairaPrice value={Number(f.amount)} />
+                        <NairaPrice amount={Number(f.amount)} />
                       </td>
                       <td className="table-cell">
                         <StatusBadge status={f.status} />
@@ -638,7 +638,7 @@ export function DisbursementsPage({
                       {getName(f.senderId)} &rarr; {getName(f.receiverId)}
                     </div>
                     <span className="font-medium text-app-fg">
-                      <NairaPrice value={Number(f.amount)} />
+                      <NairaPrice amount={Number(f.amount)} />
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
@@ -714,10 +714,10 @@ export function DisbursementsPage({
                             {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}
                           </td>
                           <td className="table-cell text-right text-sm">
-                            <NairaPrice value={Number(b.totalReceived)} />
+                            <NairaPrice amount={Number(b.totalReceived)} />
                           </td>
                           <td className="table-cell text-right text-sm">
-                            <NairaPrice value={Number(b.totalSpend)} />
+                            <NairaPrice amount={Number(b.totalSpend)} />
                           </td>
                           <td className={`table-cell text-right font-medium ${
                             balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
@@ -770,8 +770,8 @@ export function DisbursementsPage({
                       </div>
                       <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
                         <div>Role: {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}</div>
-                        <div>Received: <NairaPrice value={Number(b.totalReceived)} /></div>
-                        <div>Spent: <NairaPrice value={Number(b.totalSpend)} /></div>
+                        <div>Received: <NairaPrice amount={Number(b.totalReceived)} /></div>
+                        <div>Spent: <NairaPrice amount={Number(b.totalSpend)} /></div>
                       </div>
                       {b.role === 'HEAD_OF_MARKETING' && (
                         <Button
@@ -836,7 +836,7 @@ export function DisbursementsPage({
                             {r.requesterName ?? getRequesterName(r.requesterId)}
                           </Link>
                         </td>
-                        <td className="table-cell text-right font-medium"><NairaPrice value={Number(r.amount)} /></td>
+                        <td className="table-cell text-right font-medium"><NairaPrice amount={Number(r.amount)} /></td>
                         <td className="table-cell text-app-fg-muted text-sm max-w-[200px] truncate" title={r.reason ?? undefined}>
                           {r.reason ?? '—'}
                         </td>
@@ -908,7 +908,7 @@ export function DisbursementsPage({
                       </Link>
                       <StatusBadge status={r.status} />
                     </div>
-                    <p className="text-sm text-app-fg-muted"><NairaPrice value={Number(r.amount)} /></p>
+                    <p className="text-sm text-app-fg-muted"><NairaPrice amount={Number(r.amount)} /></p>
                     {r.reason && <p className="text-sm text-app-fg-muted">{r.reason}</p>}
                     <p className="text-xs text-app-fg-muted">
                       {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -955,7 +955,7 @@ export function DisbursementsPage({
             <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
               <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Amount</p>
               <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-                <NairaPrice value={Number(requestReceiptModal.amount)} />
+                <NairaPrice amount={Number(requestReceiptModal.amount)} />
               </p>
               <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
                 <span>{requestReceiptModal.requesterName ?? getRequesterName(requestReceiptModal.requesterId)}</span>

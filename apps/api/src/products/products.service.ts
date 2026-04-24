@@ -239,6 +239,21 @@ export class ProductsService {
 
     const total = totalRows[0]?.count ?? 0;
 
+    // Aggregate available stock (sum across all locations) for the listed products in one query.
+    const productIds = rows.map((r) => r.id);
+    const stockMap = new Map<string, number>();
+    if (productIds.length > 0) {
+      const stockRows = await this.db
+        .select({
+          productId: schema.inventoryLevels.productId,
+          totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::int`,
+        })
+        .from(schema.inventoryLevels)
+        .where(inArray(schema.inventoryLevels.productId, productIds))
+        .groupBy(schema.inventoryLevels.productId);
+      for (const s of stockRows) stockMap.set(s.productId, Number(s.totalStock) || 0);
+    }
+
     const products = rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -253,6 +268,7 @@ export class ProductsService {
       updatedAt: r.updatedAt,
       categoryName: r.categoryName ?? null,
       brandName: r.brandName ?? null,
+      totalStock: stockMap.get(r.id) ?? 0,
     }));
 
     return {

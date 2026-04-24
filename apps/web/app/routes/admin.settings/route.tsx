@@ -67,7 +67,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'updateProfile') {
-    const res = await apiRequest<unknown>('/trpc/users.updateProfile', {
+    const res = await apiRequest<unknown>('/trpc/users.updateMyProfile', {
       method: 'POST',
       cookie,
       body: {
@@ -93,7 +93,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Password must be at least 8 characters' }, { status: 400 });
     }
 
-    const res = await apiRequest<unknown>('/trpc/users.changePassword', {
+    const res = await apiRequest<unknown>('/trpc/users.changeMyPassword', {
       method: 'POST',
       cookie,
       body: { currentPassword, newPassword },
@@ -153,22 +153,6 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!capRes.ok) {
       const errorData = capRes.data as { error?: { message?: string } };
       return json({ error: errorData?.error?.message ?? 'Failed to update claim cap' }, { status: safeStatus(capRes.status) });
-    }
-
-    // 4. Low-stock threshold — drives inventory low_stock notifications.
-    const lowStockRaw = formData.get('lowStockThreshold')?.toString();
-    const lowStockThreshold = lowStockRaw ? parseInt(lowStockRaw, 10) : 10;
-    if (isNaN(lowStockThreshold) || lowStockThreshold < 1 || lowStockThreshold > 10000) {
-      return json({ error: 'Low-stock threshold must be between 1 and 10000' }, { status: 400 });
-    }
-    const lowStockRes = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
-      method: 'POST',
-      cookie,
-      body: { key: 'INVENTORY_LOW_STOCK_CONFIG', value: { threshold: lowStockThreshold } },
-    });
-    if (!lowStockRes.ok) {
-      const errorData = lowStockRes.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update low-stock threshold' }, { status: safeStatus(lowStockRes.status) });
     }
 
     const defaultAppTheme = formData.get('defaultAppTheme')?.toString() ?? 'system';

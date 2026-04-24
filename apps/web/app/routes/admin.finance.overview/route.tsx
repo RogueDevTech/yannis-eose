@@ -3,7 +3,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { FinancePage } from '~/features/finance/FinancePage';
-import type { Invoice, ProfitReport, ApprovalRequest, Budget, FinanceStreamData } from '~/features/finance/types';
+import type { Invoice, ProfitReport, ApprovalRequest, BudgetWithUtilization, FinanceStreamData } from '~/features/finance/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Finance — Yannis EOSE' },
@@ -49,7 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   const budgetsPromise = apiRequest<unknown>(
-    '/trpc/finance.listBudgets',
+    '/trpc/finance.listBudgetsWithUtilization',
     { method: 'GET', cookie },
   );
 
@@ -78,13 +78,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const budgets = budgetsPromise.then((res) => {
     if (!res.ok) return [];
-    return (res.data as { result?: { data?: Budget[] } })?.result?.data ?? [];
-  }).catch(() => [] as Budget[]);
+    return (res.data as { result?: { data?: BudgetWithUtilization[] } })?.result?.data ?? [];
+  }).catch(() => [] as BudgetWithUtilization[]);
 
   const approvals = approvalsParsed.then((p) => p.requests);
   const totalApprovals = approvalsParsed.then((p) => p.total);
   const pendingApprovals = approvalsParsed.then((p) =>
     p.requests.filter((r) => r.status === 'PENDING' || r.status === 'QUERIED').length,
+  );
+  const pendingApprovalsValue = approvalsParsed.then((p) =>
+    p.requests
+      .filter((r) => r.status === 'PENDING' || r.status === 'QUERIED')
+      .reduce((sum, r) => sum + Number(r.amount ?? 0), 0),
   );
 
   return {
@@ -96,6 +101,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     approvals,
     totalApprovals,
     pendingApprovals,
+    pendingApprovalsValue,
     budgets,
   };
 }

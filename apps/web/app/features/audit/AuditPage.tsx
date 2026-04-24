@@ -433,6 +433,15 @@ function isActorKnown(
   return !!actorNames[changedBy];
 }
 
+/** Resolve a user-reference field (e.g. sender_id) to a display name. Returns null if unknown. */
+function lookupName(
+  value: unknown,
+  actorNames: Record<string, { name: string; role: string }>,
+): string | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  return actorNames[value]?.name ?? null;
+}
+
 // ── Unknown Actor Modal ──────────────────────────────────────────
 
 function UnknownActorModal({
@@ -640,7 +649,9 @@ function getDescriptionParts(
     const status = data.invoice_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` for ${formatCurrency(data.amount)}` : '';
-    const suffix = amount + (statusLabel ? ` — ${statusLabel}` : '');
+    const recipient = (data.recipient_info as { name?: string } | undefined)?.name;
+    const recipientLine = recipient ? ` to ${recipient}` : '';
+    const suffix = amount + recipientLine + (statusLabel ? ` — ${statusLabel}` : '');
     return { prefix: `${actor} updated invoice `, entityLabel: recordLabel, suffix };
   }
 
@@ -648,9 +659,14 @@ function getDescriptionParts(
     const status = data.funding_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    if (status === 'COMPLETED') return { prefix: `${actor} confirmed funding received`, entityLabel: null, suffix: amount };
-    if (status === 'DISPUTED') return { prefix: `${actor} disputed funding`, entityLabel: null, suffix: amount };
-    const full = statusLabel ? `${actor} updated marketing funding${amount} — ${statusLabel}` : `${actor} updated marketing funding${amount}`;
+    const sender = lookupName(data.sender_id, actorNames);
+    const receiver = lookupName(data.receiver_id, actorNames);
+    const parties = sender && receiver
+      ? ` (${sender} → ${receiver})`
+      : sender ? ` (from ${sender})` : receiver ? ` (to ${receiver})` : '';
+    if (status === 'COMPLETED') return { prefix: `${actor} confirmed funding received`, entityLabel: null, suffix: parties + amount };
+    if (status === 'DISPUTED') return { prefix: `${actor} disputed funding`, entityLabel: null, suffix: parties + amount };
+    const full = statusLabel ? `${actor} updated marketing funding${parties}${amount} — ${statusLabel}` : `${actor} updated marketing funding${parties}${amount}`;
     return { prefix: full, entityLabel: null, suffix: '' };
   }
 
@@ -666,7 +682,9 @@ function getDescriptionParts(
     const status = data.payout_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.net_amount ? ` — ${formatCurrency(data.net_amount)}` : '';
-    const suffix = amount + (statusLabel ? ` — ${statusLabel}` : '');
+    const staff = lookupName(data.staff_id ?? data.user_id, actorNames);
+    const staffLine = staff ? ` for ${staff}` : '';
+    const suffix = staffLine + amount + (statusLabel ? ` — ${statusLabel}` : '');
     return { prefix: `${actor} updated payout`, entityLabel: null, suffix };
   }
 
@@ -674,15 +692,19 @@ function getDescriptionParts(
     const cat = data.category as string | undefined;
     const catLabel = cat ? cat.charAt(0) + cat.slice(1).toLowerCase() : '';
     const amount = data.amount ? ` of ${formatCurrency(data.amount)}` : '';
-    if (catLabel) return { prefix: `${actor} added ${catLabel} adjustment`, entityLabel: null, suffix: amount };
-    return { prefix: `${actor} updated earnings adjustment`, entityLabel: null, suffix: amount };
+    const staff = lookupName(data.user_id ?? data.staff_id, actorNames);
+    const staffLine = staff ? ` for ${staff}` : '';
+    if (catLabel) return { prefix: `${actor} added ${catLabel} adjustment`, entityLabel: null, suffix: staffLine + amount };
+    return { prefix: `${actor} updated earnings adjustment`, entityLabel: null, suffix: staffLine + amount };
   }
 
   if (table === 'marketing_funding_requests') {
     const status = (data.funding_request_status ?? data.status) as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    return { prefix: `${actor} updated funding request${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+    const requester = lookupName(data.requester_id, actorNames);
+    const requesterLine = requester ? ` from ${requester}` : '';
+    return { prefix: `${actor} updated funding request${requesterLine}${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
   }
 
   if (table === 'ad_spend_logs') {
@@ -710,7 +732,12 @@ function getDescriptionParts(
     const status = (data.approval_status ?? data.status) as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    return { prefix: `${actor} updated approval request${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+    const requester = lookupName(data.requester_id, actorNames);
+    const approver = lookupName(data.approver_id, actorNames);
+    const parties = requester && approver
+      ? ` (${requester} → ${approver})`
+      : requester ? ` (from ${requester})` : approver ? ` (to ${approver})` : '';
+    return { prefix: `${actor} updated approval request${parties}${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
   }
 
   if (table === 'budgets') {
@@ -743,7 +770,12 @@ function getDescriptionParts(
     const status = (data.permission_request_status ?? data.status) as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const typeLabel = (data.type as string) ?? '';
-    return { prefix: `${actor} updated permission request — ${typeLabel}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
+    const requester = lookupName(data.requested_by ?? data.requester_id, actorNames);
+    const approver = lookupName(data.approved_by ?? data.approver_id, actorNames);
+    const parties = requester && approver
+      ? ` (${requester} → ${approver})`
+      : requester ? ` (from ${requester})` : '';
+    return { prefix: `${actor} updated permission request${parties} — ${typeLabel}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
   }
 
   if (table === 'system_settings') {

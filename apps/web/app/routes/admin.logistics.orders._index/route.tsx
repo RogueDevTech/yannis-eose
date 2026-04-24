@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const status = url.searchParams.get('status') || 'CONFIRMED';
+  const status = url.searchParams.get('status') || 'ALL';
   const search = url.searchParams.get('search') || undefined;
 
   let startDate = url.searchParams.get('startDate') ?? undefined;

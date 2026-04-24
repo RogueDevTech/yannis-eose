@@ -454,7 +454,7 @@ export function HRPage({
             const getStaffRole = (id: string) => resolvedUsers.find((u: HRUser) => u.id === id)?.role?.replace(/_/g, ' ') ?? '';
 
             return (
-              <div className="card p-0 overflow-hidden">
+              <div className="card p-0 overflow-hidden hr-payroll-table">
                 <div className="hidden md:block overflow-x-auto">
                   <table className="w-full">
                     <thead>
@@ -499,13 +499,13 @@ export function HRPage({
                             <td className="table-cell text-sm text-app-fg-muted">
                               {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })} — {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                             </td>
-                            <td className="table-cell text-right text-sm"><NairaPrice value={Number(p.baseSalary)} /></td>
-                            <td className="table-cell text-right text-sm text-success-600 dark:text-success-400"><NairaPrice value={Number(p.performanceBonus)} /></td>
-                            <td className="table-cell text-right text-sm text-brand-600 dark:text-brand-400"><NairaPrice value={Number(p.addOnsTotal)} /></td>
+                            <td className="table-cell text-right text-sm"><NairaPrice amount={Number(p.baseSalary)} /></td>
+                            <td className="table-cell text-right text-sm text-success-600 dark:text-success-400"><NairaPrice amount={Number(p.performanceBonus)} /></td>
+                            <td className="table-cell text-right text-sm text-brand-600 dark:text-brand-400"><NairaPrice amount={Number(p.addOnsTotal)} /></td>
                             <td className="table-cell text-right text-sm text-danger-600 dark:text-danger-400">
-                              {Number(p.deductionsTotal) > 0 ? <><span>-</span><NairaPrice value={Number(p.deductionsTotal)} /></> : '\u2014'}
+                              {Number(p.deductionsTotal) > 0 ? <><span>-</span><NairaPrice amount={Number(p.deductionsTotal)} /></> : '\u2014'}
                             </td>
-                            <td className="table-cell text-right font-medium"><NairaPrice value={Number(p.totalPayout)} /></td>
+                            <td className="table-cell text-right font-medium"><NairaPrice amount={Number(p.totalPayout)} /></td>
                             <td className="table-cell">
                               <StatusBadge status={p.status} />
                             </td>
@@ -549,24 +549,24 @@ export function HRPage({
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                                   <div>
                                     <p className="text-xs text-app-fg-muted uppercase">Base Salary</p>
-                                    <p className="font-medium text-app-fg"><NairaPrice value={Number(p.baseSalary)} /></p>
+                                    <p className="font-medium text-app-fg"><NairaPrice amount={Number(p.baseSalary)} /></p>
                                   </div>
                                   <div>
                                     <p className="text-xs text-app-fg-muted uppercase">Performance Bonus</p>
-                                    <p className="font-medium text-success-600 dark:text-success-400">+<NairaPrice value={Number(p.performanceBonus)} /></p>
+                                    <p className="font-medium text-success-600 dark:text-success-400">+<NairaPrice amount={Number(p.performanceBonus)} /></p>
                                   </div>
                                   <div>
                                     <p className="text-xs text-app-fg-muted uppercase">Add-ons (Bonuses, OT)</p>
-                                    <p className="font-medium text-brand-600 dark:text-brand-400">+<NairaPrice value={Number(p.addOnsTotal)} /></p>
+                                    <p className="font-medium text-brand-600 dark:text-brand-400">+<NairaPrice amount={Number(p.addOnsTotal)} /></p>
                                   </div>
                                   <div>
                                     <p className="text-xs text-app-fg-muted uppercase">Deductions (Clawbacks)</p>
-                                    <p className="font-medium text-danger-600 dark:text-danger-400">-<NairaPrice value={Number(p.deductionsTotal)} /></p>
+                                    <p className="font-medium text-danger-600 dark:text-danger-400">-<NairaPrice amount={Number(p.deductionsTotal)} /></p>
                                   </div>
                                 </div>
                                 <div className="mt-3 pt-3 border-t border-app-border flex justify-between">
                                   <span className="text-sm font-semibold text-app-fg">Net Payout</span>
-                                  <span className="text-lg font-bold text-app-fg"><NairaPrice value={Number(p.totalPayout)} /></span>
+                                  <span className="text-lg font-bold text-app-fg"><NairaPrice amount={Number(p.totalPayout)} /></span>
                                 </div>
                               </td>
                             </tr>
@@ -595,20 +595,20 @@ export function HRPage({
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <div>
                           <span className="text-app-fg-muted">Base</span>
-                          <p className="font-medium text-app-fg"><NairaPrice value={Number(p.baseSalary)} /></p>
+                          <p className="font-medium text-app-fg"><NairaPrice amount={Number(p.baseSalary)} /></p>
                         </div>
                         <div>
                           <span className="text-app-fg-muted">Bonus</span>
-                          <p className="font-medium text-success-600 dark:text-success-400"><NairaPrice value={Number(p.performanceBonus)} /></p>
+                          <p className="font-medium text-success-600 dark:text-success-400"><NairaPrice amount={Number(p.performanceBonus)} /></p>
                         </div>
                         <div>
                           <span className="text-app-fg-muted">Total</span>
-                          <p className="font-bold text-app-fg"><NairaPrice value={Number(p.totalPayout)} /></p>
+                          <p className="font-bold text-app-fg"><NairaPrice amount={Number(p.totalPayout)} /></p>
                         </div>
                       </div>
                       {Number(p.deductionsTotal) > 0 && (
                         <p className="text-xs text-danger-600 dark:text-danger-400">
-                          Deductions: -<NairaPrice value={Number(p.deductionsTotal)} />
+                          Deductions: -<NairaPrice amount={Number(p.deductionsTotal)} />
                         </p>
                       )}
                       <p className="text-xs text-app-fg-muted">
@@ -780,7 +780,7 @@ export function HRPage({
                           Fixed pay when delivered orders {'\u2265'} {viewPlan.rules.baseThreshold ?? 0}
                         </p>
                       </div>
-                      <span className="text-sm font-semibold text-app-fg"><NairaPrice value={Number(viewPlan.rules.baseSalary)} /></span>
+                      <span className="text-sm font-semibold text-app-fg"><NairaPrice amount={Number(viewPlan.rules.baseSalary)} /></span>
                     </div>
                   )}
                   {viewPlan.rules.baseThreshold != null && (
@@ -798,7 +798,7 @@ export function HRPage({
                         <p className="text-sm font-medium text-app-fg">Per Order Commission</p>
                         <p className="text-xs text-app-fg-muted">Earned for every delivered order</p>
                       </div>
-                      <span className="text-sm font-semibold text-success-600 dark:text-success-400"><NairaPrice value={Number(viewPlan.rules.perOrderRate)} /></span>
+                      <span className="text-sm font-semibold text-success-600 dark:text-success-400"><NairaPrice amount={Number(viewPlan.rules.perOrderRate)} /></span>
                     </div>
                   )}
                   {viewPlan.rules.bonusPerExtraOrder != null && (
@@ -809,7 +809,7 @@ export function HRPage({
                           Additional bonus per order above {viewPlan.rules.baseThreshold ?? 0} threshold
                         </p>
                       </div>
-                      <span className="text-sm font-semibold text-success-600 dark:text-success-400"><NairaPrice value={Number(viewPlan.rules.bonusPerExtraOrder)} /></span>
+                      <span className="text-sm font-semibold text-success-600 dark:text-success-400"><NairaPrice amount={Number(viewPlan.rules.bonusPerExtraOrder)} /></span>
                     </div>
                   )}
                   {viewPlan.rules.deliveryRateThreshold != null && (
@@ -829,7 +829,7 @@ export function HRPage({
                         <p className="text-sm font-medium text-app-fg">Return Penalty</p>
                         <p className="text-xs text-app-fg-muted">Clawback deducted per returned order</p>
                       </div>
-                      <span className="text-sm font-semibold text-danger-600 dark:text-danger-400">-<NairaPrice value={Number(viewPlan.rules.penaltyPerReturn)} /></span>
+                      <span className="text-sm font-semibold text-danger-600 dark:text-danger-400">-<NairaPrice amount={Number(viewPlan.rules.penaltyPerReturn)} /></span>
                     </div>
                   )}
                   {Object.keys(viewPlan.rules).length === 0 && (
@@ -864,30 +864,30 @@ export function HRPage({
                       {earnedBase > 0 && (
                         <div className="flex justify-between">
                           <span className="text-app-fg-muted">Base Salary</span>
-                          <span className="font-medium text-app-fg"><NairaPrice value={earnedBase} /></span>
+                          <span className="font-medium text-app-fg"><NairaPrice amount={earnedBase} /></span>
                         </div>
                       )}
                       {earnedPerOrder > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-app-fg-muted">Per Order ({exampleOrders} x <NairaPrice value={perOrder} />)</span>
-                          <span className="font-medium text-app-fg"><NairaPrice value={earnedPerOrder} /></span>
+                          <span className="text-app-fg-muted">Per Order ({exampleOrders} x <NairaPrice amount={perOrder} />)</span>
+                          <span className="font-medium text-app-fg"><NairaPrice amount={earnedPerOrder} /></span>
                         </div>
                       )}
                       {earnedExtraBonus > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-app-fg-muted">Extra Bonus ({extraOrders} x <NairaPrice value={extraBonus} />)</span>
-                          <span className="font-medium text-app-fg"><NairaPrice value={earnedExtraBonus} /></span>
+                          <span className="text-app-fg-muted">Extra Bonus ({extraOrders} x <NairaPrice amount={extraBonus} />)</span>
+                          <span className="font-medium text-app-fg"><NairaPrice amount={earnedExtraBonus} /></span>
                         </div>
                       )}
                       {earnedPenalty > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-app-fg-muted">Return Penalty ({exampleReturns} x <NairaPrice value={penalty} />)</span>
-                          <span className="font-medium text-danger-600 dark:text-danger-400">-<NairaPrice value={earnedPenalty} /></span>
+                          <span className="text-app-fg-muted">Return Penalty ({exampleReturns} x <NairaPrice amount={penalty} />)</span>
+                          <span className="font-medium text-danger-600 dark:text-danger-400">-<NairaPrice amount={earnedPenalty} /></span>
                         </div>
                       )}
                       <div className="border-t border-app-border pt-1.5 flex justify-between font-semibold">
                         <span className="text-app-fg">Estimated Total</span>
-                        <span className="text-success-600 dark:text-success-400"><NairaPrice value={total} /></span>
+                        <span className="text-success-600 dark:text-success-400"><NairaPrice amount={total} /></span>
                       </div>
                     </div>
                   </div>
@@ -933,7 +933,7 @@ export function HRPage({
                                 <StatusBadge status={adj.category} />
                               </td>
                               <td className={`table-cell text-right font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : ''}`}>
-                                {Number(adj.amount) < 0 ? <><span>-</span><NairaPrice value={Math.abs(Number(adj.amount))} /></> : <NairaPrice value={Number(adj.amount)} />}
+                                {Number(adj.amount) < 0 ? <><span>-</span><NairaPrice amount={Math.abs(Number(adj.amount))} /></> : <NairaPrice amount={Number(adj.amount)} />}
                               </td>
                               <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{adj.reason}</td>
                               <td className="table-cell">
@@ -972,7 +972,7 @@ export function HRPage({
                           </div>
                           <div className="flex items-center justify-between">
                             <span className={`font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}>
-                              {Number(adj.amount) < 0 ? <><span>-</span><NairaPrice value={Math.abs(Number(adj.amount))} /></> : <NairaPrice value={Number(adj.amount)} />}
+                              {Number(adj.amount) < 0 ? <><span>-</span><NairaPrice amount={Math.abs(Number(adj.amount))} /></> : <NairaPrice amount={Number(adj.amount)} />}
                             </span>
                             <StatusBadge status={adj.approvedBy ? 'APPROVED' : 'PENDING'} />
                           </div>
@@ -1112,7 +1112,7 @@ export function HRPage({
           title="Mark payout as paid?"
           description={
             <>
-              Confirm that <strong>{markPaidConfirm.staffName}</strong> has been paid <strong><NairaPrice value={markPaidConfirm.amount} /></strong>. This action cannot be undone.
+              Confirm that <strong>{markPaidConfirm.staffName}</strong> has been paid <strong><NairaPrice amount={markPaidConfirm.amount} /></strong>. This action cannot be undone.
             </>
           }
           confirmLabel="Mark Paid"

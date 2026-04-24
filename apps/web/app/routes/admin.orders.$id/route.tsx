@@ -7,7 +7,7 @@ import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeSt
 import { isAdminLevel } from '~/lib/rbac';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
-import type { CallLogEntry, OrderDetail, OrderDetailStreamData, TimelineEvent } from '~/features/orders/types';
+import type { CallLogEntry, OrderDetail, OrderDetailStreamData, OrderInvoice, TimelineEvent } from '~/features/orders/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Order Detail — Yannis EOSE' },
@@ -102,6 +102,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     logisticsDispatchTemplates = templatesData?.result?.data ?? [];
   }
 
+  // Stream the auto-generated invoice (if any) — orders confirmed before this feature
+  // landed have null. Used by the order detail page to render an Invoice card.
+  const invoicePromise: Promise<OrderInvoice | null> = apiRequest<unknown>(
+    `/trpc/finance.getInvoiceByOrder?input=${encodeURIComponent(JSON.stringify({ orderId: params['id'] }))}`,
+    { method: 'GET', cookie },
+  ).then((res) => {
+    if (!res.ok) return null;
+    const data = (res.data as { result?: { data?: OrderInvoice | null } })?.result?.data ?? null;
+    return data;
+  }).catch(() => null);
+
   return defer({
     orderDetail: orderDetailPromise,
     canEditOrder: user.role !== 'MEDIA_BUYER',
@@ -111,6 +122,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     csAgentsForAssign: csAgentsForAssign,
     logisticsLocations,
     logisticsDispatchTemplates,
+    invoice: invoicePromise,
   });
 }
 
@@ -438,7 +450,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed', 'order:assigned', 'order:transfer_accepted', 'order:transfer_rejected'] as const;
 
 export default function OrderDetailRoute() {
-  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign, logisticsLocations, logisticsDispatchTemplates } = useLoaderData<typeof loader>();
+  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign, logisticsLocations, logisticsDispatchTemplates, invoice } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
   return (
@@ -468,6 +480,7 @@ export default function OrderDetailRoute() {
             csAgentsForAssign={csAgentsForAssign}
             logisticsLocations={logisticsLocations}
             logisticsDispatchTemplates={logisticsDispatchTemplates}
+            invoice={invoice}
           />
         )
       }

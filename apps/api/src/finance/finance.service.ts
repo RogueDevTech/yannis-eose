@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, gte, lte, count, sum, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, count, sum, sql, inArray, isNotNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -118,6 +118,27 @@ export class FinanceService {
     if (!rows[0]) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
     }
+
+    return {
+      ...rows[0],
+      referenceFormatted: this.formatReference(rows[0].referenceNumber),
+    };
+  }
+
+  /**
+   * Fetch the invoice tied to an order, if one was auto-generated on CONFIRMED.
+   * Returns null when no invoice exists yet — callers (CS / Logistics order detail
+   * pages) should render a placeholder rather than treating null as an error.
+   */
+  async getInvoiceByOrderId(orderId: string) {
+    const rows = await this.db
+      .select()
+      .from(schema.invoices)
+      .where(eq(schema.invoices.orderId, orderId))
+      .orderBy(desc(schema.invoices.createdAt))
+      .limit(1);
+
+    if (!rows[0]) return null;
 
     return {
       ...rows[0],
@@ -551,6 +572,67 @@ export class FinanceService {
       .select()
       .from(schema.budgets)
       .orderBy(desc(schema.budgets.createdAt));
+  }
+
+  /**
+   * List all budgets together with their approved/committed/remaining totals so the
+   * finance overview can render utilization without N+1 lookups.
+   */
+  async listBudgetsWithUtilization() {
+    const budgets = await this.db
+      .select()
+      .from(schema.budgets)
+      .orderBy(desc(schema.budgets.createdAt));
+
+    if (budgets.length === 0) return [];
+
+    const usageRows = await this.db
+      .select({
+        budgetId: schema.approvalRequests.budgetId,
+        status: schema.approvalRequests.status,
+        total: sum(schema.approvalRequests.amount),
+      })
+      .from(schema.approvalRequests)
+      .where(
+        and(
+          isNotNull(schema.approvalRequests.budgetId),
+          inArray(
+            schema.approvalRequests.status,
+            ['APPROVED', 'PENDING'] as const,
+          ),
+        ),
+      )
+      .groupBy(schema.approvalRequests.budgetId, schema.approvalRequests.status);
+
+    const usageMap = new Map<string, { approved: number; committed: number }>();
+    for (const row of usageRows) {
+      if (!row.budgetId) continue;
+      const existing = usageMap.get(row.budgetId) ?? { approved: 0, committed: 0 };
+      const value = parseFloat(row.total ?? '0');
+      if (row.status === 'APPROVED') existing.approved = value;
+      else if (row.status === 'PENDING') existing.committed = value;
+      usageMap.set(row.budgetId, existing);
+    }
+
+    const now = Date.now();
+    return budgets.map((b) => {
+      const usage = usageMap.get(b.id) ?? { approved: 0, committed: 0 };
+      const total = parseFloat(b.totalBudget ?? '0');
+      const remaining = total - usage.approved - usage.committed;
+      const utilizationPct = total > 0 ? ((usage.approved + usage.committed) / total) * 100 : 0;
+      const start = b.periodStart ? new Date(b.periodStart).getTime() : null;
+      const end = b.periodEnd ? new Date(b.periodEnd).getTime() : null;
+      const isActive = (start === null || start <= now) && (end === null || end >= now);
+      return {
+        ...b,
+        approved: usage.approved,
+        committed: usage.committed,
+        remaining,
+        total,
+        utilizationPct,
+        isActive,
+      };
+    });
   }
 
   async getBudgetUtilization(budgetId: string) {

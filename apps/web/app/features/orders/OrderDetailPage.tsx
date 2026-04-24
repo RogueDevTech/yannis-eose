@@ -12,12 +12,13 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useVoipDevice } from '~/hooks/useVoipDevice';
 import { useAgentStateBroadcast } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
+import { previewInvoicePdf } from '~/lib/invoice-pdf';
 import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { shareOrderToLogistics } from '~/lib/trpc-browser';
-import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps } from './types';
+import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
 
@@ -726,6 +727,7 @@ export function OrderDetailPage({
   csAgentsForAssign = [],
   logisticsLocations = [],
   logisticsDispatchTemplates = [],
+  invoice,
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
   const revealFetcher = useFetcher();
@@ -1090,6 +1092,44 @@ export function OrderDetailPage({
                 </div>
               )}
             </div>
+
+            {/* Invoice card — auto-generated on CONFIRMED. Visible to CS, Logistics, etc.
+                Renders nothing while pending or when no invoice exists yet. */}
+            {invoice !== undefined && invoice !== null && (
+              <DeferredSection resolve={invoice} skeleton="card">
+                {(inv) => {
+                  const i = inv as OrderInvoice | null;
+                  if (!i) return null;
+                  return (
+                    <div className="card">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="min-w-0">
+                          <h2 className="text-lg font-semibold text-app-fg">Invoice</h2>
+                          <p className="text-sm text-app-fg-muted">
+                            <span className="font-mono">{i.referenceFormatted}</span>
+                            <span className="mx-1.5">·</span>
+                            <span className="font-medium text-app-fg">{formatNaira(Number(i.totalAmount))}</span>
+                            <span className="mx-1.5">·</span>
+                            <span className="capitalize">{i.status.toLowerCase()}</span>
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={() => previewInvoicePdf(i)}
+                        >
+                          Preview PDF
+                        </Button>
+                      </div>
+                      <p className="text-xs text-app-fg-muted">
+                        Auto-generated when this order was confirmed. Edit the recipient, line items, tax, or due date from the Finance page before sending.
+                      </p>
+                    </div>
+                  );
+                }}
+              </DeferredSection>
+            )}
 
             {/* Order activity — lifecycle timeline */}
             <div className="card">

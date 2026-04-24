@@ -799,8 +799,55 @@ export class InventoryService {
    * Get products that are below their minimum threshold.
    * TODO: re-implement once min_threshold is stored elsewhere (e.g. inventory settings).
    */
+  /**
+   * Return all inventory levels where (stockCount - reservedCount) < configured threshold.
+   * Drives the low-stock banner on the inventory page. Joined with product + location names.
+   */
   async getLowStockAlerts() {
-    return [];
+    const cfg = await this.settings.get('INVENTORY_LOW_STOCK_CONFIG');
+    const thresholdRaw = (cfg?.['threshold'] as number | string | undefined) ?? InventoryService.DEFAULT_LOW_STOCK_THRESHOLD;
+    const threshold = typeof thresholdRaw === 'string' ? parseInt(thresholdRaw, 10) : thresholdRaw;
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      return { threshold: 0, items: [] };
+    }
+
+    const rows = await this.db
+      .select({
+        levelId: schema.inventoryLevels.id,
+        productId: schema.inventoryLevels.productId,
+        locationId: schema.inventoryLevels.locationId,
+        stockCount: schema.inventoryLevels.stockCount,
+        reservedCount: schema.inventoryLevels.reservedCount,
+        productName: schema.products.name,
+        locationName: schema.logisticsLocations.name,
+      })
+      .from(schema.inventoryLevels)
+      .leftJoin(schema.products, eq(schema.inventoryLevels.productId, schema.products.id))
+      .leftJoin(
+        schema.logisticsLocations,
+        eq(schema.inventoryLevels.locationId, schema.logisticsLocations.id),
+      )
+      .where(
+        sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}) < ${threshold}`,
+      )
+      .orderBy(
+        sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}) ASC`,
+      )
+      .limit(50);
+
+    return {
+      threshold,
+      items: rows.map((r) => ({
+        levelId: r.levelId,
+        productId: r.productId,
+        productName: r.productName ?? 'Unknown product',
+        locationId: r.locationId,
+        locationName: r.locationName ?? 'Unknown location',
+        stockCount: r.stockCount,
+        reservedCount: r.reservedCount,
+        availableCount: r.stockCount - r.reservedCount,
+      })),
+    };
   }
 
   // ============================================
