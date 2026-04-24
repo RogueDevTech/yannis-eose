@@ -210,10 +210,13 @@ export function Header({
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
           </svg>
         </button>
-        {/* Logo — mobile only, after menu bar */}
+        {/* Logo — mobile only, after menu bar. Wrapped in the same themed strip the
+            desktop sidebar uses so the logo always sits on a consistent background
+            (otherwise `isDarkTheme` on intermediate themes like Dim/Soft picked the
+            wrong asset against the elevated header bg). */}
         <Link
           to="/admin"
-          className="lg:hidden flex items-center shrink-0"
+          className="lg:hidden flex items-center shrink-0 px-2 py-0.5 rounded-lg border border-app-logo-strip-border bg-app-logo-strip-bg"
           aria-label="Yannis home"
         >
           <img
