@@ -69,7 +69,7 @@ export const ordersRouter = router({
   createOffline: authedProcedure
     .input(createOfflineOrderSchema)
     .mutation(async ({ input, ctx }) => {
-      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'];
+      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
       if (!ctx.user?.id || !allowedRoles.includes(ctx.user.role)) {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -103,7 +103,7 @@ export const ordersRouter = router({
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
       const order = await getOrdersService().getById(input.orderId);
-      if (ctx.user.role === 'SUPER_ADMIN') return order;
+      if ((ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN')) return order;
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
       const hasMarketingOrders = perms.includes('marketing.orders');
@@ -126,7 +126,7 @@ export const ordersRouter = router({
     .input(listOrdersSchema)
     .query(async ({ input, ctx }) => {
       const branchId = ctx.currentBranchId;
-      if (ctx.user.role === 'SUPER_ADMIN') {
+      if ((ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN')) {
         return getOrdersService().list(input, branchId);
       }
       const perms = ctx.user.permissions ?? [];

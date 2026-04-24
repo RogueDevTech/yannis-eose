@@ -150,7 +150,7 @@ Every single change to every record — who did it, when, what was the old value
 | **CS Agent** | Own assigned orders only, masked phone numbers, VOIP calling |
 | **Finance Officer** | All financial data, approval queue, budgets, invoices, cost data |
 | **Head of Logistics** | All 3PL partners, transfers, delivery metrics |
-| **Warehouse Manager** | Inventory levels, stock movements, transfers |
+| **Stock Manager** | Inventory levels, stock movements, transfers |
 | **3PL Manager** | Own location only — orders, stock, riders, returns |
 | **3PL Rider** | Own assigned deliveries only, mobile-optimized, offline capable |
 | **HR Manager** | Staff payouts, commission rules, settlement configuration |

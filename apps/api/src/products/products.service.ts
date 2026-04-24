@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, and, desc, asc, ilike, count, sql, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
+import { withActor } from '../common/db/with-actor';
 import { db as schema } from '@yannis/shared';
 import type {
   CreateProductInput,
@@ -10,7 +10,7 @@ import type {
   ListProductsInput,
   ProductOffer,
 } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE } from '../database/database.module';
 import { InventoryService } from '../inventory/inventory.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
@@ -25,7 +25,6 @@ export class ProductsService {
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly inventory: InventoryService,
   ) {}
 
@@ -38,7 +37,7 @@ export class ProductsService {
     viewerId: string,
     role: string,
   ): Promise<{ allowedProductIds: string[] | null }> {
-    if (role === 'SUPER_ADMIN') {
+    if ((role === 'SUPER_ADMIN' || role === 'ADMIN')) {
       return { allowedProductIds: null };
     }
 
@@ -271,59 +270,59 @@ export class ProductsService {
    * Update product details.
    */
   async update(input: UpdateProductInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    const existingRows = await this.db
-      .select({ id: schema.products.id })
-      .from(schema.products)
-      .where(eq(schema.products.id, input.productId))
-      .limit(1);
-
-    if (!existingRows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
-    }
-
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (input.name !== undefined) updateFields['name'] = input.name;
-    if (input.description !== undefined) updateFields['description'] = input.description;
-    if (input.offers !== undefined) {
-      updateFields['offers'] = input.offers;
-      updateFields['baseSalePrice'] = sql`${lowestOfferPrice(input.offers)}::numeric`;
-    }
-    if (input.costPrice !== undefined) updateFields['costPrice'] = sql`${input.costPrice}::numeric`;
-    if (input.category !== undefined) updateFields['category'] = input.category;
-    if (input.categoryId !== undefined) updateFields['categoryId'] = input.categoryId;
-    if (input.status !== undefined) updateFields['status'] = input.status;
-
-    this.logger.log('update fields', {
-      updateFields,
-      costPriceType: updateFields.costPrice !== undefined ? typeof updateFields.costPrice : 'n/a',
-      baseSalePriceType: updateFields.baseSalePrice !== undefined ? typeof updateFields.baseSalePrice : 'n/a',
-    });
-
-    try {
-      const updatedRows = await this.db
-        .update(schema.products)
-        .set(updateFields)
+    return withActor(this.db, actor, async (tx) => {
+      const existingRows = await tx
+        .select({ id: schema.products.id })
+        .from(schema.products)
         .where(eq(schema.products.id, input.productId))
-        .returning();
+        .limit(1);
 
-      const updated = updatedRows[0];
-      if (!updated) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update product' });
+      if (!existingRows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
       }
 
-      return updated;
-    } catch (err) {
-      this.logger.error('ProductsService.update DB error', {
-        message: err instanceof Error ? err.message : String(err),
-        name: err instanceof Error ? err.name : undefined,
-        stack: err instanceof Error ? err.stack : undefined,
-        cause: err instanceof Error && err.cause ? err.cause : undefined,
-        fullError: JSON.stringify(err, Object.getOwnPropertyNames(err as object)),
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.name !== undefined) updateFields['name'] = input.name;
+      if (input.description !== undefined) updateFields['description'] = input.description;
+      if (input.offers !== undefined) {
+        updateFields['offers'] = input.offers;
+        updateFields['baseSalePrice'] = sql`${lowestOfferPrice(input.offers)}::numeric`;
+      }
+      if (input.costPrice !== undefined) updateFields['costPrice'] = sql`${input.costPrice}::numeric`;
+      if (input.category !== undefined) updateFields['category'] = input.category;
+      if (input.categoryId !== undefined) updateFields['categoryId'] = input.categoryId;
+      if (input.status !== undefined) updateFields['status'] = input.status;
+
+      this.logger.log('update fields', {
+        updateFields,
+        costPriceType: updateFields.costPrice !== undefined ? typeof updateFields.costPrice : 'n/a',
+        baseSalePriceType: updateFields.baseSalePrice !== undefined ? typeof updateFields.baseSalePrice : 'n/a',
       });
-      throw err;
-    }
+
+      try {
+        const updatedRows = await tx
+          .update(schema.products)
+          .set(updateFields)
+          .where(eq(schema.products.id, input.productId))
+          .returning();
+
+        const updated = updatedRows[0];
+        if (!updated) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update product' });
+        }
+
+        return updated;
+      } catch (err) {
+        this.logger.error('ProductsService.update DB error', {
+          message: err instanceof Error ? err.message : String(err),
+          name: err instanceof Error ? err.name : undefined,
+          stack: err instanceof Error ? err.stack : undefined,
+          cause: err instanceof Error && err.cause ? err.cause : undefined,
+          fullError: JSON.stringify(err, Object.getOwnPropertyNames(err as object)),
+        });
+        throw err;
+      }
+    });
   }
 
   /**

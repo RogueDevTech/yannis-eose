@@ -206,7 +206,8 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   const [searchParams, setSearchParams] = useSearchParams();
   const installAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  // Treat SUPER_ADMIN and ADMIN identically for settings visibility (System + OrgEmails tabs).
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
 
   const allowedTabs = useMemo((): SettingsTabId[] => {
     return isSuperAdmin ? ['profile', 'security', 'push', 'system', 'orgEmails'] : ['profile', 'security', 'push'];
@@ -242,14 +243,25 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   // CS dispatch strategy: derived from settings, local state for form selection
   const csDispatchSetting = systemSettings.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
   const rawStrategy = csDispatchSetting?.value?.strategy;
-  const dispatchStrategyFromSettings: 'load_balanced' | 'performance' | 'claim' =
-    rawStrategy === 'performance' ? 'performance' : rawStrategy === 'claim' ? 'claim' : 'load_balanced';
-  const [selectedDispatchStrategy, setSelectedDispatchStrategy] = useState<'load_balanced' | 'performance' | 'claim'>(dispatchStrategyFromSettings);
+  const dispatchStrategyFromSettings: 'manual' | 'load_balanced' | 'performance' | 'claim' =
+    rawStrategy === 'performance'
+      ? 'performance'
+      : rawStrategy === 'claim'
+        ? 'claim'
+        : rawStrategy === 'load_balanced'
+          ? 'load_balanced'
+          : 'manual';
+  const [selectedDispatchStrategy, setSelectedDispatchStrategy] = useState<'manual' | 'load_balanced' | 'performance' | 'claim'>(dispatchStrategyFromSettings);
 
   // Claim cap setting
   const claimCapSetting = systemSettings.find((s) => s.key === 'CS_CLAIM_CAP');
   const claimCapFromSettings = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
   const [localClaimCap, setLocalClaimCap] = useState<number>(claimCapFromSettings);
+
+  // Low-stock threshold setting — admins get a notification when available < threshold.
+  const lowStockSetting = systemSettings.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
+  const lowStockFromSettings = typeof lowStockSetting?.value?.threshold === 'number' ? lowStockSetting.value.threshold : 10;
+  const [localLowStockThreshold, setLocalLowStockThreshold] = useState<number>(lowStockFromSettings);
 
   // Local state for notification email toggles (configurable types only)
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>({});
@@ -286,6 +298,9 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   useEffect(() => {
     setLocalClaimCap(claimCapFromSettings);
   }, [claimCapFromSettings]);
+  useEffect(() => {
+    setLocalLowStockThreshold(lowStockFromSettings);
+  }, [lowStockFromSettings]);
 
   const orgDefaultSaved = useMemo(
     () =>
@@ -312,6 +327,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
     localVoipEnabled !== isVoipEnabled ||
     selectedDispatchStrategy !== dispatchStrategyFromSettings ||
     localClaimCap !== claimCapFromSettings ||
+    localLowStockThreshold !== lowStockFromSettings ||
     orgDefaultAppTheme !== orgDefaultSaved;
 
   return (
@@ -541,6 +557,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
               <input type="hidden" name="voipEnabled" value={localVoipEnabled ? 'true' : 'false'} />
               <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
               <input type="hidden" name="claimCap" value={String(localClaimCap)} />
+              <input type="hidden" name="lowStockThreshold" value={String(localLowStockThreshold)} />
               <input type="hidden" name="defaultAppTheme" value={orgDefaultAppTheme} />
 
               {/* VOIP Integration */}
@@ -617,6 +634,22 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                       <input
                         type="radio"
                         name="strategy"
+                        value="manual"
+                        checked={selectedDispatchStrategy === 'manual'}
+                        onChange={() => setSelectedDispatchStrategy('manual')}
+                        className="mt-1 text-brand-600 border-app-border focus:ring-brand-500"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-app-fg">Manual assignment</p>
+                        <p className="text-xs text-app-fg-muted mt-0.5">
+                          No auto-assignment. New orders sit in the Unassigned queue until Head of CS assigns them. Agents cannot claim or pull orders themselves.
+                        </p>
+                      </div>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-app-border p-4 hover:bg-app-hover/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
+                      <input
+                        type="radio"
+                        name="strategy"
                         value="load_balanced"
                         checked={selectedDispatchStrategy === 'load_balanced'}
                         onChange={() => setSelectedDispatchStrategy('load_balanced')}
@@ -688,10 +721,41 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   )}
 
                   <p className="text-xs text-app-fg-muted mt-3">
-                    Saved: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : dispatchStrategyFromSettings === 'claim' ? `Claim (cap: ${claimCapFromSettings})` : 'Load balanced'}</strong>
+                    Saved: <strong>{
+                      dispatchStrategyFromSettings === 'performance'
+                        ? 'Performance'
+                        : dispatchStrategyFromSettings === 'claim'
+                          ? `Claim (cap: ${claimCapFromSettings})`
+                          : dispatchStrategyFromSettings === 'load_balanced'
+                            ? 'Load balanced'
+                            : 'Manual assignment'
+                    }</strong>
                     {hasSystemChanges && ' — you have unsaved changes'}
                   </p>
                 </div>
+              </div>
+
+              <div className="card lg:col-span-2">
+                <h3 className="text-lg font-semibold text-app-fg mb-1">Low-stock alert threshold</h3>
+                <p className="text-sm text-app-fg-muted mb-3">
+                  When a product's available stock at any location drops below this number, SuperAdmins, Admins, and Stock Managers get an in-app + push notification. Rate-limited to one alert per location per 6 hours.
+                </p>
+                <div className="flex items-center gap-3">
+                  <TextInput
+                    id="low-stock-threshold-input"
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={localLowStockThreshold}
+                    onChange={(e) => setLocalLowStockThreshold(Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 10)))}
+                    wrapperClassName="w-28"
+                  />
+                  <span className="text-xs text-app-fg-muted">units</span>
+                </div>
+                <p className="text-xs text-app-fg-muted mt-3">
+                  Saved: <strong>{lowStockFromSettings} units</strong>
+                  {hasSystemChanges && localLowStockThreshold !== lowStockFromSettings && ' — you have unsaved changes'}
+                </p>
               </div>
 
               <div className="card lg:col-span-2">
@@ -771,7 +835,15 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                 </div>
                 <div className="rounded-lg border border-app-border p-4">
                   <p className="text-sm text-app-fg-muted">
-                    Only Super Admin can configure CS order distribution. Current: <strong>{dispatchStrategyFromSettings === 'performance' ? 'Performance' : dispatchStrategyFromSettings === 'claim' ? `Claim (cap: ${claimCapFromSettings})` : 'Load balanced'}</strong>.
+                    Only Super Admin can configure CS order distribution. Current: <strong>{
+                      dispatchStrategyFromSettings === 'performance'
+                        ? 'Performance'
+                        : dispatchStrategyFromSettings === 'claim'
+                          ? `Claim (cap: ${claimCapFromSettings})`
+                          : dispatchStrategyFromSettings === 'load_balanced'
+                            ? 'Load balanced'
+                            : 'Manual assignment'
+                    }</strong>.
                   </p>
                 </div>
               </div>

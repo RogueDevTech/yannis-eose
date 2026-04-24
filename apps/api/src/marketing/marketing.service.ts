@@ -3,7 +3,6 @@ import { TRPCError } from '@trpc/server';
 import { eq, and, desc, gte, lte, count, sum, inArray, or, ilike, getTableColumns, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
 import type {
   CreateFundingInput,
@@ -21,15 +20,15 @@ import type {
   UpdateCampaignInput,
   ListCampaignsInput,
 } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { withActor } from '../common/db/with-actor';
 
 @Injectable()
 export class MarketingService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -57,45 +56,46 @@ export class MarketingService {
   // ============================================
 
   async createFunding(input: CreateFundingInput, senderId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${senderId}, true)`;
-
-    // Validate sender → receiver flow: SA/FO → HoM (tier 1), HoM → Media Buyer (tier 2)
-    const [sender, receiver] = await Promise.all([
-      this.db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, senderId)).limit(1),
-      this.db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, input.receiverId)).limit(1),
-    ]);
-    const receiverRole = receiver[0]?.role;
-    const senderRole = sender[0]?.role;
-    if (!receiverRole || !senderRole) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Sender or receiver not found' });
-    }
-    if (receiverRole === 'HEAD_OF_MARKETING') {
-      if (senderRole !== 'SUPER_ADMIN' && senderRole !== 'FINANCE_OFFICER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Super Admin or Finance Officer can disburse to Head of Marketing' });
+    const funding = await withActor(this.db, { id: senderId }, async (tx) => {
+      // Validate sender → receiver flow: SA/FO → HoM (tier 1), HoM → Media Buyer (tier 2)
+      const [sender, receiver] = await Promise.all([
+        tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, senderId)).limit(1),
+        tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, input.receiverId)).limit(1),
+      ]);
+      const receiverRole = receiver[0]?.role;
+      const senderRole = sender[0]?.role;
+      if (!receiverRole || !senderRole) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Sender or receiver not found' });
       }
-    } else if (receiverRole === 'MEDIA_BUYER') {
-      if (senderRole !== 'HEAD_OF_MARKETING') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing can disburse to Media Buyers' });
+      if (receiverRole === 'HEAD_OF_MARKETING') {
+        if (senderRole !== 'SUPER_ADMIN' && senderRole !== 'ADMIN' && senderRole !== 'FINANCE_OFFICER') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Super Admin or Finance Officer can disburse to Head of Marketing' });
+        }
+      } else if (receiverRole === 'MEDIA_BUYER') {
+        if (senderRole !== 'HEAD_OF_MARKETING') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing can disburse to Media Buyers' });
+        }
+      } else {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Receiver must be Head of Marketing or Media Buyer' });
       }
-    } else {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Receiver must be Head of Marketing or Media Buyer' });
-    }
 
-    const rows = await this.db
-      .insert(schema.marketingFunding)
-      .values({
-        senderId,
-        receiverId: input.receiverId,
-        amount: String(input.amount),
-        receiptUrl: input.receiptUrl,
-        status: 'SENT',
-      })
-      .returning();
+      const rows = await tx
+        .insert(schema.marketingFunding)
+        .values({
+          senderId,
+          receiverId: input.receiverId,
+          amount: String(input.amount),
+          receiptUrl: input.receiptUrl,
+          status: 'SENT',
+        })
+        .returning();
 
-    const funding = rows[0];
-    if (!funding) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create funding' });
-    }
+      const inserted = rows[0];
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create funding' });
+      }
+      return inserted;
+    });
 
     // Notify the receiver (real-time + persistent)
     this.events.emitToUser(input.receiverId, 'funding:received', {
@@ -116,39 +116,41 @@ export class MarketingService {
   }
 
   async verifyFunding(input: VerifyFundingInput, receiverId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${receiverId}, true)`;
+    const { funding, updated } = await withActor(this.db, { id: receiverId }, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(schema.marketingFunding)
+        .where(eq(schema.marketingFunding.id, input.fundingId))
+        .limit(1);
 
-    const rows = await this.db
-      .select()
-      .from(schema.marketingFunding)
-      .where(eq(schema.marketingFunding.id, input.fundingId))
-      .limit(1);
+      const found = rows[0];
+      if (!found) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Funding record not found' });
+      }
 
-    const funding = rows[0];
-    if (!funding) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Funding record not found' });
-    }
+      if (found.receiverId !== receiverId) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the receiver can verify this funding' });
+      }
 
-    if (funding.receiverId !== receiverId) {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the receiver can verify this funding' });
-    }
+      if (found.status !== 'SENT') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Funding has already been verified' });
+      }
 
-    if (funding.status !== 'SENT') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Funding has already been verified' });
-    }
+      if (input.action === 'DISPUTED' && (!input.disputeReason || input.disputeReason.length < 10)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Dispute requires a reason with at least 10 characters' });
+      }
 
-    if (input.action === 'DISPUTED' && (!input.disputeReason || input.disputeReason.length < 10)) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Dispute requires a reason with at least 10 characters' });
-    }
+      const updatedRows = await tx
+        .update(schema.marketingFunding)
+        .set({
+          status: input.action,
+          verifiedAt: new Date(),
+        })
+        .where(eq(schema.marketingFunding.id, input.fundingId))
+        .returning();
 
-    const updated = await this.db
-      .update(schema.marketingFunding)
-      .set({
-        status: input.action,
-        verifiedAt: new Date(),
-      })
-      .where(eq(schema.marketingFunding.id, input.fundingId))
-      .returning();
+      return { funding: found, updated: updatedRows };
+    });
 
     if (input.action === 'DISPUTED') {
       // Alert SuperAdmin and Head of Marketing (real-time + persistent)
@@ -566,7 +568,7 @@ export class MarketingService {
     if (caller.id === userId) {
       return this.getFundingBalance(userId, branchId);
     }
-    if (caller.role === 'SUPER_ADMIN' || caller.role === 'FINANCE_OFFICER') {
+    if ((caller.role === 'SUPER_ADMIN' || caller.role === 'ADMIN') || caller.role === 'FINANCE_OFFICER') {
       return this.getFundingBalance(userId, branchId);
     }
     if (caller.role === 'HEAD_OF_MARKETING' && targetRole === 'MEDIA_BUYER') {
@@ -596,28 +598,30 @@ export class MarketingService {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Requester is not in the active branch' });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${requesterId}, true)`;
+    const { request, requester } = await withActor(this.db, { id: requesterId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.marketingFundingRequests)
+        .values({
+          requesterId,
+          amount: String(amount),
+          reason: reason.trim() || null,
+          status: 'PENDING',
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.marketingFundingRequests)
-      .values({
-        requesterId,
-        amount: String(amount),
-        reason: reason.trim() || null,
-        status: 'PENDING',
-      })
-      .returning();
+      const inserted = rows[0];
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create funding request' });
+      }
 
-    const request = rows[0];
-    if (!request) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create funding request' });
-    }
+      const [foundRequester] = await tx
+        .select({ name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, requesterId))
+        .limit(1);
 
-    const [requester] = await this.db
-      .select({ name: schema.users.name })
-      .from(schema.users)
-      .where(eq(schema.users.id, requesterId))
-      .limit(1);
+      return { request: inserted, requester: foundRequester };
+    });
 
     const name = requester?.name ?? (requesterRole === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'A Media Buyer');
     const bodySuffix = reason.trim() ? ` Reason: ${reason}` : '';
@@ -758,22 +762,23 @@ export class MarketingService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${approverId}, true)`;
+    const updated = await withActor(this.db, { id: approverId }, async (tx) => {
+      const [row] = await tx
+        .update(schema.marketingFundingRequests)
+        .set({
+          status: 'APPROVED',
+          receiptUrl,
+          resolvedAt: new Date(),
+          resolvedBy: approverId,
+        })
+        .where(eq(schema.marketingFundingRequests.id, requestId))
+        .returning();
 
-    const [updated] = await this.db
-      .update(schema.marketingFundingRequests)
-      .set({
-        status: 'APPROVED',
-        receiptUrl,
-        resolvedAt: new Date(),
-        resolvedBy: approverId,
-      })
-      .where(eq(schema.marketingFundingRequests.id, requestId))
-      .returning();
-
-    if (!updated) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
-    }
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
+      }
+      return row;
+    });
 
     const amount = Number(existing.amount);
     const body = `Your funding request of ₦${amount.toLocaleString()} was approved. You can view the receipt in Marketing → Funding.`;
@@ -815,21 +820,22 @@ export class MarketingService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${rejectorId}, true)`;
+    const updated = await withActor(this.db, { id: rejectorId }, async (tx) => {
+      const [row] = await tx
+        .update(schema.marketingFundingRequests)
+        .set({
+          status: 'REJECTED',
+          resolvedAt: new Date(),
+          resolvedBy: rejectorId,
+        })
+        .where(eq(schema.marketingFundingRequests.id, requestId))
+        .returning();
 
-    const [updated] = await this.db
-      .update(schema.marketingFundingRequests)
-      .set({
-        status: 'REJECTED',
-        resolvedAt: new Date(),
-        resolvedBy: rejectorId,
-      })
-      .where(eq(schema.marketingFundingRequests.id, requestId))
-      .returning();
-
-    if (!updated) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
-    }
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
+      }
+      return row;
+    });
 
     const amount = Number(existing.amount);
     await this.notifications
@@ -854,37 +860,37 @@ export class MarketingService {
     mediaBuyerId: string,
     branchId?: string | null,
   ) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${mediaBuyerId}, true)`;
-
-    if (branchId) {
-      const [campaign] = await this.db
-        .select({ id: schema.campaigns.id })
-        .from(schema.campaigns)
-        .where(and(eq(schema.campaigns.id, input.campaignId ?? ''), eq(schema.campaigns.branchId, branchId)))
-        .limit(1);
-      if (!campaign) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+    return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
+      if (branchId) {
+        const [campaign] = await tx
+          .select({ id: schema.campaigns.id })
+          .from(schema.campaigns)
+          .where(and(eq(schema.campaigns.id, input.campaignId ?? ''), eq(schema.campaigns.branchId, branchId)))
+          .limit(1);
+        if (!campaign) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+        }
       }
-    }
 
-    // Screenshot is mandatory — enforced by Zod schema. status defaults to PENDING in DB.
-    const rows = await this.db
-      .insert(schema.adSpendLogs)
-      .values({
-        mediaBuyerId,
-        productId: input.productId ?? '',
-        campaignId: input.campaignId ?? '',
-        spendAmount: String(input.spendAmount),
-        screenshotUrl: input.screenshotUrl,
-        spendDate: new Date(input.spendDate),
-      })
-      .returning();
+      // Screenshot is mandatory — enforced by Zod schema. status defaults to PENDING in DB.
+      const rows = await tx
+        .insert(schema.adSpendLogs)
+        .values({
+          mediaBuyerId,
+          productId: input.productId ?? '',
+          campaignId: input.campaignId ?? '',
+          spendAmount: String(input.spendAmount),
+          screenshotUrl: input.screenshotUrl,
+          spendDate: new Date(input.spendDate),
+        })
+        .returning();
 
-    const spend = rows[0];
-    if (!spend) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to log ad spend' });
-    }
-    return spend;
+      const spend = rows[0];
+      if (!spend) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to log ad spend' });
+      }
+      return spend;
+    });
   }
 
   /** Head of Marketing / SuperAdmin: approve a PENDING ad spend entry. */
@@ -902,17 +908,18 @@ export class MarketingService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only PENDING ad spend can be approved' });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${approverId}, true)`;
-
-    const [updated] = await this.db
-      .update(schema.adSpendLogs)
-      .set({
-        status: 'APPROVED',
-        approvedAt: new Date(),
-        approvedBy: approverId,
-      })
-      .where(eq(schema.adSpendLogs.id, adSpendId))
-      .returning();
+    const updated = await withActor(this.db, { id: approverId }, async (tx) => {
+      const [row] = await tx
+        .update(schema.adSpendLogs)
+        .set({
+          status: 'APPROVED',
+          approvedAt: new Date(),
+          approvedBy: approverId,
+        })
+        .where(eq(schema.adSpendLogs.id, adSpendId))
+        .returning();
+      return row;
+    });
 
     if (!updated) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to approve ad spend' });
@@ -1289,64 +1296,64 @@ export class MarketingService {
   // ============================================
 
   async createOfferTemplate(input: CreateOfferTemplateInput, createdBy: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${createdBy}, true)`;
+    return withActor(this.db, { id: createdBy }, async (tx) => {
+      // Verify product exists
+      const productRows = await tx
+        .select()
+        .from(schema.products)
+        .where(eq(schema.products.id, input.productId))
+        .limit(1);
 
-    // Verify product exists
-    const productRows = await this.db
-      .select()
-      .from(schema.products)
-      .where(eq(schema.products.id, input.productId))
-      .limit(1);
+      if (productRows.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+      }
 
-    if (productRows.length === 0) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
-    }
+      const rows = await tx
+        .insert(schema.offerTemplates)
+        .values({
+          productId: input.productId,
+          name: input.name,
+          price: String(input.price),
+          variants: input.variants ?? null,
+          createdBy,
+          status: 'ACTIVE',
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.offerTemplates)
-      .values({
-        productId: input.productId,
-        name: input.name,
-        price: String(input.price),
-        variants: input.variants ?? null,
-        createdBy,
-        status: 'ACTIVE',
-      })
-      .returning();
-
-    const template = rows[0];
-    if (!template) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offer template' });
-    }
-    return template;
+      const template = rows[0];
+      if (!template) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offer template' });
+      }
+      return template;
+    });
   }
 
   async updateOfferTemplate(input: UpdateOfferTemplateInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const existing = await tx
+        .select()
+        .from(schema.offerTemplates)
+        .where(eq(schema.offerTemplates.id, input.id))
+        .limit(1);
 
-    const existing = await this.db
-      .select()
-      .from(schema.offerTemplates)
-      .where(eq(schema.offerTemplates.id, input.id))
-      .limit(1);
+      if (existing.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Offer template not found' });
+      }
 
-    if (existing.length === 0) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Offer template not found' });
-    }
+      const updateData: Record<string, unknown> = {};
+      if (input.name !== undefined) updateData['name'] = input.name;
+      if (input.price !== undefined) updateData['price'] = String(input.price);
+      if (input.variants !== undefined) updateData['variants'] = input.variants;
+      if (input.status !== undefined) updateData['status'] = input.status;
 
-    const updateData: Record<string, unknown> = {};
-    if (input.name !== undefined) updateData['name'] = input.name;
-    if (input.price !== undefined) updateData['price'] = String(input.price);
-    if (input.variants !== undefined) updateData['variants'] = input.variants;
-    if (input.status !== undefined) updateData['status'] = input.status;
+      const updated = await tx
+        .update(schema.offerTemplates)
+        .set(updateData)
+        .where(eq(schema.offerTemplates.id, input.id))
+        .returning();
 
-    const updated = await this.db
-      .update(schema.offerTemplates)
-      .set(updateData)
-      .where(eq(schema.offerTemplates.id, input.id))
-      .returning();
-
-    return updated[0];
+      return updated[0];
+    });
   }
 
   async getOfferTemplate(id: string) {
@@ -1392,53 +1399,53 @@ export class MarketingService {
   // ============================================
 
   async createCampaign(input: CreateCampaignInput, mediaBuyerId: string, branchId?: string | null) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${mediaBuyerId}, true)`;
+    return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.campaigns)
+        .values({
+          mediaBuyerId,
+          name: input.name,
+          productIds: input.productIds,
+          deploymentType: input.deploymentType,
+          formConfig: input.formConfig ?? null,
+          status: 'ACTIVE',
+          branchId: branchId ?? null,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.campaigns)
-      .values({
-        mediaBuyerId,
-        name: input.name,
-        productIds: input.productIds,
-        deploymentType: input.deploymentType,
-        formConfig: input.formConfig ?? null,
-        status: 'ACTIVE',
-        branchId: branchId ?? null,
-      })
-      .returning();
-
-    const campaign = rows[0];
-    if (!campaign) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create campaign' });
-    }
-    return campaign;
+      const campaign = rows[0];
+      if (!campaign) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create campaign' });
+      }
+      return campaign;
+    });
   }
 
   async updateCampaign(input: UpdateCampaignInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const existing = await tx
+        .select()
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, input.id))
+        .limit(1);
 
-    const existing = await this.db
-      .select()
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.id, input.id))
-      .limit(1);
+      if (existing.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Campaign not found' });
+      }
 
-    if (existing.length === 0) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Campaign not found' });
-    }
+      const updateData: Record<string, unknown> = {};
+      if (input.name !== undefined) updateData['name'] = input.name;
+      if (input.formConfig !== undefined) updateData['formConfig'] = input.formConfig;
+      if (input.status !== undefined) updateData['status'] = input.status;
 
-    const updateData: Record<string, unknown> = {};
-    if (input.name !== undefined) updateData['name'] = input.name;
-    if (input.formConfig !== undefined) updateData['formConfig'] = input.formConfig;
-    if (input.status !== undefined) updateData['status'] = input.status;
+      const updated = await tx
+        .update(schema.campaigns)
+        .set(updateData)
+        .where(eq(schema.campaigns.id, input.id))
+        .returning();
 
-    const updated = await this.db
-      .update(schema.campaigns)
-      .set(updateData)
-      .where(eq(schema.campaigns.id, input.id))
-      .returning();
-
-    return updated[0];
+      return updated[0];
+    });
   }
 
   async getCampaign(id: string) {

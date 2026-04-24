@@ -97,7 +97,7 @@ export class TrpcMiddleware implements NestMiddleware {
 
     const user = await this.sessionStore.getSession(token);
     if (!user) return null;
-    if (user.role !== 'SUPER_ADMIN') {
+    if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
       const perms = await this.permissionsService.getEffectivePermissions(user.id, user.role);
       user.permissions = Array.from(perms);
     } else {

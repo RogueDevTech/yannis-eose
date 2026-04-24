@@ -1,10 +1,10 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT, REDIS } from '../database/database.module';
+import { DRIZZLE, REDIS } from '../database/database.module';
+import { withActor } from '../common/db/with-actor';
 
 const REDIS_PREFIX = 'yannis:setting:';
 const CACHE_TTL_SECONDS = 300; // 5 minutes
@@ -13,7 +13,6 @@ const CACHE_TTL_SECONDS = 300; // 5 minutes
 export class SettingsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
@@ -71,34 +70,33 @@ export class SettingsService {
    * Upsert a system setting with audit trail.
    */
   async set(key: string, value: Record<string, unknown>, actorId: string): Promise<void> {
-    // Set actor for audit trail
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      // Check if setting exists
+      const existing = await tx
+        .select()
+        .from(schema.systemSettings)
+        .where(eq(schema.systemSettings.key, key))
+        .limit(1);
 
-    // Check if setting exists
-    const existing = await this.db
-      .select()
-      .from(schema.systemSettings)
-      .where(eq(schema.systemSettings.key, key))
-      .limit(1);
-
-    if (existing[0]) {
-      await this.db
-        .update(schema.systemSettings)
-        .set({
-          value,
-          updatedBy: actorId,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.systemSettings.key, key));
-    } else {
-      await this.db
-        .insert(schema.systemSettings)
-        .values({
-          key,
-          value,
-          updatedBy: actorId,
-        });
-    }
+      if (existing[0]) {
+        await tx
+          .update(schema.systemSettings)
+          .set({
+            value,
+            updatedBy: actorId,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.systemSettings.key, key));
+      } else {
+        await tx
+          .insert(schema.systemSettings)
+          .values({
+            key,
+            value,
+            updatedBy: actorId,
+          });
+      }
+    });
 
     // Invalidate Redis cache
     await this.redis.del(`${REDIS_PREFIX}${key}`);

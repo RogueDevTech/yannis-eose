@@ -444,6 +444,13 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             <TextInput name="name" type="text" required placeholder="Location name" />
             <TextInput name="address" type="text" required placeholder="Address" />
             <TextInput name="coordinates" type="text" placeholder="GPS coordinates (optional)" />
+            <TextInput
+              name="whatsappGroupLink"
+              type="url"
+              placeholder="https://chat.whatsapp.com/... (optional)"
+              hint="WhatsApp group invite link used by the CS 'Share to 3PL' flow."
+              wrapperClassName="sm:col-span-2"
+            />
           </div>
           <div className="flex gap-2">
             <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">

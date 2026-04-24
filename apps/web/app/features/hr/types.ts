@@ -72,6 +72,12 @@ export interface HRStreamData {
   totalPlans: number;
   payouts: Payout[];
   totalPayouts: number;
+  /** Current page for the payouts table (from URL `payoutPage` param). */
+  payoutPage: number;
+  /** Total pages available for the current filter. */
+  totalPayoutPages: number;
+  /** Current status filter for payouts (`'ALL'` or a PayoutStatus). */
+  payoutStatus: string;
   adjustments: Adjustment[];
   payoutSummary: PayoutSummary;
   users: HRUser[];

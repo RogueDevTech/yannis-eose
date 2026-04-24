@@ -46,7 +46,7 @@ function parseFundingSummary(res: { ok: boolean; data: unknown }) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
     permission: 'marketing.teamOverview',
   });
   const cookie = getSessionCookie(request);
@@ -64,7 +64,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let teamMembers = parseBalancesList(balancesRes);
   const fundingSummary = parseFundingSummary(summaryRes);
 
-  if (teamMembers.length === 0 && (user.role === 'SUPER_ADMIN' || user.role === 'HEAD_OF_MARKETING')) {
+  if (teamMembers.length === 0 && (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_MARKETING')) {
     const listInput = (input: { role: string }) =>
       `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ role: input.role, limit: 20 }))}`;
     const [mbRes, homRes] = await Promise.all([

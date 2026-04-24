@@ -44,6 +44,13 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
     setGroupCollapsed(loadGroupState());
   }, []);
 
+  // When a role has ≤2 named groups (e.g. HR Manager → "HR"; Media Buyer → "MARKETING";
+  // CS Agent → "SALES & CS"), auto-open the groups so the handful of nav items are
+  // immediately visible. Users with many groups (SuperAdmin/Admin) keep the collapsed
+  // default to avoid a wall of nav. An explicit user toggle still wins — persisted.
+  const namedGroupCount = groups.filter((g) => g.group !== null && g.items.length > 0).length;
+  const autoOpenAll = namedGroupCount <= 2;
+
   const toggleGroup = useCallback((groupName: string) => {
     setGroupCollapsed((prev) => {
       // true = expanded, default is collapsed (undefined/false)
@@ -106,9 +113,11 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
               );
             }
 
-            // Named group — collapsible section
-            // Default closed: groupCollapsed stores true = expanded
-            const isOpen = !!groupCollapsed[group.group];
+            // Named group — collapsible section.
+            // Default: closed; but if the role has ≤2 groups, auto-open when no explicit preference is stored.
+            // Explicit user toggles are persisted in localStorage and always win over the auto-open heuristic.
+            const stored = groupCollapsed[group.group];
+            const isOpen = stored !== undefined ? stored : autoOpenAll;
 
             // In icon-only mode, skip headers and render items flat
             if (isExpanded) {

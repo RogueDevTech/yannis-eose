@@ -45,8 +45,35 @@ export const inventoryRouter = router({
     }),
 
   /**
+   * Detail view for a single inventory row — FIFO batches intaken at this location
+   * plus the full movement history affecting stock at this (product, location).
+   */
+  levelDetail: authedProcedure
+    .input(z.object({
+      productId: z.string().uuid(),
+      locationId: z.string().uuid(),
+      limit: z.number().int().min(1).max(500).default(100),
+    }))
+    .query(async ({ input }) => {
+      return getInventoryService().levelDetail(input.productId, input.locationId, input.limit);
+    }),
+
+  /**
+   * Single-inventory-row detail page loader — returns level + product/location names
+   * + batches + movements in one round-trip.
+   */
+  getLevelById: authedProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      limit: z.number().int().min(1).max(500).default(200),
+    }))
+    .query(async ({ input }) => {
+      return getInventoryService().getLevelById(input.id, input.limit);
+    }),
+
+  /**
    * Stock intake — receive new stock batch.
-   * Warehouse Manager or SuperAdmin only.
+   * Stock Manager or SuperAdmin only.
    */
   intake: permissionProcedure('inventory.intake')
     .input(stockIntakeSchema)

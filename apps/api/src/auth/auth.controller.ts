@@ -9,6 +9,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -186,16 +187,25 @@ export class AuthController {
   }
 
   /**
-   * SuperAdmin-only: Kill all sessions for a specific user.
-   * Forces immediate logout across all devices.
+   * Kill all sessions for a specific user — forces immediate logout across all devices.
+   * SUPER_ADMIN may target anyone. ADMIN may only target non-admin-level users
+   * (cannot lock out another Admin or the SuperAdmin).
    */
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN')
   @Delete('sessions/:userId')
   @HttpCode(HttpStatus.OK)
   async killUserSessions(
     @Param('userId') userId: string,
     @CurrentUser() actor: SessionUser,
   ) {
+    if (actor.role === 'ADMIN') {
+      const targetUser = await this.usersService.getById(userId).catch(() => null);
+      if (targetUser && (targetUser.role === 'SUPER_ADMIN' || targetUser.role === 'ADMIN')) {
+        throw new ForbiddenException(
+          'Admins cannot kill sessions of another Admin or the SuperAdmin. Only the SuperAdmin can.',
+        );
+      }
+    }
     const killed = await this.authService.killUserSessions(userId);
     return {
       message: `Terminated ${killed} session(s) for user ${userId}`,
@@ -211,7 +221,7 @@ export class AuthController {
   @Post('me')
   @HttpCode(HttpStatus.OK)
   async me(@CurrentUser() user: SessionUser) {
-    if (user.role !== 'SUPER_ADMIN') {
+    if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
       const perms = await this.permissionsService.getEffectivePermissions(user.id, user.role);
       user = { ...user, permissions: Array.from(perms) };
     } else {

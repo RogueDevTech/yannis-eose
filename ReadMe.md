@@ -10,6 +10,9 @@ brew services list           # see status
 brew services stop redis     # stop now (does not unregister)
 brew services restart redis  # restart
 
+brew services stop redis
+brew services start redis
+brew services list | grep redis   # should now show "started"
 
 ```bash
 pnpm install
@@ -103,7 +106,6 @@ apps/api/          NestJS backend (21 modules, 18 tRPC routers)
 apps/web/          Remix PWA frontend (65+ routes, 29 feature modules)
 apps/edge-worker/  Cloudflare Worker (form submission + circuit breaker)
 packages/shared/   Drizzle schema (18 files), Zod validators (14 files), types
-packages/ui/       Shared Tailwind components
 packages/config/   ESLint, TypeScript, Tailwind configs
 docs/              Developer Guide, Runbook, ADRs
 ```
@@ -225,3 +227,6 @@ TURNSTILE_SECRET_KEY = "0x4AAAAAACwS5ss9tTk4mAVWT0jI_Nm-1Hw"
     "type": "secret_text"
   }
 ]
+
+
+

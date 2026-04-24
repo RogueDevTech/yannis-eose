@@ -123,6 +123,7 @@ export class AuthService {
       currentBranchId,
       appTheme: user.appTheme ?? null,
       fontScale: user.fontScale ?? null,
+      isFinanceOfficer: user.isFinanceOfficer === true,
     };
 
     // Persist session in DB, then cache in Redis when available.
@@ -271,8 +272,8 @@ export class AuthService {
 
     const user: SessionUser = sessionData;
 
-    // SuperAdmin can switch to any branch; others must be a member
-    if (user.role !== 'SUPER_ADMIN') {
+    // SUPER_ADMIN and ADMIN can switch to any branch; others must be a member
+    if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
       const membership = await this.db
         .select({ branchId: schema.userBranches.branchId })
         .from(schema.userBranches)

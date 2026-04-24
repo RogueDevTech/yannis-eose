@@ -161,7 +161,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const isDeliveryConfirmation = newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED';
-    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN';
+    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
 
     if (isDeliveryConfirmation && !canTransitionDirect) {
       const res = await apiRequest<unknown>('/trpc/logistics.submitDeliveryConfirmation', {

@@ -176,7 +176,8 @@ export async function requirePermission(
 ): Promise<{ id: string; email: string; name: string; role: string; permissions?: string[]; logisticsLocationId?: string | null }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  if (user.role === 'SUPER_ADMIN') return user;
+  // SUPER_ADMIN and ADMIN bypass all permission checks.
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return user;
   const codes = Array.isArray(permissionCode) ? permissionCode : [permissionCode];
   const perms = user.permissions ?? [];
   const hasAny = codes.some((c) => perms.includes(c));

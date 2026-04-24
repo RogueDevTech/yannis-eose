@@ -60,6 +60,11 @@ export const listInventorySchema = z.object({
   productId: z.string().uuid().optional(),
   locationId: z.string().uuid().optional(),
   belowThreshold: z.boolean().optional(),
+  /** Substring match against the product name (case-insensitive). */
+  search: z.string().trim().min(1).max(100).optional(),
+  /** `available` sorts by (stockCount - reservedCount); `updatedAt` is the default recency sort. */
+  sortBy: z.enum(['updatedAt', 'available']).default('updatedAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });

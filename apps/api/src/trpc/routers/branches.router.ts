@@ -59,7 +59,7 @@ export const branchesRouter = router({
    */
   list: authedProcedure.query(async ({ ctx }) => {
     const db = getDb();
-    if (ctx.user.role === 'SUPER_ADMIN') {
+    if ((ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN')) {
       return db.select().from(schema.branches);
     }
     const memberships = await db
@@ -84,7 +84,7 @@ export const branchesRouter = router({
     .query(async ({ input, ctx }) => {
       const db = getDb();
 
-      if (ctx.user.role !== 'SUPER_ADMIN') {
+      if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
         const membership = await db
           .select({ branchId: schema.userBranches.branchId })
           .from(schema.userBranches)
@@ -365,10 +365,10 @@ export const branchesRouter = router({
 
       // null = "All Branches" — only SuperAdmin may clear branch context
       if (input.branchId === null) {
-        if (ctx.user.role !== 'SUPER_ADMIN') {
+        if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
           throw new TRPCError({ code: 'FORBIDDEN', message: 'Only SuperAdmin can view all branches' });
         }
-      } else if (ctx.user.role !== 'SUPER_ADMIN') {
+      } else if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
         const membership = await db
           .select({ branchId: schema.userBranches.branchId })
           .from(schema.userBranches)

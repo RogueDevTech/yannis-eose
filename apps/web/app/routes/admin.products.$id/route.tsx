@@ -89,7 +89,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const product = mapApiProductToProduct(apiProduct);
   const canEditProduct =
-    user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('products.update');
+    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('products.update');
 
   return { product, categories, canEditProduct } satisfies LoaderData;
 }

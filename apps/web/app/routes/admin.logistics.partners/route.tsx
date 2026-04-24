@@ -13,7 +13,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'logistics.read');
   const cookie = getSessionCookie(request);
 
-  const canViewEscalations = ['SUPER_ADMIN', 'HEAD_OF_LOGISTICS'].includes(user.role);
+  const canViewEscalations = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'].includes(user.role);
 
   const listInput = JSON.stringify({ page: 1, limit: 20 });
   const providersPromise = apiRequest<unknown>(`/trpc/logistics.listProviders?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
@@ -132,6 +132,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name: formData.get('name')?.toString() ?? '',
         address: formData.get('address')?.toString() ?? '',
         coordinates: formData.get('coordinates')?.toString() || undefined,
+        whatsappGroupLink: formData.get('whatsappGroupLink')?.toString() || undefined,
       },
     });
     if (!res.ok) {

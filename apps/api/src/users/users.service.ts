@@ -3,7 +3,6 @@ import { TRPCError } from '@trpc/server';
 import { randomBytes } from 'crypto';
 import { eq, and, desc, asc, ilike, or, count, ne, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
 import type {
   SetupSuperAdminInput,
@@ -12,8 +11,9 @@ import type {
   ListUsersInput,
   ResetPasswordInput,
 } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE } from '../database/database.module';
 import { AuthService } from '../auth/auth.service';
+import { withActor } from '../common/db/with-actor';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -24,7 +24,6 @@ export class UsersService {
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly authService: AuthService,
     private readonly notificationsService: NotificationsService,
     private readonly permissionsService: PermissionsService,
@@ -91,6 +90,50 @@ export class UsersService {
       membershipsByUser.set(row.userId, existing);
     }
     return membershipsByUser;
+  }
+
+  /**
+   * Fire the "Finance hat changed hands" notifications. Both the new holder and the displaced
+   * previous holder (if any) get an in-app + push + email (account category). Errors are
+   * swallowed — the hat assignment has already committed; a failed notification must never roll it back.
+   */
+  private notifyFinanceHatChange(params: {
+    newHolder: { id: string; name: string };
+    displacedHolder: { id: string; name: string } | null;
+    actorName: string;
+  }): void {
+    const { newHolder, displacedHolder, actorName } = params;
+    const assignedBody = displacedHolder
+      ? `${actorName} assigned the Finance hat to you. It was previously held by ${displacedHolder.name}. You now have Finance Officer powers on top of your primary role.`
+      : `${actorName} assigned the Finance hat to you. You now have Finance Officer powers on top of your primary role.`;
+    this.notificationsService
+      .create({
+        userId: newHolder.id,
+        type: 'account:finance_hat_assigned',
+        title: 'You now hold the Finance hat',
+        body: assignedBody,
+        data: {
+          displacedHolderId: displacedHolder?.id ?? null,
+          displacedHolderName: displacedHolder?.name ?? null,
+          assignedBy: actorName,
+        },
+      })
+      .catch((err) => this.logger.warn(`finance_hat_assigned notification failed: ${err}`));
+    if (displacedHolder && displacedHolder.id !== newHolder.id) {
+      this.notificationsService
+        .create({
+          userId: displacedHolder.id,
+          type: 'account:finance_hat_revoked',
+          title: 'Finance hat reassigned',
+          body: `${actorName} reassigned the Finance hat to ${newHolder.name}. You no longer have Finance Officer powers.`,
+          data: {
+            newHolderId: newHolder.id,
+            newHolderName: newHolder.name,
+            assignedBy: actorName,
+          },
+        })
+        .catch((err) => this.logger.warn(`finance_hat_revoked notification failed: ${err}`));
+    }
   }
 
   /**
@@ -167,25 +210,34 @@ export class UsersService {
    * If actor is HR (non-SuperAdmin) and role is sensitive, creates permission_request instead.
    */
   async createStaff(input: CreateStaffInput, actor: SessionUser) {
-    // Set actor for audit trail
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    // Preserve SuperAdmin singleton invariant: SUPER_ADMIN can ONLY be created via the public
+    // /auth/setup flow (setupSuperAdmin), never via createStaff. Anyone attempting it is blocked.
+    if (input.role === 'SUPER_ADMIN') {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message:
+          'SUPER_ADMIN is a singleton and cannot be created via staff management. Use the initial setup flow.',
+      });
+    }
 
-    // HR scope check: if HR (has users.create but not SuperAdmin) and role is sensitive, create request
+    // Sensitive-role approval flow: anyone other than SuperAdmin attempting to create a sensitive
+    // role (ADMIN, FINANCE_OFFICER, etc.) generates a permission_request the SuperAdmin must approve.
+    // This covers: HR creating any sensitive role, AND ADMIN creating another ADMIN.
     const isSuperAdmin = actor.role === 'SUPER_ADMIN';
-    const hasUsersCreate =
-      isSuperAdmin || (actor.permissions ?? []).includes('users.create');
-    if (hasUsersCreate && !isSuperAdmin && this.permissionsService.isSensitiveRole(input.role)) {
-      const [req] = await this.db
-        .insert(schema.permissionRequests)
-        .values({
-          type: 'USER_CREATION',
-          status: 'PENDING',
-          requesterId: actor.id,
-          requestedRole: input.role,
-          reason: `HR requested creation of user with role ${input.role}`,
-          payload: input as unknown as Record<string, unknown>,
-        })
-        .returning({ id: schema.permissionRequests.id });
+    if (!isSuperAdmin && this.permissionsService.isSensitiveRole(input.role)) {
+      const [req] = await withActor(this.db, actor, async (tx) =>
+        tx
+          .insert(schema.permissionRequests)
+          .values({
+            type: 'USER_CREATION',
+            status: 'PENDING',
+            requesterId: actor.id,
+            requestedRole: input.role,
+            reason: `HR requested creation of user with role ${input.role}`,
+            payload: input as unknown as Record<string, unknown>,
+          })
+          .returning({ id: schema.permissionRequests.id }),
+      );
 
       if (req?.id) {
         this.notificationsService
@@ -220,7 +272,10 @@ export class UsersService {
     }
 
     // Enforce one active HEAD_OF_* per branch
-    const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
+    // Roles limited to at most one active holder per branch. HR_MANAGER joined this set on
+    // 2026-04-23 per CEO directive — same rule as the HEAD_OF_* roles even though it's not
+    // literally a "head" (naming kept for continuity with migration 0056/0060 + callers).
+    const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'] as const;
     if (HEAD_ROLES.includes(input.role as typeof HEAD_ROLES[number]) && input.primaryBranchId) {
       const existingHead = await this.db
         .select({ id: schema.users.id, name: schema.users.name })
@@ -258,7 +313,8 @@ export class UsersService {
       }
     }
 
-    if (input.role !== 'SUPER_ADMIN') {
+    // SUPER_ADMIN already rejected above; ADMIN is global (no primary branch required).
+    if (input.role !== 'ADMIN') {
       if (!input.primaryBranchId) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -289,7 +345,15 @@ export class UsersService {
     const plainPassword = this.generatePassword();
     const passwordHash = await this.authService.hashPassword(plainPassword);
 
+    // Captured during the atomic Finance-hat swap so we can notify the displaced holder
+    // after the transaction commits.
+    let displacedFinanceHolder: { id: string; name: string } | null = null;
+
     const user = await this.db.transaction(async (tx) => {
+      // Audit actor for this transaction — must be INSIDE the transaction because
+      // `SET LOCAL` is scoped to the current transaction's connection (see with-actor.ts).
+      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
+
       // If inline compensation provided, create a commission plan first
       let commissionPlanId = input.commissionPlanId ?? null;
       if (input.compensation && !commissionPlanId) {
@@ -326,6 +390,23 @@ export class UsersService {
         }
       }
 
+      // Finance hat: if requested, clear the flag from whoever currently holds it (atomic swap
+      // inside this transaction). The partial unique index is the safety net; the pre-clear is
+      // what actually lets a new user be inserted with the hat set to true.
+      // Capture the displaced holder so we can notify them once the transaction commits.
+      if (input.isFinanceOfficer === true) {
+        const [existing] = await tx
+          .select({ id: schema.users.id, name: schema.users.name })
+          .from(schema.users)
+          .where(eq(schema.users.isFinanceOfficer, true))
+          .limit(1);
+        if (existing) displacedFinanceHolder = existing;
+        await tx
+          .update(schema.users)
+          .set({ isFinanceOfficer: false, updatedAt: new Date() })
+          .where(eq(schema.users.isFinanceOfficer, true));
+      }
+
       // Insert user with all fields
       const rows = await tx
         .insert(schema.users)
@@ -342,6 +423,7 @@ export class UsersService {
           visibleOrderStatuses: input.visibleOrderStatuses ?? null,
           restrictProductAccess: input.restrictProductAccess ?? false,
           commissionPlanId,
+          isFinanceOfficer: input.isFinanceOfficer === true,
         })
         .returning({
           id: schema.users.id,
@@ -423,6 +505,17 @@ export class UsersService {
         .catch(() => {});
     }
 
+    // Finance-hat notifications: fired after the transaction commits so both parties see the
+    // change. The new holder gets "you now hold the Finance hat"; the displaced holder (if any)
+    // gets "you no longer hold the Finance hat".
+    if (input.isFinanceOfficer === true) {
+      this.notifyFinanceHatChange({
+        newHolder: { id: user.id, name: user.name },
+        displacedHolder: displacedFinanceHolder,
+        actorName: actor.name ?? 'an admin',
+      });
+    }
+
     return {
       ...user,
       phone: this.maskPhone(user.phone),
@@ -448,6 +541,7 @@ export class UsersService {
         restrictProductAccess: schema.users.restrictProductAccess,
         commissionPlanId: schema.users.commissionPlanId,
         primaryBranchId: schema.users.primaryBranchId,
+        isFinanceOfficer: schema.users.isFinanceOfficer,
         createdAt: schema.users.createdAt,
         updatedAt: schema.users.updatedAt,
       })
@@ -659,7 +753,7 @@ export class UsersService {
       .from(schema.users)
       .where(
         and(
-          inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS']),
+          inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER']),
           eq(schema.users.status, 'ACTIVE'),
         ),
       )
@@ -667,12 +761,24 @@ export class UsersService {
   }
 
   /**
+   * Current holder of the Finance hat, if any. Exactly zero or one rows. Used by the user
+   * create/edit forms to show a "Currently held by X — reassigning will revoke from them" hint
+   * before the admin submits the change.
+   */
+  async getCurrentFinanceOfficerHolder(): Promise<{ id: string; name: string } | null> {
+    const rows = await this.db
+      .select({ id: schema.users.id, name: schema.users.name })
+      .from(schema.users)
+      .where(eq(schema.users.isFinanceOfficer, true))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  /**
    * Update a staff member's details.
    * If actor is HR and requested role is sensitive, creates permission_request instead.
    */
   async update(input: UpdateStaffInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     if (input.userId === actor.id && input.role) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -693,6 +799,7 @@ export class UsersService {
         visibleOrderStatuses: schema.users.visibleOrderStatuses,
         restrictProductAccess: schema.users.restrictProductAccess,
         primaryBranchId: schema.users.primaryBranchId,
+        isFinanceOfficer: schema.users.isFinanceOfficer,
       })
       .from(schema.users)
       .where(eq(schema.users.id, input.userId))
@@ -722,12 +829,17 @@ export class UsersService {
       });
     }
 
-    // HR scope check: if HR and role change to sensitive, create request
+    // Sensitive-role approval flow on update — anyone other than SuperAdmin promoting someone to
+    // a sensitive role (ADMIN, FINANCE_OFFICER, etc.) creates a permission_request for approval.
     const isSuperAdmin = actor.role === 'SUPER_ADMIN';
-    const hasUsersUpdate =
-      isSuperAdmin || (actor.permissions ?? []).includes('users.update');
+    // Additionally block non-SuperAdmins from promoting anyone to SUPER_ADMIN (singleton invariant).
+    if (!isSuperAdmin && input.role === 'SUPER_ADMIN') {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the current SuperAdmin can transfer the SUPER_ADMIN role.',
+      });
+    }
     if (
-      hasUsersUpdate &&
       !isSuperAdmin &&
       input.role &&
       this.permissionsService.isSensitiveRole(input.role)
@@ -772,7 +884,7 @@ export class UsersService {
     }
 
     // Enforce one active HEAD_OF_* per branch on role change or branch change
-    const HEAD_ROLES_UPDATE = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
+    const HEAD_ROLES_UPDATE = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'] as const;
     const roleBeingSet = input.role ?? beforeRow.role;
     const branchBeingSet = beforeRow.primaryBranchId ?? null;
     if (
@@ -885,24 +997,46 @@ export class UsersService {
     }
     if (input.visibleOrderStatuses !== undefined) updateFields['visibleOrderStatuses'] = input.visibleOrderStatuses;
     if (input.restrictProductAccess !== undefined) updateFields['restrictProductAccess'] = input.restrictProductAccess;
+    if (input.isFinanceOfficer !== undefined) updateFields['isFinanceOfficer'] = input.isFinanceOfficer;
 
-    const updatedRows = await this.db
-      .update(schema.users)
-      .set(updateFields)
-      .where(eq(schema.users.id, input.userId))
-      .returning({
-        id: schema.users.id,
-        name: schema.users.name,
-        email: schema.users.email,
-        role: schema.users.role,
-        status: schema.users.status,
-        capacity: schema.users.capacity,
-        logisticsLocationId: schema.users.logisticsLocationId,
-        phone: schema.users.phone,
-        visibleOrderStatuses: schema.users.visibleOrderStatuses,
-        restrictProductAccess: schema.users.restrictProductAccess,
-        updatedAt: schema.users.updatedAt,
-      });
+    // Finance-hat swap: if we're turning the hat ON for this user, clear it from the current
+    // holder first in the same transaction. Turning it OFF is a plain revoke (no swap needed).
+    // Capture the displaced holder (if any) so we can notify them after commit.
+    let displacedFinanceHolder: { id: string; name: string } | null = null;
+    const updatedRows = await this.db.transaction(async (tx) => {
+      // Audit actor for this transaction (see with-actor.ts for why SET LOCAL must be inside).
+      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
+      if (input.isFinanceOfficer === true) {
+        const [existing] = await tx
+          .select({ id: schema.users.id, name: schema.users.name })
+          .from(schema.users)
+          .where(and(eq(schema.users.isFinanceOfficer, true), ne(schema.users.id, input.userId)))
+          .limit(1);
+        if (existing) displacedFinanceHolder = existing;
+        await tx
+          .update(schema.users)
+          .set({ isFinanceOfficer: false, updatedAt: new Date() })
+          .where(and(eq(schema.users.isFinanceOfficer, true), ne(schema.users.id, input.userId)));
+      }
+      return tx
+        .update(schema.users)
+        .set(updateFields)
+        .where(eq(schema.users.id, input.userId))
+        .returning({
+          id: schema.users.id,
+          name: schema.users.name,
+          email: schema.users.email,
+          role: schema.users.role,
+          status: schema.users.status,
+          capacity: schema.users.capacity,
+          logisticsLocationId: schema.users.logisticsLocationId,
+          phone: schema.users.phone,
+          visibleOrderStatuses: schema.users.visibleOrderStatuses,
+          restrictProductAccess: schema.users.restrictProductAccess,
+          isFinanceOfficer: schema.users.isFinanceOfficer,
+          updatedAt: schema.users.updatedAt,
+        });
+    });
 
     const updated = updatedRows[0];
     if (!updated) {
@@ -914,24 +1048,48 @@ export class UsersService {
 
     // Update product assignments if provided
     if (input.productIds !== undefined) {
-      // Delete existing assignments
-      await this.db
-        .delete(schema.userProductAssignments)
-        .where(eq(schema.userProductAssignments.userId, input.userId));
+      await withActor(this.db, actor, async (tx) => {
+        // Delete existing assignments
+        await tx
+          .delete(schema.userProductAssignments)
+          .where(eq(schema.userProductAssignments.userId, input.userId));
 
-      // Insert new ones
-      if (input.productIds.length > 0) {
-        await this.db.insert(schema.userProductAssignments).values(
-          input.productIds.map((productId) => ({
-            userId: input.userId,
-            productId,
-          })),
-        );
-      }
+        // Insert new ones
+        if (input.productIds && input.productIds.length > 0) {
+          await tx.insert(schema.userProductAssignments).values(
+            input.productIds.map((productId) => ({
+              userId: input.userId,
+              productId,
+            })),
+          );
+        }
+      });
     }
 
     if (input.status === 'INACTIVE' || input.status === 'ARCHIVED' || input.status === 'DEACTIVATED') {
       await this.authService.killUserSessions(input.userId);
+    }
+
+    // Finance-hat notifications, fired post-commit. Three cases:
+    //   - Assign TO this user (hat turned on): notify this user + any displaced holder.
+    //   - Plain revoke FROM this user (hat turned off, not reassigned elsewhere): notify this user.
+    //   - Unchanged: nothing to fire.
+    if (input.isFinanceOfficer === true && beforeRow.isFinanceOfficer !== true) {
+      this.notifyFinanceHatChange({
+        newHolder: { id: updated.id, name: updated.name },
+        displacedHolder: displacedFinanceHolder,
+        actorName: actor.name ?? 'an admin',
+      });
+    } else if (input.isFinanceOfficer === false && beforeRow.isFinanceOfficer === true) {
+      this.notificationsService
+        .create({
+          userId: updated.id,
+          type: 'account:finance_hat_revoked',
+          title: 'Finance hat revoked',
+          body: `${actor.name ?? 'An admin'} revoked the Finance hat from you. You no longer have Finance Officer powers.`,
+          data: { revokedBy: actor.name ?? 'an admin' },
+        })
+        .catch((err) => this.logger.warn(`finance_hat_revoked notification failed: ${err}`));
     }
 
     const afterProductIds =
@@ -975,13 +1133,16 @@ export class UsersService {
   }
 
   /**
-   * Deactivate a staff member. SuperAdmin only; permanent (no reactivation).
+   * Deactivate a staff member. Permanent (no reactivation).
+   * - SuperAdmin may deactivate anyone (except themselves).
+   * - Admin may deactivate non-admin-level users only.
+   * - Others: forbidden.
    */
   async deactivate(userId: string, actor: SessionUser) {
-    if (actor.role !== 'SUPER_ADMIN') {
+    if (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN') {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins can deactivate users.',
+        message: 'Only Super Admins and Admins can deactivate users.',
       });
     }
     if (userId === actor.id) {
@@ -990,23 +1151,38 @@ export class UsersService {
         message: 'Cannot deactivate your own account',
       });
     }
-
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    const updatedRows = await this.db
-      .update(schema.users)
-      .set({ status: 'DEACTIVATED', updatedAt: new Date() })
-      .where(eq(schema.users.id, userId))
-      .returning({
-        id: schema.users.id,
-        name: schema.users.name,
-        status: schema.users.status,
-      });
-
-    const updated = updatedRows[0];
-    if (!updated) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    // Admins cannot deactivate other admin-level users. Only SuperAdmin can do that.
+    if (actor.role === 'ADMIN') {
+      const [target] = await this.db
+        .select({ role: schema.users.role })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+      if (target && (target.role === 'SUPER_ADMIN' || target.role === 'ADMIN')) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Admins cannot deactivate another Admin or the SuperAdmin. Only the SuperAdmin can.',
+        });
+      }
     }
+
+    const updated = await withActor(this.db, actor, async (tx) => {
+      const rows = await tx
+        .update(schema.users)
+        .set({ status: 'DEACTIVATED', updatedAt: new Date() })
+        .where(eq(schema.users.id, userId))
+        .returning({
+          id: schema.users.id,
+          name: schema.users.name,
+          status: schema.users.status,
+        });
+
+      const result = rows[0];
+      if (!result) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+      return result;
+    });
 
     await this.authService.killUserSessions(userId);
 
@@ -1027,19 +1203,19 @@ export class UsersService {
    * Reset a user's password (admin action).
    */
   async resetPassword(input: ResetPasswordInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     const passwordHash = await this.authService.hashPassword(input.newPassword);
 
-    const updatedRows = await this.db
-      .update(schema.users)
-      .set({ passwordHash, updatedAt: new Date() })
-      .where(eq(schema.users.id, input.userId))
-      .returning({ id: schema.users.id });
+    await withActor(this.db, actor, async (tx) => {
+      const updatedRows = await tx
+        .update(schema.users)
+        .set({ passwordHash, updatedAt: new Date() })
+        .where(eq(schema.users.id, input.userId))
+        .returning({ id: schema.users.id });
 
-    if (!updatedRows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
-    }
+      if (!updatedRows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+    });
 
     await this.authService.killUserSessions(input.userId);
 
@@ -1082,53 +1258,55 @@ export class UsersService {
     input: { requestId: string; action: 'APPROVED' | 'REJECTED'; reason: string },
     actor: SessionUser,
   ) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    const rows = await this.db
-      .select()
-      .from(schema.emailChangeRequests)
-      .where(eq(schema.emailChangeRequests.id, input.requestId))
-      .limit(1);
-
-    const req = rows[0];
-    if (!req) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Email change request not found' });
-    }
-    if (req.status !== 'PENDING') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request already processed' });
-    }
-
-    if (input.action === 'APPROVED') {
-      // Check new email is not taken
-      const existing = await this.db
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(eq(schema.users.email, req.requestedNewEmail))
+    const req = await withActor(this.db, actor, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(schema.emailChangeRequests)
+        .where(eq(schema.emailChangeRequests.id, input.requestId))
         .limit(1);
 
-      if (existing[0] && existing[0].id !== req.userId) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: 'A user with this email already exists',
-        });
+      const found = rows[0];
+      if (!found) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Email change request not found' });
+      }
+      if (found.status !== 'PENDING') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request already processed' });
       }
 
-      await this.db
-        .update(schema.users)
-        .set({ email: req.requestedNewEmail, updatedAt: new Date() })
-        .where(eq(schema.users.id, req.userId));
-    }
+      if (input.action === 'APPROVED') {
+        // Check new email is not taken
+        const existing = await tx
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(eq(schema.users.email, found.requestedNewEmail))
+          .limit(1);
 
-    await this.db
-      .update(schema.emailChangeRequests)
-      .set({
-        status: input.action,
-        approverId: actor.id,
-        approvalReason: input.reason,
-        approvedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.emailChangeRequests.id, input.requestId));
+        if (existing[0] && existing[0].id !== found.userId) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'A user with this email already exists',
+          });
+        }
+
+        await tx
+          .update(schema.users)
+          .set({ email: found.requestedNewEmail, updatedAt: new Date() })
+          .where(eq(schema.users.id, found.userId));
+      }
+
+      await tx
+        .update(schema.emailChangeRequests)
+        .set({
+          status: input.action,
+          approverId: actor.id,
+          approvalReason: input.reason,
+          approvedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.emailChangeRequests.id, input.requestId));
+
+      return found;
+    });
 
     const body =
       input.action === 'APPROVED'
@@ -1271,19 +1449,19 @@ export class UsersService {
    * Persists the current user's appearance theme. `null` = follow org default (`client_ui_config`).
    */
   async updateMyAppTheme(appTheme: string | null, actor: SessionUser): Promise<{ appTheme: string | null }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .update(schema.users)
+        .set({ appTheme, updatedAt: new Date() })
+        .where(eq(schema.users.id, actor.id))
+        .returning({ appTheme: schema.users.appTheme });
 
-    const [row] = await this.db
-      .update(schema.users)
-      .set({ appTheme, updatedAt: new Date() })
-      .where(eq(schema.users.id, actor.id))
-      .returning({ appTheme: schema.users.appTheme });
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
 
-    if (!row) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
-    }
-
-    return { appTheme: row.appTheme ?? null };
+      return { appTheme: row.appTheme ?? null };
+    });
   }
 
   /** Current saved font scale preference from DB (null = base). */
@@ -1300,17 +1478,18 @@ export class UsersService {
    * Persists the current user's font scale. `null` = reset to base.
    */
   async updateMyFontScale(fontScale: string | null, actor: SessionUser): Promise<{ fontScale: string | null }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const row = await withActor(this.db, actor, async (tx) => {
+      const [r] = await tx
+        .update(schema.users)
+        .set({ fontScale, updatedAt: new Date() })
+        .where(eq(schema.users.id, actor.id))
+        .returning({ fontScale: schema.users.fontScale });
 
-    const [row] = await this.db
-      .update(schema.users)
-      .set({ fontScale, updatedAt: new Date() })
-      .where(eq(schema.users.id, actor.id))
-      .returning({ fontScale: schema.users.fontScale });
-
-    if (!row) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
-    }
+      if (!r) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+      return r;
+    });
 
     return { fontScale: row.fontScale ?? null };
   }

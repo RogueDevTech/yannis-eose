@@ -9,7 +9,11 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'users.read');
+  // /hr/users is HR's org-wide directory — gated on `hr.read` (HR_MANAGER + admins). Head of
+  // Marketing / Head of CS still hold `users.read` for team overview lookups + push target
+  // search, but they must NOT see the full staff list here. They can still open individual
+  // profiles of their own team members via /hr/users/:id (see that route for the carve-out).
+  await requirePermission(request, 'hr.read');
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);

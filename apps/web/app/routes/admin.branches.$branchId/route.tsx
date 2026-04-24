@@ -137,7 +137,7 @@ const ROLE_OPTIONS = [
   { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
   { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
   { value: 'HR_MANAGER', label: 'HR Manager' },
-  { value: 'WAREHOUSE_MANAGER', label: 'Warehouse Manager' },
+  { value: 'STOCK_MANAGER', label: 'Stock Manager' },
   { value: 'BRANCH_ADMIN', label: 'Branch Admin' },
 ];
 
@@ -174,7 +174,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!overview) throw new Response('Branch not found', { status: 404 });
 
   const allUsers: UserOption[] = (usersRes.data?.result?.data?.users ?? []).filter(
-    (u) => u.role !== 'SUPER_ADMIN',
+    (u) => u.role !== 'SUPER_ADMIN' && u.role !== 'ADMIN',
   );
 
   return { overview, allUsers };

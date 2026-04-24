@@ -61,7 +61,7 @@ const defaultToday = defaultTodayRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
     permission: 'marketing.teamOverview',
   });
   const cookie = getSessionCookie(request);

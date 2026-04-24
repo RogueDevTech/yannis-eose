@@ -8,36 +8,29 @@ import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
 import { DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
-import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
-import { CEODashboardSkeleton } from '~/features/ceo/CEODashboardSkeleton';
+import { AdminQuickDashboard, type QuickOverviewData } from '~/features/dashboard/AdminQuickDashboard';
 import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
-import type { CEODashboardData, CEODashboardFilters } from '~/features/ceo/types';
 
 const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
 const defaultProfit: DashboardData['profit'] = { revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0, trueProfit: 0, orderCount: 0, margin: 0 };
 
-const defaultCEOData: CEODashboardData = {
-  revenue: 0,
-  trueProfit: 0,
-  margin: 0,
-  costBreakdown: { landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0 },
-  orderPipeline: { total: 0, active: 0, delivered: 0, cancelled: 0, returned: 0, statusCounts: {} },
-  marketing: { totalSpend: 0, cpa: 0, roas: 0, deliveryRate: 0 },
-  csTeam: { agentCount: 0, pendingOrders: 0, utilization: 0 },
-  payroll: { totalPaid: 0, totalPending: 0, staffCount: 0 },
-  invoiceSummary: {},
+const defaultQuickOverview: QuickOverviewData = {
+  today: { newOrders: 0, delivered: 0, cancelled: 0 },
+  activeNow: 0,
+  unprocessedNow: 0,
+  pendingApprovals: 0,
 };
 
 /** Roles that need marketing.metrics */
-const ROLES_NEED_METRICS = ['SUPER_ADMIN', 'HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'];
+const ROLES_NEED_METRICS = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'];
 /** Roles that need finance.profitReport */
-const ROLES_NEED_PROFIT = ['SUPER_ADMIN', 'FINANCE_OFFICER'];
+const ROLES_NEED_PROFIT = ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'];
 /** Roles that need users.list (totalUsers) */
-const ROLES_NEED_USERS = ['SUPER_ADMIN', 'HR_MANAGER'];
+const ROLES_NEED_USERS = ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'];
 /** Roles that need products.list (totalProducts) */
-const ROLES_NEED_PRODUCTS = ['SUPER_ADMIN', 'WAREHOUSE_MANAGER'];
+const ROLES_NEED_PRODUCTS = ['SUPER_ADMIN', 'ADMIN', 'STOCK_MANAGER'];
 /** Roles that need hr.payoutSummary */
-const ROLES_NEED_PAYOUT = ['SUPER_ADMIN', 'HR_MANAGER'];
+const ROLES_NEED_PAYOUT = ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -49,9 +42,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
 
-  const rawTopic = url.searchParams.get('topic');
-  const topic = rawTopic === 'media_buyers' || rawTopic === 'cs' ? rawTopic : 'orders';
-
   if (!periodAllTime && !startDate && !endDate) {
     const range = defaultThisMonthRange();
     startDate = range.startDate;
@@ -62,98 +52,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     endDate = undefined;
   }
 
-  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime, topic };
+  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
 
-  const ceoInput = JSON.stringify({ startDate, endDate });
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' && user?.id ? { mediaBuyerId: user.id } : {};
   const ordersCountsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
   const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 
-  // SuperAdmin: CEO Executive Overview — deferred for navigate-first
-  if (role === 'SUPER_ADMIN') {
+  // SUPER_ADMIN + ADMIN: lightweight landing. The heavy Executive Overview with profit
+  // aggregation, time series, charts, and leaderboards now lives at /admin/ceo. Landing on
+  // /admin hits ONE tRPC call (dashboard.quickOverview) and renders in <200ms.
+  if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
     const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
-    const ceoPromise = apiRequest<{ result?: { data?: CEODashboardData } }>(
-      `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(ceoInput)}`,
+    const quickPromise = apiRequest<{ result?: { data?: QuickOverviewData } }>(
+      '/trpc/dashboard.quickOverview',
       deferredOpt,
     ).then((res) =>
-      res.ok && res.data?.result?.data ? res.data.result.data : defaultCEOData
-    ).catch(() => defaultCEOData);
+      res.ok && res.data?.result?.data ? res.data.result.data : defaultQuickOverview
+    ).catch(() => defaultQuickOverview);
 
-    const timeSeriesPromise = apiRequest<{ result?: { data?: { date: string; revenue: number; orderCount: number; createdCount: number }[] } }>(
-      `/trpc/dashboard.ceoOverviewTimeSeries?input=${encodeURIComponent(ceoInput)}`,
-      deferredOpt,
-    ).then((res) =>
-      res.ok && Array.isArray(res.data?.result?.data) ? res.data.result.data : []
-    ).catch(() => []);
-
-    const orderPipelineChartPromise = apiRequest<{ result?: { data?: { volume: number; csEngaged: number; confirmed: number; logisticsDistributed: number; delivered: number } } }>(
-      `/trpc/dashboard.orderPipelineChart?input=${encodeURIComponent(ceoInput)}`,
-      deferredOpt,
-    ).then((res) =>
-      res.ok && res.data?.result?.data ? res.data.result.data : { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 }
-    ).catch(() => ({ volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 }));
-
-    const leaderboardInput = JSON.stringify({ period: startDate && endDate ? 'this_month' : 'all_time', startDate, endDate });
-    const mediaBuyersPromise =
-      topic === 'media_buyers'
-        ? apiRequest<{ result?: { data?: Array<{ mediaBuyerId: string; name: string; email?: string; totalSpend: number; totalOrders: number; deliveredOrders: number; deliveredRevenue: number; cpa: number; trueRoas: number; deliveryRate: number }> } }>(
-            `/trpc/marketing.leaderboard?input=${encodeURIComponent(leaderboardInput)}`,
-            deferredOpt,
-          ).then((res) =>
-            res.ok && Array.isArray(res.data?.result?.data) ? res.data.result.data : []
-          ).catch(() => [])
-        : Promise.resolve([]);
-
-    const csWorkloadsPromise =
-      topic === 'cs'
-        ? apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string; capacity: number; pendingCount: number; lastActionAt?: string | null }> } }>(
-            '/trpc/orders.csWorkloads?input=%7B%7D',
-            deferredOpt,
-          ).then((res) =>
-            res.ok && Array.isArray(res.data?.result?.data) ? res.data.result.data : []
-          ).catch(() => [])
-        : Promise.resolve([]);
-
-    const dataPromise = Promise.all([
-      ceoPromise,
-      timeSeriesPromise,
-      orderPipelineChartPromise,
-      mediaBuyersPromise,
-      csWorkloadsPromise,
-    ])
-      .then(([ceoData, timeSeries, orderPipelineChart, mediaBuyerLeaderboard, csWorkloads]) => {
-        try {
-          const base = {
-            ...defaultCEOData,
-            ...ceoData,
-            timeSeries: Array.isArray(timeSeries) ? timeSeries : [],
-            orderPipelineChart:
-              orderPipelineChart && typeof orderPipelineChart === 'object'
-                ? orderPipelineChart
-                : { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 },
-          };
-          if (topic === 'media_buyers') {
-            return { ...base, chartTopicData: { mediaBuyerLeaderboard: Array.isArray(mediaBuyerLeaderboard) ? mediaBuyerLeaderboard : [] } };
-          }
-          if (topic === 'cs') {
-            return { ...base, chartTopicData: { csWorkloads: Array.isArray(csWorkloads) ? csWorkloads : [] } };
-          }
-          return base;
-        } catch {
-          return {
-            ...defaultCEOData,
-            timeSeries: [],
-            orderPipelineChart: { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 },
-          };
-        }
-      })
-      .catch(() => ({
-        ...defaultCEOData,
-        timeSeries: [],
-        orderPipelineChart: { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 },
-      }));
-    return defer({ variant: 'ceo' as const, data: dataPromise, filters });
+    return defer({ variant: 'admin_quick' as const, data: quickPromise, filters });
   }
 
   // All other roles: role-specific dashboard — all deferred for navigate-first
@@ -229,15 +147,15 @@ export default function AdminDashboard() {
   const userName = parentData?.user?.name ?? 'User';
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
-  if (loaderData.variant === 'ceo') {
+  if (loaderData.variant === 'admin_quick') {
     return (
-      <Suspense fallback={<CEODashboardSkeleton />}>
+      <Suspense fallback={<DashboardSkeleton />}>
         <Await resolve={loaderData.data} errorElement={<DeferredError />}>
           {(data) => (
-            <CEODashboardPage
+            <AdminQuickDashboard
               data={data}
-              filters={loaderData.filters as CEODashboardFilters}
-              showBackToDashboard={false}
+              userName={userName}
+              role={role ?? 'ADMIN'}
             />
           )}
         </Await>

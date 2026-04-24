@@ -20,7 +20,7 @@ export type UserRole =
   | 'TPL_MANAGER'
   | 'TPL_RIDER'
   | 'HR_MANAGER'
-  | 'WAREHOUSE_MANAGER';
+  | 'STOCK_MANAGER';
 
 export async function createTestUser(
   db: PostgresJsDatabase<typeof schema>,

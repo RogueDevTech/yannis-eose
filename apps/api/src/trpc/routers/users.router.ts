@@ -80,6 +80,14 @@ export const usersRouter = router({
   }),
 
   /**
+   * Returns the current Finance-hat holder (`{ id, name }`) or `null`.
+   * Used by the user create/edit forms to warn admins before reassigning the hat.
+   */
+  getCurrentFinanceOfficer: permissionProcedure('users.read', 'users.create', 'users.update').query(async () => {
+    return getUsersService().getCurrentFinanceOfficerHolder();
+  }),
+
+  /**
    * Get a single user by ID.
    */
   getById: authedProcedure

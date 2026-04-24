@@ -3,6 +3,7 @@ import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
+import { Spinner } from '~/components/ui/spinner';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -13,14 +14,29 @@ import { useAgentStateBroadcast } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
 import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
+import { FileUpload } from '~/components/ui/file-upload';
+import { S3_FOLDERS } from '~/lib/s3-upload';
+import { shareOrderToLogistics } from '~/lib/trpc-browser';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
 
 const STATUS_FLOW = [
   'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED',
-  'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'COMPLETED',
+  'DELIVERED', 'COMPLETED',
 ] as const;
+
+const STATUS_DISPLAY_LABELS: Partial<Record<(typeof STATUS_FLOW)[number], string>> = {};
+
+// Everything between ALLOCATED and DELIVERED happens offline (rider with the parcel).
+// DISPATCHED + IN_TRANSIT therefore collapse back into the ALLOCATED step — the order is
+// still "in 3PL hands" from the CS perspective until someone marks it delivered.
+function getProgressIndex(status: string): number {
+  if (status === 'DISPATCHED' || status === 'IN_TRANSIT') {
+    return STATUS_FLOW.indexOf('ALLOCATED');
+  }
+  return STATUS_FLOW.indexOf(status as (typeof STATUS_FLOW)[number]);
+}
 
 const CALL_STATUS_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
   INITIATED: { bg: 'bg-info-50 dark:bg-info-700/20', text: 'text-info-600 dark:text-info-400', icon: 'text-info-500' },
@@ -708,6 +724,8 @@ export function OrderDetailPage({
   userId,
   permissions,
   csAgentsForAssign = [],
+  logisticsLocations = [],
+  logisticsDispatchTemplates = [],
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
   const revealFetcher = useFetcher();
@@ -736,8 +754,18 @@ export function OrderDetailPage({
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number }>>([]);
   const [callDebugLog, setCallDebugLog] = useState<string[]>([]);
+  const [allocateModalOpen, setAllocateModalOpen] = useState(false);
+  const [allocateLocationId, setAllocateLocationId] = useState('');
+  const [deliverModalOpen, setDeliverModalOpen] = useState(false);
+  const [deliverNote, setDeliverNote] = useState('');
+  const [deliverProofUrl, setDeliverProofUrl] = useState('');
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareLocationId, setShareLocationId] = useState('');
+  const [shareTemplateId, setShareTemplateId] = useState('');
+  const [sharePending, setSharePending] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
-  const currentStatusIndex = STATUS_FLOW.indexOf(order.status as (typeof STATUS_FLOW)[number]);
+  const currentStatusIndex = getProgressIndex(order.status);
   const actionError = (fetcher.data as { error?: string })?.error;
   const callInitiated = (fetcher.data as { callInitiated?: boolean })?.callInitiated;
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
@@ -753,20 +781,19 @@ export function OrderDetailPage({
     if (fetcher.state === 'submitting') setDismissedError(false);
   }, [fetcher.state]);
 
-  // When call customer modal opens and order is not yet engaged, transition to CS_ENGAGED so user only clicks once
+  // When call customer modal opens (VOIP off), auto-reveal the phone in one shot.
+  // `revealPhoneForManualCall` on the server handles the CS_ENGAGED transition itself,
+  // so the user skips the "Reveal number" middle step and lands straight on the dialer buttons.
   useEffect(() => {
     if (
       callCustomerModalOpen &&
-      (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') &&
-      canTransitionTo('CS_ENGAGED') &&
-      fetcher.state === 'idle'
+      !voipEnabled &&
+      revealFetcher.state === 'idle' &&
+      !revealFetcher.data
     ) {
-      fetcher.submit(
-        { intent: 'transition', newStatus: 'CS_ENGAGED' },
-        { method: 'post' },
-      );
+      revealFetcher.submit({ intent: 'revealPhone' }, { method: 'post' });
     }
-  }, [callCustomerModalOpen, order.status, fetcher.state]);
+  }, [callCustomerModalOpen, voipEnabled, revealFetcher.state, revealFetcher.data]);
 
   // Reset call debug log when opening the call modal (VOIP path)
   useEffect(() => {
@@ -792,8 +819,8 @@ export function OrderDetailPage({
   const showActionError = actionError && !dismissedError;
 
   const isAssignedToMe = order.assignedCsId === userId;
-  const isCSOrHoS = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'].includes(userRole);
-  const isElevated = userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN';
+  const isCSOrHoS = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(userRole);
+  const isElevated = userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
   // CS agent can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
@@ -806,7 +833,7 @@ export function OrderDetailPage({
     const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
     if (!csOnlyStatuses.includes(newStatus)) return true;
     if (!isCSOrHoS) return false;
-    if (userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN') return true;
+    if (userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN') return true;
     if (userRole === 'CS_AGENT') {
       if (newStatus === 'CS_ENGAGED') {
         return isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId);
@@ -890,9 +917,18 @@ export function OrderDetailPage({
         setCancelModalOpen(false);
         setCancelReason('');
       }
+      if (allocateModalOpen) {
+        setAllocateModalOpen(false);
+        setAllocateLocationId('');
+      }
+      if (deliverModalOpen) {
+        setDeliverModalOpen(false);
+        setDeliverNote('');
+        setDeliverProofUrl('');
+      }
     }
     prevFetcherState.current = fetcher.state;
-  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen]);
+  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen, allocateModalOpen, deliverModalOpen]);
 
   // Close confirm modal and revalidate when schedule callback succeeds
   const scheduleData = scheduleFetcher.data as { success?: boolean; scheduled?: boolean; error?: string } | undefined;
@@ -998,7 +1034,7 @@ export function OrderDetailPage({
                         <span className={`text-2xs mt-1 whitespace-nowrap lg:whitespace-normal lg:text-center lg:leading-tight ${
                           isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-app-fg-muted'
                         }`}>
-                          {status.replace(/_/g, ' ')}
+                          {STATUS_DISPLAY_LABELS[status] ?? status.replace(/_/g, ' ')}
                         </span>
                       </div>
                       {idx < STATUS_FLOW.length - 1 && (
@@ -1117,8 +1153,18 @@ export function OrderDetailPage({
 
           {/* Right column */}
           <div className="space-y-4">
-            {/* Order Actions — CS / Head of CS only, role-based */}
-            {canEditOrder && isCSOrHoS && (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || order.status === 'CS_ENGAGED') && (
+            {/* Order Actions — CS / Head of CS only, role-based.
+                CS still owns Adjust/Call/Delete after CS_ENGAGED while goods are pre-delivery so
+                they can manage upsells, delivery-coordination calls, and cancellations. */}
+            {canEditOrder && isCSOrHoS && (
+              order.status === 'UNPROCESSED' ||
+              order.status === 'CS_ASSIGNED' ||
+              order.status === 'CS_ENGAGED' ||
+              order.status === 'CONFIRMED' ||
+              order.status === 'ALLOCATED' ||
+              order.status === 'DISPATCHED' ||
+              order.status === 'IN_TRANSIT'
+            ) && (
               <div className="card">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {!canPerformCSActionsOnOrder && (
@@ -1163,12 +1209,13 @@ export function OrderDetailPage({
                     </Button>
                   )}
 
-                  {/* Call customer + helper — one button opens modal; transition to CS_ENGAGED runs when modal opens if needed (VOIP off) */}
-                  {!voipEnabled &&
-                  (((order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') && canTransitionTo('CS_ENGAGED')) ||
-                    order.status === 'CS_ENGAGED') ? (
+                  {/* Call customer — available pre-delivery. For pre-CS_ENGAGED statuses, opening
+                      the modal also triggers CS_ENGAGED on the server (one click to dial).
+                      Post-CS_ENGAGED statuses (CONFIRMED/ALLOCATED/…) use the same modal for
+                      delivery-coordination / follow-up calls without changing order state. */}
+                  {!voipEnabled ? (
                     <div className="space-y-2">
-                      {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || !canConfirm) && (
+                      {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || !canConfirm) && order.status !== 'CS_ENGAGED' && !(order.status === 'CONFIRMED' || order.status === 'ALLOCATED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
                         <p className="text-xs text-warning-600 dark:text-warning-400 text-center">
                           Call the customer manually, then confirm the order.
                         </p>
@@ -1233,6 +1280,80 @@ export function OrderDetailPage({
                 </div>
               </div>
             )}
+
+            {/* Logistics Actions — share/allocate when CONFIRMED or ALLOCATED, confirm delivery when IN_TRANSIT. */}
+            {(() => {
+              const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
+              const canShareToWhatsApp =
+                (order.status === 'CONFIRMED' || order.status === 'ALLOCATED') &&
+                locationsWithGroup.length > 0 &&
+                logisticsDispatchTemplates.length > 0;
+              const canMarkDelivered =
+                (order.status === 'ALLOCATED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') &&
+                canTransitionTo('DELIVERED');
+              const showCard =
+                (order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0) ||
+                canMarkDelivered ||
+                canShareToWhatsApp;
+              if (!showCard) return null;
+              return (
+                <div className="card">
+                  <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
+                  <div className="space-y-2">
+                    {order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        className="w-full"
+                        onClick={() => {
+                          setAllocateLocationId('');
+                          setAllocateModalOpen(true);
+                        }}
+                        disabled={fetcher.state === 'submitting'}
+                      >
+                        Allocate to 3PL
+                      </Button>
+                    )}
+                    {canShareToWhatsApp && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => {
+                          setShareError(null);
+                          // Default to the already-allocated location if set; else the first with a group link.
+                          const alreadyAllocated = order.logisticsLocationId
+                            ? locationsWithGroup.find((l) => l.id === order.logisticsLocationId)
+                            : undefined;
+                          const preselected = alreadyAllocated?.id ?? locationsWithGroup[0]?.id ?? '';
+                          setShareLocationId(preselected);
+                          setShareTemplateId(logisticsDispatchTemplates[0]?.id ?? '');
+                          setShareModalOpen(true);
+                        }}
+                        disabled={sharePending}
+                      >
+                        Share to 3PL (WhatsApp)
+                      </Button>
+                    )}
+                    {canMarkDelivered && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        className="w-full"
+                        onClick={() => {
+                          setDeliverNote('');
+                          setDeliverProofUrl('');
+                          setDeliverModalOpen(true);
+                        }}
+                        disabled={fetcher.state === 'submitting'}
+                      >
+                        Mark delivered
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS agents */}
             {canEditOrder && canPerformCSActionsOnOrder && (
@@ -1473,6 +1594,240 @@ export function OrderDetailPage({
         </Modal>
       )}
 
+      {/* Allocate to 3PL modal — CONFIRMED → ALLOCATED */}
+      {allocateModalOpen && (
+        <Modal open onClose={() => setAllocateModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Allocate to 3PL</h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            Select the 3PL location that will fulfil this order. Stock must be available at that location.
+          </p>
+          <label htmlFor="allocate-location-id" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+            Logistics location
+          </label>
+          <select
+            id="allocate-location-id"
+            value={allocateLocationId}
+            onChange={(e) => setAllocateLocationId(e.target.value)}
+            className="input w-full"
+          >
+            <option value="">Select a location...</option>
+            {logisticsLocations.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                {loc.name}{loc.address ? ` — ${loc.address}` : ''}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2 mt-4 justify-end">
+            <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
+              Back
+            </Button>
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="transition" />
+              <input type="hidden" name="newStatus" value="ALLOCATED" />
+              <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!allocateLocationId || fetcher.state === 'submitting'}
+                loading={fetcher.state === 'submitting'}
+                loadingText="Allocating..."
+              >
+                Allocate
+              </Button>
+            </fetcher.Form>
+          </div>
+        </Modal>
+      )}
+
+      {/* Mark delivered modal — IN_TRANSIT → DELIVERED. Mandatory note + optional proof screenshot. */}
+      {deliverModalOpen && (
+        <Modal
+          open
+          onClose={() => setDeliverModalOpen(false)}
+          maxWidth="max-w-md"
+          contentClassName="p-6 max-h-[90dvh] overflow-y-auto"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Mark order delivered</h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            Confirm that the customer received the order. A note and screenshot are optional.
+          </p>
+          <label htmlFor="delivery-note" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+            Delivery note (optional)
+          </label>
+          <textarea
+            id="delivery-note"
+            value={deliverNote}
+            onChange={(e) => setDeliverNote(e.target.value)}
+            placeholder="e.g. Customer confirmed receipt on follow-up call at 3:42pm."
+            className="input w-full min-h-[80px]"
+            rows={3}
+          />
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+              Screenshot (optional)
+            </label>
+            <FileUpload
+              folder={S3_FOLDERS.DELIVERY_PROOF}
+              onUpload={(url) => setDeliverProofUrl(url)}
+              accept="image/*"
+              maxSizeMB={10}
+            />
+          </div>
+          <div className="flex gap-2 mt-5 justify-end">
+            <Button type="button" variant="secondary" onClick={() => setDeliverModalOpen(false)}>
+              Back
+            </Button>
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="transition" />
+              <input type="hidden" name="newStatus" value="DELIVERED" />
+              {deliverNote.trim() && <input type="hidden" name="deliveryNote" value={deliverNote.trim()} />}
+              {deliverProofUrl && <input type="hidden" name="deliveryProofUrl" value={deliverProofUrl} />}
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={fetcher.state === 'submitting'}
+                loading={fetcher.state === 'submitting'}
+                loadingText="Marking..."
+              >
+                Mark delivered
+              </Button>
+            </fetcher.Form>
+          </div>
+        </Modal>
+      )}
+
+      {/* Share to 3PL modal (WhatsApp group) — Phase 4. Server renders the template, logs the
+          outbound message + timeline event, then we copy to clipboard and open the group link. */}
+      {shareModalOpen && (() => {
+        const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
+        const selectedLocation = locationsWithGroup.find((l) => l.id === shareLocationId);
+        const selectedTemplate = logisticsDispatchTemplates.find((t) => t.id === shareTemplateId);
+        // Local preview — server is the authority on the final rendered text.
+        const previewText = (selectedTemplate?.body ?? '')
+          .replace(/\{\{customer_name\}\}/g, order.customerName ?? '')
+          .replace(/\{\{order_id\}\}/g, order.id.slice(0, 8).toUpperCase())
+          .replace(/\{\{product_name\}\}/g, order.orderItems[0]?.productName ?? '')
+          .replace(/\{\{delivery_address\}\}/g, order.deliveryAddress ?? '')
+          .replace(/\{\{quantity\}\}/g, order.orderItems[0]?.quantity != null ? String(order.orderItems[0]?.quantity) : '')
+          .replace(/\{\{total_amount\}\}/g, order.totalAmount != null ? String(order.totalAmount) : '')
+          .replace(/\{\{payment_status\}\}/g, order.paymentStatus ?? '')
+          .replace(/\{\{estimated_date\}\}/g, '');
+        const canSubmit = !!shareLocationId && !!shareTemplateId && !sharePending;
+        return (
+          <Modal
+            open
+            onClose={() => setShareModalOpen(false)}
+            maxWidth="max-w-lg"
+            contentClassName="p-6 max-h-[90dvh] overflow-y-auto"
+          >
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Share to 3PL (WhatsApp)</h3>
+            <p className="text-sm text-app-fg-muted mb-3">
+              Pick a 3PL location and a template. Clicking <strong>Copy &amp; open group</strong> logs the message, copies the text to your clipboard, and opens the WhatsApp group. Paste with ⌘V / long-press then hit send.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="share-location" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                  3PL location
+                </label>
+                <select
+                  id="share-location"
+                  value={shareLocationId}
+                  onChange={(e) => setShareLocationId(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="">Select a location...</option>
+                  {locationsWithGroup.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+                {locationsWithGroup.length === 0 && (
+                  <p className="text-xs text-warning-600 mt-1">
+                    No 3PL locations have a WhatsApp group link configured. Ask Logistics to add one.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="share-template" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                  Template
+                </label>
+                <select
+                  id="share-template"
+                  value={shareTemplateId}
+                  onChange={(e) => setShareTemplateId(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="">Select a template...</option>
+                  {logisticsDispatchTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedTemplate && (
+                <div>
+                  <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                    Preview
+                  </label>
+                  <pre className="whitespace-pre-wrap text-sm p-3 rounded-lg bg-app-hover border border-app-border text-app-fg max-h-48 overflow-y-auto">
+                    {previewText}
+                  </pre>
+                </div>
+              )}
+
+              {shareError && (
+                <p className="text-sm text-danger-600 dark:text-danger-400">{shareError}</p>
+              )}
+            </div>
+
+            <div className="flex gap-2 mt-5 justify-end">
+              <Button type="button" variant="secondary" onClick={() => setShareModalOpen(false)} disabled={sharePending}>
+                Back
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!canSubmit}
+                loading={sharePending}
+                loadingText="Sharing..."
+                onClick={async () => {
+                  if (!selectedLocation || !selectedTemplate) return;
+                  setSharePending(true);
+                  setShareError(null);
+                  try {
+                    const result = await shareOrderToLogistics({
+                      orderId: order.id,
+                      locationId: selectedLocation.id,
+                      templateId: selectedTemplate.id,
+                    });
+                    // Copy rendered text to clipboard; fall back silently if the API isn't available.
+                    try {
+                      await navigator.clipboard.writeText(result.renderedBody);
+                    } catch {
+                      // ignore — user can still copy from the group if needed
+                    }
+                    window.open(result.groupLink, '_blank', 'noopener,noreferrer');
+                    setShareModalOpen(false);
+                    revalidator.revalidate();
+                  } catch (err) {
+                    setShareError(err instanceof Error ? err.message : 'Share failed');
+                  } finally {
+                    setSharePending(false);
+                  }
+                }}
+              >
+                Copy &amp; open group
+              </Button>
+            </div>
+          </Modal>
+        );
+      })()}
+
       {/* Call customer modal — VOIP: Start call + status + debug; VOIP off: reveal number, copy, open dialer */}
       {callCustomerModalOpen && (
         <Modal open onClose={() => setCallCustomerModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
@@ -1587,33 +1942,33 @@ export function OrderDetailPage({
               </>
             ) : !revealData?.phoneRevealed ? (
               <>
-                <p className="text-sm text-app-fg-muted mb-4">
-                  Reveal the customer&apos;s number to call them manually. The call is recorded when you click &quot;Copy number&quot; or &quot;Call on my phone&quot;.
-                </p>
-                {revealData?.error && (
-                  <p className="text-sm text-danger-600 dark:text-danger-400 mb-3">{revealData.error}</p>
+                {revealData?.error ? (
+                  <>
+                    <p className="text-sm text-danger-600 dark:text-danger-400 mb-3">{revealData.error}</p>
+                    <div className="flex gap-2 justify-end">
+                      <Button type="button" variant="secondary" onClick={() => setCallCustomerModalOpen(false)}>
+                        Close
+                      </Button>
+                      <revealFetcher.Form method="post">
+                        <input type="hidden" name="intent" value="revealPhone" />
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          disabled={revealFetcher.state === 'submitting'}
+                          loading={revealFetcher.state === 'submitting'}
+                          loadingText="Retrying..."
+                        >
+                          Retry
+                        </Button>
+                      </revealFetcher.Form>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-center py-6">
+                    <Spinner size="sm" />
+                    <span className="ml-3 text-sm text-app-fg-muted">Preparing call…</span>
+                  </div>
                 )}
-                <div className="flex gap-2 justify-end">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setCallCustomerModalOpen(false)}
-                  >
-                    Close
-                  </Button>
-                  <revealFetcher.Form method="post">
-                    <input type="hidden" name="intent" value="revealPhone" />
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      disabled={revealFetcher.state === 'submitting'}
-                      loading={revealFetcher.state === 'submitting'}
-                      loadingText="Revealing..."
-                    >
-                      Reveal number
-                    </Button>
-                  </revealFetcher.Form>
-                </div>
               </>
             ) : !revealData?.isDialable ? (
               <>

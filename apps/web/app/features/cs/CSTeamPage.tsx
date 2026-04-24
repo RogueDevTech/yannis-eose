@@ -224,9 +224,26 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false }: CSTeam
                 Workload, activity, and performance — switch to grid for card layout.
               </p>
             </div>
-            <TeamViewToggle value={view} onChange={setView} />
+            {/* Toggle is desktop-only; mobile always uses the card grid */}
+            <div className="hidden md:block">
+              <TeamViewToggle value={view} onChange={setView} />
+            </div>
           </div>
 
+          {/* Mobile: always render card grid (the table view is unusable on a narrow viewport) */}
+          <div className="md:hidden grid grid-cols-1 gap-3">
+            {teamMembers.map((m) => (
+              <CSTeamMemberCard
+                key={m.id}
+                member={m}
+                canReassign={canReassign}
+                onRedistribute={setRedistributeMember}
+              />
+            ))}
+          </div>
+
+          {/* Desktop: respect the table/grid toggle */}
+          <div className="hidden md:block">
           {view === 'table' ? (
             <div className="card p-0 overflow-hidden">
               <div className="overflow-x-auto">
@@ -353,6 +370,7 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false }: CSTeam
               ))}
             </div>
           )}
+          </div>
         </div>
       )}
 

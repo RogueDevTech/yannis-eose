@@ -760,7 +760,7 @@ export class NotificationsService {
     const conditions: Parameters<typeof and>[0][] = [];
 
     // Non-admin users can only see their own logs
-    if (actorRole !== 'SUPER_ADMIN' && actorRole !== 'BRANCH_ADMIN') {
+    if (actorRole !== 'SUPER_ADMIN' && actorRole !== 'ADMIN' && actorRole !== 'BRANCH_ADMIN') {
       conditions.push(eq(schema.pushDeliveryLog.userId, actorId));
     } else if (input.userId) {
       conditions.push(eq(schema.pushDeliveryLog.userId, input.userId));

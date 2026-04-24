@@ -189,7 +189,7 @@ export interface MarketingRoleFlags {
 
 export function getMarketingRoleFlags(role: string): MarketingRoleFlags {
   const isMediaBuyer = role === 'MEDIA_BUYER';
-  const isFundingAdmin = ['SUPER_ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role);
+  const isFundingAdmin = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role);
   const canRequestFunding = isMediaBuyer || role === 'HEAD_OF_MARKETING';
   return { isMediaBuyer, isFundingAdmin, canRequestFunding };
 }

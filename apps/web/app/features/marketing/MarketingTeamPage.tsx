@@ -68,7 +68,12 @@ export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeam
               Funding received (confirmed) minus approved ad spend
             </p>
           </div>
-          {teamMembers.length > 0 && <TeamViewToggle value={view} onChange={setView} />}
+          {/* Toggle is desktop-only; mobile always uses the card grid */}
+          {teamMembers.length > 0 && (
+            <div className="hidden md:block">
+              <TeamViewToggle value={view} onChange={setView} />
+            </div>
+          )}
         </div>
 
         {teamMembers.length === 0 ? (
@@ -78,7 +83,18 @@ export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeam
               description="Manage staff from HR → Users."
             />
           </div>
-        ) : view === 'table' ? (
+        ) : (
+          <>
+            {/* Mobile: always render card grid (table is unusable on a narrow viewport) */}
+            <div className="md:hidden grid grid-cols-1 gap-3">
+              {teamMembers.map((m) => (
+                <MediaBuyerBalanceCard key={m.userId} row={m} />
+              ))}
+            </div>
+
+            {/* Desktop: respect the table/grid toggle */}
+            <div className="hidden md:block">
+            {view === 'table' ? (
           <div className="card p-0 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px]">
@@ -157,6 +173,9 @@ export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeam
               <MediaBuyerBalanceCard key={m.userId} row={m} />
             ))}
           </div>
+            )}
+            </div>
+          </>
         )}
       </div>
 

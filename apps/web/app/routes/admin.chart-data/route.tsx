@@ -5,7 +5,7 @@ import type { ChartDataPayload } from '~/features/ceo/types';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
-  if (!user || user.role !== 'SUPER_ADMIN') {
+  if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN')) {
     return json({ error: 'Forbidden' } satisfies ChartDataPayload, { status: 403 });
   }
 

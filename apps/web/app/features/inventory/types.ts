@@ -54,12 +54,26 @@ export interface LocationOption {
 export interface InventoryStreamData {
   levels: InventoryLevel[];
   totalLevels: number;
+  /** Server-side pagination state for the Stock Levels tab. */
+  levelsPage?: number;
+  levelsTotalPages?: number;
+  levelsLimit?: number;
+  /** Product UUID filter (empty string = no filter). */
+  levelsProductFilter?: string;
+  /** Substring search against product name (empty string = no search). */
+  levelsSearch?: string;
+  /** `default` | `lowestAvailable` | `highestAvailable`. */
+  levelsSort?: 'default' | 'lowestAvailable' | 'highestAvailable';
   movements: StockMovement[];
   totalMovements: number;
   products: ProductOption[];
   locations: LocationOption[];
   /** When false, Stock Intake button and form are hidden (view-only). */
   canIntake?: boolean;
+  /** When false, the row-level "Edit" (stock adjust) action is hidden. */
+  canAdjust?: boolean;
+  /** When false, the Export CSV button is hidden. SuperAdmin/Admin + STOCK_MANAGER only. */
+  canExport?: boolean;
   /** TPL combined view: transfers, returns, reconciliations */
   transfers?: Transfer[];
   returnedOrders?: ReturnedOrder[];

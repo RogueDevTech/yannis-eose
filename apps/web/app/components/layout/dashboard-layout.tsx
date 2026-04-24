@@ -79,14 +79,14 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/marketing/overview',
         icon: SidebarIcons.marketing,
         permission: 'marketing.teamOverview',
-        roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Team',
         href: '/admin/marketing/team',
         icon: SidebarIcons.marketing,
         permission: 'marketing.teamOverview',
-        roles: ['SUPER_ADMIN', 'HEAD_OF_MARKETING'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Marketing Orders',
@@ -135,7 +135,7 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/cs/team',
         icon: SidebarIcons.cs,
         permission: 'cs.teamOverview',
-        roles: ['SUPER_ADMIN', 'HEAD_OF_CS'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
         label: 'CS Orders',
@@ -211,13 +211,15 @@ const navStructure: NavGroupDef[] = [
     ],
   },
   {
-    group: 'Warehouse',
+    group: 'Stock Management',
     items: [
       {
         label: 'Inventory',
         href: '/admin/inventory',
         icon: SidebarIcons.inventory,
         permission: 'inventory.read',
+        // Heads see inventory read-only by role so they can plan against stock.
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
       },
       {
         label: 'Transfers',
@@ -254,7 +256,10 @@ const navStructure: NavGroupDef[] = [
     group: 'HR',
     items: [
       { label: 'Payroll', href: '/hr/payroll', icon: SidebarIcons.hr, permission: 'hr.read' },
-      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'users.read' },
+      // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
+      // Head of Marketing / Head of CS hold `users.read` for other features but must not see
+      // this link — they manage their team from the Marketing / CS team pages instead.
+      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
     ],
   },
   {
@@ -286,7 +291,7 @@ const navStructure: NavGroupDef[] = [
         label: 'Audit Trail',
         href: '/admin/analytics/audit',
         icon: SidebarIcons.audit,
-        permission: 'audit.read',
+        // No permission — transparency policy: every authenticated user can view the audit trail.
       },
     ],
   },
@@ -310,7 +315,8 @@ function getNavGroupsForUser(
   options?: { forMobile?: boolean },
 ): SidebarGroup[] {
   const result: SidebarGroup[] = [];
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  // ADMIN shares SUPER_ADMIN sidebar visibility.
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
   const perms = user?.permissions ?? [];
   const role = user?.role ?? '';
   const forMobile = options?.forMobile === true;
@@ -363,6 +369,13 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/logistics/orders',
     '/admin/finance/overview',
   ],
+  ADMIN: [
+    '/admin',
+    '/admin/marketing/overview',
+    '/admin/cs/queue',
+    '/admin/logistics/orders',
+    '/admin/finance/overview',
+  ],
   HEAD_OF_MARKETING: [
     '/admin',
     '/admin/marketing/overview',
@@ -405,7 +418,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/finance/delivery-remittances',
     '/admin/finance/disbursements',
   ],
-  WAREHOUSE_MANAGER: ['/admin', '/admin/inventory', '/admin/transfers', '/admin/returns'],
+  STOCK_MANAGER: ['/admin', '/admin/inventory', '/admin/transfers', '/admin/returns'],
   HR_MANAGER: ['/admin', '/hr/payroll', '/hr/users'],
 };
 
@@ -418,7 +431,7 @@ function getBottomNavItemsForUser(
   const role = user.role ?? '';
   const priorityHrefs = BOTTOM_NAV_PRIORITY_BY_ROLE[role];
   if (priorityHrefs) {
-    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
     const perms = user.permissions ?? [];
     const result: BottomNavItem[] = [];
     const hrefToItem = new Map(FLAT_NAV_ITEMS.map((item) => [item.href, item]));

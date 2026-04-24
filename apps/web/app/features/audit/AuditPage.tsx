@@ -242,13 +242,14 @@ function AttachedFileDisplay({ url, onPreview }: { url: string; onPreview?: (url
 // ── Role labels ──────────────────────────────────────────────────
 const ROLE_LABELS: Record<string, string> = {
   SUPER_ADMIN: 'Super Admin',
+  ADMIN: 'Admin',
   HEAD_OF_MARKETING: 'Head of Marketing',
   MEDIA_BUYER: 'Media Buyer',
   HEAD_OF_CS: 'Head of CS',
   CS_AGENT: 'CS Agent',
   FINANCE_OFFICER: 'Finance Officer',
   HEAD_OF_LOGISTICS: 'Head of Logistics',
-  WAREHOUSE_MANAGER: 'Warehouse Manager',
+  STOCK_MANAGER: 'Stock Manager',
   TPL_MANAGER: '3PL Manager',
   TPL_RIDER: '3PL Rider',
   HR_MANAGER: 'HR Manager',
@@ -832,6 +833,19 @@ function formatLeafValue(
   if (isUUID(val) && (key.endsWith('_id') || key === 'created_by' || key === 'approved_by' || key === 'locked_by')) {
     const actor = actorNames[strVal];
     if (actor) return `${actor.name} (${ROLE_LABELS[actor.role] ?? actor.role})`;
+    // Linkable ID keys — audit detail shows the truncated UUID that jumps straight to the record.
+    // Keep the truncated visual for density; the <Link> carries the full id via the URL.
+    if (key === 'product_id') {
+      return (
+        <Link
+          to={`/admin/products/${strVal}`}
+          className="text-blue-600 underline underline-offset-2 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+          title={strVal}
+        >
+          {strVal.slice(0, 8)}...
+        </Link>
+      );
+    }
     return `${strVal.slice(0, 8)}...`;
   }
   if (isISODate(val)) return formatDate(strVal);
@@ -1470,7 +1484,6 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             <thead>
               <tr>
                 <th className="table-header">Timestamp</th>
-                <th className="table-header">Table</th>
                 <th className="table-header">Description</th>
                 <th className="table-header">Actor</th>
                 <th className="table-header">Action</th>
@@ -1480,18 +1493,13 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7}><EmptyState title="No audit entries found" description="Try adjusting your filters." /></td>
+                  <td colSpan={6}><EmptyState title="No audit entries found" description="Try adjusting your filters." /></td>
                 </tr>
               )}
               {rows.map((entry, idx) => (
                 <tr key={`${entry.recordId}-${entry.validFrom}-${idx}`} className="table-row">
                   <td className="table-cell text-xs text-app-fg-muted whitespace-nowrap">
                     {formatDate(entry.validFrom)}
-                  </td>
-                  <td className="table-cell">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-app-hover text-app-fg-muted">
-                      {formatTableName(entry.tableName)}
-                    </span>
                   </td>
                   <td className="table-cell text-xs text-app-fg-muted max-w-[180px] sm:max-w-xs md:max-w-sm break-words whitespace-normal min-w-0">
                     <DeferredSection resolve={actorNames} skeleton="inline">
@@ -1564,12 +1572,9 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                 key={`${entry.recordId}-${entry.validFrom}-${idx}`}
                 className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
               >
-                <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs text-app-fg-muted">
                     {formatDate(entry.validFrom)}
-                  </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-app-hover text-app-fg-muted">
-                    {formatTableName(entry.tableName)}
                   </span>
                 </div>
                 <div className="text-sm text-app-fg-muted break-words min-w-0">

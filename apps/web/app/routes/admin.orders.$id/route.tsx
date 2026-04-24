@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { defer, json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import type { CallLogEntry, OrderDetail, OrderDetailStreamData, TimelineEvent } from '~/features/orders/types';
@@ -66,13 +67,39 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   })();
 
   let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
-  if (user.permissions?.includes('orders.reassign')) {
+  // SA + ADMIN bypass permission checks at middleware (permissions: []); include them explicitly.
+  if (isAdminLevel(user) || user.permissions?.includes('orders.reassign')) {
     const agentsRes = await apiRequest<unknown>('/trpc/orders.listCSAgents', { method: 'GET', cookie });
     if (agentsRes.ok) {
       const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
       const list = agentsData?.result?.data ?? [];
       csAgentsForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
     }
+  }
+
+  // Logistics locations — used by the "Allocate to 3PL" action available to the assigned
+  // CS agent, Logistics, and admins when the order is CONFIRMED.
+  let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> = [];
+  const locationsRes = await apiRequest<unknown>(
+    `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
+    { method: 'GET', cookie },
+  );
+  if (locationsRes.ok) {
+    const locationsData = locationsRes.data as {
+      result?: { data?: { locations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> } };
+    };
+    logisticsLocations = locationsData?.result?.data?.locations ?? [];
+  }
+
+  // Dispatch templates for the "Share to 3PL" WhatsApp flow.
+  let logisticsDispatchTemplates: Array<{ id: string; name: string; body: string }> = [];
+  const templatesRes = await apiRequest<unknown>(
+    `/trpc/messaging.templates.list?input=${encodeURIComponent(JSON.stringify({ channel: 'WHATSAPP_GROUP' }))}`,
+    { method: 'GET', cookie },
+  );
+  if (templatesRes.ok) {
+    const templatesData = templatesRes.data as { result?: { data?: Array<{ id: string; name: string; body: string }> } };
+    logisticsDispatchTemplates = templatesData?.result?.data ?? [];
   }
 
   return defer({
@@ -82,6 +109,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     userId: user.id,
     permissions: user.permissions ?? [],
     csAgentsForAssign: csAgentsForAssign,
+    logisticsLocations,
+    logisticsDispatchTemplates,
   });
 }
 
@@ -268,7 +297,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'adjustOrderItems') {
-    const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'];
+    const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
     if (!allowedRoles.includes(user.role)) {
       return json({ error: 'Only CS or Head of CS can adjust order items' }, { status: 403 });
     }
@@ -341,7 +370,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
     if (csOnlyStatuses.includes(newStatus)) {
-      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN'];
+      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
       if (!allowedRoles.includes(user.role)) {
         return json({ error: 'Only CS or Head of CS can perform this action' }, { status: 403 });
       }
@@ -356,6 +385,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const deliveryDiscountAmountStr = formData.get('deliveryDiscountAmount')?.toString();
 
     const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString() || undefined;
+    const deliveryNote = formData.get('deliveryNote')?.toString() || undefined;
+    const deliveryProofUrl = formData.get('deliveryProofUrl')?.toString() || undefined;
 
     const metadata: Record<string, unknown> = {};
     if (reason) metadata['reason'] = reason;
@@ -363,6 +394,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (logisticsProviderId) metadata['logisticsProviderId'] = logisticsProviderId;
     if (riderId) metadata['riderId'] = riderId;
     if (preferredDeliveryDate) metadata['preferredDeliveryDate'] = preferredDeliveryDate;
+    if (deliveryNote) metadata['deliveryNote'] = deliveryNote;
+    if (deliveryProofUrl) metadata['deliveryProofUrl'] = deliveryProofUrl;
     const deliveredQty = deliveredQtyStr != null ? parseInt(deliveredQtyStr, 10) : NaN;
     if (!Number.isNaN(deliveredQty) && Number.isInteger(deliveredQty) && deliveredQty >= 0) {
       metadata['deliveredQuantity'] = deliveredQty;
@@ -405,7 +438,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed', 'order:assigned', 'order:transfer_accepted', 'order:transfer_rejected'] as const;
 
 export default function OrderDetailRoute() {
-  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign } = useLoaderData<typeof loader>();
+  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign, logisticsLocations, logisticsDispatchTemplates } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
   return (
@@ -433,6 +466,8 @@ export default function OrderDetailRoute() {
             userId={userId}
             permissions={permissions}
             csAgentsForAssign={csAgentsForAssign}
+            logisticsLocations={logisticsLocations}
+            logisticsDispatchTemplates={logisticsDispatchTemplates}
           />
         )
       }

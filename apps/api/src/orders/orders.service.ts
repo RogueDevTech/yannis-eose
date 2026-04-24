@@ -4,7 +4,6 @@ import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
 import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -16,7 +15,8 @@ import type {
   OrderStatus,
 } from '@yannis/shared';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT, REDIS } from '../database/database.module';
+import { DRIZZLE, REDIS } from '../database/database.module';
+import { withActor } from '../common/db/with-actor';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
@@ -37,7 +37,6 @@ const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
 export class OrdersService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
@@ -87,11 +86,6 @@ export class OrdersService {
     actorId: string | null,
     orderSource?: 'edge-form' | null,
   ): Promise<{ id: string; authorizationUrl?: string }> {
-    // Set actor for audit trail
-    if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-    }
-
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
 
@@ -108,49 +102,55 @@ export class OrdersService {
       fallbackBranchId: null,
     });
 
-    const rows = await this.db
-      .insert(schema.orders)
-      .values({
-        campaignId: orderInput.campaignId ?? null,
-        mediaBuyerId: orderInput.mediaBuyerId ?? null,
-        branchId: branchId ?? null,
-        customerName: orderInput.customerName,
-        customerPhoneHash: orderInput.customerPhoneHash,
-        customerPhone: orderInput.customerPhone ?? null,
-        customerAddress: orderInput.customerAddress ?? null,
-        deliveryAddress: orderInput.deliveryAddress ?? null,
-        deliveryNotes: orderInput.deliveryNotes ?? null,
-        deliveryState: orderInput.deliveryState ?? null,
-        customerGender: orderInput.customerGender ?? null,
-        preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
-        customerEmail: orderInput.customerEmail ?? null,
-        paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
-        paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
-        paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
-        items: orderInput.items,
-        totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
-        status: 'UNPROCESSED',
-        orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
-      })
-      .returning();
+    const insertOrder = async (
+      dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
+    ) => {
+      const rows = await dbOrTx
+        .insert(schema.orders)
+        .values({
+          campaignId: orderInput.campaignId ?? null,
+          mediaBuyerId: orderInput.mediaBuyerId ?? null,
+          branchId: branchId ?? null,
+          customerName: orderInput.customerName,
+          customerPhoneHash: orderInput.customerPhoneHash,
+          customerPhone: orderInput.customerPhone ?? null,
+          customerAddress: orderInput.customerAddress ?? null,
+          deliveryAddress: orderInput.deliveryAddress ?? null,
+          deliveryNotes: orderInput.deliveryNotes ?? null,
+          deliveryState: orderInput.deliveryState ?? null,
+          customerGender: orderInput.customerGender ?? null,
+          preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
+          customerEmail: orderInput.customerEmail ?? null,
+          paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
+          paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
+          paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
+          items: orderInput.items,
+          totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
+          status: 'UNPROCESSED',
+          orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
+        })
+        .returning();
+      const created = rows[0];
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create order' });
+      }
+      if (orderInput.items.length > 0) {
+        await dbOrTx.insert(schema.orderItems).values(
+          orderInput.items.map((item) => ({
+            orderId: created.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: String(item.unitPrice),
+            offerLabel: item.offerLabel ?? null,
+          })),
+        );
+      }
+      return created;
+    };
 
-    const order = rows[0];
-    if (!order) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create order' });
-    }
-
-    // Create order items
-    if (orderInput.items.length > 0) {
-      await this.db.insert(schema.orderItems).values(
-        orderInput.items.map((item) => ({
-          orderId: order.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: String(item.unitPrice),
-          offerLabel: item.offerLabel ?? null,
-        })),
-      );
-    }
+    const order = actorId
+      ? await withActor(this.db, { id: actorId }, insertOrder)
+      : await insertOrder(this.db);
 
     // Emit real-time event for CS dispatch
     this.events.emitNewOrder({
@@ -265,10 +265,19 @@ export class OrdersService {
       });
       if (result) {
         authorizationUrl = result.authorizationUrl;
-        await this.db
-          .update(schema.orders)
-          .set({ paymentReference: result.reference })
-          .where(eq(schema.orders.id, order.id));
+        const updatePayRef = async (
+          dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
+        ) => {
+          await dbOrTx
+            .update(schema.orders)
+            .set({ paymentReference: result.reference })
+            .where(eq(schema.orders.id, order.id));
+        };
+        if (actorId) {
+          await withActor(this.db, { id: actorId }, updatePayRef);
+        } else {
+          await updatePayRef(this.db);
+        }
       }
     }
 
@@ -284,8 +293,6 @@ export class OrdersService {
     actorId: string,
     sessionBranchId?: string | null,
   ): Promise<{ id: string }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-
     const customerPhoneHash = this.hashPhone(input.customerPhone);
     const paymentMethod = input.paymentMethod ?? 'PAY_ON_DELIVERY';
 
@@ -313,47 +320,50 @@ export class OrdersService {
       fallbackBranchId: sessionBranchId ?? null,
     });
 
-    const rows = await this.db
-      .insert(schema.orders)
-      .values({
-        campaignId: input.campaignId ?? null,
-        mediaBuyerId: input.mediaBuyerId ?? null,
-        branchId: branchId ?? null,
-        assignedCsId: actorId,
-        customerName: input.customerName,
-        customerPhoneHash,
-        customerPhone: input.customerPhone,
-        customerAddress: input.customerAddress ?? null,
-        deliveryAddress: input.deliveryAddress ?? null,
-        deliveryNotes: input.deliveryNotes ?? null,
-        deliveryState: input.deliveryState ?? null,
-        customerGender: input.customerGender ?? null,
-        preferredDeliveryDate: input.preferredDeliveryDate ?? null,
-        customerEmail: input.customerEmail ?? null,
-        paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
-        paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
-        paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
-        items: input.items,
-        totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
-        status: 'CS_ASSIGNED',
-        orderSource: 'offline',
-      })
-      .returning();
+    const order = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.orders)
+        .values({
+          campaignId: input.campaignId ?? null,
+          mediaBuyerId: input.mediaBuyerId ?? null,
+          branchId: branchId ?? null,
+          assignedCsId: actorId,
+          customerName: input.customerName,
+          customerPhoneHash,
+          customerPhone: input.customerPhone,
+          customerAddress: input.customerAddress ?? null,
+          deliveryAddress: input.deliveryAddress ?? null,
+          deliveryNotes: input.deliveryNotes ?? null,
+          deliveryState: input.deliveryState ?? null,
+          customerGender: input.customerGender ?? null,
+          preferredDeliveryDate: input.preferredDeliveryDate ?? null,
+          customerEmail: input.customerEmail ?? null,
+          paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
+          paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
+          paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
+          items: input.items,
+          totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
+          status: 'CS_ASSIGNED',
+          orderSource: 'offline',
+        })
+        .returning();
 
-    const order = rows[0];
-    if (!order) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offline order' });
-    }
+      const created = rows[0];
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offline order' });
+      }
 
-    await this.db.insert(schema.orderItems).values(
-      input.items.map((item) => ({
-        orderId: order.id,
-        productId: item.productId,
-        quantity: item.quantity,
-        unitPrice: String(item.unitPrice),
-        offerLabel: item.offerLabel ?? null,
-      })),
-    );
+      await tx.insert(schema.orderItems).values(
+        input.items.map((item) => ({
+          orderId: created.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: String(item.unitPrice),
+          offerLabel: item.offerLabel ?? null,
+        })),
+      );
+      return created;
+    });
 
     this.events.emitNewOrder({
       orderId: order.id,
@@ -643,14 +653,18 @@ export class OrdersService {
       order = refreshed;
     }
 
-    if (order.status !== 'CS_ENGAGED') {
+    // CS can call the customer at any pre-delivery stage: initial engagement, post-confirm
+    // upsell/adjustment, or delivery-coordination follow-up after allocation/dispatch.
+    // Blocked only once the order is closed out (DELIVERED / RETURNED / CANCELLED / etc.).
+    const callableStatuses = ['CS_ENGAGED', 'CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT'];
+    if (!callableStatuses.includes(order.status)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: `Cannot reveal phone: order is in ${order.status} status`,
       });
     }
 
-    const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+    const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
     if (!isElevated && order.assignedCsId !== actor.id) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -791,9 +805,6 @@ export class OrdersService {
    * Enforces the state machine, gates, and side effects.
    */
   async transition(input: TransitionOrderInput, actor: SessionUser) {
-    // Set actor for audit trail
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     // Get current order
     const rows = await this.db
       .select()
@@ -823,7 +834,7 @@ export class OrdersService {
       (currentStatus === 'CS_ASSIGNED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
       (currentStatus === 'CS_ENGAGED' && (newStatus === 'CONFIRMED' || newStatus === 'CANCELLED'));
     if (csOnlyTransitions) {
-      const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN';
+      const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
       if ((currentStatus === 'UNPROCESSED' || currentStatus === 'CS_ASSIGNED') && newStatus === 'CS_ENGAGED') {
         if (!isElevated && actor.role !== 'CS_AGENT') {
           throw new TRPCError({
@@ -842,26 +853,49 @@ export class OrdersService {
       }
     }
 
-    // Role check: only Head of Logistics or SuperAdmin can transition IN_TRANSIT → DELIVERED/PARTIALLY_DELIVERED.
-    // TPL_MANAGER may mark delivered when the order has been resolved (resolveReceiptUrl set) via Resolve order.
-    // Riders must still submit a delivery confirmation request for HOL approval.
+    // Role check: CONFIRMED → ALLOCATED can be triggered by the assigned CS agent (the one who
+    // confirmed the order), by Head of Logistics / Logistics Manager, or by Super Admin / Admin.
+    // CS agents "share" orders to a 3PL location the same way HoLogistics does from the logistics dashboard.
+    if (currentStatus === 'CONFIRMED' && newStatus === 'ALLOCATED') {
+      const isAssignedCs = actor.role === 'CS_AGENT' && order.assignedCsId === actor.id;
+      const isLogistics = actor.role === 'HEAD_OF_LOGISTICS' || actor.role === 'LOGISTICS_MANAGER';
+      const isElevated = actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN' || actor.role === 'HEAD_OF_CS';
+      if (!isAssignedCs && !isLogistics && !isElevated) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only the assigned CS agent, Logistics, or an Admin can allocate this order to a 3PL location.',
+        });
+      }
+    }
+
+    // Role check: {ALLOCATED|DISPATCHED|IN_TRANSIT} → DELIVERED/PARTIALLY_DELIVERED can be triggered by:
+    //   - Head of Logistics / SuperAdmin / Admin (unrestricted).
+    //   - TPL_MANAGER, but only when the order was resolved (resolveReceiptUrl set) via Resolve order.
+    //   - The assigned CS agent, but only with a mandatory deliveryNote (>= 10 chars) since they
+    //     are confirming delivery via a follow-up call rather than rider OTP/GPS.
+    //   ALLOCATED is included because 3PL isn't in-app yet — CS / HoLogistics marks delivered
+    //   directly after ALLOCATED without the order ever physically transitioning through
+    //   DISPATCHED / IN_TRANSIT. Riders still submit a delivery confirmation request for HOL approval (not this path).
     if (
-      currentStatus === 'IN_TRANSIT' &&
+      (currentStatus === 'ALLOCATED' || currentStatus === 'DISPATCHED' || currentStatus === 'IN_TRANSIT') &&
       (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED')
     ) {
       const hasResolveReceipt = !!order.resolveReceiptUrl?.trim();
       const tplManagerMayDeliver = actor.role === 'TPL_MANAGER' && hasResolveReceipt;
-      if (
-        actor.role !== 'HEAD_OF_LOGISTICS' &&
-        actor.role !== 'SUPER_ADMIN' &&
-        !tplManagerMayDeliver
-      ) {
+      const isAssignedCs = actor.role === 'CS_AGENT' && order.assignedCsId === actor.id;
+      const isElevated =
+        actor.role === 'HEAD_OF_LOGISTICS' ||
+        actor.role === 'SUPER_ADMIN' ||
+        actor.role === 'ADMIN';
+      if (!isElevated && !tplManagerMayDeliver && !isAssignedCs) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message:
             'Delivery confirmation requires Head of Logistics approval. Submit a delivery confirmation request instead.',
         });
       }
+      // Delivery note is optional (CEO directive 2026-04-24 reversed the prior mandatory rule).
+      // The note + screenshot fields are still persisted when provided.
     }
 
     // Validate gates based on the transition
@@ -902,10 +936,12 @@ export class OrdersService {
 
     // Update agent's lastActionAt for dispatch tiebreaker + inactivity tracking
     if (actor.role === 'CS_AGENT' || actor.role === 'HEAD_OF_CS') {
-      await this.db
-        .update(schema.users)
-        .set({ lastActionAt: new Date() })
-        .where(eq(schema.users.id, actor.id));
+      await withActor(this.db, actor, async (tx) => {
+        await tx
+          .update(schema.users)
+          .set({ lastActionAt: new Date() })
+          .where(eq(schema.users.id, actor.id));
+      });
     }
 
     // Generate OTP on DISPATCHED (single-use, sent to customer)
@@ -928,6 +964,12 @@ export class OrdersService {
     // v1: persist delivery proof URL when 3PL marks DELIVERED or PARTIALLY_DELIVERED
     if ((newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED') && input.metadata?.deliveryProofUrl) {
       updateFields['deliveryProofUrl'] = String(input.metadata.deliveryProofUrl).trim();
+    }
+
+    // Persist the delivery note when provided on DELIVERED/PARTIALLY_DELIVERED (currently required
+    // for CS-triggered confirmations; optional when elevated roles mark it).
+    if ((newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED') && input.metadata?.deliveryNote) {
+      updateFields['deliveryNotes'] = String(input.metadata.deliveryNote).trim();
     }
 
     // Delivery fee add-on when marking DELIVERED or PARTIALLY_DELIVERED (3PL records delivery cost; required in v1)
@@ -967,12 +1009,14 @@ export class OrdersService {
       updateFields['riderId'] = input.metadata.riderId;
     }
 
-    // Perform the update
-    const updatedRows = await this.db
-      .update(schema.orders)
-      .set(updateFields)
-      .where(eq(schema.orders.id, input.orderId))
-      .returning();
+    // Perform the update — wrapped in withActor so the temporal-audit trigger sees the actor.
+    const updatedRows = await withActor(this.db, actor, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set(updateFields)
+        .where(eq(schema.orders.id, input.orderId))
+        .returning(),
+    );
 
     const updated = updatedRows[0];
     if (!updated) {
@@ -999,6 +1043,17 @@ export class OrdersService {
     const timelineType = timelineEventMap[newStatus];
     if (timelineType) {
       const reason = typeof input.metadata?.reason === 'string' ? input.metadata.reason : undefined;
+      // Resolve the 3PL location name so the timeline reads
+      // "Order allocated to <Location>" instead of the generic "…logistics".
+      let logisticsLocationName: string | undefined;
+      if (newStatus === 'ALLOCATED' && typeof input.metadata?.logisticsLocationId === 'string') {
+        const locRows = await this.db
+          .select({ name: schema.logisticsLocations.name })
+          .from(schema.logisticsLocations)
+          .where(eq(schema.logisticsLocations.id, input.metadata.logisticsLocationId))
+          .limit(1);
+        logisticsLocationName = locRows[0]?.name ?? undefined;
+      }
       this.writeTimelineEvent({
         orderId: input.orderId,
         eventType: timelineType,
@@ -1010,6 +1065,7 @@ export class OrdersService {
             typeof input.metadata?.preferredDeliveryDate === 'string'
               ? input.metadata.preferredDeliveryDate
               : undefined,
+          logisticsLocationName,
         }),
         metadata: input.metadata as Record<string, unknown> | undefined,
       });
@@ -1062,8 +1118,6 @@ export class OrdersService {
    * The temporal table automatically preserves old values.
    */
   async update(input: UpdateOrderInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     const existingRows = await this.db
       .select()
       .from(schema.orders)
@@ -1076,11 +1130,13 @@ export class OrdersService {
     }
 
     if (input.items !== undefined) {
-      const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'];
+      // Items may be adjusted any time before the goods physically leave the 3PL (DISPATCHED+).
+      // Post-dispatch adjustments would conflict with the rider's pick list / stock already in-transit.
+      const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED'];
       if (!allowedStatuses.includes(order.status)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'Order items can only be adjusted when order is UNPROCESSED, CS_ASSIGNED, or CS_ENGAGED.',
+          message: 'Order items cannot be adjusted once the order has been dispatched.',
         });
       }
     }
@@ -1132,32 +1188,34 @@ export class OrdersService {
     if (effectiveInput.totalAmount !== undefined) updateFields['totalAmount'] = String(effectiveInput.totalAmount);
     if (effectiveInput.items !== undefined) updateFields['items'] = effectiveInput.items;
 
-    const updatedRows = await this.db
-      .update(schema.orders)
-      .set(updateFields)
-      .where(eq(schema.orders.id, input.orderId))
-      .returning();
+    const updated = await withActor(this.db, actor, async (tx) => {
+      const updatedRows = await tx
+        .update(schema.orders)
+        .set(updateFields)
+        .where(eq(schema.orders.id, input.orderId))
+        .returning();
 
-    const updated = updatedRows[0];
-    if (!updated) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update order' });
-    }
+      const row = updatedRows[0];
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update order' });
+      }
 
-    // Update order items if provided
-    if (effectiveInput.items) {
-      await this.db
-        .delete(schema.orderItems)
-        .where(eq(schema.orderItems.orderId, input.orderId));
+      if (effectiveInput.items) {
+        await tx
+          .delete(schema.orderItems)
+          .where(eq(schema.orderItems.orderId, input.orderId));
 
-      await this.db.insert(schema.orderItems).values(
-        effectiveInput.items.map((item) => ({
-          orderId: input.orderId,
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: String(item.unitPrice),
-        })),
-      );
-    }
+        await tx.insert(schema.orderItems).values(
+          effectiveInput.items.map((item) => ({
+            orderId: input.orderId,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: String(item.unitPrice),
+          })),
+        );
+      }
+      return row;
+    });
 
     const actorName = actor.name ?? 'CS agent';
     if (
@@ -1238,7 +1296,6 @@ export class OrdersService {
         return null;
       }
       const actorId = EDGE_FORM_ACTOR_ID;
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
 
       const { cartId, ...orderInput } = payload;
       const paystackBranchId = await this.resolveBranchIdForNewOrder({
@@ -1246,47 +1303,53 @@ export class OrdersService {
         mediaBuyerId: orderInput.mediaBuyerId ?? null,
         fallbackBranchId: null,
       });
-      const rows = await this.db
-        .insert(schema.orders)
-        .values({
-          campaignId: orderInput.campaignId ?? null,
-          mediaBuyerId: orderInput.mediaBuyerId ?? null,
-          branchId: paystackBranchId ?? null,
-          customerName: orderInput.customerName,
-          customerPhoneHash: orderInput.customerPhoneHash,
-          customerPhone: orderInput.customerPhone ?? null,
-          customerAddress: orderInput.customerAddress ?? null,
-          deliveryAddress: orderInput.deliveryAddress ?? null,
-          deliveryNotes: orderInput.deliveryNotes ?? null,
-          deliveryState: orderInput.deliveryState ?? null,
-          customerGender: orderInput.customerGender ?? null,
-          preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
-          customerEmail: orderInput.customerEmail ?? null,
-          paymentMethod: 'PAY_ONLINE',
-          paymentStatus: 'PAID',
-          paymentReference: reference,
-          paymentProvider: 'PAYSTACK',
-          items: orderInput.items,
-          totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
-          status: 'UNPROCESSED',
-        })
-        .returning();
 
-      const order = rows[0];
+      const order = await withActor(this.db, { id: actorId }, async (tx) => {
+        const rows = await tx
+          .insert(schema.orders)
+          .values({
+            campaignId: orderInput.campaignId ?? null,
+            mediaBuyerId: orderInput.mediaBuyerId ?? null,
+            branchId: paystackBranchId ?? null,
+            customerName: orderInput.customerName,
+            customerPhoneHash: orderInput.customerPhoneHash,
+            customerPhone: orderInput.customerPhone ?? null,
+            customerAddress: orderInput.customerAddress ?? null,
+            deliveryAddress: orderInput.deliveryAddress ?? null,
+            deliveryNotes: orderInput.deliveryNotes ?? null,
+            deliveryState: orderInput.deliveryState ?? null,
+            customerGender: orderInput.customerGender ?? null,
+            preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
+            customerEmail: orderInput.customerEmail ?? null,
+            paymentMethod: 'PAY_ONLINE',
+            paymentStatus: 'PAID',
+            paymentReference: reference,
+            paymentProvider: 'PAYSTACK',
+            items: orderInput.items,
+            totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
+            status: 'UNPROCESSED',
+          })
+          .returning();
+
+        const created = rows[0];
+        if (!created) return null;
+
+        if (orderInput.items.length > 0) {
+          await tx.insert(schema.orderItems).values(
+            orderInput.items.map((item) => ({
+              orderId: created.id,
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: String(item.unitPrice),
+              offerLabel: item.offerLabel ?? null,
+            })),
+          );
+        }
+        return created;
+      });
+
       if (!order) {
         return null;
-      }
-
-      if (orderInput.items.length > 0) {
-        await this.db.insert(schema.orderItems).values(
-          orderInput.items.map((item) => ({
-            orderId: order.id,
-            productId: item.productId,
-            quantity: item.quantity,
-            unitPrice: String(item.unitPrice),
-            offerLabel: item.offerLabel ?? null,
-          })),
-        );
       }
 
       await this.redis.del(pendingKey);
@@ -1384,8 +1447,6 @@ export class OrdersService {
    * Only Head of CS or SuperAdmin may call this (Hot Swap). CS agents cannot self-initiate transfers.
    */
   async assignToCS(orderId: string, csAgentId: string, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     const existingRows = await this.db
       .select()
       .from(schema.orders)
@@ -1396,20 +1457,23 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
-    const updatedRows = await this.db
-      .update(schema.orders)
-      .set({
-        assignedCsId: csAgentId,
-        status: 'CS_ASSIGNED',
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId))
-      .returning();
+    const updated = await withActor(this.db, actor, async (tx) => {
+      const updatedRows = await tx
+        .update(schema.orders)
+        .set({
+          assignedCsId: csAgentId,
+          status: 'CS_ASSIGNED',
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId))
+        .returning();
 
-    const updated = updatedRows[0];
-    if (!updated) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to assign order' });
-    }
+      const row = updatedRows[0];
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to assign order' });
+      }
+      return row;
+    });
 
     // Notify the assigned agent (real-time + persistent)
     this.events.emitToUser(csAgentId, 'order:assigned', {
@@ -1459,22 +1523,22 @@ export class OrdersService {
     toAgentId: string,
     actor: SessionUser,
   ) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    const updated = await this.db
-      .update(schema.orders)
-      .set({
-        assignedCsId: toAgentId,
-        status: 'CS_ASSIGNED',
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          inArray(schema.orders.id, orderIds),
-          eq(schema.orders.assignedCsId, fromAgentId),
-        ),
-      )
-      .returning();
+    const updated = await withActor(this.db, actor, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set({
+          assignedCsId: toAgentId,
+          status: 'CS_ASSIGNED',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            inArray(schema.orders.id, orderIds),
+            eq(schema.orders.assignedCsId, fromAgentId),
+          ),
+        )
+        .returning(),
+    );
 
     // Notify both agents (real-time + persistent)
     this.events.emitToUser(fromAgentId, 'order:reassigned', {
@@ -1541,7 +1605,6 @@ export class OrdersService {
    * Returns the number of orders whose assignment was changed.
    */
   async redistributeCSOrders(actor: SessionUser): Promise<{ redistributed: number }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
     await this.releaseExpiredLocks(actor.id);
 
     const workloads = await this.getCSAgentWorkloads();
@@ -1638,7 +1701,6 @@ export class OrdersService {
    * agent from receiving orders. Returns the number of orders reassigned.
    */
   async redistributeOrdersFromAgent(agentId: string, actor: SessionUser): Promise<{ redistributed: number }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
     await this.releaseExpiredLocks(actor.id);
 
     const orders = await this.db
@@ -2018,19 +2080,23 @@ export class OrdersService {
    * When actorId is provided (e.g. from tRPC), audit trail records that user; otherwise system/cron.
    */
   async releaseExpiredLocks(actorId?: string | null): Promise<{ releasedCount: number }> {
-    if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-    }
-    const released = await this.db
-      .update(schema.orders)
-      .set({ lockedUntil: null, lockedBy: null, updatedAt: new Date() })
-      .where(
-        and(
-          sql`${schema.orders.lockedUntil} IS NOT NULL`,
-          sql`${schema.orders.lockedUntil} < NOW()`,
-        ),
-      )
-      .returning();
+    const run = async (
+      dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
+    ) =>
+      dbOrTx
+        .update(schema.orders)
+        .set({ lockedUntil: null, lockedBy: null, updatedAt: new Date() })
+        .where(
+          and(
+            sql`${schema.orders.lockedUntil} IS NOT NULL`,
+            sql`${schema.orders.lockedUntil} < NOW()`,
+          ),
+        )
+        .returning();
+
+    const released = actorId
+      ? await withActor(this.db, { id: actorId }, run)
+      : await run(this.db);
 
     return { releasedCount: released.length };
   }
@@ -2324,15 +2390,22 @@ export class OrdersService {
   /**
    * Auto-dispatch a new order to a CS agent.
    * Strategy is configurable via system setting CS_DISPATCH_STRATEGY:
-   * - load_balanced (default): lowest pending count first, then most idle.
+   * - manual (default): no auto-assignment; orders sit UNPROCESSED until HoCS assigns them.
+   * - load_balanced: lowest pending count first, then most idle.
    * - performance: prioritise agents with higher delivery rate and confirmation rate (this month).
-   * - claim: no auto-assignment; orders stay UNPROCESSED in the claim queue.
+   * - claim: no auto-assignment; orders stay UNPROCESSED in the claim queue for agents to grab.
    */
   private async autoDispatchToCS(orderId: string) {
     await this.releaseExpiredLocks();
 
     const dispatchSetting = await this.settingsService.get('CS_DISPATCH_STRATEGY');
-    const strategy = (dispatchSetting?.strategy as string | undefined) ?? 'load_balanced';
+    const strategy = (dispatchSetting?.strategy as string | undefined) ?? 'manual';
+
+    if (strategy === 'manual') {
+      // Manual mode: no auto-assignment and no claim broadcast. Order remains UNPROCESSED
+      // in the HoCS unassigned queue for manual assignment via Hot Swap.
+      return;
+    }
 
     if (strategy === 'claim') {
       // Claim mode: leave order in UNPROCESSED, broadcast to claim queue
@@ -2382,7 +2455,7 @@ export class OrdersService {
 
     let claimedOrder: Array<{ id: string }> = [];
     await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actor.id}`);
+      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
       claimedOrder = await tx.execute<{ id: string }>(
         sql`
           UPDATE orders
@@ -2466,7 +2539,6 @@ export class OrdersService {
    * Restricted to Head of CS and SuperAdmin.
    */
   async distributeUnassignedOrders(actor: SessionUser): Promise<{ distributed: number }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
     await this.releaseExpiredLocks(actor.id);
 
     const unassigned = await this.db
@@ -2742,6 +2814,20 @@ export class OrdersService {
         // Look up the logistics provider's rate card and set deliveryFee
         const locationId = order.logisticsLocationId;
         if (locationId) {
+          // Per-item ALLOCATION movement — earmarks the reserved stock against a specific 3PL
+          // location so the inventory detail drawer can show "intaken → allocated → delivered".
+          for (const item of orderItems) {
+            await this.db.insert(schema.stockMovements).values({
+              productId: item.productId,
+              movementType: 'ALLOCATION',
+              quantity: item.quantity,
+              toLocationId: locationId,
+              referenceId: order.id,
+              reason: `Allocated to 3PL for order ${order.id}`,
+              actorId,
+            });
+          }
+
           const locationRows = await this.db
             .select()
             .from(schema.logisticsLocations)
@@ -2811,10 +2897,17 @@ export class OrdersService {
               productId: item.productId,
               movementType: 'DELIVERY',
               quantity: -item.quantity,
+              // Stock leaves the 3PL that fulfilled the order — attribute the reduction to that location.
+              fromLocationId: order.logisticsLocationId ?? undefined,
               referenceId: order.id,
               reason: `Delivered: order ${order.id}`,
               actorId,
             });
+
+          // Low-stock alert for the 3PL that just fulfilled.
+          if (order.logisticsLocationId) {
+            await this.inventoryService.checkLowStockAndNotify(item.productId, order.logisticsLocationId);
+          }
         }
         break;
       }
@@ -2846,6 +2939,8 @@ export class OrdersService {
               productId: item.productId,
               movementType: 'RETURN',
               quantity: item.quantity,
+              // Units come back to the 3PL that attempted delivery (pending Restock vs WriteOff decision).
+              toLocationId: order.logisticsLocationId ?? undefined,
               referenceId: order.id,
               reason: `Returned: order ${order.id}`,
               actorId,
@@ -2879,10 +2974,16 @@ export class OrdersService {
               productId: item.productId,
               movementType: 'WRITE_OFF',
               quantity: -item.quantity,
+              // Units disappear from the 3PL that was holding them.
+              fromLocationId: order.logisticsLocationId ?? undefined,
               referenceId: order.id,
               reason: `Written off: order ${order.id}`,
               actorId,
             });
+
+          if (order.logisticsLocationId) {
+            await this.inventoryService.checkLowStockAndNotify(item.productId, order.logisticsLocationId);
+          }
         }
         break;
       }
@@ -2902,8 +3003,6 @@ export class OrdersService {
     actor: SessionUser,
     options?: { delayMinutes?: number; notes?: string },
   ) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     const rows = await this.db
       .select()
       .from(schema.orders)
@@ -2921,15 +3020,17 @@ export class OrdersService {
 
     if (currentAttempts >= maxAttempts) {
       // Auto-cancel: max callback attempts reached
-      await this.db
-        .update(schema.orders)
-        .set({
-          status: 'CANCELLED',
-          callbackScheduledAt: null,
-          callbackNotes: `Auto-cancelled: max callback attempts (${maxAttempts}) reached`,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.orders.id, orderId));
+      await withActor(this.db, actor, async (tx) =>
+        tx
+          .update(schema.orders)
+          .set({
+            status: 'CANCELLED',
+            callbackScheduledAt: null,
+            callbackNotes: `Auto-cancelled: max callback attempts (${maxAttempts}) reached`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.orders.id, orderId)),
+      );
 
       this.events.emitOrderStatusChange({
         orderId,
@@ -2961,19 +3062,21 @@ export class OrdersService {
 
     const scheduledAt = new Date(Date.now() + delayMinutes * 60 * 1000);
 
-    await this.db
-      .update(schema.orders)
-      .set({
-        callbackScheduledAt: scheduledAt,
-        callbackAttempts: currentAttempts + 1,
-        callbackNotes: options?.notes ?? null,
-        // Move to CS_ASSIGNED so order stays in same agent's queue
-        status: 'CS_ASSIGNED',
-        lockedUntil: null,
-        lockedBy: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId));
+    await withActor(this.db, actor, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set({
+          callbackScheduledAt: scheduledAt,
+          callbackAttempts: currentAttempts + 1,
+          callbackNotes: options?.notes ?? null,
+          // Move to CS_ASSIGNED so order stays in same agent's queue
+          status: 'CS_ASSIGNED',
+          lockedUntil: null,
+          lockedBy: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId)),
+    );
 
     this.events.emitOrderStatusChange({
       orderId,
@@ -3114,16 +3217,16 @@ export class OrdersService {
    * Flag an order as a potential duplicate of another order.
    */
   async flagDuplicate(orderId: string, duplicateOfId: string, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-
-    await this.db
-      .update(schema.orders)
-      .set({
-        isDuplicate: 'FLAGGED',
-        duplicateOfId,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId));
+    await withActor(this.db, { id: actorId }, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set({
+          isDuplicate: 'FLAGGED',
+          duplicateOfId,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId)),
+    );
 
     return { flagged: true };
   }
@@ -3166,8 +3269,6 @@ export class OrdersService {
    * Merge a duplicate order into the original (combine quantities).
    */
   async mergeDuplicate(duplicateId: string, originalId: string, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     // Get both orders
     const [dupRows, origRows] = await Promise.all([
       this.db.select().from(schema.orders).where(eq(schema.orders.id, duplicateId)).limit(1),
@@ -3187,51 +3288,53 @@ export class OrdersService {
       this.db.select().from(schema.orderItems).where(eq(schema.orderItems.orderId, originalId)),
     ]);
 
-    // Merge quantities: for matching products add quantities, for new products add items
-    for (const dupItem of dupItems) {
-      const matchingOrig = origItems.find((oi) => oi.productId === dupItem.productId);
-      if (matchingOrig) {
-        // Add quantities
-        await this.db
-          .update(schema.orderItems)
-          .set({ quantity: matchingOrig.quantity + dupItem.quantity })
-          .where(eq(schema.orderItems.id, matchingOrig.id));
-      } else {
-        // Add new item to original order
-        await this.db.insert(schema.orderItems).values({
-          orderId: originalId,
-          productId: dupItem.productId,
-          quantity: dupItem.quantity,
-          unitPrice: dupItem.unitPrice,
-        });
+    await withActor(this.db, actor, async (tx) => {
+      // Merge quantities: for matching products add quantities, for new products add items
+      for (const dupItem of dupItems) {
+        const matchingOrig = origItems.find((oi) => oi.productId === dupItem.productId);
+        if (matchingOrig) {
+          // Add quantities
+          await tx
+            .update(schema.orderItems)
+            .set({ quantity: matchingOrig.quantity + dupItem.quantity })
+            .where(eq(schema.orderItems.id, matchingOrig.id));
+        } else {
+          // Add new item to original order
+          await tx.insert(schema.orderItems).values({
+            orderId: originalId,
+            productId: dupItem.productId,
+            quantity: dupItem.quantity,
+            unitPrice: dupItem.unitPrice,
+          });
+        }
       }
-    }
 
-    // Update original order total
-    const newTotal =
-      parseFloat(original.totalAmount ?? '0') + parseFloat(duplicate.totalAmount ?? '0');
-    await this.db
-      .update(schema.orders)
-      .set({
-        totalAmount: newTotal.toFixed(2),
-        deliveryNotes: [original.deliveryNotes, `[Merged from order ${duplicateId}]`]
-          .filter(Boolean)
-          .join(' | '),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, originalId));
+      // Update original order total
+      const newTotal =
+        parseFloat(original.totalAmount ?? '0') + parseFloat(duplicate.totalAmount ?? '0');
+      await tx
+        .update(schema.orders)
+        .set({
+          totalAmount: newTotal.toFixed(2),
+          deliveryNotes: [original.deliveryNotes, `[Merged from order ${duplicateId}]`]
+            .filter(Boolean)
+            .join(' | '),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, originalId));
 
-    // Mark duplicate as merged and cancel it
-    await this.db
-      .update(schema.orders)
-      .set({
-        isDuplicate: 'MERGED',
-        duplicateOfId: originalId,
-        status: 'CANCELLED',
-        deliveryNotes: `Merged into order ${originalId}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, duplicateId));
+      // Mark duplicate as merged and cancel it
+      await tx
+        .update(schema.orders)
+        .set({
+          isDuplicate: 'MERGED',
+          duplicateOfId: originalId,
+          status: 'CANCELLED',
+          deliveryNotes: `Merged into order ${originalId}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, duplicateId));
+    });
 
     this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {}, actor.currentBranchId ?? null);
     return { merged: true, originalId, duplicateId };
@@ -3241,16 +3344,16 @@ export class OrdersService {
    * Dismiss a flagged duplicate — mark as legitimate new order.
    */
   async dismissDuplicate(orderId: string, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    await this.db
-      .update(schema.orders)
-      .set({
-        isDuplicate: 'DISMISSED',
-        duplicateOfId: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId));
+    await withActor(this.db, actor, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set({
+          isDuplicate: 'DISMISSED',
+          duplicateOfId: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId)),
+    );
 
     this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {}, actor.currentBranchId ?? null);
     return { dismissed: true };
@@ -3449,11 +3552,11 @@ export class OrdersService {
 
     // Role-based filtering
     const csRoles = new Set(['CS_AGENT', 'HEAD_OF_CS']);
-    const logisticsRoles = new Set(['HEAD_OF_LOGISTICS', 'WAREHOUSE_MANAGER', 'TPL_MANAGER', 'TPL_RIDER']);
+    const logisticsRoles = new Set(['HEAD_OF_LOGISTICS', 'STOCK_MANAGER', 'TPL_MANAGER', 'TPL_RIDER']);
 
     return mergedRows.filter((row) => {
       const eventType = row.eventType as string;
-      if (actor.role === 'SUPER_ADMIN' || actor.role === 'FINANCE_OFFICER' || actor.role === 'HR_MANAGER') {
+      if ((actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN') || actor.role === 'FINANCE_OFFICER' || actor.role === 'HR_MANAGER') {
         return true;
       }
       if (csRoles.has(actor.role)) {
@@ -3503,12 +3606,12 @@ export class OrdersService {
 
   private buildTransitionActivityDescription(
     newStatus: string,
-    options?: { reason?: string; preferredDeliveryDate?: string },
+    options?: { reason?: string; preferredDeliveryDate?: string; logisticsLocationName?: string },
   ): string {
     const reasonSuffix = options?.reason ? ` (${options.reason})` : '';
     switch (newStatus) {
       case 'CS_ENGAGED':
-        return 'Agent started customer engagement';
+        return 'CS started customer engagement';
       case 'CONFIRMED':
         return options?.preferredDeliveryDate
           ? `Order confirmed for delivery on ${options.preferredDeliveryDate}`
@@ -3516,7 +3619,9 @@ export class OrdersService {
       case 'CANCELLED':
         return `Order cancelled${reasonSuffix}`;
       case 'ALLOCATED':
-        return 'Order allocated to logistics';
+        return options?.logisticsLocationName
+          ? `Order allocated to ${options.logisticsLocationName}`
+          : 'Order allocated to logistics';
       case 'DISPATCHED':
         return 'Order dispatched to rider';
       case 'IN_TRANSIT':

@@ -1,7 +1,8 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption } from '~/features/inventory/types';
@@ -11,11 +12,47 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'inventory.read');
+  // Heads (HoM, HoCS) get inventory visibility by role so they can see stock levels
+  // when planning campaigns / CS priorities, even without the inventory.read permission.
+  const user = await requirePermissionOrRoles(request, {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
+    permission: 'inventory.read',
+  });
   const cookie = getSessionCookie(request);
 
+  // Parse Stock-Levels filter + sort + pagination from URL search params.
+  // `sort=lowestAvailable|highestAvailable` maps to backend sortBy/sortOrder pairs.
+  const url = new URL(request.url);
+  const rawProductFilter = url.searchParams.get('productId') ?? '';
+  const rawSort = url.searchParams.get('sort') ?? '';
+  const rawSearch = (url.searchParams.get('search') ?? '').trim();
+  const rawPage = Number(url.searchParams.get('page') ?? '1');
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+  const LEVELS_LIMIT = 20;
+
+  const levelsInput: {
+    productId?: string;
+    search?: string;
+    sortBy?: 'available' | 'updatedAt';
+    sortOrder?: 'asc' | 'desc';
+    page: number;
+    limit: number;
+  } = { page, limit: LEVELS_LIMIT };
+  if (rawProductFilter) levelsInput.productId = rawProductFilter;
+  if (rawSearch) levelsInput.search = rawSearch;
+  if (rawSort === 'lowestAvailable') {
+    levelsInput.sortBy = 'available';
+    levelsInput.sortOrder = 'asc';
+  } else if (rawSort === 'highestAvailable') {
+    levelsInput.sortBy = 'available';
+    levelsInput.sortOrder = 'desc';
+  }
+
   // Start fetches concurrently
-  const levelsPromise = apiRequest<unknown>('/trpc/inventory.levels', { method: 'GET', cookie });
+  const levelsPromise = apiRequest<unknown>(
+    `/trpc/inventory.levels?input=${encodeURIComponent(JSON.stringify(levelsInput))}`,
+    { method: 'GET', cookie },
+  );
   const movementsPromise = apiRequest<unknown>('/trpc/inventory.movements', { method: 'GET', cookie });
   const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 20, status: 'ACTIVE' }))}`, { method: 'GET', cookie });
   const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 20 }))}`, { method: 'GET', cookie });
@@ -24,7 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const levelsRes = await levelsPromise;
 
   const levelsData = levelsRes.ok
-    ? (levelsRes.data as { result?: { data?: { levels: InventoryLevel[]; pagination: { total: number } } } })?.result?.data
+    ? (levelsRes.data as { result?: { data?: { levels: InventoryLevel[]; pagination: { total: number; totalPages: number } } } })?.result?.data
     : null;
 
   // Await movements data
@@ -52,21 +89,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     levels: levelsData?.levels ?? [],
     totalLevels: levelsData?.pagination?.total ?? 0,
+    levelsPage: page,
+    levelsTotalPages: levelsData?.pagination?.totalPages ?? 1,
+    levelsLimit: LEVELS_LIMIT,
+    levelsProductFilter: rawProductFilter,
+    levelsSearch: rawSearch,
+    levelsSort: rawSort === 'lowestAvailable' || rawSort === 'highestAvailable' ? rawSort : 'default',
     movements: movementsData.movements,
     totalMovements: movementsData.total,
     products,
     locations,
-    canIntake: user.permissions?.includes('inventory.intake') ?? false,
+    // Admin-level users bypass permission lookups at the middleware layer (permissions: []),
+    // so we must also bypass here — otherwise the Stock Intake button is hidden from SuperAdmin / Admin.
+    canIntake: isAdminLevel(user) || (user.permissions?.includes('inventory.intake') ?? false),
+    canAdjust: isAdminLevel(user) || (user.permissions?.includes('inventory.adjust') ?? false),
+    // Inventory CSV export is restricted to admin-level users and STOCK_MANAGER — the same
+    // roles that own the stock data. Everyone else reading inventory (logistics, TPL managers,
+    // finance) still sees the table but cannot download the raw levels.
+    canExport: isAdminLevel(user) || user.role === 'STOCK_MANAGER',
   };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermission(request, 'inventory.intake');
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'stockIntake') {
+    await requirePermission(request, 'inventory.intake');
     const productId = formData.get('productId')?.toString() ?? '';
     const locationId = formData.get('locationId')?.toString() ?? '';
     const quantity = parseInt(formData.get('quantity')?.toString() ?? '0', 10);
@@ -92,6 +142,33 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
       return json({ error: errorData?.error?.message ?? 'Failed to add stock' }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'adjustStock') {
+    await requirePermission(request, 'inventory.adjust');
+    const productId = formData.get('productId')?.toString() ?? '';
+    const locationId = formData.get('locationId')?.toString() ?? '';
+    const adjustmentQuantity = parseInt(formData.get('adjustmentQuantity')?.toString() ?? '0', 10);
+    const reason = formData.get('reason')?.toString().trim() ?? '';
+
+    if (!productId || !locationId || !Number.isFinite(adjustmentQuantity) || adjustmentQuantity === 0) {
+      return json({ error: 'Product, location, and a non-zero adjustment quantity are required' }, { status: 400 });
+    }
+    if (reason.length < 10) {
+      return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/inventory.adjust', {
+      method: 'POST',
+      cookie,
+      body: { productId, locationId, adjustmentQuantity, reason },
+    });
+
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to adjust stock' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

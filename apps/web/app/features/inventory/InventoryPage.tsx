@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { exportToCsv } from '~/lib/csv-export';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
@@ -16,8 +16,10 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
+import { Pagination } from '~/components/ui/pagination';
 import type {
   InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption,
   Transfer, ReturnedOrder, Reconciliation, LocationWithLock,
@@ -28,7 +30,10 @@ import {
 } from './types';
 
 export function InventoryPage({
-  levels, totalLevels, movements, totalMovements, products, locations, canIntake = false,
+  levels, totalLevels, levelsPage = 1, levelsTotalPages = 1, levelsLimit = 20,
+  levelsProductFilter: serverProductFilter = '', levelsSearch: serverSearch = '',
+  levelsSort: serverSort = 'default',
+  movements, totalMovements, products, locations, canIntake = false, canAdjust = false, canExport = false,
   transfers, returnedOrders, reconciliations, locationsWithLock,
 }: InventoryStreamData) {
   const hasTransfers = !!transfers;
@@ -37,9 +42,70 @@ export function InventoryPage({
   type TabValue = 'levels' | 'movements' | 'transfers' | 'returns' | 'reconciliation';
   const [activeTab, setActiveTab] = useState<TabValue>('levels');
 
+  // Stock Levels filter + sort are URL-driven so the backend can do the actual filter/sort/paginate.
+  // `levelsProductFilter` empty string = no filter (backend default).
+  type LevelsSort = 'default' | 'lowestAvailable' | 'highestAvailable';
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const updateLevelsParam = (key: 'productId' | 'sort' | 'search', value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (!value || value === 'ALL' || value === 'default') next.delete(key);
+      else next.set(key, value);
+      // Any filter/sort/search change resets to page 1.
+      next.delete('page');
+      return next;
+    }, { preventScrollReset: true });
+  };
+
+  const resetLevelsFilters = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('productId');
+      next.delete('sort');
+      next.delete('search');
+      next.delete('page');
+      return next;
+    }, { preventScrollReset: true });
+  };
+
+  // Controlled search input — submitted on form submit (Enter) or when the user clears it.
+  const [searchInput, setSearchInput] = useState(serverSearch);
+  useEffect(() => { setSearchInput(serverSearch); }, [serverSearch]);
+
+  const submitSearch = (next: string) => {
+    const trimmed = next.trim();
+    if (trimmed === serverSearch) return;
+    updateLevelsParam('search', trimmed);
+  };
+
+  // useNavigation: state is 'loading' while the page's loader re-runs after a
+  // search-param change. Used to render the inline spinner beside the filters.
+  const navigation = useNavigation();
+  const isLoadingLevels = navigation.state === 'loading';
+
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
   const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…') : '—';
+
+  const displayedLevels = levels;
+  const currentProductFilter = serverProductFilter || 'ALL';
+  const currentSort: LevelsSort = serverSort;
   const [showIntakeForm, setShowIntakeForm] = useState(false);
+
+  // Edit modal: open when a row is selected; pre-fills product + location read-only.
+  const [editingLevel, setEditingLevel] = useState<InventoryLevel | null>(null);
+  const [adjustReason, setAdjustReason] = useState('');
+  const [adjustQty, setAdjustQty] = useState('');
+  const adjustFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(adjustFetcher.data, { successMessage: 'Stock adjusted' });
+  useEffect(() => {
+    if (adjustFetcher.state === 'idle' && adjustFetcher.data?.success) {
+      setEditingLevel(null);
+      setAdjustReason('');
+      setAdjustQty('');
+    }
+  }, [adjustFetcher.state, adjustFetcher.data]);
+
   const fetcher = useFetcher();
 
   const intakeError = (fetcher.data as { error?: string } | undefined)?.error;
@@ -88,89 +154,98 @@ export function InventoryPage({
                 )}
               </Button>
             )}
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => exportToCsv(
-                levels.map((inv) => ({
-                  product: productName(inv.productId),
-                  location: locationName(inv.locationId),
-                  stock: inv.stockCount,
-                  reserved: inv.reservedCount,
-                  available: inv.stockCount - inv.reservedCount,
-                  status: inv.status,
-                  updated: new Date(inv.updatedAt).toLocaleDateString(),
-                })),
-                [
-                  { key: 'product', label: 'Product' },
-                  { key: 'location', label: 'Location' },
-                  { key: 'stock', label: 'Stock Count' },
-                  { key: 'reserved', label: 'Reserved' },
-                  { key: 'available', label: 'Available' },
-                  { key: 'status', label: 'Status' },
-                  { key: 'updated', label: 'Last Updated' },
-                ],
-                `inventory-${new Date().toISOString().split('T')[0]}.csv`,
-              )}
-            >
-              Export CSV
-            </Button>
+            {canExport && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => exportToCsv(
+                  levels.map((inv) => ({
+                    product: productName(inv.productId),
+                    location: locationName(inv.locationId),
+                    stock: inv.stockCount,
+                    reserved: inv.reservedCount,
+                    available: inv.stockCount - inv.reservedCount,
+                    status: inv.status,
+                    updated: new Date(inv.updatedAt).toLocaleDateString(),
+                  })),
+                  [
+                    { key: 'product', label: 'Product' },
+                    { key: 'location', label: 'Location' },
+                    { key: 'stock', label: 'Stock Count' },
+                    { key: 'reserved', label: 'Reserved' },
+                    { key: 'available', label: 'Available' },
+                    { key: 'status', label: 'Status' },
+                    { key: 'updated', label: 'Last Updated' },
+                  ],
+                  `inventory-${new Date().toISOString().split('T')[0]}.csv`,
+                )}
+              >
+                Export CSV
+              </Button>
+            )}
           </>
         }
       />
 
-      {/* Stock Intake form (only when user has inventory.intake) */}
-      {canIntake && (
-        <ResponsiveFormPanel open={showIntakeForm} onClose={() => setShowIntakeForm(false)}>
-          <div className="card space-y-4">
-            <div className="flex items-center justify-between">
+      {/* Stock Intake modal (only when user has inventory.intake) */}
+      {canIntake && showIntakeForm && (
+        <Modal
+          open
+          onClose={() => setShowIntakeForm(false)}
+          maxWidth="max-w-2xl"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
               <h3 className="text-lg font-semibold text-app-fg">Receive Stock (Stock Intake)</h3>
-              <button
-                type="button"
-                onClick={() => setShowIntakeForm(false)}
-                className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <p className="text-sm text-app-fg-muted mt-1">
+                Add a new FIFO batch. Each intake creates a batch with its own factory and landing cost.
+              </p>
             </div>
-            <p className="text-sm text-app-fg-muted">
-              Add a new FIFO batch. Each intake creates a batch with its own factory and landing cost. Requires Warehouse Manager or SuperAdmin role.
-            </p>
-            {intakeError && !dismissedIntakeError && (
-              <div ref={intakeErrorRef}>
-                <PageNotification
-                  variant="error"
-                  message={intakeError}
-                  durationMs={5000}
-                  onDismiss={() => setDismissedIntakeError(true)}
-                />
-              </div>
-            )}
-            {(products.length === 0 || locations.length === 0) ? (
-              <InlineNotification
-                variant="warning"
-                message={
-                  products.length === 0 && locations.length === 0
-                    ? 'Create products and logistics locations first.'
-                    : products.length === 0
-                      ? 'Create products first via Products → Add Product.'
-                      : 'Create logistics locations first via Logistics.'
-                }
-                actions={
-                  products.length === 0 && locations.length === 0
-                    ? [
-                        { label: 'Add Product', href: '/admin/products/new' },
-                        { label: 'Go to Logistics', href: '/admin/logistics' },
-                      ]
-                    : products.length === 0
-                      ? [{ label: 'Add Product', href: '/admin/products/new' }]
-                      : [{ label: 'Go to Logistics', href: '/admin/logistics' }]
-                }
+            <button
+              type="button"
+              onClick={() => setShowIntakeForm(false)}
+              aria-label="Close"
+              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {intakeError && !dismissedIntakeError && (
+            <div ref={intakeErrorRef}>
+              <PageNotification
+                variant="error"
+                message={intakeError}
+                durationMs={5000}
+                onDismiss={() => setDismissedIntakeError(true)}
               />
-            ) : (
-            <fetcher.Form method="post" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            </div>
+          )}
+          {(products.length === 0 || locations.length === 0) ? (
+            <InlineNotification
+              variant="warning"
+              message={
+                products.length === 0 && locations.length === 0
+                  ? 'Create products and logistics locations first.'
+                  : products.length === 0
+                    ? 'Create products first via Products → Add Product.'
+                    : 'Create logistics locations first via Logistics.'
+              }
+              actions={
+                products.length === 0 && locations.length === 0
+                  ? [
+                      { label: 'Add Product', href: '/admin/products/new' },
+                      { label: 'Go to Logistics', href: '/admin/logistics' },
+                    ]
+                  : products.length === 0
+                    ? [{ label: 'Add Product', href: '/admin/products/new' }]
+                    : [{ label: 'Go to Logistics', href: '/admin/logistics' }]
+              }
+            />
+          ) : (
+            <fetcher.Form method="post" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <input type="hidden" name="intent" value="stockIntake" />
               <FormSelect
                 label="Product"
@@ -179,6 +254,7 @@ export function InventoryPage({
                 required
                 placeholder="Select product..."
                 options={products.map((p: ProductOption) => ({ value: p.id, label: p.name }))}
+                wrapperClassName="sm:col-span-2"
               />
               <FormSelect
                 label="Location"
@@ -187,6 +263,7 @@ export function InventoryPage({
                 required
                 placeholder="Select location..."
                 options={locations.map((l: LocationOption) => ({ value: l.id, label: l.name }))}
+                wrapperClassName="sm:col-span-2"
               />
               <TextInput
                 label="Quantity"
@@ -209,7 +286,7 @@ export function InventoryPage({
                   placeholder="0.00"
                 />
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <label htmlFor="intake-landingCost" className="block text-sm font-medium text-app-fg-muted mb-1">
                   Landing Cost (&#8358;)
                 </label>
@@ -224,7 +301,10 @@ export function InventoryPage({
                   Freight, duty, etc. Default 0.
                 </p>
               </div>
-              <div className="sm:col-span-2 lg:col-span-5 flex justify-end">
+              <div className="sm:col-span-2 flex justify-end gap-2 pt-2 border-t border-app-border">
+                <Button type="button" variant="secondary" onClick={() => setShowIntakeForm(false)}>
+                  Cancel
+                </Button>
                 <Button
                   type="submit"
                   variant="primary"
@@ -235,9 +315,87 @@ export function InventoryPage({
                 </Button>
               </div>
             </fetcher.Form>
-            )}
+          )}
+        </Modal>
+      )}
+
+      {/* Edit modal — adjust stock with a proper movement + reason (preserves audit trail). */}
+      {canAdjust && editingLevel && (
+        <Modal
+          open
+          onClose={() => setEditingLevel(null)}
+          maxWidth="max-w-md"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-app-fg">Adjust stock</h3>
+              <p className="text-sm text-app-fg-muted mt-1 truncate">
+                {productName(editingLevel.productId)} · {locationName(editingLevel.locationId)}
+              </p>
+              <p className="text-xs text-app-fg-muted mt-1">
+                Current: <span className="font-medium text-app-fg">{editingLevel.stockCount}</span> · Reserved: {editingLevel.reservedCount} · Available: {editingLevel.stockCount - editingLevel.reservedCount}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEditingLevel(null)}
+              aria-label="Close"
+              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-        </ResponsiveFormPanel>
+          {adjustFetcher.data?.error && (
+            <PageNotification
+              variant="error"
+              message={adjustFetcher.data.error}
+              onDismiss={() => { /* transient — dismisses with modal close */ }}
+            />
+          )}
+          <adjustFetcher.Form method="post" className="space-y-4">
+            <input type="hidden" name="intent" value="adjustStock" />
+            <input type="hidden" name="productId" value={editingLevel.productId} />
+            <input type="hidden" name="locationId" value={editingLevel.locationId} />
+            <TextInput
+              label="Adjustment"
+              id="adjust-quantity"
+              name="adjustmentQuantity"
+              type="number"
+              required
+              placeholder="e.g. -5 to remove, +50 to add"
+              value={adjustQty}
+              onChange={(e) => setAdjustQty(e.target.value)}
+              hint="Positive adds stock, negative removes it. A stock_movements row is recorded."
+            />
+            <Textarea
+              label="Reason"
+              id="adjust-reason"
+              name="reason"
+              rows={3}
+              required
+              placeholder="Why is this adjustment needed? (min 10 characters)"
+              value={adjustReason}
+              onChange={(e) => setAdjustReason(e.target.value)}
+            />
+            <div className="flex justify-end gap-2 pt-2 border-t border-app-border">
+              <Button type="button" variant="secondary" onClick={() => setEditingLevel(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!adjustQty.trim() || adjustReason.trim().length < 10 || adjustFetcher.state !== 'idle'}
+                loading={adjustFetcher.state !== 'idle'}
+                loadingText="Adjusting…"
+              >
+                Apply adjustment
+              </Button>
+            </div>
+          </adjustFetcher.Form>
+        </Modal>
       )}
 
       <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={4} />}>
@@ -271,6 +429,85 @@ export function InventoryPage({
 
       {/* Content */}
       {activeTab === 'levels' ? (
+        <>
+        {/* Filter + search + sort row. Hidden only when there is no data AND no active filter. */}
+        {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <FormSelect
+              label=""
+              id="levels-product-filter"
+              name="productFilter"
+              value={currentProductFilter}
+              onChange={(e) => updateLevelsParam('productId', e.target.value)}
+              wrapperClassName="w-full sm:w-48"
+              options={[
+                { value: 'ALL', label: 'All products' },
+                ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
+              ]}
+              aria-label="Filter by product"
+            />
+            <form
+              method="get"
+              className="flex-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitSearch(searchInput);
+              }}
+            >
+              <SearchInput
+                name="search"
+                placeholder="Search by product name…"
+                value={searchInput}
+                onChange={(val) => {
+                  setSearchInput(val);
+                  // Clearing the field commits the reset immediately so the list doesn't look stuck.
+                  if (val === '') submitSearch('');
+                }}
+                wrapperClassName="w-full"
+              />
+            </form>
+            <FormSelect
+              label=""
+              id="levels-sort"
+              name="levelsSort"
+              value={currentSort}
+              onChange={(e) => updateLevelsParam('sort', e.target.value)}
+              wrapperClassName="w-full sm:w-48"
+              options={[
+                { value: 'default', label: 'Default order' },
+                { value: 'lowestAvailable', label: 'Lowest available first' },
+                { value: 'highestAvailable', label: 'Highest available first' },
+              ]}
+              aria-label="Sort order"
+            />
+            {isLoadingLevels && (
+              <span
+                className="inline-flex items-center gap-1.5 text-xs text-app-fg-muted shrink-0"
+                aria-live="polite"
+              >
+                <svg
+                  className="w-3.5 h-3.5 animate-spin text-brand-500"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" />
+                  <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+                <span className="hidden sm:inline">Loading…</span>
+              </span>
+            )}
+            {(currentProductFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
+              <button
+                type="button"
+                onClick={resetLevelsFilters}
+                className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center shrink-0"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        )}
         <div className="card p-0 overflow-hidden">
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
@@ -283,10 +520,11 @@ export function InventoryPage({
                   <th className="table-header text-right">Available</th>
                   <th className="table-header">Status</th>
                   <th className="table-header">Last Updated</th>
+                  <th className="table-header text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {levels.map((level) => (
+                {displayedLevels.map((level) => (
                   <tr key={level.id} className="table-row">
                     <td className="table-cell font-medium text-app-fg">{productName(level.productId)}</td>
                     <td className="table-cell text-app-fg-muted">{locationName(level.locationId)}</td>
@@ -303,12 +541,35 @@ export function InventoryPage({
                         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                       })}
                     </td>
+                    <td className="table-cell text-right">
+                      <div className="inline-flex items-center gap-2">
+                        <Link
+                          to={`/admin/inventory/${level.id}`}
+                          prefetch="intent"
+                          className="btn-secondary btn-sm text-xs inline-flex items-center justify-center"
+                        >
+                          View
+                        </Link>
+                        {canAdjust && (
+                          <button
+                            type="button"
+                            onClick={() => { setEditingLevel(level); setAdjustQty(''); setAdjustReason(''); }}
+                            className="btn-secondary btn-sm text-xs inline-flex items-center justify-center"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
-                {levels.length === 0 && (
+                {displayedLevels.length === 0 && (
                   <tr>
-                    <td colSpan={7}>
-                      <EmptyState title="No inventory data yet" description="Add products and receive stock to get started." />
+                    <td colSpan={8}>
+                      <EmptyState
+                        title={levels.length === 0 ? 'No inventory data yet' : 'No inventory matches your filter'}
+                        description={levels.length === 0 ? 'Add products and receive stock to get started.' : 'Try changing the product filter or sort.'}
+                      />
                     </td>
                   </tr>
                 )}
@@ -318,8 +579,11 @@ export function InventoryPage({
 
           {/* Mobile */}
           <div className="md:hidden space-y-3 px-1">
-            {levels.map((level) => (
-              <div key={level.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+            {displayedLevels.map((level) => (
+              <div
+                key={level.id}
+                className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
+              >
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className="font-medium text-sm text-app-fg">{productName(level.productId)}</p>
@@ -341,13 +605,44 @@ export function InventoryPage({
                     <p className="font-medium text-success-600 dark:text-success-400">{level.stockCount - level.reservedCount}</p>
                   </div>
                 </div>
+                <div className="flex items-center gap-3 pt-2 border-t border-app-border">
+                  <Link
+                    to={`/admin/inventory/${level.id}`}
+                    prefetch="intent"
+                    className="btn-secondary btn-sm"
+                  >
+                    View
+                  </Link>
+                  {canAdjust && (
+                    <button
+                      type="button"
+                      onClick={() => { setEditingLevel(level); setAdjustQty(''); setAdjustReason(''); }}
+                      className="btn-secondary btn-sm"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
-            {levels.length === 0 && (
-              <EmptyState title="No inventory data yet" />
+            {displayedLevels.length === 0 && (
+              <EmptyState title={totalLevels === 0 && currentProductFilter === 'ALL' ? 'No inventory data yet' : 'No inventory matches your filter'} />
             )}
           </div>
         </div>
+
+        {/* Pagination — server-side, drives `page` URL param. */}
+        {levelsTotalPages > 1 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-sm text-app-fg-muted">
+              {totalLevels > 0
+                ? `Showing ${(levelsPage - 1) * levelsLimit + 1}–${Math.min(levelsPage * levelsLimit, totalLevels)} of ${totalLevels} rows`
+                : 'No rows'}
+            </p>
+            <Pagination page={levelsPage} totalPages={levelsTotalPages} pageParam="page" />
+          </div>
+        )}
+        </>
       ) : (
         <DeferredSection resolve={movements} skeleton="table">
           {(resolvedMovements) => (

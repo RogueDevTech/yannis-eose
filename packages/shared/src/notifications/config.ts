@@ -43,6 +43,8 @@ export const CONFIGURABLE_EMAIL_TYPES = [
   'delivery_remittance:received',
   'account:updated',
   'account:security',
+  'account:finance_hat_assigned',
+  'account:finance_hat_revoked',
   'approval:permission_request',
 ] as const;
 
@@ -276,6 +278,20 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     type: 'account:security',
     label: 'Account security',
     description: 'User — password reset, deactivation, or similar security-related change',
+    mandatory: false,
+    category: 'account',
+  },
+  'account:finance_hat_assigned': {
+    type: 'account:finance_hat_assigned',
+    label: 'Finance hat assigned',
+    description: 'User — you now hold the org-wide Finance hat and can act as Finance Officer',
+    mandatory: false,
+    category: 'account',
+  },
+  'account:finance_hat_revoked': {
+    type: 'account:finance_hat_revoked',
+    label: 'Finance hat revoked',
+    description: 'User — the Finance hat has been reassigned; you no longer hold Finance Officer powers',
     mandatory: false,
     category: 'account',
   },

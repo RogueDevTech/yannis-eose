@@ -34,11 +34,19 @@ export type ListProvidersInput = z.infer<typeof listProvidersSchema>;
 // Logistics Location Validators
 // ============================================
 
+const whatsappGroupLinkSchema = z
+  .string()
+  .url()
+  .refine((v) => v.startsWith('https://chat.whatsapp.com/') || v.startsWith('https://wa.me/'), {
+    message: 'Must be a WhatsApp group invite (chat.whatsapp.com/...) or direct chat (wa.me/...) link',
+  });
+
 export const createLocationSchema = z.object({
   providerId: z.string().uuid(),
   name: z.string().min(2).max(200),
   address: z.string().min(5).max(500),
   coordinates: z.string().max(100).optional(),
+  whatsappGroupLink: whatsappGroupLinkSchema.optional().nullable(),
 });
 export type CreateLocationInput = z.infer<typeof createLocationSchema>;
 
@@ -48,6 +56,7 @@ export const updateLocationSchema = z.object({
   address: z.string().min(5).max(500).optional(),
   coordinates: z.string().max(100).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+  whatsappGroupLink: whatsappGroupLinkSchema.optional().nullable(),
 });
 export type UpdateLocationInput = z.infer<typeof updateLocationSchema>;
 

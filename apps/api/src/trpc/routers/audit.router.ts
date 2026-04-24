@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { router, permissionProcedure } from '../trpc';
+import { router, authedProcedure } from '../trpc';
 import type { AuditService } from '../../audit/audit.service';
 
 // Factory pattern — same as all other routers
@@ -17,14 +17,23 @@ function getAuditService(): AuditService {
 }
 
 /**
- * Audit router — SuperAdmin only.
- * Provides read access to the temporal audit trail (_history tables).
+ * Audit router — open to any authenticated user.
+ *
+ * Policy (Pillar 4, "Absolute Accountability"): every staff member can see
+ * who changed what and when. Column-level security is still enforced via the
+ * `stripFinanceFields` middleware applied in `authedProcedure`, so cost/margin
+ * keys remain hidden from non-finance roles even when they appear inside audit
+ * row JSON payloads. Phone numbers are already stored as hashes, so PII is not
+ * leaked by exposing audit rows.
+ *
+ * If you need to re-gate this (e.g. hide audit from TPL riders), swap
+ * `authedProcedure` back to `authedProcedure` on each row.
  */
 export const auditRouter = router({
   /**
    * Get all history versions of a specific record in a table.
    */
-  recordHistory: permissionProcedure('audit.read')
+  recordHistory: authedProcedure
     .input(
       z.object({
         tableName: z.string(),
@@ -45,7 +54,7 @@ export const auditRouter = router({
   /**
    * Global audit log — query across all or a specific history table.
    */
-  globalLog: permissionProcedure('audit.read')
+  globalLog: authedProcedure
     .input(
       z.object({
         tableName: z.string().optional(),
@@ -63,7 +72,7 @@ export const auditRouter = router({
   /**
    * Time travel — view the state of a record at a specific point in time.
    */
-  timeTravel: permissionProcedure('audit.read')
+  timeTravel: authedProcedure
     .input(
       z.object({
         tableName: z.string(),
@@ -82,7 +91,7 @@ export const auditRouter = router({
   /**
    * Get list of auditable table names (for UI dropdown).
    */
-  tables: permissionProcedure('audit.read')
+  tables: authedProcedure
     .query(async () => {
       return getAuditService().getAuditableTables();
     }),
@@ -90,7 +99,7 @@ export const auditRouter = router({
   /**
    * Resolve user IDs to names+roles for human-friendly audit display.
    */
-  actorNames: permissionProcedure('audit.read')
+  actorNames: authedProcedure
     .input(z.object({ userIds: z.array(z.string().uuid()) }))
     .query(async ({ input }) => {
       return getAuditService().getUserNameMap(input.userIds);

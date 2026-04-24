@@ -88,11 +88,11 @@ CREATE POLICY orders_tpl_rider ON orders
     AND rider_id = yannis_current_user_id()
   );
 
--- Warehouse Manager: see orders for stock management (read-only)
+-- Stock Manager: see orders for stock management (read-only)
 CREATE POLICY orders_warehouse_manager ON orders
   FOR SELECT
   USING (
-    yannis_current_user_role() = 'WAREHOUSE_MANAGER'
+    yannis_current_user_role() = 'STOCK_MANAGER'
   );
 
 -- HR Manager: see orders for commission calculations (read-only)
@@ -116,11 +116,11 @@ CREATE POLICY products_read_all ON products
   FOR SELECT
   USING (true);
 
--- Only SuperAdmin, Finance, Warehouse Manager can modify products
+-- Only SuperAdmin, Finance, Stock Manager can modify products
 CREATE POLICY products_write ON products
   FOR ALL
   USING (
-    yannis_current_user_role() IN ('SUPER_ADMIN', 'FINANCE_OFFICER', 'WAREHOUSE_MANAGER')
+    yannis_current_user_role() IN ('SUPER_ADMIN', 'FINANCE_OFFICER', 'STOCK_MANAGER')
   );
 
 -- Security barrier view: masks cost_price for non-privileged roles
@@ -141,7 +141,7 @@ FROM products;
 -- 3. INVENTORY_LEVELS — RLS Policies
 -- ============================================
 -- 3PL Managers: see only their location
--- Warehouse Manager: see all (manages main warehouse + oversight)
+-- Stock Manager: see all (manages main warehouse + oversight)
 -- Head of Logistics, SuperAdmin: see all
 -- ============================================
 
@@ -151,7 +151,7 @@ ALTER TABLE inventory_levels ENABLE ROW LEVEL SECURITY;
 CREATE POLICY inventory_privileged ON inventory_levels
   FOR ALL
   USING (
-    yannis_current_user_role() IN ('SUPER_ADMIN', 'FINANCE_OFFICER', 'HEAD_OF_LOGISTICS', 'WAREHOUSE_MANAGER')
+    yannis_current_user_role() IN ('SUPER_ADMIN', 'FINANCE_OFFICER', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER')
   );
 
 -- 3PL Manager: see only their location's inventory

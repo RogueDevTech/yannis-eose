@@ -2,6 +2,9 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 
 export const userRoleEnum = pgEnum('user_role', [
   'SUPER_ADMIN',
+  // ADMIN = SuperAdmin-equivalent privileges EXCEPT cannot manage another Admin or the SuperAdmin.
+  // Multiple ADMINs can exist; SUPER_ADMIN is a singleton.
+  'ADMIN',
   'BRANCH_ADMIN',
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
@@ -9,7 +12,7 @@ export const userRoleEnum = pgEnum('user_role', [
   'CS_AGENT',
   'FINANCE_OFFICER',
   'HEAD_OF_LOGISTICS',
-  'WAREHOUSE_MANAGER',
+  'STOCK_MANAGER',
   'TPL_MANAGER',
   'TPL_RIDER',
   'HR_MANAGER',
@@ -194,10 +197,11 @@ export const branchStatusEnum = pgEnum('branch_status', [
   'INACTIVE',
 ]);
 
-/** Channel for outbound CS messages to customers. */
+/** Channel for outbound messages (customer-facing CS comms + 3PL dispatch coordination). */
 export const messageChannelEnum = pgEnum('message_channel', [
   'SMS',
   'WHATSAPP',
+  'WHATSAPP_GROUP',
 ]);
 
 /** Status of an outbound CS message. */

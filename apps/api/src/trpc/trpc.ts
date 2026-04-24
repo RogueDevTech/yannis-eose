@@ -70,12 +70,12 @@ export function rolesProcedure(...roles: UserRole[]) {
 
 /**
  * Permission-restricted procedure factory.
- * SuperAdmin bypasses all checks. Others must have at least one of the required permissions.
+ * SUPER_ADMIN and ADMIN bypass all checks. Others must have at least one of the required permissions.
  * Usage: permissionProcedure('users.create') or permissionProcedure('orders.read', 'orders.reassign')
  */
 export function permissionProcedure(...permissionCodes: string[]) {
   return authedProcedure.use(async ({ ctx, next }) => {
-    if (ctx.user.role === 'SUPER_ADMIN') {
+    if (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN') {
       return next({ ctx });
     }
     const perms = ctx.user.permissions ?? [];

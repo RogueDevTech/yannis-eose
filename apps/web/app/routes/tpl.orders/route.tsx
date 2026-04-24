@@ -15,7 +15,7 @@ const ORDERS_PER_PAGE = 40;
 const defaultThisMonth = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
+  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
   const cookie = getSessionCookie(request);
 
   const isTplManager = user.role === 'TPL_MANAGER';
@@ -224,7 +224,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'bulkMarkDelivered') {
-    const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
+    const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
     let orderIds: string[] = [];
     try {
       const raw = formData.get('orderIds')?.toString();
@@ -236,7 +236,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: 'Select at least one order', succeeded: 0, failed: orderIds.length, results: [] }, { status: 400 });
     }
     const isDeliveryConfirmation = true;
-    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN';
+    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
     const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
     let succeeded = 0;
     let failed = 0;
@@ -275,7 +275,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'transition') {
-    const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN'], permission: 'logistics.read' });
+    const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
     const orderId = formData.get('orderId')?.toString();
     const newStatus = formData.get('newStatus')?.toString()?.trim();
     if (!orderId || !newStatus) {
@@ -298,7 +298,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Delivery confirmation (DELIVERED / PARTIALLY_DELIVERED): TPL_MANAGER goes through approval
     const isDeliveryConfirmation = newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED';
-    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN';
+    const canTransitionDirect = user.role === 'HEAD_OF_LOGISTICS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
 
     if (isDeliveryConfirmation && !canTransitionDirect) {
       const res = await apiRequest<unknown>('/trpc/logistics.submitDeliveryConfirmation', {
@@ -336,7 +336,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'updateDeliveryDate') {
     const user = await requirePermissionOrRoles(request, {
-      roles: ['TPL_MANAGER', 'SUPER_ADMIN'],
+      roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'],
       permission: 'logistics.read',
     }) as { id: string; role: string; logisticsLocationId?: string | null };
     const orderId = formData.get('orderId')?.toString();
