@@ -102,6 +102,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Admin-level users bypass permission lookups at the middleware layer (permissions: []),
     // so we must also bypass here — otherwise the Stock Intake button is hidden from SuperAdmin / Admin.
     canIntake: isAdminLevel(user) || (user.permissions?.includes('inventory.intake') ?? false),
+    canAdjust: isAdminLevel(user) || (user.permissions?.includes('inventory.adjust') ?? false),
     // Inventory CSV export is restricted to admin-level users and STOCK_MANAGER — the same
     // roles that own the stock data. Everyone else reading inventory (logistics, TPL managers,
     // finance) still sees the table but cannot download the raw levels.
@@ -110,12 +111,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermission(request, 'inventory.intake');
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'stockIntake') {
+    await requirePermission(request, 'inventory.intake');
     const productId = formData.get('productId')?.toString() ?? '';
     const locationId = formData.get('locationId')?.toString() ?? '';
     const quantity = parseInt(formData.get('quantity')?.toString() ?? '0', 10);
@@ -141,6 +142,33 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
       return json({ error: errorData?.error?.message ?? 'Failed to add stock' }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'adjustStock') {
+    await requirePermission(request, 'inventory.adjust');
+    const productId = formData.get('productId')?.toString() ?? '';
+    const locationId = formData.get('locationId')?.toString() ?? '';
+    const adjustmentQuantity = parseInt(formData.get('adjustmentQuantity')?.toString() ?? '0', 10);
+    const reason = formData.get('reason')?.toString().trim() ?? '';
+
+    if (!productId || !locationId || !Number.isFinite(adjustmentQuantity) || adjustmentQuantity === 0) {
+      return json({ error: 'Product, location, and a non-zero adjustment quantity are required' }, { status: 400 });
+    }
+    if (reason.length < 10) {
+      return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/inventory.adjust', {
+      method: 'POST',
+      cookie,
+      body: { productId, locationId, adjustmentQuantity, reason },
+    });
+
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to adjust stock' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

@@ -352,7 +352,7 @@ export class UsersService {
     const user = await this.db.transaction(async (tx) => {
       // Audit actor for this transaction — must be INSIDE the transaction because
       // `SET LOCAL` is scoped to the current transaction's connection (see with-actor.ts).
-      await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actor.id}`);
+      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
 
       // If inline compensation provided, create a commission plan first
       let commissionPlanId = input.commissionPlanId ?? null;
@@ -1005,7 +1005,7 @@ export class UsersService {
     let displacedFinanceHolder: { id: string; name: string } | null = null;
     const updatedRows = await this.db.transaction(async (tx) => {
       // Audit actor for this transaction (see with-actor.ts for why SET LOCAL must be inside).
-      await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actor.id}`);
+      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
       if (input.isFinanceOfficer === true) {
         const [existing] = await tx
           .select({ id: schema.users.id, name: schema.users.name })

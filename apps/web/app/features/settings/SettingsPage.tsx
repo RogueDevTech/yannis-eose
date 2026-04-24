@@ -258,6 +258,11 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   const claimCapFromSettings = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
   const [localClaimCap, setLocalClaimCap] = useState<number>(claimCapFromSettings);
 
+  // Low-stock threshold setting — admins get a notification when available < threshold.
+  const lowStockSetting = systemSettings.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
+  const lowStockFromSettings = typeof lowStockSetting?.value?.threshold === 'number' ? lowStockSetting.value.threshold : 10;
+  const [localLowStockThreshold, setLocalLowStockThreshold] = useState<number>(lowStockFromSettings);
+
   // Local state for notification email toggles (configurable types only)
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>({});
 
@@ -293,6 +298,9 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   useEffect(() => {
     setLocalClaimCap(claimCapFromSettings);
   }, [claimCapFromSettings]);
+  useEffect(() => {
+    setLocalLowStockThreshold(lowStockFromSettings);
+  }, [lowStockFromSettings]);
 
   const orgDefaultSaved = useMemo(
     () =>
@@ -319,6 +327,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
     localVoipEnabled !== isVoipEnabled ||
     selectedDispatchStrategy !== dispatchStrategyFromSettings ||
     localClaimCap !== claimCapFromSettings ||
+    localLowStockThreshold !== lowStockFromSettings ||
     orgDefaultAppTheme !== orgDefaultSaved;
 
   return (
@@ -548,6 +557,7 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
               <input type="hidden" name="voipEnabled" value={localVoipEnabled ? 'true' : 'false'} />
               <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
               <input type="hidden" name="claimCap" value={String(localClaimCap)} />
+              <input type="hidden" name="lowStockThreshold" value={String(localLowStockThreshold)} />
               <input type="hidden" name="defaultAppTheme" value={orgDefaultAppTheme} />
 
               {/* VOIP Integration */}
@@ -723,6 +733,29 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                     {hasSystemChanges && ' — you have unsaved changes'}
                   </p>
                 </div>
+              </div>
+
+              <div className="card lg:col-span-2">
+                <h3 className="text-lg font-semibold text-app-fg mb-1">Low-stock alert threshold</h3>
+                <p className="text-sm text-app-fg-muted mb-3">
+                  When a product's available stock at any location drops below this number, SuperAdmins, Admins, and Stock Managers get an in-app + push notification. Rate-limited to one alert per location per 6 hours.
+                </p>
+                <div className="flex items-center gap-3">
+                  <TextInput
+                    id="low-stock-threshold-input"
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={localLowStockThreshold}
+                    onChange={(e) => setLocalLowStockThreshold(Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 10)))}
+                    wrapperClassName="w-28"
+                  />
+                  <span className="text-xs text-app-fg-muted">units</span>
+                </div>
+                <p className="text-xs text-app-fg-muted mt-3">
+                  Saved: <strong>{lowStockFromSettings} units</strong>
+                  {hasSystemChanges && localLowStockThreshold !== lowStockFromSettings && ' — you have unsaved changes'}
+                </p>
               </div>
 
               <div className="card lg:col-span-2">

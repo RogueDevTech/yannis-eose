@@ -70,6 +70,8 @@ export interface InventoryStreamData {
   locations: LocationOption[];
   /** When false, Stock Intake button and form are hidden (view-only). */
   canIntake?: boolean;
+  /** When false, the row-level "Edit" (stock adjust) action is hidden. */
+  canAdjust?: boolean;
   /** When false, the Export CSV button is hidden. SuperAdmin/Admin + STOCK_MANAGER only. */
   canExport?: boolean;
   /** TPL combined view: transfers, returns, reconciliations */

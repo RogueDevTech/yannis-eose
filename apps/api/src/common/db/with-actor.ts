@@ -17,9 +17,12 @@ type Tx = Parameters<Parameters<Drizzle['transaction']>[0]>[0];
  *     sets the value for a *single auto-commit transaction* — the setting dies the moment that
  *     SELECT completes. The next `db.insert(...)` lands on a different pooled connection where
  *     the setting is empty, the trigger records NULL, and the audit UI shows "System".
- *   - `SET LOCAL yannis.current_user_id = ...` is transaction-scoped; wrapping the writes in
- *     drizzle's `db.transaction()` pins a single connection + runs SET LOCAL as the first
+ *   - `set_config(var, value, is_local=true)` is transaction-scoped; wrapping the writes in
+ *     drizzle's `db.transaction()` pins a single connection + runs set_config as the first
  *     statement, so every subsequent write inside the block sees the actor.
+ *   - Note: `SET LOCAL var = $1` does NOT work — postgres rejects parameters in SET with
+ *     "syntax error at or near $1". Use `set_config(var, $1, true)` instead, since function
+ *     arguments accept parameters.
  *
  * Every write path that ultimately inserts/updates a row with `modified_by` MUST go through
  * `withActor()` — otherwise its audit entries silently attribute to "System". See
@@ -40,7 +43,7 @@ export async function withActor<T>(
   fn: (tx: Tx) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actor.id}`);
+    await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
     return fn(tx);
   });
 }
@@ -56,9 +59,9 @@ export async function withActorAndBranch<T>(
   fn: (tx: Tx) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actor.id}`);
+    await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
     if (actor.currentBranchId) {
-      await tx.execute(sql`SET LOCAL yannis.current_branch_id = ${actor.currentBranchId}`);
+      await tx.execute(sql`SELECT set_config('yannis.current_branch_id', ${actor.currentBranchId}, true)`);
     }
     return fn(tx);
   });

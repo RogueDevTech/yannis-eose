@@ -454,7 +454,7 @@ export class CartService {
    */
   async deleteAbandoned(cartId: string, actorId: string): Promise<{ deleted: boolean }> {
     const result = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actorId}`);
+      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actorId}, true)`);
       return tx
         .delete(schema.cartAbandonments)
         .where(

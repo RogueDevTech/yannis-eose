@@ -33,7 +33,7 @@ export function InventoryPage({
   levels, totalLevels, levelsPage = 1, levelsTotalPages = 1, levelsLimit = 20,
   levelsProductFilter: serverProductFilter = '', levelsSearch: serverSearch = '',
   levelsSort: serverSort = 'default',
-  movements, totalMovements, products, locations, canIntake = false, canExport = false,
+  movements, totalMovements, products, locations, canIntake = false, canAdjust = false, canExport = false,
   transfers, returnedOrders, reconciliations, locationsWithLock,
 }: InventoryStreamData) {
   const hasTransfers = !!transfers;
@@ -91,6 +91,20 @@ export function InventoryPage({
   const currentProductFilter = serverProductFilter || 'ALL';
   const currentSort: LevelsSort = serverSort;
   const [showIntakeForm, setShowIntakeForm] = useState(false);
+
+  // Edit modal: open when a row is selected; pre-fills product + location read-only.
+  const [editingLevel, setEditingLevel] = useState<InventoryLevel | null>(null);
+  const [adjustReason, setAdjustReason] = useState('');
+  const [adjustQty, setAdjustQty] = useState('');
+  const adjustFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  useFetcherToast(adjustFetcher.data, { successMessage: 'Stock adjusted' });
+  useEffect(() => {
+    if (adjustFetcher.state === 'idle' && adjustFetcher.data?.success) {
+      setEditingLevel(null);
+      setAdjustReason('');
+      setAdjustQty('');
+    }
+  }, [adjustFetcher.state, adjustFetcher.data]);
 
   const fetcher = useFetcher();
 
@@ -305,6 +319,85 @@ export function InventoryPage({
         </Modal>
       )}
 
+      {/* Edit modal — adjust stock with a proper movement + reason (preserves audit trail). */}
+      {canAdjust && editingLevel && (
+        <Modal
+          open
+          onClose={() => setEditingLevel(null)}
+          maxWidth="max-w-md"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-app-fg">Adjust stock</h3>
+              <p className="text-sm text-app-fg-muted mt-1 truncate">
+                {productName(editingLevel.productId)} · {locationName(editingLevel.locationId)}
+              </p>
+              <p className="text-xs text-app-fg-muted mt-1">
+                Current: <span className="font-medium text-app-fg">{editingLevel.stockCount}</span> · Reserved: {editingLevel.reservedCount} · Available: {editingLevel.stockCount - editingLevel.reservedCount}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEditingLevel(null)}
+              aria-label="Close"
+              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {adjustFetcher.data?.error && (
+            <PageNotification
+              variant="error"
+              message={adjustFetcher.data.error}
+              onDismiss={() => { /* transient — dismisses with modal close */ }}
+            />
+          )}
+          <adjustFetcher.Form method="post" className="space-y-4">
+            <input type="hidden" name="intent" value="adjustStock" />
+            <input type="hidden" name="productId" value={editingLevel.productId} />
+            <input type="hidden" name="locationId" value={editingLevel.locationId} />
+            <TextInput
+              label="Adjustment"
+              id="adjust-quantity"
+              name="adjustmentQuantity"
+              type="number"
+              required
+              placeholder="e.g. -5 to remove, +50 to add"
+              value={adjustQty}
+              onChange={(e) => setAdjustQty(e.target.value)}
+              hint="Positive adds stock, negative removes it. A stock_movements row is recorded."
+            />
+            <Textarea
+              label="Reason"
+              id="adjust-reason"
+              name="reason"
+              rows={3}
+              required
+              placeholder="Why is this adjustment needed? (min 10 characters)"
+              value={adjustReason}
+              onChange={(e) => setAdjustReason(e.target.value)}
+            />
+            <div className="flex justify-end gap-2 pt-2 border-t border-app-border">
+              <Button type="button" variant="secondary" onClick={() => setEditingLevel(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!adjustQty.trim() || adjustReason.trim().length < 10 || adjustFetcher.state !== 'idle'}
+                loading={adjustFetcher.state !== 'idle'}
+                loadingText="Adjusting…"
+              >
+                Apply adjustment
+              </Button>
+            </div>
+          </adjustFetcher.Form>
+        </Modal>
+      )}
+
       <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={4} />}>
         {(count) => (
           <OverviewStatStrip
@@ -449,13 +542,24 @@ export function InventoryPage({
                       })}
                     </td>
                     <td className="table-cell text-right">
-                      <Link
-                        to={`/admin/inventory/${level.id}`}
-                        prefetch="intent"
-                        className="btn-secondary btn-sm text-xs inline-flex items-center justify-center"
-                      >
-                        View
-                      </Link>
+                      <div className="inline-flex items-center gap-2">
+                        <Link
+                          to={`/admin/inventory/${level.id}`}
+                          prefetch="intent"
+                          className="btn-secondary btn-sm text-xs inline-flex items-center justify-center"
+                        >
+                          View
+                        </Link>
+                        {canAdjust && (
+                          <button
+                            type="button"
+                            onClick={() => { setEditingLevel(level); setAdjustQty(''); setAdjustReason(''); }}
+                            className="btn-secondary btn-sm text-xs inline-flex items-center justify-center"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -509,6 +613,15 @@ export function InventoryPage({
                   >
                     View
                   </Link>
+                  {canAdjust && (
+                    <button
+                      type="button"
+                      onClick={() => { setEditingLevel(level); setAdjustQty(''); setAdjustReason(''); }}
+                      className="btn-secondary btn-sm"
+                    >
+                      Edit
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

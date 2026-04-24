@@ -16,6 +16,7 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { withActor } from '../common/db/with-actor';
 
@@ -28,7 +29,88 @@ export class InventoryService {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
+    private readonly settings: SettingsService,
   ) {}
+
+  /** Default low-stock threshold used when the setting row is missing or malformed. */
+  private static readonly DEFAULT_LOW_STOCK_THRESHOLD = 10;
+  private static readonly LOW_STOCK_DEDUP_HOURS = 6;
+
+  /**
+   * Fire in-app + push notifications to stock-aware admins when available stock at
+   * (productId, locationId) drops below the configured threshold after a reduction.
+   *
+   * Rate-limited: at most one notification per (productId, locationId) per 6 hours,
+   * deduped against the notifications table by type and data payload.
+   */
+  async checkLowStockAndNotify(productId: string, locationId: string): Promise<void> {
+    try {
+      const cfg = await this.settings.get('INVENTORY_LOW_STOCK_CONFIG');
+      const thresholdRaw = (cfg?.['threshold'] as number | string | undefined) ?? InventoryService.DEFAULT_LOW_STOCK_THRESHOLD;
+      const threshold = typeof thresholdRaw === 'string' ? parseInt(thresholdRaw, 10) : thresholdRaw;
+      if (!Number.isFinite(threshold) || threshold <= 0) return;
+
+      const [level] = await this.db
+        .select({
+          stockCount: schema.inventoryLevels.stockCount,
+          reservedCount: schema.inventoryLevels.reservedCount,
+        })
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, productId),
+            eq(schema.inventoryLevels.locationId, locationId),
+          ),
+        )
+        .limit(1);
+      if (!level) return;
+
+      const available = level.stockCount - level.reservedCount;
+      if (available >= threshold) return;
+
+      // Dedup: skip if we already notified about this (productId, locationId) recently.
+      const sinceIso = new Date(Date.now() - InventoryService.LOW_STOCK_DEDUP_HOURS * 3_600_000).toISOString();
+      const recent = await this.db.execute<{ id: string }>(sql`
+        SELECT id
+        FROM notifications
+        WHERE type = 'inventory:low_stock'
+          AND data->>'productId' = ${productId}
+          AND data->>'locationId' = ${locationId}
+          AND created_at >= ${sinceIso}
+        LIMIT 1
+      `);
+      if (recent.length > 0) return;
+
+      // Lookup product + location names for a friendly body.
+      const [productRow] = await this.db
+        .select({ name: schema.products.name })
+        .from(schema.products)
+        .where(eq(schema.products.id, productId))
+        .limit(1);
+      const [locationRow] = await this.db
+        .select({ name: schema.logisticsLocations.name })
+        .from(schema.logisticsLocations)
+        .where(eq(schema.logisticsLocations.id, locationId))
+        .limit(1);
+      const productName = productRow?.name ?? 'Unknown product';
+      const locationName = locationRow?.name ?? 'Unknown location';
+
+      const body = `Only ${available} unit${available === 1 ? '' : 's'} of ${productName} left at ${locationName} (threshold ${threshold}). Time to restock.`;
+      const payload = {
+        type: 'inventory:low_stock' as const,
+        title: 'Low stock alert',
+        body,
+        data: { productId, locationId, available, threshold },
+      };
+
+      // Target roles that can actually act on low stock.
+      for (const role of ['SUPER_ADMIN', 'ADMIN', 'STOCK_MANAGER'] as const) {
+        await this.notifications.createForRole(role, payload).catch(() => {});
+      }
+    } catch {
+      // Notifications are best-effort — never break a stock mutation because of them.
+    }
+  }
 
   // ============================================
   // Stock Intake — FIFO Batch Creation
@@ -47,7 +129,7 @@ export class InventoryService {
     // the follow-up drizzle queries (they land on different pooled connections), which is why
     // stock movements were showing "System" as the actor in the audit trail.
     const batch = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actor.id}`);
+      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
 
       // Create the FIFO batch
       const batchRows = await tx
@@ -230,6 +312,9 @@ export class InventoryService {
       })
       .catch(() => {});
 
+    // Stock left the source — check if that location is now below threshold.
+    await this.checkLowStockAndNotify(input.productId, input.fromLocationId);
+
     return transfer;
   }
 
@@ -402,6 +487,12 @@ export class InventoryService {
       });
 
       return { stockCount: newCount };
+    }).then(async (result) => {
+      // Fire low-stock alert only on net reductions. Fire-and-forget; never blocks the mutation.
+      if (input.adjustmentQuantity < 0) {
+        await this.checkLowStockAndNotify(input.productId, input.locationId);
+      }
+      return result;
     });
   }
 

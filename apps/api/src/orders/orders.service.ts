@@ -2442,7 +2442,7 @@ export class OrdersService {
 
     let claimedOrder: Array<{ id: string }> = [];
     await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL yannis.current_user_id = ${actor.id}`);
+      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
       claimedOrder = await tx.execute<{ id: string }>(
         sql`
           UPDATE orders
@@ -2890,6 +2890,11 @@ export class OrdersService {
               reason: `Delivered: order ${order.id}`,
               actorId,
             });
+
+          // Low-stock alert for the 3PL that just fulfilled.
+          if (order.logisticsLocationId) {
+            await this.inventoryService.checkLowStockAndNotify(item.productId, order.logisticsLocationId);
+          }
         }
         break;
       }
@@ -2962,6 +2967,10 @@ export class OrdersService {
               reason: `Written off: order ${order.id}`,
               actorId,
             });
+
+          if (order.logisticsLocationId) {
+            await this.inventoryService.checkLowStockAndNotify(item.productId, order.logisticsLocationId);
+          }
         }
         break;
       }
