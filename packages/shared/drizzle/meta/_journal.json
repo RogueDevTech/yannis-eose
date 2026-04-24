@@ -65,6 +65,8 @@
     { "idx": 60, "version": "7", "when": 1772435000000, "tag": "0058_logistics_whatsapp_share", "breakpoints": true },
     { "idx": 61, "version": "7", "when": 1772436000000, "tag": "0059_finance_officer_hat", "breakpoints": true },
     { "idx": 62, "version": "7", "when": 1772437000000, "tag": "0060_unique_hr_per_branch", "breakpoints": true },
-    { "idx": 63, "version": "7", "when": 1772438000000, "tag": "0061_rename_warehouse_to_stock_manager", "breakpoints": true }
+    { "idx": 63, "version": "7", "when": 1772438000000, "tag": "0061_rename_warehouse_to_stock_manager", "breakpoints": true },
+    { "idx": 64, "version": "7", "when": 1777593600000, "tag": "0062_uuid_column_type", "breakpoints": true },
+    { "idx": 65, "version": "7", "when": 1777680000000, "tag": "0063_push_install_mode", "breakpoints": true }
   ]
 }
