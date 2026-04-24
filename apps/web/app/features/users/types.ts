@@ -222,7 +222,14 @@ export interface UserApprovalRecord {
 
 export interface UserPushStatus {
   subscribedDevices: number;
-  devices: Array<{ id: string; userAgent: string | null; createdAt: string }>;
+  installedDeviceCount: number;
+  devices: Array<{
+    id: string;
+    userAgent: string | null;
+    createdAt: string;
+    installMode: 'STANDALONE' | 'BROWSER' | 'UNKNOWN';
+    installModeUpdatedAt: string | null;
+  }>;
   lastPushSentAt: string | null;
   totalPushSent: number;
 }
@@ -249,6 +256,12 @@ export interface UserDetailLoaderData {
   isSuperAdmin?: boolean;
   isViewerHeadOfMarketing?: boolean;
   isViewerHeadOfCS?: boolean;
+  /**
+   * True when the viewer is HoCS/HoM looking at a direct report on the same branch.
+   * Backend enforces which fields they can actually edit (capacity, productIds,
+   * visibleOrderStatuses); this flag tells the UI to show the limited Settings form.
+   */
+  canEditLimited?: boolean;
 }
 
 // ─── Avatar gradient mapping by role ────────────────────
