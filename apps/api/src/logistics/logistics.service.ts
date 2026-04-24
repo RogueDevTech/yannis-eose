@@ -3,7 +3,6 @@ import { TRPCError } from '@trpc/server';
 import { eq, and, desc, ilike, count, lt, gte, lte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
 import type {
   CreateProviderInput,
@@ -24,8 +23,9 @@ import type {
   RejectDeliveryConfirmationInput,
   DisputeDeliveryRemittanceInput,
 } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
+import { withActor } from '../common/db/with-actor';
 import { OrdersService } from '../orders/orders.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
@@ -33,7 +33,6 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
 export class LogisticsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly notifications: NotificationsService,
     @Inject(forwardRef(() => OrdersService)) private readonly ordersService: OrdersService,
   ) {}
@@ -43,45 +42,45 @@ export class LogisticsService {
   // ============================================
 
   async createProvider(input: CreateProviderInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.logisticsProviders)
+        .values({
+          name: input.name,
+          contactInfo: input.contactInfo ?? null,
+          coverageArea: input.coverageArea ?? null,
+          rateCard: input.rateCard ?? null,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.logisticsProviders)
-      .values({
-        name: input.name,
-        contactInfo: input.contactInfo ?? null,
-        coverageArea: input.coverageArea ?? null,
-        rateCard: input.rateCard ?? null,
-      })
-      .returning();
-
-    const provider = rows[0];
-    if (!provider) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create provider' });
-    }
-    return provider;
+      const provider = rows[0];
+      if (!provider) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create provider' });
+      }
+      return provider;
+    });
   }
 
   async updateProvider(input: UpdateProviderInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.name !== undefined) updateFields['name'] = input.name;
+      if (input.contactInfo !== undefined) updateFields['contactInfo'] = input.contactInfo;
+      if (input.coverageArea !== undefined) updateFields['coverageArea'] = input.coverageArea;
+      if (input.rateCard !== undefined) updateFields['rateCard'] = input.rateCard;
+      if (input.status !== undefined) updateFields['status'] = input.status;
 
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (input.name !== undefined) updateFields['name'] = input.name;
-    if (input.contactInfo !== undefined) updateFields['contactInfo'] = input.contactInfo;
-    if (input.coverageArea !== undefined) updateFields['coverageArea'] = input.coverageArea;
-    if (input.rateCard !== undefined) updateFields['rateCard'] = input.rateCard;
-    if (input.status !== undefined) updateFields['status'] = input.status;
+      const rows = await tx
+        .update(schema.logisticsProviders)
+        .set(updateFields)
+        .where(eq(schema.logisticsProviders.id, input.providerId))
+        .returning();
 
-    const rows = await this.db
-      .update(schema.logisticsProviders)
-      .set(updateFields)
-      .where(eq(schema.logisticsProviders.id, input.providerId))
-      .returning();
-
-    if (!rows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Provider not found' });
-    }
-    return rows[0];
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Provider not found' });
+      }
+      return rows[0];
+    });
   }
 
   async getProviderById(providerId: string) {
@@ -134,57 +133,57 @@ export class LogisticsService {
   // ============================================
 
   async createLocation(input: CreateLocationInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      // Verify provider exists
+      const providerRows = await tx
+        .select()
+        .from(schema.logisticsProviders)
+        .where(eq(schema.logisticsProviders.id, input.providerId))
+        .limit(1);
 
-    // Verify provider exists
-    const providerRows = await this.db
-      .select()
-      .from(schema.logisticsProviders)
-      .where(eq(schema.logisticsProviders.id, input.providerId))
-      .limit(1);
+      if (!providerRows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Provider not found' });
+      }
 
-    if (!providerRows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Provider not found' });
-    }
+      const rows = await tx
+        .insert(schema.logisticsLocations)
+        .values({
+          providerId: input.providerId,
+          name: input.name,
+          address: input.address,
+          coordinates: input.coordinates ?? null,
+          whatsappGroupLink: input.whatsappGroupLink ?? null,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.logisticsLocations)
-      .values({
-        providerId: input.providerId,
-        name: input.name,
-        address: input.address,
-        coordinates: input.coordinates ?? null,
-        whatsappGroupLink: input.whatsappGroupLink ?? null,
-      })
-      .returning();
-
-    const location = rows[0];
-    if (!location) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create location' });
-    }
-    return location;
+      const location = rows[0];
+      if (!location) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create location' });
+      }
+      return location;
+    });
   }
 
   async updateLocation(input: UpdateLocationInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.name !== undefined) updateFields['name'] = input.name;
+      if (input.address !== undefined) updateFields['address'] = input.address;
+      if (input.coordinates !== undefined) updateFields['coordinates'] = input.coordinates;
+      if (input.status !== undefined) updateFields['status'] = input.status;
+      if (input.whatsappGroupLink !== undefined) updateFields['whatsappGroupLink'] = input.whatsappGroupLink;
 
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (input.name !== undefined) updateFields['name'] = input.name;
-    if (input.address !== undefined) updateFields['address'] = input.address;
-    if (input.coordinates !== undefined) updateFields['coordinates'] = input.coordinates;
-    if (input.status !== undefined) updateFields['status'] = input.status;
-    if (input.whatsappGroupLink !== undefined) updateFields['whatsappGroupLink'] = input.whatsappGroupLink;
+      const rows = await tx
+        .update(schema.logisticsLocations)
+        .set(updateFields)
+        .where(eq(schema.logisticsLocations.id, input.locationId))
+        .returning();
 
-    const rows = await this.db
-      .update(schema.logisticsLocations)
-      .set(updateFields)
-      .where(eq(schema.logisticsLocations.id, input.locationId))
-      .returning();
-
-    if (!rows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Location not found' });
-    }
-    return rows[0];
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Location not found' });
+      }
+      return rows[0];
+    });
   }
 
   async listLocations(input: ListLocationsInput) {
@@ -400,47 +399,48 @@ export class LogisticsService {
       });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const remittance = await withActor(this.db, actor, async (tx) => {
+      // Validate toLocation exists and is different from from
+      const toLoc = await tx
+        .select()
+        .from(schema.logisticsLocations)
+        .where(eq(schema.logisticsLocations.id, input.toLocationId))
+        .limit(1);
+      if (!toLoc[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Destination location not found' });
+      }
+      if (input.toLocationId === actor.logisticsLocationId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot remit to your own location' });
+      }
 
-    // Validate toLocation exists and is different from from
-    const toLoc = await this.db
-      .select()
-      .from(schema.logisticsLocations)
-      .where(eq(schema.logisticsLocations.id, input.toLocationId))
-      .limit(1);
-    if (!toLoc[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Destination location not found' });
-    }
-    if (input.toLocationId === actor.logisticsLocationId) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot remit to your own location' });
-    }
+      // Validate product exists
+      const product = await tx
+        .select()
+        .from(schema.products)
+        .where(eq(schema.products.id, input.productId))
+        .limit(1);
+      if (!product[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+      }
 
-    // Validate product exists
-    const product = await this.db
-      .select()
-      .from(schema.products)
-      .where(eq(schema.products.id, input.productId))
-      .limit(1);
-    if (!product[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
-    }
+      const [row] = await tx
+        .insert(schema.transferRemittances)
+        .values({
+          fromLocationId: actor.logisticsLocationId!,
+          toLocationId: input.toLocationId,
+          productId: input.productId,
+          quantitySent: input.quantitySent,
+          receiptUrl: input.receiptUrl,
+          status: 'SENT',
+          sentBy: actor.id,
+        })
+        .returning();
 
-    const [remittance] = await this.db
-      .insert(schema.transferRemittances)
-      .values({
-        fromLocationId: actor.logisticsLocationId,
-        toLocationId: input.toLocationId,
-        productId: input.productId,
-        quantitySent: input.quantitySent,
-        receiptUrl: input.receiptUrl,
-        status: 'SENT',
-        sentBy: actor.id,
-      })
-      .returning();
-
-    if (!remittance) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create remittance' });
-    }
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create remittance' });
+      }
+      return row;
+    });
 
     this.notifications
       .createForRole('HEAD_OF_LOGISTICS', {
@@ -525,75 +525,77 @@ export class LogisticsService {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Logistics can mark remittances as received' });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    const [remittance] = await this.db
-      .select()
-      .from(schema.transferRemittances)
-      .where(eq(schema.transferRemittances.id, input.remittanceId))
-      .limit(1);
-
-    if (!remittance) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Remittance not found' });
-    }
-    if (remittance.status !== 'SENT') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: `Remittance is already ${remittance.status}` });
-    }
-
-    const hasShrinkage = input.quantityReceived < remittance.quantitySent;
-    const status = hasShrinkage ? 'DISPUTED' : 'RECEIVED';
-
-    await this.db
-      .update(schema.transferRemittances)
-      .set({
-        quantityReceived: input.quantityReceived,
-        status,
-        receivedAt: new Date(),
-        receivedBy: actor.id,
-        shrinkageReason: input.shrinkageReason ?? null,
-      })
-      .where(eq(schema.transferRemittances.id, input.remittanceId));
-
-    if (input.quantityReceived > 0) {
-      const destLevel = await this.db
+    const { remittance, status, hasShrinkage } = await withActor(this.db, actor, async (tx) => {
+      const [found] = await tx
         .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, remittance.productId),
-            eq(schema.inventoryLevels.locationId, remittance.toLocationId),
-          ),
-        )
+        .from(schema.transferRemittances)
+        .where(eq(schema.transferRemittances.id, input.remittanceId))
         .limit(1);
 
-      if (destLevel[0]) {
-        await this.db
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantityReceived}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.inventoryLevels.id, destLevel[0].id));
-      } else {
-        await this.db.insert(schema.inventoryLevels).values({
-          productId: remittance.productId,
-          locationId: remittance.toLocationId,
-          stockCount: input.quantityReceived,
-          reservedCount: 0,
-          status: 'AVAILABLE',
+      if (!found) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Remittance not found' });
+      }
+      if (found.status !== 'SENT') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Remittance is already ${found.status}` });
+      }
+
+      const hasShort = input.quantityReceived < found.quantitySent;
+      const newStatus: 'DISPUTED' | 'RECEIVED' = hasShort ? 'DISPUTED' : 'RECEIVED';
+
+      await tx
+        .update(schema.transferRemittances)
+        .set({
+          quantityReceived: input.quantityReceived,
+          status: newStatus,
+          receivedAt: new Date(),
+          receivedBy: actor.id,
+          shrinkageReason: input.shrinkageReason ?? null,
+        })
+        .where(eq(schema.transferRemittances.id, input.remittanceId));
+
+      if (input.quantityReceived > 0) {
+        const destLevel = await tx
+          .select()
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, found.productId),
+              eq(schema.inventoryLevels.locationId, found.toLocationId),
+            ),
+          )
+          .limit(1);
+
+        if (destLevel[0]) {
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantityReceived}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.inventoryLevels.id, destLevel[0].id));
+        } else {
+          await tx.insert(schema.inventoryLevels).values({
+            productId: found.productId,
+            locationId: found.toLocationId,
+            stockCount: input.quantityReceived,
+            reservedCount: 0,
+            status: 'AVAILABLE',
+          });
+        }
+
+        await tx.insert(schema.stockMovements).values({
+          productId: found.productId,
+          movementType: 'TRANSFER_IN',
+          quantity: input.quantityReceived,
+          fromLocationId: found.fromLocationId,
+          toLocationId: found.toLocationId,
+          referenceId: found.id,
+          actorId: actor.id,
         });
       }
 
-      await this.db.insert(schema.stockMovements).values({
-        productId: remittance.productId,
-        movementType: 'TRANSFER_IN',
-        quantity: input.quantityReceived,
-        fromLocationId: remittance.fromLocationId,
-        toLocationId: remittance.toLocationId,
-        referenceId: remittance.id,
-        actorId: actor.id,
-      });
-    }
+      return { remittance: found, status: newStatus, hasShrinkage: hasShort };
+    });
 
     this.notifications
       .createForLocation(remittance.fromLocationId, {
@@ -625,66 +627,68 @@ export class LogisticsService {
       });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const remittance = await withActor(this.db, actor, async (tx) => {
+      const orderRows = await tx
+        .select({ id: schema.orders.id, status: schema.orders.status, logisticsLocationId: schema.orders.logisticsLocationId })
+        .from(schema.orders)
+        .where(inArray(schema.orders.id, input.orderIds));
 
-    const orderRows = await this.db
-      .select({ id: schema.orders.id, status: schema.orders.status, logisticsLocationId: schema.orders.logisticsLocationId })
-      .from(schema.orders)
-      .where(inArray(schema.orders.id, input.orderIds));
-
-    const foundIds = new Set(orderRows.map((r) => r.id));
-    for (const id of input.orderIds) {
-      if (!foundIds.has(id)) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: `Order ${id} not found` });
+      const foundIds = new Set(orderRows.map((r) => r.id));
+      for (const id of input.orderIds) {
+        if (!foundIds.has(id)) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: `Order ${id} not found` });
+        }
       }
-    }
 
-    for (const row of orderRows) {
-      if (row.status !== 'DELIVERED') {
+      for (const row of orderRows) {
+        if (row.status !== 'DELIVERED') {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Order ${row.id} is not DELIVERED. Only delivered orders can be included.`,
+          });
+        }
+        if (row.logisticsLocationId !== actor.logisticsLocationId) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Orders must belong to your 3PL location',
+          });
+        }
+      }
+
+      const alreadyRemitted = await tx
+        .select({ orderId: schema.deliveryRemittanceOrders.orderId })
+        .from(schema.deliveryRemittanceOrders)
+        .where(inArray(schema.deliveryRemittanceOrders.orderId, input.orderIds));
+      if (alreadyRemitted.length > 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `Order ${row.id} is not DELIVERED. Only delivered orders can be included.`,
+          message: 'One or more orders are already part of a delivery remittance',
         });
       }
-      if (row.logisticsLocationId !== actor.logisticsLocationId) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Orders must belong to your 3PL location',
-        });
+
+      const [row] = await tx
+        .insert(schema.deliveryRemittances)
+        .values({
+          logisticsLocationId: actor.logisticsLocationId!,
+          sentBy: actor.id,
+          receiptUrls: input.receiptUrls,
+          status: 'SENT',
+        })
+        .returning();
+
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create delivery remittance' });
       }
-    }
 
-    const alreadyRemitted = await this.db
-      .select({ orderId: schema.deliveryRemittanceOrders.orderId })
-      .from(schema.deliveryRemittanceOrders)
-      .where(inArray(schema.deliveryRemittanceOrders.orderId, input.orderIds));
-    if (alreadyRemitted.length > 0) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: 'One or more orders are already part of a delivery remittance',
-      });
-    }
+      await tx.insert(schema.deliveryRemittanceOrders).values(
+        input.orderIds.map((orderId) => ({
+          deliveryRemittanceId: row.id,
+          orderId,
+        })),
+      );
 
-    const [remittance] = await this.db
-      .insert(schema.deliveryRemittances)
-      .values({
-        logisticsLocationId: actor.logisticsLocationId,
-        sentBy: actor.id,
-        receiptUrls: input.receiptUrls,
-        status: 'SENT',
-      })
-      .returning();
-
-    if (!remittance) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create delivery remittance' });
-    }
-
-    await this.db.insert(schema.deliveryRemittanceOrders).values(
-      input.orderIds.map((orderId) => ({
-        deliveryRemittanceId: remittance.id,
-        orderId,
-      })),
-    );
+      return row;
+    });
 
     this.notifications
       .createForRole('FINANCE_OFFICER', {
@@ -817,32 +821,34 @@ export class LogisticsService {
       });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const remittance = await withActor(this.db, actor, async (tx) => {
+      const [found] = await tx
+        .select()
+        .from(schema.deliveryRemittances)
+        .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId))
+        .limit(1);
 
-    const [remittance] = await this.db
-      .select()
-      .from(schema.deliveryRemittances)
-      .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId))
-      .limit(1);
+      if (!found) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery remittance not found' });
+      }
+      if (found.status !== 'SENT') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Delivery remittance is already ${found.status}`,
+        });
+      }
 
-    if (!remittance) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery remittance not found' });
-    }
-    if (remittance.status !== 'SENT') {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `Delivery remittance is already ${remittance.status}`,
-      });
-    }
+      await tx
+        .update(schema.deliveryRemittances)
+        .set({
+          status: 'RECEIVED',
+          receivedAt: new Date(),
+          receivedBy: actor.id,
+        })
+        .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId));
 
-    await this.db
-      .update(schema.deliveryRemittances)
-      .set({
-        status: 'RECEIVED',
-        receivedAt: new Date(),
-        receivedBy: actor.id,
-      })
-      .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId));
+      return found;
+    });
 
     this.notifications
       .createForLocation(remittance.logisticsLocationId, {
@@ -867,33 +873,35 @@ export class LogisticsService {
       });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const remittance = await withActor(this.db, actor, async (tx) => {
+      const [found] = await tx
+        .select()
+        .from(schema.deliveryRemittances)
+        .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId))
+        .limit(1);
 
-    const [remittance] = await this.db
-      .select()
-      .from(schema.deliveryRemittances)
-      .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId))
-      .limit(1);
+      if (!found) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery remittance not found' });
+      }
+      if (found.status !== 'SENT') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Delivery remittance is already ${found.status}`,
+        });
+      }
 
-    if (!remittance) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery remittance not found' });
-    }
-    if (remittance.status !== 'SENT') {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `Delivery remittance is already ${remittance.status}`,
-      });
-    }
+      await tx
+        .update(schema.deliveryRemittances)
+        .set({
+          status: 'DISPUTED',
+          disputeReason: input.disputeReason,
+          receivedAt: new Date(),
+          receivedBy: actor.id,
+        })
+        .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId));
 
-    await this.db
-      .update(schema.deliveryRemittances)
-      .set({
-        status: 'DISPUTED',
-        disputeReason: input.disputeReason,
-        receivedAt: new Date(),
-        receivedBy: actor.id,
-      })
-      .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId));
+      return found;
+    });
 
     this.notifications
       .createForLocation(remittance.logisticsLocationId, {
@@ -1029,57 +1037,58 @@ export class LogisticsService {
       });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const request = await withActor(this.db, actor, async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(schema.orders)
+        .where(eq(schema.orders.id, input.orderId))
+        .limit(1);
 
-    const [order] = await this.db
-      .select()
-      .from(schema.orders)
-      .where(eq(schema.orders.id, input.orderId))
-      .limit(1);
+      if (!order) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+      }
+      if (order.status !== 'IN_TRANSIT') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Order must be IN_TRANSIT to submit delivery confirmation. Current status: ${order.status}`,
+        });
+      }
 
-    if (!order) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
-    }
-    if (order.status !== 'IN_TRANSIT') {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `Order must be IN_TRANSIT to submit delivery confirmation. Current status: ${order.status}`,
-      });
-    }
+      const [existing] = await tx
+        .select()
+        .from(schema.deliveryConfirmationRequests)
+        .where(
+          and(
+            eq(schema.deliveryConfirmationRequests.orderId, input.orderId),
+            eq(schema.deliveryConfirmationRequests.status, 'PENDING'),
+          ),
+        )
+        .limit(1);
 
-    const [existing] = await this.db
-      .select()
-      .from(schema.deliveryConfirmationRequests)
-      .where(
-        and(
-          eq(schema.deliveryConfirmationRequests.orderId, input.orderId),
-          eq(schema.deliveryConfirmationRequests.status, 'PENDING'),
-        ),
-      )
-      .limit(1);
+      if (existing) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'A delivery confirmation request is already pending for this order',
+        });
+      }
 
-    if (existing) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: 'A delivery confirmation request is already pending for this order',
-      });
-    }
+      const payload = input.metadata ?? {};
+      const rows = await tx
+        .insert(schema.deliveryConfirmationRequests)
+        .values({
+          orderId: input.orderId,
+          requestedBy: actor.id,
+          status: 'PENDING',
+          payload: { newStatus: input.newStatus, ...payload },
+        })
+        .returning();
 
-    const payload = input.metadata ?? {};
-    const rows = await this.db
-      .insert(schema.deliveryConfirmationRequests)
-      .values({
-        orderId: input.orderId,
-        requestedBy: actor.id,
-        status: 'PENDING',
-        payload: { newStatus: input.newStatus, ...payload },
-      })
-      .returning();
-
-    const request = rows[0];
-    if (!request) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create delivery confirmation request' });
-    }
+      const row = rows[0];
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create delivery confirmation request' });
+      }
+      return row;
+    });
 
     this.notifications
       .createForRole('HEAD_OF_LOGISTICS', {
@@ -1165,37 +1174,39 @@ export class LogisticsService {
       });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const { request, newStatus, metadata } = await withActor(this.db, actor, async (tx) => {
+      const [found] = await tx
+        .select()
+        .from(schema.deliveryConfirmationRequests)
+        .where(eq(schema.deliveryConfirmationRequests.id, input.requestId))
+        .limit(1);
 
-    const [request] = await this.db
-      .select()
-      .from(schema.deliveryConfirmationRequests)
-      .where(eq(schema.deliveryConfirmationRequests.id, input.requestId))
-      .limit(1);
+      if (!found) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery confirmation request not found' });
+      }
+      if (found.status !== 'PENDING') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request has already been processed' });
+      }
+      if (found.requestedBy === actor.id) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot approve your own request' });
+      }
 
-    if (!request) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery confirmation request not found' });
-    }
-    if (request.status !== 'PENDING') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request has already been processed' });
-    }
-    if (request.requestedBy === actor.id) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot approve your own request' });
-    }
+      const p = found.payload as { newStatus: 'DELIVERED' | 'PARTIALLY_DELIVERED'; [k: string]: unknown };
+      const ns = p?.newStatus ?? 'DELIVERED';
+      const { newStatus: _omit, ...payloadRest } = p;
+      const md = payloadRest as Parameters<OrdersService['transition']>[0]['metadata'];
 
-    const payload = request.payload as { newStatus: 'DELIVERED' | 'PARTIALLY_DELIVERED'; [k: string]: unknown };
-    const newStatus = payload?.newStatus ?? 'DELIVERED';
-    const { newStatus: _omit, ...payloadRest } = payload;
-    const metadata = payloadRest as Parameters<OrdersService['transition']>[0]['metadata'];
+      await tx
+        .update(schema.deliveryConfirmationRequests)
+        .set({
+          status: 'APPROVED',
+          approvedBy: actor.id,
+          approvedAt: new Date(),
+        })
+        .where(eq(schema.deliveryConfirmationRequests.id, input.requestId));
 
-    await this.db
-      .update(schema.deliveryConfirmationRequests)
-      .set({
-        status: 'APPROVED',
-        approvedBy: actor.id,
-        approvedAt: new Date(),
-      })
-      .where(eq(schema.deliveryConfirmationRequests.id, input.requestId));
+      return { request: found, newStatus: ns, metadata: md };
+    });
 
     try {
       await this.ordersService.transition(
@@ -1203,10 +1214,12 @@ export class LogisticsService {
         actor,
       );
     } catch (err) {
-      await this.db
-        .update(schema.deliveryConfirmationRequests)
-        .set({ status: 'REJECTED', rejectionReason: err instanceof Error ? err.message : 'Transition failed' })
-        .where(eq(schema.deliveryConfirmationRequests.id, input.requestId));
+      await withActor(this.db, actor, async (tx) => {
+        await tx
+          .update(schema.deliveryConfirmationRequests)
+          .set({ status: 'REJECTED', rejectionReason: err instanceof Error ? err.message : 'Transition failed' })
+          .where(eq(schema.deliveryConfirmationRequests.id, input.requestId));
+      });
       throw err;
     }
 
@@ -1231,30 +1244,32 @@ export class LogisticsService {
       });
     }
 
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+    const request = await withActor(this.db, actor, async (tx) => {
+      const [found] = await tx
+        .select()
+        .from(schema.deliveryConfirmationRequests)
+        .where(eq(schema.deliveryConfirmationRequests.id, input.requestId))
+        .limit(1);
 
-    const [request] = await this.db
-      .select()
-      .from(schema.deliveryConfirmationRequests)
-      .where(eq(schema.deliveryConfirmationRequests.id, input.requestId))
-      .limit(1);
+      if (!found) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery confirmation request not found' });
+      }
+      if (found.status !== 'PENDING') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request has already been processed' });
+      }
 
-    if (!request) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery confirmation request not found' });
-    }
-    if (request.status !== 'PENDING') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request has already been processed' });
-    }
+      await tx
+        .update(schema.deliveryConfirmationRequests)
+        .set({
+          status: 'REJECTED',
+          approvedBy: actor.id,
+          approvedAt: new Date(),
+          rejectionReason: input.reason ?? null,
+        })
+        .where(eq(schema.deliveryConfirmationRequests.id, input.requestId));
 
-    await this.db
-      .update(schema.deliveryConfirmationRequests)
-      .set({
-        status: 'REJECTED',
-        approvedBy: actor.id,
-        approvedAt: new Date(),
-        rejectionReason: input.reason ?? null,
-      })
-      .where(eq(schema.deliveryConfirmationRequests.id, input.requestId));
+      return found;
+    });
 
     this.notifications
       .create({

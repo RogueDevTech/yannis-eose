@@ -35,7 +35,7 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('creates two stock batches with different costs', async () => {
-    const actor = await createTestUser(db as any, { role: 'WAREHOUSE_MANAGER' });
+    const actor = await createTestUser(db as any, { role: 'STOCK_MANAGER' });
     await setSessionActor(pgClient, actor.id);
 
     const { id: productId } = await createTestProduct(db as any);
@@ -81,7 +81,7 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('FIFO: first delivery of 80 units deducts from Batch A only', async () => {
-    const actor = await createTestUser(db as any, { role: 'WAREHOUSE_MANAGER' });
+    const actor = await createTestUser(db as any, { role: 'STOCK_MANAGER' });
     await setSessionActor(pgClient, actor.id);
 
     const { id: productId } = await createTestProduct(db as any);
@@ -135,7 +135,7 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('FIFO: second delivery of 30 units exhausts Batch A and deducts from Batch B', async () => {
-    const actor = await createTestUser(db as any, { role: 'WAREHOUSE_MANAGER' });
+    const actor = await createTestUser(db as any, { role: 'STOCK_MANAGER' });
     await setSessionActor(pgClient, actor.id);
 
     const { id: productId } = await createTestProduct(db as any);
@@ -195,7 +195,7 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('prevents remaining_quantity from going below 0 (constraint check)', async () => {
-    const actor = await createTestUser(db as any, { role: 'WAREHOUSE_MANAGER' });
+    const actor = await createTestUser(db as any, { role: 'STOCK_MANAGER' });
     await setSessionActor(pgClient, actor.id);
 
     const { id: productId } = await createTestProduct(db as any);

@@ -1,4 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { eq, and, desc, gte, lte, count, sum, sql, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -16,22 +17,44 @@ import type {
 } from '@yannis/shared';
 import { DRIZZLE, PG_CLIENT } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
+import { withActor } from '../common/db/with-actor';
 
 @Injectable()
 export class FinanceService {
+  private readonly logger = new Logger(FinanceService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly notifications: NotificationsService,
   ) {}
 
+  /**
+   * Refresh the finance materialized views every 15 minutes so the CEO Executive dashboard
+   * (which reads from them via `getFastProfitReport`) doesn't drift out of sync with live
+   * orders / payouts / ad spend. CEO requested live numbers — 15 min is a good balance between
+   * freshness and CPU: REFRESH CONCURRENTLY is cheap on small datasets and scales linearly.
+   */
+  @Cron('0 */15 * * * *')
+  async refreshMaterializedViewsCron() {
+    try {
+      const results = await this.refreshMaterializedViews();
+      const failures = Object.entries(results).filter(([, ok]) => ok !== true);
+      if (failures.length > 0) {
+        this.logger.warn(`mv_refresh_cron partial_failure count=${failures.length} views=${failures.map(([n]) => n).join(',')}`);
+      } else {
+        this.logger.log(`mv_refresh_cron success count=${Object.keys(results).length}`);
+      }
+    } catch (err) {
+      this.logger.error(`mv_refresh_cron error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // ============================================
   // Invoices
   // ============================================
 
   async createInvoice(input: CreateInvoiceInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-
     // Calculate total from line items + tax
     const subtotal = input.lineItems.reduce(
       (sum, item) => sum + item.quantity * item.unitPrice,
@@ -40,47 +63,49 @@ export class FinanceService {
     const taxRate = input.taxRate ?? 0;
     const totalAmount = subtotal * (1 + taxRate);
 
-    const rows = await this.db
-      .insert(schema.invoices)
-      .values({
-        orderId: input.orderId ?? null,
-        recipientInfo: input.recipientInfo,
-        lineItems: input.lineItems,
-        taxRate: input.taxRate != null ? String(input.taxRate) : null,
-        totalAmount: totalAmount.toFixed(2),
-        dueDate: input.dueDate ? new Date(input.dueDate) : null,
-        status: 'DRAFT',
-      })
-      .returning();
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.invoices)
+        .values({
+          orderId: input.orderId ?? null,
+          recipientInfo: input.recipientInfo,
+          lineItems: input.lineItems,
+          taxRate: input.taxRate != null ? String(input.taxRate) : null,
+          totalAmount: totalAmount.toFixed(2),
+          dueDate: input.dueDate ? new Date(input.dueDate) : null,
+          status: 'DRAFT',
+        })
+        .returning();
 
-    const invoice = rows[0];
-    if (!invoice) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create invoice' });
-    }
+      const invoice = rows[0];
+      if (!invoice) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create invoice' });
+      }
 
-    return {
-      ...invoice,
-      referenceFormatted: this.formatReference(invoice.referenceNumber),
-    };
+      return {
+        ...invoice,
+        referenceFormatted: this.formatReference(invoice.referenceNumber),
+      };
+    });
   }
 
   async updateInvoiceStatus(input: UpdateInvoiceStatusInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .update(schema.invoices)
+        .set({ status: input.status })
+        .where(eq(schema.invoices.id, input.invoiceId))
+        .returning();
 
-    const rows = await this.db
-      .update(schema.invoices)
-      .set({ status: input.status })
-      .where(eq(schema.invoices.id, input.invoiceId))
-      .returning();
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+      }
 
-    if (!rows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
-    }
-
-    return {
-      ...rows[0],
-      referenceFormatted: this.formatReference(rows[0].referenceNumber),
-    };
+      return {
+        ...rows[0],
+        referenceFormatted: this.formatReference(rows[0].referenceNumber),
+      };
+    });
   }
 
   async getInvoiceById(invoiceId: string) {
@@ -344,23 +369,24 @@ export class FinanceService {
   // ============================================
 
   async createApprovalRequest(input: CreateApprovalRequestInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    const request = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.approvalRequests)
+        .values({
+          type: input.type,
+          requesterId: actorId,
+          amount: String(input.amount),
+          description: input.description,
+          budgetId: input.budgetId ?? null,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.approvalRequests)
-      .values({
-        type: input.type,
-        requesterId: actorId,
-        amount: String(input.amount),
-        description: input.description,
-        budgetId: input.budgetId ?? null,
-      })
-      .returning();
-
-    const request = rows[0];
-    if (!request) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create approval request' });
-    }
+      const inserted = rows[0];
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create approval request' });
+      }
+      return inserted;
+    });
 
     // Notify Finance Officers and SuperAdmin
     this.notifications
@@ -384,49 +410,50 @@ export class FinanceService {
   }
 
   async processApproval(input: ProcessApprovalInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    const { updated, request } = await withActor(this.db, { id: actorId }, async (tx) => {
+      // Get the existing request
+      const existing = await tx
+        .select()
+        .from(schema.approvalRequests)
+        .where(eq(schema.approvalRequests.id, input.requestId))
+        .limit(1);
 
-    // Get the existing request
-    const existing = await this.db
-      .select()
-      .from(schema.approvalRequests)
-      .where(eq(schema.approvalRequests.id, input.requestId))
-      .limit(1);
+      const found = existing[0];
+      if (!found) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Approval request not found' });
+      }
+      if (found.status !== 'PENDING' && found.status !== 'QUERIED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request already processed' });
+      }
+      // Self-approval prevention
+      if (found.requesterId === actorId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot approve/reject your own request' });
+      }
 
-    const request = existing[0];
-    if (!request) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Approval request not found' });
-    }
-    if (request.status !== 'PENDING' && request.status !== 'QUERIED') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request already processed' });
-    }
-    // Self-approval prevention
-    if (request.requesterId === actorId) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot approve/reject your own request' });
-    }
+      const updateFields: Record<string, unknown> = {
+        status: input.action,
+        approverId: actorId,
+        approvalReason: input.reason,
+        updatedAt: new Date(),
+      };
+      if (input.action === 'APPROVED' || input.action === 'REJECTED') {
+        updateFields['approvedAt'] = new Date();
+      }
 
-    const updateFields: Record<string, unknown> = {
-      status: input.action,
-      approverId: actorId,
-      approvalReason: input.reason,
-      updatedAt: new Date(),
-    };
-    if (input.action === 'APPROVED' || input.action === 'REJECTED') {
-      updateFields['approvedAt'] = new Date();
-    }
+      const rows = await tx
+        .update(schema.approvalRequests)
+        .set(updateFields)
+        .where(eq(schema.approvalRequests.id, input.requestId))
+        .returning();
 
-    const rows = await this.db
-      .update(schema.approvalRequests)
-      .set(updateFields)
-      .where(eq(schema.approvalRequests.id, input.requestId))
-      .returning();
+      const result = rows[0];
+      if (!result) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to process approval' });
+      }
+      return { updated: result, request: found };
+    });
 
-    const updated = rows[0];
-    if (!updated) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to process approval' });
-    }
-
-    // Notify requester of outcome
+    // Notify requester of outcome (outside the transaction)
     if (input.action === 'APPROVED' || input.action === 'REJECTED') {
       this.notifications
         .create({
@@ -443,6 +470,18 @@ export class FinanceService {
     }
 
     return updated;
+  }
+
+  /**
+   * Count of approval requests currently in PENDING state. Used by the lightweight admin
+   * landing KPI — a single indexed count, intentionally cheap.
+   */
+  async countPendingApprovalRequests(): Promise<number> {
+    const [row] = await this.db
+      .select({ count: count() })
+      .from(schema.approvalRequests)
+      .where(eq(schema.approvalRequests.status, 'PENDING'));
+    return row?.count ?? 0;
   }
 
   async listApprovalRequests(input: ListApprovalRequestsInput) {
@@ -485,26 +524,26 @@ export class FinanceService {
   // ============================================
 
   async setBudget(input: SetBudgetInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.budgets)
+        .values({
+          name: input.name,
+          departmentOrCampaign: input.departmentOrCampaign,
+          totalBudget: String(input.totalBudget),
+          periodStart: new Date(input.periodStart),
+          periodEnd: new Date(input.periodEnd),
+          createdBy: actorId,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.budgets)
-      .values({
-        name: input.name,
-        departmentOrCampaign: input.departmentOrCampaign,
-        totalBudget: String(input.totalBudget),
-        periodStart: new Date(input.periodStart),
-        periodEnd: new Date(input.periodEnd),
-        createdBy: actorId,
-      })
-      .returning();
+      const budget = rows[0];
+      if (!budget) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create budget' });
+      }
 
-    const budget = rows[0];
-    if (!budget) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create budget' });
-    }
-
-    return budget;
+      return budget;
+    });
   }
 
   async listBudgets() {
@@ -656,8 +695,17 @@ export class FinanceService {
             : `SELECT COALESCE(SUM(total_spend), 0) AS total FROM mv_ad_spend_summary`,
           startDate && endDate ? [startDate, endDate] : [],
         ),
+        // mv_commission_summary buckets payouts by DATE_TRUNC('month', period_start); filter by
+        // the month range derived from the user's date filter so a request for "April 2026" does
+        // not return the all-time total (which produced the inflated numbers on the CEO dashboard).
         this.pgClient.unsafe(
-          `SELECT COALESCE(SUM(total_commission), 0) AS total FROM mv_commission_summary`,
+          startDate && endDate
+            ? `SELECT COALESCE(SUM(total_commission), 0) AS total
+               FROM mv_commission_summary
+               WHERE period_month >= DATE_TRUNC('month', $1::date)
+                 AND period_month <= DATE_TRUNC('month', $2::date)`
+            : `SELECT COALESCE(SUM(total_commission), 0) AS total FROM mv_commission_summary`,
+          startDate && endDate ? [startDate, endDate] : [],
         ),
         this.pgClient.unsafe(
           `SELECT status, order_count, total_amount FROM mv_order_pipeline`,
@@ -715,24 +763,24 @@ export class FinanceService {
    * Returns the count of invoices flagged.
    */
   async flagOverdueInvoices(actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const now = new Date();
+      const overdueRows = await tx
+        .update(schema.invoices)
+        .set({ status: 'OVERDUE' })
+        .where(
+          and(
+            eq(schema.invoices.status, 'SENT'),
+            lte(schema.invoices.dueDate, now),
+          ),
+        )
+        .returning();
 
-    const now = new Date();
-    const overdueRows = await this.db
-      .update(schema.invoices)
-      .set({ status: 'OVERDUE' })
-      .where(
-        and(
-          eq(schema.invoices.status, 'SENT'),
-          lte(schema.invoices.dueDate, now),
-        ),
-      )
-      .returning();
-
-    return {
-      flaggedCount: overdueRows.length,
-      flaggedIds: overdueRows.map((inv) => inv.id),
-    };
+      return {
+        flaggedCount: overdueRows.length,
+        flaggedIds: overdueRows.map((inv) => inv.id),
+      };
+    });
   }
 
   // ============================================

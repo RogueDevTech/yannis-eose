@@ -22,9 +22,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'hr.read');
   const cookie = getSessionCookie(request);
 
+  // Read payout filter + pagination from URL so navigation triggers a fresh loader call.
+  const url = new URL(request.url);
+  const statusParam = url.searchParams.get('payoutStatus') || undefined;
+  const pageParam = Number(url.searchParams.get('payoutPage') ?? '1');
+  const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
+  const payoutsInput: { page: number; limit: number; status?: string } = { page, limit: 20 };
+  if (statusParam && statusParam !== 'ALL') payoutsInput.status = statusParam;
+
   // ── Start ALL fetches concurrently ────────────────────────────
   const plansPromise = apiRequest<unknown>('/trpc/hr.listPlans', { method: 'GET', cookie });
-  const payoutsPromise = apiRequest<unknown>('/trpc/hr.listPayouts', { method: 'GET', cookie });
+  const payoutsPromise = apiRequest<unknown>(
+    `/trpc/hr.listPayouts?input=${encodeURIComponent(JSON.stringify(payoutsInput))}`,
+    { method: 'GET', cookie },
+  );
   const adjustmentsPromise = apiRequest<unknown>(`/trpc/hr.listAdjustments?input=${encodeURIComponent(JSON.stringify({}))}`, { method: 'GET', cookie });
   const summaryPromise = apiRequest<unknown>('/trpc/hr.payoutSummary', { method: 'GET', cookie });
   const usersPromise = apiRequest<unknown>('/trpc/users.list', { method: 'GET', cookie });
@@ -39,7 +50,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
 
   const payoutsData = payoutsRes.ok
-    ? (payoutsRes.data as { result?: { data?: { payouts: Payout[]; pagination: { total: number } } } })?.result?.data
+    ? (payoutsRes.data as { result?: { data?: { payouts: Payout[]; pagination: { total: number; page: number; limit: number; totalPages?: number } } } })?.result?.data
     : null;
 
   // Await secondary data in parallel
@@ -80,11 +91,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .catch((): SettlementPeriod | null => null),
   ]);
 
+  const totalPayouts = payoutsData?.pagination?.total ?? 0;
+  const limit = payoutsData?.pagination?.limit ?? 20;
+  const totalPayoutPages = Math.max(1, Math.ceil(totalPayouts / limit));
+
   return {
     plans: plansData?.plans ?? [],
     totalPlans: plansData?.pagination?.total ?? 0,
     payouts: payoutsData?.payouts ?? [],
-    totalPayouts: payoutsData?.pagination?.total ?? 0,
+    totalPayouts,
+    payoutPage: payoutsData?.pagination?.page ?? page,
+    totalPayoutPages,
+    payoutStatus: statusParam ?? 'ALL',
     adjustments,
     payoutSummary,
     users,

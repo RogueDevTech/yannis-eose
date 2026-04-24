@@ -130,7 +130,7 @@ async function seedOfferTemplates(sql: postgres.Sql): Promise<void> {
 
   const actorRows = await sql`
     SELECT COALESCE(
-      (SELECT id FROM users WHERE role = 'WAREHOUSE_MANAGER' ORDER BY created_at ASC NULLS LAST LIMIT 1),
+      (SELECT id FROM users WHERE role = 'STOCK_MANAGER' ORDER BY created_at ASC NULLS LAST LIMIT 1),
       (SELECT id FROM users WHERE role = 'SUPER_ADMIN' LIMIT 1),
       (SELECT id FROM users ORDER BY created_at ASC NULLS LAST LIMIT 1)
     ) AS id

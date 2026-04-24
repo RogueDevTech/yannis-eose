@@ -20,6 +20,7 @@ import type {
   UserApprovalRecord,
   UserPushStatus,
   ActiveHeadUser,
+  FinanceHatHolder,
 } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -53,11 +54,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return defer({ userDetail: Promise.resolve({ notFound: true as const }) });
   }
 
-  // Head of CS can view CS team members (CS_AGENT, HEAD_OF_CS) without users.read
+  // Access model for /hr/users/:id:
+  //  - Head of CS  may view their CS team (CS_AGENT, HEAD_OF_CS) — nothing else.
+  //  - Head of Marketing may view their Marketing team (MEDIA_BUYER, HEAD_OF_MARKETING) — nothing else.
+  //  - Everyone else must hold `hr.read` (HR_MANAGER) or be admin-level.
+  // HoM/HoCS still carry `users.read` globally for other features (team leaderboards, push
+  // target search, etc.), so we can't just require `users.read` — we'd leak unrelated profiles.
   const headOfCSViewingTeam =
     currentUser.role === 'HEAD_OF_CS' && ['CS_AGENT', 'HEAD_OF_CS'].includes(profileUser.role);
-  if (!headOfCSViewingTeam) {
-    await requirePermission(request, ['users.read', 'users.update']);
+  const headOfMarketingViewingTeam =
+    currentUser.role === 'HEAD_OF_MARKETING' && ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(profileUser.role);
+  const isHoMOrHoCS = currentUser.role === 'HEAD_OF_MARKETING' || currentUser.role === 'HEAD_OF_CS';
+
+  if (isHoMOrHoCS && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
+    throw new Response('This user is not on your team.', { status: 403 });
+  }
+  if (!headOfCSViewingTeam && !headOfMarketingViewingTeam) {
+    await requirePermission(request, ['hr.read', 'users.update']);
   }
 
   const user = profileUser;
@@ -229,8 +242,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     })
     .catch(() => null);
 
-  // Stock movements (for WAREHOUSE_MANAGER, TPL_MANAGER, HEAD_OF_LOGISTICS)
-  const isStockRole = ['WAREHOUSE_MANAGER', 'TPL_MANAGER', 'HEAD_OF_LOGISTICS'].includes(user.role);
+  // Stock movements (for STOCK_MANAGER, TPL_MANAGER, HEAD_OF_LOGISTICS)
+  const isStockRole = ['STOCK_MANAGER', 'TPL_MANAGER', 'HEAD_OF_LOGISTICS'].includes(user.role);
   const stockMovements: Promise<{ movements: UserStockMovement[]; total: number }> | null = isStockRole
     ? apiRequest<unknown>(
         `/trpc/inventory.movements?input=${encodeURIComponent(JSON.stringify({ actorId: userId, page: 1, limit: 20 }))}`,
@@ -286,6 +299,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     })
     .catch(() => []);
 
+  // Current Finance-hat holder (if any) — lets the edit form warn about reassignment.
+  const currentFinanceOfficer: Promise<FinanceHatHolder | null> = apiRequest<unknown>(
+    '/trpc/users.getCurrentFinanceOfficer',
+    { method: 'GET', cookie },
+  )
+    .then((res) => {
+      if (!res.ok) return null;
+      const d = res.data as { result?: { data?: FinanceHatHolder | null } };
+      return d?.result?.data ?? null;
+    })
+    .catch(() => null);
+
   // Active branches for the edit form's warning (to show branch name in the message).
   const branchesList: Promise<Array<{ id: string; name: string; code: string; status: string }>> =
     apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie })
@@ -310,7 +335,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => null)
     : Promise.resolve(null);
 
-    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS };
+    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, currentFinanceOfficer, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS };
   })();
 
   return defer({ userDetail: userDetailPromise });
@@ -347,6 +372,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
           logisticsLocationId: string | null;
           restrictProductAccess: boolean;
           assignedProductIds?: string[];
+          isFinanceOfficer?: boolean;
         };
       };
     };
@@ -422,6 +448,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       } catch {
         /* invalid productIds JSON */
+      }
+    }
+
+    if (formData.has('isFinanceOfficer')) {
+      const nextHat = formData.get('isFinanceOfficer')?.toString() === 'true';
+      if (nextHat !== !!target.isFinanceOfficer) {
+        body.isFinanceOfficer = nextHat;
       }
     }
 

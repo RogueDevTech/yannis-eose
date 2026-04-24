@@ -27,25 +27,32 @@ import type {
   UserApprovalRecord,
   UserPushStatus,
   ActiveHeadUser,
+  FinanceHatHolder,
 } from './types';
 import { ROLE_COLORS, USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
 
-const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'];
+// Roles limited to one active holder per branch. HR_MANAGER was added 2026-04-23 (CEO directive)
+// to follow the same rule as the HEAD_OF_* roles. Naming kept for continuity with backend.
+const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
 
 // ─── Constants ──────────────────────────────────────────
 
+// SUPER_ADMIN is removed — the service rejects setting it on any user, so including it in the
+// dropdown is misleading. ADMIN + BRANCH_ADMIN routes through the SuperAdmin approval flow for
+// non-SuperAdmin callers; included so SuperAdmin can promote / demote directly.
 const ROLES = [
+  { value: 'ADMIN', label: 'Admin' },
+  { value: 'BRANCH_ADMIN', label: 'Branch Admin' },
   { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
   { value: 'MEDIA_BUYER', label: 'Media Buyer' },
   { value: 'HEAD_OF_CS', label: 'Head of CS' },
   { value: 'CS_AGENT', label: 'CS Agent' },
   { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
   { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
-  { value: 'WAREHOUSE_MANAGER', label: 'Warehouse Manager' },
+  { value: 'STOCK_MANAGER', label: 'Stock Manager' },
   { value: 'TPL_MANAGER', label: '3PL Manager' },
   { value: 'TPL_RIDER', label: '3PL Rider' },
   { value: 'HR_MANAGER', label: 'HR Manager' },
-  { value: 'SUPER_ADMIN', label: 'Super Admin' },
 ];
 
 const ROLE_DESCRIPTIONS: Record<string, string> = {
@@ -56,7 +63,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   CS_AGENT: 'Handles customer calls, confirms orders, and processes cancellations.',
   FINANCE_OFFICER: 'Manages invoices, approvals, budgets, and financial reporting.',
   HEAD_OF_LOGISTICS: 'Oversees all logistics operations, 3PL partners, and transfers.',
-  WAREHOUSE_MANAGER: 'Manages inventory, stock movements, and procurement.',
+  STOCK_MANAGER: 'Manages inventory, stock movements, and procurement.',
   TPL_MANAGER: 'Manages a third-party logistics location and its riders.',
   TPL_RIDER: 'Handles last-mile deliveries and order fulfillment.',
   HR_MANAGER: 'Manages payroll, commission plans, payouts, and staff records.',
@@ -94,6 +101,7 @@ export function UserDetailPage({
   financeActivity,
   pushStatus,
   activeHeads,
+  currentFinanceOfficer,
   branchesList,
   canDisburseToThisUser = false,
   isSuperAdmin = false,
@@ -146,8 +154,10 @@ export function UserDetailPage({
   // Role-based tab visibility
   const showOrdersTab = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_LOGISTICS', 'TPL_MANAGER', 'TPL_RIDER'].includes(user.role);
   const showPayrollTab = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'HEAD_OF_CS', 'CS_AGENT', 'TPL_RIDER', 'HR_MANAGER'].includes(user.role);
-  const showStockTab = ['WAREHOUSE_MANAGER', 'TPL_MANAGER', 'HEAD_OF_LOGISTICS'].includes(user.role);
-  const showFinanceTab = ['FINANCE_OFFICER'].includes(user.role);
+  const showStockTab = ['STOCK_MANAGER', 'TPL_MANAGER', 'HEAD_OF_LOGISTICS'].includes(user.role);
+  // Finance activity tab is visible to either a primary Finance Officer OR anyone currently
+  // wearing the Finance hat on top of their primary role.
+  const showFinanceTab = user.role === 'FINANCE_OFFICER' || user.isFinanceOfficer === true;
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'overview', label: 'Overview' },
@@ -174,6 +184,10 @@ export function UserDetailPage({
 
   // Edit form state
   const [selectedRole, setSelectedRole] = useState(user.role);
+  const [assignFinanceHat, setAssignFinanceHat] = useState(user.isFinanceOfficer === true);
+  useEffect(() => {
+    setAssignFinanceHat(user.isFinanceOfficer === true);
+  }, [user.id, user.updatedAt, user.isFinanceOfficer]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>(user.assignedProductIds ?? []);
 
   const assignedProductIdsKey = [...(user.assignedProductIds ?? [])].sort().join(',');
@@ -187,7 +201,7 @@ export function UserDetailPage({
   const showProductAssignment = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(selectedRole);
   const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
   const isCSRole = ['CS_AGENT', 'HEAD_OF_CS'].includes(user.role);
-  const isLogisticsRole = ['TPL_MANAGER', 'TPL_RIDER', 'HEAD_OF_LOGISTICS', 'WAREHOUSE_MANAGER'].includes(user.role);
+  const isLogisticsRole = ['TPL_MANAGER', 'TPL_RIDER', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'].includes(user.role);
 
   const toggleProduct = (id: string) => {
     setSelectedProductIds((prev) =>
@@ -326,6 +340,11 @@ export function UserDetailPage({
           {/* Quick info pills */}
           <div className="flex flex-wrap items-center gap-2 mt-4">
             <span className={ROLE_COLORS[user.role] ?? 'badge'}>{formatRole(user.role)}</span>
+            {user.isFinanceOfficer && user.role !== 'FINANCE_OFFICER' && (
+              <span className="badge-success" title="Wears the Finance hat — carries Finance Officer powers on top of their primary role.">
+                + Finance hat
+              </span>
+            )}
             <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1052,6 +1071,43 @@ export function UserDetailPage({
               </div>
             </div>
           </div>
+
+          {/* Finance hat — org-wide singleton. Skip for primary FINANCE_OFFICER users (role already covers it). */}
+          {selectedRole !== 'FINANCE_OFFICER' && (
+            <div className="card space-y-3">
+              <h2 className="text-base font-semibold text-app-fg">Finance hat</h2>
+              <p className="text-sm text-app-fg-muted">
+                Deputize this user with Finance Officer powers (column-level cost visibility, approvals, remittance) <strong>in addition to</strong> their primary role. Only one user can hold the hat at any time.
+              </p>
+              <input type="hidden" name="isFinanceOfficer" value={assignFinanceHat ? 'true' : 'false'} />
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={assignFinanceHat}
+                  onChange={(e) => setAssignFinanceHat((e.target as HTMLInputElement).checked)}
+                />
+                <span className="text-sm text-app-fg">This user holds the Finance hat</span>
+              </label>
+              {assignFinanceHat && !user.isFinanceOfficer && currentFinanceOfficer && (
+                <DeferredSection resolve={currentFinanceOfficer} skeleton="inline">
+                  {(holder: FinanceHatHolder | null) => {
+                    if (!holder || holder.id === user.id) return null;
+                    return (
+                      <InlineNotification
+                        variant="warning"
+                        message={`The Finance hat is currently held by ${holder.name}. Saving will revoke it from them automatically.`}
+                      />
+                    );
+                  }}
+                </DeferredSection>
+              )}
+              {user.isFinanceOfficer && !assignFinanceHat && (
+                <InlineNotification
+                  variant="warning"
+                  message="Unchecking this revokes the Finance hat from this user. No one else will hold it until you assign it to someone else."
+                />
+              )}
+            </div>
+          )}
 
           {/* Role Settings */}
           {(showCapacity || showLogisticsLocation || showProductAssignment) && (

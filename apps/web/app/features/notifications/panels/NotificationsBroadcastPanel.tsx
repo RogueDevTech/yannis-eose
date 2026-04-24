@@ -25,7 +25,7 @@ const ALL_ROLES: RoleOption[] = [
   { value: 'LOGISTICS_MANAGER', label: 'Logistics Manager' },
   { value: 'TPL_MANAGER', label: '3PL Manager' },
   { value: 'TPL_RIDER', label: '3PL Rider' },
-  { value: 'WAREHOUSE_MANAGER', label: 'Warehouse Manager' },
+  { value: 'STOCK_MANAGER', label: 'Stock Manager' },
   { value: 'HR_MANAGER', label: 'HR Manager' },
 ];
 

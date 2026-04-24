@@ -464,6 +464,55 @@ export class InventoryService {
   }
 
   /**
+   * Detail payload for a single inventory row by its inventory_levels.id.
+   * Convenience wrapper around `levelDetail` that also resolves product/location names
+   * so a full-page view only needs one round-trip.
+   */
+  async getLevelById(id: string, limit = 200) {
+    const rows = await this.db.execute<{
+      id: string;
+      productId: string;
+      productName: string | null;
+      locationId: string;
+      locationName: string | null;
+      stockCount: number;
+      reservedCount: number;
+      status: string;
+      updatedAt: Date;
+    }>(sql`
+      SELECT
+        il.id,
+        il.product_id          AS "productId",
+        p.name                 AS "productName",
+        il.location_id         AS "locationId",
+        loc.name               AS "locationName",
+        il.stock_count         AS "stockCount",
+        il.reserved_count      AS "reservedCount",
+        il.status::text        AS "status",
+        il.updated_at          AS "updatedAt"
+      FROM inventory_levels il
+      LEFT JOIN products p ON p.id = il.product_id
+      LEFT JOIN logistics_locations loc ON loc.id = il.location_id
+      WHERE il.id = ${id}
+      LIMIT 1
+    `);
+
+    const level = rows[0];
+    if (!level) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Inventory level not found' });
+    }
+
+    const detail = await this.levelDetail(level.productId, level.locationId, limit);
+
+    return {
+      level,
+      batches: detail.batches,
+      movements: detail.movements,
+      total: detail.total,
+    };
+  }
+
+  /**
    * Detail view for a single (productId, locationId) inventory level.
    *
    * Returns:

@@ -10,6 +10,6 @@ export const ROLE_LABELS: Record<string, string> = {
   LOGISTICS_MANAGER: 'Logistics Manager',
   TPL_MANAGER: '3PL Manager',
   TPL_RIDER: '3PL Rider',
-  WAREHOUSE_MANAGER: 'Warehouse Manager',
+  STOCK_MANAGER: 'Stock Manager',
   HR_MANAGER: 'HR Manager',
 };

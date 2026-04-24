@@ -43,7 +43,7 @@ export const productsRouter = router({
 
   /**
    * Create a new product.
-   * SuperAdmin, Warehouse Manager, or Head of Logistics only.
+   * SuperAdmin, Stock Manager, or Head of Logistics only.
    */
   create: permissionProcedure('products.create')
     .input(createProductSchema)

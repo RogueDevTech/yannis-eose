@@ -123,6 +123,7 @@ export class AuthService {
       currentBranchId,
       appTheme: user.appTheme ?? null,
       fontScale: user.fontScale ?? null,
+      isFinanceOfficer: user.isFinanceOfficer === true,
     };
 
     // Persist session in DB, then cache in Redis when available.

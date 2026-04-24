@@ -2,7 +2,6 @@ import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, and, or, desc, gte, lte, isNull, count, sum } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
 import type {
   CreateCommissionPlanInput,
@@ -15,15 +14,15 @@ import type {
   ApproveAdjustmentInput,
   SetSettlementConfigInput,
 } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { withActor } from '../common/db/with-actor';
 
 @Injectable()
 export class HrService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -33,45 +32,45 @@ export class HrService {
   // ============================================
 
   async createCommissionPlan(input: CreateCommissionPlanInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.commissionPlans)
+        .values({
+          role: input.role as typeof schema.commissionPlans.$inferInsert['role'],
+          planName: input.planName,
+          rules: input.rules,
+          effectiveFrom: new Date(input.effectiveFrom),
+          effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
+          createdBy: actorId,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.commissionPlans)
-      .values({
-        role: input.role as typeof schema.commissionPlans.$inferInsert['role'],
-        planName: input.planName,
-        rules: input.rules,
-        effectiveFrom: new Date(input.effectiveFrom),
-        effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
-        createdBy: actorId,
-      })
-      .returning();
-
-    const plan = rows[0];
-    if (!plan) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create commission plan' });
-    }
-    return plan;
+      const plan = rows[0];
+      if (!plan) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create commission plan' });
+      }
+      return plan;
+    });
   }
 
   async updateCommissionPlan(input: UpdateCommissionPlanInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.planName !== undefined) updateFields['planName'] = input.planName;
+      if (input.rules !== undefined) updateFields['rules'] = input.rules;
+      if (input.effectiveTo !== undefined) updateFields['effectiveTo'] = new Date(input.effectiveTo);
 
-    const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (input.planName !== undefined) updateFields['planName'] = input.planName;
-    if (input.rules !== undefined) updateFields['rules'] = input.rules;
-    if (input.effectiveTo !== undefined) updateFields['effectiveTo'] = new Date(input.effectiveTo);
+      const rows = await tx
+        .update(schema.commissionPlans)
+        .set(updateFields)
+        .where(eq(schema.commissionPlans.id, input.planId))
+        .returning();
 
-    const rows = await this.db
-      .update(schema.commissionPlans)
-      .set(updateFields)
-      .where(eq(schema.commissionPlans.id, input.planId))
-      .returning();
-
-    if (!rows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Commission plan not found' });
-    }
-    return rows[0];
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Commission plan not found' });
+      }
+      return rows[0];
+    });
   }
 
   async listCommissionPlans(input: ListCommissionPlansInput) {
@@ -108,13 +107,12 @@ export class HrService {
   // ============================================
 
   async generatePayouts(input: GeneratePayoutsInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-
+    return withActor(this.db, { id: actorId }, async (tx) => {
     const periodStart = new Date(input.periodStart);
     const periodEnd = new Date(input.periodEnd);
 
     // Get all active staff members
-    const staff = await this.db
+    const staff = await tx
       .select()
       .from(schema.users)
       .where(eq(schema.users.status, 'ACTIVE'));
@@ -124,7 +122,7 @@ export class HrService {
     for (const member of staff) {
       // Get delivered orders in this period — check BOTH CS agent and Media Buyer attribution
       // Commission is based on DELIVERED_AT timestamp, NOT CREATED_AT
-      const deliveredRows = await this.db
+      const deliveredRows = await tx
         .select({ count: count(), revenue: sum(schema.orders.totalAmount) })
         .from(schema.orders)
         .where(
@@ -140,7 +138,7 @@ export class HrService {
         );
 
       // Get total orders (all statuses) for delivery rate calculation
-      const totalOrdersRows = await this.db
+      const totalOrdersRows = await tx
         .select({ count: count() })
         .from(schema.orders)
         .where(
@@ -155,7 +153,7 @@ export class HrService {
         );
 
       // Get returned orders for penalty calculation
-      const returnedRows = await this.db
+      const returnedRows = await tx
         .select({ count: count() })
         .from(schema.orders)
         .where(
@@ -176,7 +174,7 @@ export class HrService {
       const deliveryRate = totalOrders > 0 ? (deliveredCount / totalOrders) * 100 : 0;
 
       // Get applicable commission plan — most recent plan for this role
-      const planRows = await this.db
+      const planRows = await tx
         .select()
         .from(schema.commissionPlans)
         .where(
@@ -231,7 +229,7 @@ export class HrService {
       }
 
       // Get pending deductions (clawbacks from previous returns)
-      const deductionRows = await this.db
+      const deductionRows = await tx
         .select({ total: sum(schema.earningsAdjustments.amount) })
         .from(schema.earningsAdjustments)
         .where(
@@ -245,7 +243,7 @@ export class HrService {
       const clawbackTotal = Math.abs(Number(deductionRows[0]?.total ?? 0));
 
       // Get add-ons for this period (approved only — approvedBy is not null)
-      const addOnsRows = await this.db
+      const addOnsRows = await tx
         .select({ total: sum(schema.earningsAdjustments.amount) })
         .from(schema.earningsAdjustments)
         .where(
@@ -258,7 +256,7 @@ export class HrService {
         );
 
       // Also get other positive add-on categories
-      const otherAddOnsRows = await this.db
+      const otherAddOnsRows = await tx
         .select({ total: sum(schema.earningsAdjustments.amount) })
         .from(schema.earningsAdjustments)
         .where(
@@ -281,7 +279,7 @@ export class HrService {
 
       // Only create payout if there's something to pay or deduct
       if (totalPayout > 0 || deductionsTotal > 0 || baseSalary > 0) {
-        const payoutRows = await this.db
+        const payoutRows = await tx
           .insert(schema.payoutRecords)
           .values({
             staffId: member.id,
@@ -303,35 +301,37 @@ export class HrService {
     }
 
     return { generated: payouts.length, payouts };
+    });
   }
 
   async approvePayout(input: ApprovePayoutInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    const payout = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .update(schema.payoutRecords)
+        .set({ status: input.status as typeof schema.payoutRecords.$inferInsert['status'] })
+        .where(eq(schema.payoutRecords.id, input.payoutId))
+        .returning();
 
-    const rows = await this.db
-      .update(schema.payoutRecords)
-      .set({ status: input.status as typeof schema.payoutRecords.$inferInsert['status'] })
-      .where(eq(schema.payoutRecords.id, input.payoutId))
-      .returning();
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Payout record not found' });
+      }
+      return rows[0];
+    });
 
-    if (!rows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Payout record not found' });
-    }
-
-    // Notify staff when payout is approved
+    // Notify staff when payout is approved (outside the transaction)
     if (input.status === 'APPROVED') {
       this.notifications
         .create({
-          userId: rows[0].staffId,
+          userId: payout.staffId,
           type: 'hr:payout_approved',
           title: 'Payout approved',
           body: `Your payout for the period has been approved.`,
-          data: { payoutId: rows[0].id, totalPayout: rows[0].totalPayout },
+          data: { payoutId: payout.id, totalPayout: payout.totalPayout },
         })
         .catch(() => {});
     }
 
-    return rows[0];
+    return payout;
   }
 
   async listPayouts(input: ListPayoutsInput) {
@@ -391,68 +391,73 @@ export class HrService {
    * Creates PENDING_DEDUCTION for both Media Buyer and CS Agent.
    */
   async createClawbackForReturn(orderId: string, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    const clawbacks = await withActor(this.db, { id: actorId }, async (tx) => {
+      const notifications: Array<{ staffId: string; amount: number }> = [];
 
-    // Get the order to find affected staff
-    const orderRows = await this.db
-      .select()
-      .from(schema.orders)
-      .where(eq(schema.orders.id, orderId))
-      .limit(1);
-
-    const order = orderRows[0];
-    if (!order) return;
-
-    const affectedStaff: string[] = [];
-    if (order.assignedCsId) affectedStaff.push(order.assignedCsId);
-    if (order.mediaBuyerId && order.mediaBuyerId !== order.assignedCsId) {
-      affectedStaff.push(order.mediaBuyerId);
-    }
-
-    // Get applicable penalty rate from their commission plans
-    for (const staffId of affectedStaff) {
-      const userRows = await this.db
-        .select({ role: schema.users.role })
-        .from(schema.users)
-        .where(eq(schema.users.id, staffId))
-        .limit(1);
-
-      const role = userRows[0]?.role;
-      if (!role) continue;
-
-      const planRows = await this.db
+      // Get the order to find affected staff
+      const orderRows = await tx
         .select()
-        .from(schema.commissionPlans)
-        .where(
-          and(
-            eq(schema.commissionPlans.role, role),
-            lte(schema.commissionPlans.effectiveFrom, new Date()),
-          ),
-        )
-        .orderBy(desc(schema.commissionPlans.effectiveFrom))
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
         .limit(1);
 
-      const plan = planRows[0];
-      const rules = (plan?.rules ?? {}) as { penaltyPerReturn?: number; perOrderRate?: number };
+      const order = orderRows[0];
+      if (!order) return notifications;
 
-      // Use penalty rate if set, otherwise use per-order rate as the clawback amount
-      const clawbackAmount = rules.penaltyPerReturn ?? rules.perOrderRate ?? 0;
-      if (clawbackAmount <= 0) continue;
+      const affectedStaff: string[] = [];
+      if (order.assignedCsId) affectedStaff.push(order.assignedCsId);
+      if (order.mediaBuyerId && order.mediaBuyerId !== order.assignedCsId) {
+        affectedStaff.push(order.mediaBuyerId);
+      }
 
-      await this.db
-        .insert(schema.earningsAdjustments)
-        .values({
-          staffId,
-          amount: (-clawbackAmount).toFixed(2),
-          category: 'CLAWBACK',
-          reason: `Return clawback for order ${orderId.slice(0, 8)}`,
-        });
+      // Get applicable penalty rate from their commission plans
+      for (const staffId of affectedStaff) {
+        const userRows = await tx
+          .select({ role: schema.users.role })
+          .from(schema.users)
+          .where(eq(schema.users.id, staffId))
+          .limit(1);
 
-      // Notify the staff member
-      this.events.emitToUser(staffId, 'hr:clawback', {
-        orderId,
-        amount: clawbackAmount,
-      });
+        const role = userRows[0]?.role;
+        if (!role) continue;
+
+        const planRows = await tx
+          .select()
+          .from(schema.commissionPlans)
+          .where(
+            and(
+              eq(schema.commissionPlans.role, role),
+              lte(schema.commissionPlans.effectiveFrom, new Date()),
+            ),
+          )
+          .orderBy(desc(schema.commissionPlans.effectiveFrom))
+          .limit(1);
+
+        const plan = planRows[0];
+        const rules = (plan?.rules ?? {}) as { penaltyPerReturn?: number; perOrderRate?: number };
+
+        // Use penalty rate if set, otherwise use per-order rate as the clawback amount
+        const clawbackAmount = rules.penaltyPerReturn ?? rules.perOrderRate ?? 0;
+        if (clawbackAmount <= 0) continue;
+
+        await tx
+          .insert(schema.earningsAdjustments)
+          .values({
+            staffId,
+            amount: (-clawbackAmount).toFixed(2),
+            category: 'CLAWBACK',
+            reason: `Return clawback for order ${orderId.slice(0, 8)}`,
+          });
+
+        notifications.push({ staffId, amount: clawbackAmount });
+      }
+
+      return notifications;
+    });
+
+    // Emit notifications outside the transaction
+    for (const { staffId, amount } of clawbacks) {
+      this.events.emitToUser(staffId, 'hr:clawback', { orderId, amount });
     }
   }
 
@@ -601,22 +606,23 @@ export class HrService {
   // ============================================
 
   async createAdjustment(input: CreateAdjustmentInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    const adj = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.earningsAdjustments)
+        .values({
+          staffId: input.staffId,
+          amount: String(input.amount),
+          category: input.category,
+          reason: input.reason,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.earningsAdjustments)
-      .values({
-        staffId: input.staffId,
-        amount: String(input.amount),
-        category: input.category,
-        reason: input.reason,
-      })
-      .returning();
-
-    const adj = rows[0];
-    if (!adj) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create adjustment' });
-    }
+      const inserted = rows[0];
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create adjustment' });
+      }
+      return inserted;
+    });
 
     // Notify staff when clawback/deduction is created (they need to know)
     const isDeduction = ['CLAWBACK', 'DEDUCTION'].includes(input.category) || Number(input.amount) < 0;
@@ -636,40 +642,41 @@ export class HrService {
   }
 
   async approveAdjustment(input: ApproveAdjustmentInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    const row = await withActor(this.db, { id: actorId }, async (tx) => {
+      const updateFields: Record<string, unknown> = {};
+      if (input.approved) {
+        updateFields['approvedBy'] = actorId;
+      }
 
-    const updateFields: Record<string, unknown> = {};
-    if (input.approved) {
-      updateFields['approvedBy'] = actorId;
-    }
+      const rows = await tx
+        .update(schema.earningsAdjustments)
+        .set(updateFields)
+        .where(eq(schema.earningsAdjustments.id, input.adjustmentId))
+        .returning();
 
-    const rows = await this.db
-      .update(schema.earningsAdjustments)
-      .set(updateFields)
-      .where(eq(schema.earningsAdjustments.id, input.adjustmentId))
-      .returning();
-
-    if (!rows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Adjustment not found' });
-    }
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Adjustment not found' });
+      }
+      return rows[0];
+    });
 
     // Notify staff when add-on/bonus is approved (or clawback/deduction is applied)
     if (input.approved) {
-      const isDeduction = Number(rows[0].amount) < 0 || ['CLAWBACK', 'DEDUCTION'].includes(rows[0].category);
+      const isDeduction = Number(row.amount) < 0 || ['CLAWBACK', 'DEDUCTION'].includes(row.category);
       this.notifications
         .create({
-          userId: rows[0].staffId,
+          userId: row.staffId,
           type: isDeduction ? 'hr:deduction_applied' : 'hr:addon_approved',
           title: isDeduction ? 'Deduction applied' : 'Add-on approved',
           body: isDeduction
             ? 'A deduction has been applied to your earnings.'
             : 'Your add-on earnings have been approved.',
-          data: { adjustmentId: rows[0].id, amount: rows[0].amount, category: rows[0].category },
+          data: { adjustmentId: row.id, amount: row.amount, category: row.category },
         })
         .catch(() => {});
     }
 
-    return rows[0];
+    return row;
   }
 
   async listAdjustments(staffId?: string) {
@@ -690,22 +697,22 @@ export class HrService {
   // ============================================
 
   async setSettlementConfig(input: SetSettlementConfigInput, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.settlementConfigs)
+        .values({
+          windowType: input.windowType,
+          startDay: input.startDay,
+          createdBy: actorId,
+        })
+        .returning();
 
-    const rows = await this.db
-      .insert(schema.settlementConfigs)
-      .values({
-        windowType: input.windowType,
-        startDay: input.startDay,
-        createdBy: actorId,
-      })
-      .returning();
-
-    const config = rows[0];
-    if (!config) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create settlement config' });
-    }
-    return config;
+      const config = rows[0];
+      if (!config) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create settlement config' });
+      }
+      return config;
+    });
   }
 
   async getActiveSettlementConfig() {

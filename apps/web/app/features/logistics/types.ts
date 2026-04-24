@@ -13,6 +13,7 @@ export interface Location {
   name: string;
   address: string;
   coordinates: string | null;
+  whatsappGroupLink?: string | null;
   status: string;
   dispatchLocked?: boolean;
   createdAt: string;

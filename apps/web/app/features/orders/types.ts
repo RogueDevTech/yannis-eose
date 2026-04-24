@@ -141,5 +141,7 @@ export interface OrderDetailPageExtraProps {
   userId: string;
   permissions: string[];
   csAgentsForAssign?: Array<{ id: string; name: string }>;
-  logisticsLocations?: Array<{ id: string; name: string; address: string | null }>;
+  logisticsLocations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }>;
+  /** WhatsApp group dispatch templates — loaded for the CS "Share to 3PL" flow. */
+  logisticsDispatchTemplates?: Array<{ id: string; name: string; body: string }>;
 }

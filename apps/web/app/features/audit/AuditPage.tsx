@@ -833,6 +833,19 @@ function formatLeafValue(
   if (isUUID(val) && (key.endsWith('_id') || key === 'created_by' || key === 'approved_by' || key === 'locked_by')) {
     const actor = actorNames[strVal];
     if (actor) return `${actor.name} (${ROLE_LABELS[actor.role] ?? actor.role})`;
+    // Linkable ID keys — audit detail shows the truncated UUID that jumps straight to the record.
+    // Keep the truncated visual for density; the <Link> carries the full id via the URL.
+    if (key === 'product_id') {
+      return (
+        <Link
+          to={`/admin/products/${strVal}`}
+          className="underline decoration-app-fg-muted underline-offset-2 hover:decoration-app-fg hover:text-app-fg"
+          title={strVal}
+        >
+          {strVal.slice(0, 8)}...
+        </Link>
+      );
+    }
     return `${strVal.slice(0, 8)}...`;
   }
   if (isISODate(val)) return formatDate(strVal);

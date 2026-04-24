@@ -121,6 +121,35 @@ Every NestJS service method that performs a write operation must:
 
 This ensures the PostgreSQL trigger that manages the temporal audit trail knows WHO made the change. Never skip this step. Never hardcode a user ID.
 
+**Use `withActor()` — never bare `pgClient.set_config`:**
+The canonical pattern lives in [apps/api/src/common/db/with-actor.ts](apps/api/src/common/db/with-actor.ts):
+
+```ts
+import { withActor } from '../common/db/with-actor';
+
+async someWrite(input: X, actor: SessionUser) {
+  return withActor(this.db, actor, async (tx) => {
+    await tx.insert(schema.orders).values({ ... });
+    await tx.update(schema.users).set({ ... });
+    return result;
+  });
+}
+```
+
+`withActor()` opens a drizzle transaction, runs `SET LOCAL yannis.current_user_id` as the first statement, then executes the callback on the pinned connection. Every write inside the callback is attributed to the actor.
+
+**Why bare `pgClient.set_config(..., true)` is BROKEN (seen in the wild, flagged 2026-04-24):**
+postgres.js uses a pooled connection pool (default `max: 5`). Running
+```ts
+await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
+// ... this.db.insert(...) or this.db.transaction(...)
+```
+sets the variable on ONE pooled connection for the duration of that bare SELECT's auto-commit transaction — **the setting dies the instant the SELECT completes**. The subsequent drizzle write lands on whatever pooled connection is available (often different, never guaranteed), where `yannis.current_user_id` is empty. The trigger records `NULL`, and the audit UI displays "System" for the actor. This is silent — it *sometimes* works when the pool reuses the same connection, masking the bug until someone inspects the audit trail.
+
+The fix is ALWAYS to put `SET LOCAL` inside the same drizzle transaction as the writes (use `withActor()` or `tx.execute(sql\`SET LOCAL...\`)` as the first statement in an existing `this.db.transaction(...)` call).
+
+**Migration status (2026-04-24):** inventory, products, and settings services have been converted. Cart, logistics, marketing, hr, finance, orders, users, voip, permission-requests services still have `this.pgClient\`SELECT set_config...\`` callsites and will intermittently show "System" in audit until converted. Convert them when touching those service methods for other reasons — the refactor is mechanical but multi-file and should not be rushed.
+
 ### Numeric Columns, Temporal Triggers, and History Table Sync (Troubleshooting)
 
 **Problem:** Drizzle/Postgres.js can serialize numeric values as text. The `yannis_capture_history_insert` trigger copies new rows into `*_history` tables. When numeric columns arrive as text, PostgreSQL errors: `column "X" is of type numeric but expression is of type text`.
@@ -167,10 +196,10 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 | CS_ASSIGNED | CANCELLED | CS/HoS cancels | Mandatory reason note (min 10 chars) | None — stock was never reserved |
 | CS_ENGAGED | CONFIRMED | CS clicks Confirm | VOIP call_duration > 15 seconds | Stock: Available → Reserved |
 | CS_ENGAGED | CANCELLED | CS clicks Cancel | Mandatory reason note (min 10 chars) | None — stock was never reserved |
-| CONFIRMED | ALLOCATED | Logistics assigns to 3PL | 3PL location must have available stock | Stock: Reserved → Allocated_to_3PL |
+| CONFIRMED | ALLOCATED | **Assigned CS agent**, Logistics, or admin assigns to 3PL | 3PL location must have available stock | Stock: Reserved → Allocated_to_3PL |
 | ALLOCATED | DISPATCHED | 3PL rider picks up | Rider must be assigned | Stock: Allocated → In_Transit |
 | DISPATCHED | IN_TRANSIT | Rider confirms departure | GPS ping logged | Delivery timer starts |
-| IN_TRANSIT | DELIVERED | Rider confirms delivery | OTP or signature capture | Stock: Deducted. Commission: Triggered. Revenue: Recognized |
+| IN_TRANSIT | DELIVERED | Rider confirms delivery **OR** assigned CS agent confirms via follow-up call | Rider path: OTP/signature/GPS; CS path: mandatory delivery note ≥10 chars (screenshot optional). 3PL not in-app yet — CS is the de facto rider-proxy. | Stock: Deducted. Commission: Triggered. Revenue: Recognized |
 | IN_TRANSIT | PARTIALLY_DELIVERED | Rider marks partial | Must specify delivered qty vs returned qty | Split: delivered portion completes, returned portion enters return flow |
 | IN_TRANSIT | RETURNED | Rider marks rejected | Mandatory return reason | Return flow begins |
 | RETURNED | RESTOCKED | 3PL marks sellable | Quality check by 3PL manager | Stock: +1 at 3PL local inventory |
@@ -197,14 +226,32 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 ### When Building the CS Module
 - Phone numbers in API responses must be masked: 0803****1234. The full number is NEVER sent to the frontend
 - The Call button sends a call_token to the VOIP provider, which connects the two parties. The frontend never receives the raw number
-- Three dispatch modes configurable by HoCS via system_settings (`dispatch_mode`): `load_balanced` (default), `performance`, `claim`
-  - `load_balanced` / `performance`: algorithm auto-pushes orders to agents
-  - `claim`: orders sit in an open pool; reps race to claim them via `claimOrder()` with atomic Redis/Postgres lock
-  - Claim cap (`claim_cap` system setting, default 2): rep blocked from claiming if they have ≥ cap unconfirmed orders — enforced server-side
+- Four dispatch modes configurable by HoCS via `system_settings` (`CS_DISPATCH_STRATEGY.strategy`). Default is `manual`. UI must list them in this order:
+  - `manual` (DEFAULT): no auto-assignment and no claim broadcast. Orders land as `UNPROCESSED` with `csAgentId = null` and wait for HoCS / SuperAdmin / Branch Admin to assign via Hot Swap. Agents cannot pull orders.
+  - `load_balanced`: algorithm auto-pushes to agent with fewest pending, tie-breaker most idle.
+  - `performance`: prioritises agents with higher delivery + confirmation rates (this month).
+  - `claim`: orders sit in an open pool; reps race to claim via `claimOrder()` with atomic Redis/Postgres lock.
+  - Claim cap (`CS_CLAIM_CAP.cap`, default 2): rep blocked from claiming if they have ≥ cap unconfirmed orders — enforced server-side. Only applies in `claim` mode.
+  - CEO directive: `manual` is the default so Head of CS retains full control over order distribution. Do NOT change the default without an explicit product decision.
 - The Confirm and No Answer buttons must be DISABLED in the UI until the system receives a VOIP webhook confirming call_duration > 15 seconds for that specific order
 - **Order reassignment is a management action only.** CS agents CANNOT transfer orders between themselves. Only HoCS and SuperAdmin can reassign via Hot Swap. The `order_transfer_requests` table and all agent-initiated transfer UI/procedures are REMOVED.
 - Head of CS can Hot Swap — select orders from one agent and mass-reassign to another
 - When CS updates an order (address change, quantity change, upsell), the system creates a VERSION SNAPSHOT, not an in-place edit. The original data is preserved in the temporal table. The order history timeline shows every change with the agent's name and timestamp
+
+**CS owns the order end-to-end (rider-proxy model):**
+Because the 3PL partners are not in-app yet, the assigned CS agent is the de facto operator through delivery. They:
+- Allocate to a 3PL (`CONFIRMED → ALLOCATED`) themselves — see "Share to 3PL" below. Authorized: assigned CS agent, HoCS, HoLogistics, LogisticsManager, SuperAdmin, Admin.
+- Confirm delivery via follow-up call (`IN_TRANSIT → DELIVERED`). Authorized: assigned CS agent, HoLogistics, SuperAdmin, Admin (plus TPL_MANAGER with resolveReceiptUrl). When CS is the actor, a `deliveryNote` of at least 10 characters is mandatory; a screenshot (`deliveryProofUrl`) is optional. Both are stored on the order (`delivery_notes`, `delivery_proof_url`).
+- COMPLETED stays with the accountant — set only when remittance is received/reconciled. CS never marks COMPLETED. Do not shortcut this.
+
+**Share to 3PL (WhatsApp group flow):**
+- 3PL locations carry an optional `whatsapp_group_link` (added in migration 0058). Logistics partners page form accepts it at creation time. Only `chat.whatsapp.com/...` or `wa.me/...` URLs are valid.
+- `message_channel` enum gained `WHATSAPP_GROUP` so `message_templates` and `outbound_messages` can carry dispatch-to-3PL messages without conflating them with customer-facing SMS/WhatsApp DMs.
+- tRPC: `messaging.shareToLogistics({ orderId, locationId, templateId })` renders the template, writes `outbound_messages` + `order_timeline_events` in one transaction, returns `{ renderedBody, groupLink, locationName }`.
+- UI flow ("Share to 3PL" on Order detail, visible when order is `CONFIRMED` or `ALLOCATED` AND at least one location has a group link AND at least one `WHATSAPP_GROUP` template exists): user picks location + template, hits "Copy & open group". Client copies rendered body to clipboard, then `window.open(groupLink)`. User pastes + sends manually in the group.
+- WhatsApp platform limit: group invite links (`chat.whatsapp.com/...`) **cannot** carry a pre-filled `?text=` payload. Do NOT try to deep-link with text — it's silently ignored. The two-step (copy + open) is the best one-click UX available and is intentional.
+- Placeholders supported in WHATSAPP_GROUP templates: all the CS ones (`{{customer_name}}`, `{{order_id}}`, `{{product_name}}`, `{{delivery_address}}`, `{{estimated_date}}`) plus `{{quantity}}`, `{{total_amount}}`, `{{payment_status}}`. Server-side allowlist in `messaging.router.ts::ALLOWED_TEMPLATE_PLACEHOLDERS` is the source of truth.
+- Double-entry is expected for the first 6 months while 3PL managers learn to trust in-app notifications — the Share button exists to make that copy/paste step take 2 seconds instead of 30, not to replace the group chat. HoCS / HoLogistics own the template content via the existing template admin UI.
 
 **CS Communication Panel (order detail page):**
 - Three channels in one unified panel: Call (existing VOIP), SMS, WhatsApp
@@ -315,6 +362,21 @@ The push system has four layers — all must be consistent:
 - Invoices use sequential reference numbers (INV-2026-0001). Auto-generated. No manual override
 - Budget tracking: Finance Officers set budget limits per department/campaign. Requests exceeding remaining budget trigger a warning (approval still possible but requires explicit override with reason)
 
+**Finance "hat" (deputization, migration 0059 — CEO directive 2026-04-23):**
+Finance is the ONLY role that can be worn on top of another primary role. Every other role is single-assignment. The hat is org-wide and a singleton: exactly one user in the entire org holds it at a time.
+- Column on `users`: `is_finance_officer boolean not null default false`. Partial unique index `users_only_one_finance_officer` on `((1)) WHERE is_finance_officer = true` enforces the singleton at the DB layer.
+- Session payload gains `isFinanceOfficer: boolean`. `hasFinanceAccess(user)` in [apps/api/src/common/utils/strip-finance-fields.ts](apps/api/src/common/utils/strip-finance-fields.ts) returns true when `role === 'FINANCE_OFFICER'` OR `isFinanceOfficer === true` (plus the existing admin/permission paths). Column-stripping interceptor and all finance tRPC gates honour this automatically.
+- Assignment is atomic-swap: `UsersService.createStaff` / `update` clear the flag from the current holder in the same transaction before writing the new one. Do NOT try to enforce the singleton purely with the DB index — the app-level pre-clear is what lets the swap succeed without conflict. The index is the safety net.
+- UI: the "Finance hat" checkbox appears on the user create form and the edit tab in [apps/web/app/features/users/UserCreatePage.tsx](apps/web/app/features/users/UserCreatePage.tsx) + [apps/web/app/features/users/UserDetailPage.tsx](apps/web/app/features/users/UserDetailPage.tsx). The form queries `users.getCurrentFinanceOfficer` at load time and shows a warning if another user already holds the hat — the save still goes through because the service does the swap.
+- Primary role of `FINANCE_OFFICER` does NOT need the hat (role already grants the same powers). The UI hides the checkbox for that role.
+- User detail header shows a `+ Finance hat` badge when the flag is set. The "Finance Activity" tab is visible for either `role === 'FINANCE_OFFICER'` OR `isFinanceOfficer === true`.
+- Commission/payroll attribution is UNCHANGED — the hat is a capability grant, not a second commission bucket. Mary (Stock Manager + hat) still earns on her Stock Manager commission plan, not a Finance one.
+- Assignment notifications are MANDATORY. When the hat moves, both parties are notified via the standard in-app + push + email channel:
+  - New holder gets `account:finance_hat_assigned` ("You now hold the Finance hat").
+  - Displaced holder (if any) gets `account:finance_hat_revoked` ("Finance hat reassigned to <name>").
+  - Plain revoke (hat turned off without reassignment) also sends `account:finance_hat_revoked` to the user losing it.
+  - Fired from `UsersService.notifyFinanceHatChange()` AFTER the swap transaction commits — notifications must never roll back the assignment on failure.
+
 ### When Building the HR and Payroll Module
 - Settlement Window is CONFIGURABLE by HR: Weekly, Bi-weekly, or Monthly
 - Commissions are calculated based on DELIVERED_AT timestamp, NOT CREATED_AT. A January order delivered in February is paid in the February cycle
@@ -343,7 +405,7 @@ The push system has four layers — all must be consistent:
 | Logistics Manager | Assigned location orders | No | No | No | No |
 | 3PL Manager | Own location orders + stock only | No | No | No | No |
 | 3PL Rider | Own assigned deliveries only | No | No (masked) | No | No |
-| Warehouse Manager | Inventory, stock movements, procurement | No | No | No | No |
+| Stock Manager | Inventory, stock movements, procurement | No | No | No | No |
 | HR Manager | All staff payouts, commission configs | No | No | No | Yes |
 
 **SuperAdmin-only (Admin cannot):**
@@ -359,6 +421,14 @@ The push system has four layers — all must be consistent:
 - Finance field stripping: `hasFinanceAccess` returns true for both.
 - Branch visibility: `canViewAllBranches` returns true for both.
 - `SENSITIVE_ROLES` includes both `SUPER_ADMIN` and `ADMIN` — creating/promoting anyone into an admin-level role generates a `permission_request` for SuperAdmin approval.
+
+**One active holder per branch (uniqueness rule):**
+Four roles are limited to at most one active holder per branch: `HEAD_OF_CS`, `HEAD_OF_MARKETING`, `HEAD_OF_LOGISTICS`, and **`HR_MANAGER`** (added 2026-04-23 per CEO directive, migration 0060). Enforcement lives at two layers:
+- **Service:** `UsersService.createStaff` and `UsersService.update` check the `HEAD_ROLES` tuple and reject with a friendly `CONFLICT` message (`"Branch already has an active Hr Manager (Mary). Deactivate them first."`) before writing.
+- **DB:** partial unique indexes `uq_active_head_of_*_per_branch` + `uq_active_hr_manager_per_branch` (migrations 0056 + 0060) — safety net catches any write path that skips the service.
+- **UI proactive warning:** `users.listActiveHeads` tRPC returns all current holders; user create / edit pages render an inline warning BEFORE submit if the admin picks a role+branch combo that's already taken. Constant `HEAD_ROLES` is mirrored in `apps/web/app/features/users/UserCreatePage.tsx` and `UserDetailPage.tsx`.
+- Note on naming: the constant stays `HEAD_ROLES` even though `HR_MANAGER` isn't literally a "head" — renaming would churn every call site for no functional benefit.
+- This is the **per-branch** uniqueness pattern, distinct from the **org-wide singleton** pattern used by the Finance hat (`is_finance_officer` flag). Do not conflate the two.
 
 ---
 
@@ -503,6 +573,20 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT create a user with role `SUPER_ADMIN` through any path other than the public `/auth/setup` endpoint. `createStaff` rejects it; the enum exists only to persist the initial singleton. If you need to transfer ownership, implement an explicit transfer mutation — do not reuse `createStaff` or `update`.
 - Do NOT let an `ADMIN` directly create or deactivate another `ADMIN`/`SUPER_ADMIN`. The service layer (`users.service.ts`) funnels such attempts through the `permission_requests` approval flow so the SuperAdmin retains unique authority over who holds admin-level access. Do not add shortcut code paths around this.
 - Do NOT set `font-size` directly on any element when you mean "scale the app" — the root font-size is controlled by `applyFontScale()` / the inline boot script and every Tailwind utility is rem-based. Per-element `font-size` will break the scale.
+- Do NOT change the default dispatch mode from `manual` without an explicit product decision. CEO wants HoCS in full control of distribution; `manual` is the default and must be listed first in the Settings UI.
+- Do NOT let CS mark orders as `COMPLETED`. COMPLETED is the accountant's signal that remittance was received + reconciled. CS's last action in the lifecycle is `DELIVERED`.
+- Do NOT remove the mandatory `deliveryNote` (min 10 chars) when CS marks an order delivered. It's the paper trail against COD dispute ("customer says they didn't receive it"). The screenshot (`deliveryProofUrl`) stays optional.
+- Do NOT attempt to pre-fill a WhatsApp **group** invite link with `?text=` — WhatsApp ignores it for groups. Only `wa.me/<number>` links support pre-fill. The Share-to-3PL flow intentionally copies to clipboard + opens the group; do not try to "fix" this with a deep-link.
+- Do NOT use `message_channel = 'WHATSAPP'` for 3PL dispatch messages. `WHATSAPP` is customer-facing DMs; use `WHATSAPP_GROUP` for 3PL coordination so outbound_messages analytics stay meaningful.
+- Do NOT add placeholders to templates outside `ALLOWED_TEMPLATE_PLACEHOLDERS` in `messaging.router.ts`. Unknown placeholders are rejected at template save time; adding them elsewhere will silently pass through unrendered.
+- Do NOT generalize the Finance "hat" pattern into a generic multi-role system. Finance is intentionally the ONLY role that can be layered on top of a primary role — the CEO asked for this specifically to cover absent-accountant scenarios. Adding other hats duplicates the complexity of multi-role auth without the use case to justify it.
+- Do NOT set `users.is_finance_officer = true` on more than one user in a single statement. The atomic-swap in `UsersService` clears the current holder before setting the new one; bypassing it will hit the `users_only_one_finance_officer` unique index.
+- Do NOT write `user.role === 'FINANCE_OFFICER'` as a standalone finance-access check. Use `hasFinanceAccess(user)` from [apps/api/src/common/utils/strip-finance-fields.ts](apps/api/src/common/utils/strip-finance-fields.ts) so both the primary role AND the Finance hat are honoured.
+- Do NOT move the Finance hat silently. The new holder and the displaced holder must each receive an `account:finance_hat_assigned` / `account:finance_hat_revoked` notification via `notifyFinanceHatChange()`. Skipping the notification breaks the audit expectation CEO set when approving this feature.
+- Do NOT serve the heavy CEO Executive Overview on `/admin` for SuperAdmin/Admin. The landing page is intentionally lightweight (`dashboard.quickOverview`); the full report lives at `/admin/ceo` and is reached via the card on the landing. Reverting to "show everything on /admin" reintroduces the slow-first-paint problem flagged 2026-04-23.
+- Do NOT query a materialized view without applying the user's date filter to it. Every cost line in `getFastProfitReport` must be scoped by `startDate`/`endDate` (via `spend_date`, `period_month`, `delivery_date`, etc.). An unfiltered MV query silently returns all-time totals and corrupts the CEO dashboard.
+- Do NOT set the audit actor with `this.pgClient\`SELECT set_config('yannis.current_user_id', ..., true)\``. It runs outside any drizzle transaction and the setting dies before the next `this.db.*` call — writes get attributed to "System" in the audit trail. Always use `withActor(this.db, actor, async (tx) => { ... })` from `apps/api/src/common/db/with-actor.ts` and route every write through `tx`, never `this.db`, inside the callback. See the "Actor Injection Pattern" section for the full rationale.
+- Do NOT remove `HR_MANAGER` from the `HEAD_ROLES` tuples in `users.service.ts` or the frontend equivalents. CEO directive 2026-04-23: HR follows the same one-per-branch rule as `HEAD_OF_CS` / `HEAD_OF_MARKETING` / `HEAD_OF_LOGISTICS`. Migration 0060 enforces it at the DB layer too.
 
 ---
 
@@ -517,6 +601,21 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 | Profit/Loss Report Generation | < 3 seconds for 100k records (use Materialized Views) |
 | Order State Transition (API) | < 500ms |
 | Offline Sync (Rider PWA) | Auto-sync within 30 seconds of network recovery |
+| Admin landing (`/admin`) for SuperAdmin/Admin | < 200ms (single `dashboard.quickOverview` call, no MVs) |
+| Executive Overview (`/admin/ceo`) | < 2s cold, < 500ms cached (60s Redis cache + 15-min MV refresh) |
+
+---
+
+## Dashboard architecture (2026-04-23)
+
+Two-page split for admin-level users so landing on `/admin` stays fast:
+
+- **`/admin`** — lightweight "quick overview" for SuperAdmin and Admin. One tRPC call (`dashboard.quickOverview`), renders today's status counts, active orders, pending approvals, and prominent jumps to the rest of the app. No materialized views, no profit aggregation, no charts. Built in `apps/web/app/features/dashboard/AdminQuickDashboard.tsx`. All non-admin roles continue to use the role-specific dashboards (CS, Finance, Marketing, etc.) at the same route.
+- **`/admin/ceo`** — full Executive Overview. Heavy (profit report via materialized views, time series, pipeline charts, media buyer / CS leaderboards, branch breakdown). 60-second Redis cache keyed on branch + date range. Always linked from `/admin` via a prominent "Executive Overview" card. Served by `dashboard.ceoOverview` + `dashboard.ceoOverviewTimeSeries` + `dashboard.orderPipelineChart` + `dashboard.ceoBranchBreakdown`.
+
+**Materialized view refresh:** `FinanceService.refreshMaterializedViewsCron()` fires every 15 minutes via `@Cron('0 */15 * * * *')`. Without this, `mv_profit_summary` / `mv_ad_spend_summary` / `mv_commission_summary` / `mv_order_pipeline` drift out of sync with live data and the Executive Overview shows stale numbers. Do NOT remove the cron without replacing it (e.g. post-commit hooks, streaming CDC).
+
+**Fast-path filter pitfall:** `FinanceService.getFastProfitReport` reads from materialized views. Every cost category must apply the user's date filter to the MV — ad spend uses `spend_date`, commission uses `period_month` (bucketed by `DATE_TRUNC('month', period_start)`). An earlier bug ignored the date filter for commission, inflating CEO dashboard numbers to all-time totals. Full audit of MV queries lives in `apps/api/src/finance/finance.service.ts::getFastProfitReport`.
 
 ---
 

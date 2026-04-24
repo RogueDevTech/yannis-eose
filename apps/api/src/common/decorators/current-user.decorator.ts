@@ -14,6 +14,11 @@ export interface SessionUser {
   appTheme?: string | null;
   /** Saved font scale id; undefined/null = base. */
   fontScale?: string | null;
+  /**
+   * True when this user currently wears the "Finance hat" — grants Finance Officer powers
+   * on top of their primary role. Exactly one user in the org has this at any time.
+   */
+  isFinanceOfficer?: boolean;
 }
 
 /**

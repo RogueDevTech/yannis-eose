@@ -162,7 +162,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
       case 'HEAD_OF_LOGISTICS':
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:logistics`);
         break;
-      case 'WAREHOUSE_MANAGER':
+      case 'STOCK_MANAGER':
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:logistics`);
         break;
       case 'HEAD_OF_MARKETING':

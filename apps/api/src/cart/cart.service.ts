@@ -2,11 +2,15 @@ import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { eq, and, lt, desc, count, gte, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT } from '../database/database.module';
+import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
+import { withActor } from '../common/db/with-actor';
+
+type CartDbOrTx =
+  | PostgresJsDatabase<typeof schema>
+  | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
 
 function maskPhone(phoneHash: string): string {
   if (phoneHash.length <= 8) return '****';
@@ -17,7 +21,6 @@ function maskPhone(phoneHash: string): string {
 export class CartService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     private readonly events: EventsService,
   ) {}
 
@@ -46,59 +49,62 @@ export class CartService {
     },
     actorId?: string | null,
   ) {
-    if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-    }
-    // Upsert key: campaign_id + phone_hash — one active PENDING cart per person per campaign.
-    // If they change product/offer mid-session we update the existing row rather than creating a duplicate.
-    const existing = await this.db
-      .select()
-      .from(schema.cartAbandonments)
-      .where(
-        and(
-          eq(schema.cartAbandonments.campaignId, input.campaignId),
-          eq(schema.cartAbandonments.customerPhoneHash, input.customerPhoneHash),
-          eq(schema.cartAbandonments.status, 'PENDING'),
-        ),
-      )
-      .limit(1);
+    const run = async (db: CartDbOrTx) => {
+      // Upsert key: campaign_id + phone_hash — one active PENDING cart per person per campaign.
+      const existing = await db
+        .select()
+        .from(schema.cartAbandonments)
+        .where(
+          and(
+            eq(schema.cartAbandonments.campaignId, input.campaignId),
+            eq(schema.cartAbandonments.customerPhoneHash, input.customerPhoneHash),
+            eq(schema.cartAbandonments.status, 'PENDING'),
+          ),
+        )
+        .limit(1);
 
-    const now = new Date();
-    const existingRow = existing[0];
-    const branchId = await this.getCampaignBranchId(input.campaignId);
-    if (existingRow) {
-      await this.db
-        .update(schema.cartAbandonments)
-        .set({
+      const now = new Date();
+      const existingRow = existing[0];
+      if (existingRow) {
+        await db
+          .update(schema.cartAbandonments)
+          .set({
+            customerName: input.customerName,
+            productId: input.productId,
+            offerLabel: input.offerLabel ?? null,
+            mediaBuyerId: input.mediaBuyerId ?? existingRow.mediaBuyerId,
+            updatedAt: now,
+          })
+          .where(eq(schema.cartAbandonments.id, existingRow.id));
+        return { id: existingRow.id, created: false as const };
+      }
+
+      const [row] = await db
+        .insert(schema.cartAbandonments)
+        .values({
+          campaignId: input.campaignId,
+          mediaBuyerId: input.mediaBuyerId ?? null,
           customerName: input.customerName,
+          customerPhoneHash: input.customerPhoneHash,
           productId: input.productId,
           offerLabel: input.offerLabel ?? null,
-          mediaBuyerId: input.mediaBuyerId ?? existingRow.mediaBuyerId,
-          updatedAt: now,
+          status: 'PENDING',
         })
-        .where(eq(schema.cartAbandonments.id, existingRow.id));
-      this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
-      return { id: existingRow.id, created: false };
-    }
+        .returning({ id: schema.cartAbandonments.id });
 
-    const [row] = await this.db
-      .insert(schema.cartAbandonments)
-      .values({
-        campaignId: input.campaignId,
-        mediaBuyerId: input.mediaBuyerId ?? null,
-        customerName: input.customerName,
-        customerPhoneHash: input.customerPhoneHash,
-        productId: input.productId,
-        offerLabel: input.offerLabel ?? null,
-        status: 'PENDING',
-      })
-      .returning({ id: schema.cartAbandonments.id });
+      if (!row) {
+        throw new Error('Failed to create cart');
+      }
+      return { id: row.id, created: true as const };
+    };
 
-    if (!row) {
-      throw new Error('Failed to create cart');
-    }
+    const result = actorId
+      ? await withActor(this.db, { id: actorId }, (tx) => run(tx))
+      : await run(this.db);
+
+    const branchId = await this.getCampaignBranchId(input.campaignId);
     this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
-    return { id: row.id, created: true };
+    return result;
   }
 
   /**
@@ -106,26 +112,30 @@ export class CartService {
    * When actorId is provided (e.g. from order create flow), audit trail records it.
    */
   async convert(cartId: string, orderId: string, actorId?: string | null): Promise<void> {
-    if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-    }
-    const cartRows = await this.db
-      .select({ campaignId: schema.cartAbandonments.campaignId })
-      .from(schema.cartAbandonments)
-      .where(eq(schema.cartAbandonments.id, cartId))
-      .limit(1);
-    const branchId = cartRows[0]?.campaignId
-      ? await this.getCampaignBranchId(cartRows[0].campaignId)
-      : null;
+    const run = async (db: CartDbOrTx) => {
+      const cartRows = await db
+        .select({ campaignId: schema.cartAbandonments.campaignId })
+        .from(schema.cartAbandonments)
+        .where(eq(schema.cartAbandonments.id, cartId))
+        .limit(1);
 
-    await this.db
-      .update(schema.cartAbandonments)
-      .set({
-        status: 'CONVERTED',
-        convertedOrderId: orderId,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.cartAbandonments.id, cartId));
+      await db
+        .update(schema.cartAbandonments)
+        .set({
+          status: 'CONVERTED',
+          convertedOrderId: orderId,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.cartAbandonments.id, cartId));
+
+      return cartRows[0]?.campaignId ?? null;
+    };
+
+    const campaignId = actorId
+      ? await withActor(this.db, { id: actorId }, (tx) => run(tx))
+      : await run(this.db);
+
+    const branchId = campaignId ? await this.getCampaignBranchId(campaignId) : null;
     this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
   }
 
@@ -141,25 +151,30 @@ export class CartService {
     orderId: string,
     actorId?: string | null,
   ): Promise<void> {
+    const run = async (db: CartDbOrTx) =>
+      db
+        .update(schema.cartAbandonments)
+        .set({
+          status: 'CONVERTED',
+          convertedOrderId: orderId,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.cartAbandonments.campaignId, campaignId),
+            eq(schema.cartAbandonments.customerPhoneHash, customerPhoneHash),
+            eq(schema.cartAbandonments.productId, productId),
+            inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
+          ),
+        );
+
     if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+      await withActor(this.db, { id: actorId }, (tx) => run(tx));
+    } else {
+      await run(this.db);
     }
+
     const branchId = await this.getCampaignBranchId(campaignId);
-    await this.db
-      .update(schema.cartAbandonments)
-      .set({
-        status: 'CONVERTED',
-        convertedOrderId: orderId,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(schema.cartAbandonments.campaignId, campaignId),
-          eq(schema.cartAbandonments.customerPhoneHash, customerPhoneHash),
-          eq(schema.cartAbandonments.productId, productId),
-          inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
-        ),
-      );
     this.events.emitToRoom('cs-all', 'cart:updated', {}, branchId);
   }
 
@@ -182,20 +197,22 @@ export class CartService {
    * When actorId is provided (e.g. from tRPC or SYSTEM_ACTOR_ID for cron), audit trail records it.
    */
   async markAbandoned(thresholdMinutes: number, actorId?: string | null): Promise<number> {
-    if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-    }
     const threshold = new Date(Date.now() - thresholdMinutes * 60 * 1000);
-    const result = await this.db
-      .update(schema.cartAbandonments)
-      .set({ status: 'ABANDONED', updatedAt: new Date() })
-      .where(
-        and(
-          eq(schema.cartAbandonments.status, 'PENDING'),
-          lt(schema.cartAbandonments.updatedAt, threshold),
-        ),
-      )
-      .returning({ id: schema.cartAbandonments.id, campaignId: schema.cartAbandonments.campaignId });
+    const run = async (db: CartDbOrTx) =>
+      db
+        .update(schema.cartAbandonments)
+        .set({ status: 'ABANDONED', updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.cartAbandonments.status, 'PENDING'),
+            lt(schema.cartAbandonments.updatedAt, threshold),
+          ),
+        )
+        .returning({ id: schema.cartAbandonments.id, campaignId: schema.cartAbandonments.campaignId });
+
+    const result = actorId
+      ? await withActor(this.db, { id: actorId }, (tx) => run(tx))
+      : await run(this.db);
 
     if (result.length > 0) {
       const campaignIds = Array.from(new Set(result.map((row) => row.campaignId)));

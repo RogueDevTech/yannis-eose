@@ -15,6 +15,7 @@ import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
+import { shareOrderToLogistics } from '~/lib/trpc-browser';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
@@ -711,6 +712,7 @@ export function OrderDetailPage({
   permissions,
   csAgentsForAssign = [],
   logisticsLocations = [],
+  logisticsDispatchTemplates = [],
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
   const revealFetcher = useFetcher();
@@ -744,6 +746,11 @@ export function OrderDetailPage({
   const [deliverModalOpen, setDeliverModalOpen] = useState(false);
   const [deliverNote, setDeliverNote] = useState('');
   const [deliverProofUrl, setDeliverProofUrl] = useState('');
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareLocationId, setShareLocationId] = useState('');
+  const [shareTemplateId, setShareTemplateId] = useState('');
+  const [sharePending, setSharePending] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   const currentStatusIndex = STATUS_FLOW.indexOf(order.status as (typeof STATUS_FLOW)[number]);
   const actionError = (fetcher.data as { error?: string })?.error;
@@ -1242,46 +1249,76 @@ export function OrderDetailPage({
               </div>
             )}
 
-            {/* Logistics Actions — share to 3PL (CONFIRMED) or confirm delivery (IN_TRANSIT). */}
-            {(
-              (order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0) ||
-              (order.status === 'IN_TRANSIT' && canTransitionTo('DELIVERED'))
-            ) && (
-              <div className="card">
-                <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
-                <div className="space-y-2">
-                  {order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0 && (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      className="w-full"
-                      onClick={() => {
-                        setAllocateLocationId('');
-                        setAllocateModalOpen(true);
-                      }}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Allocate to 3PL
-                    </Button>
-                  )}
-                  {order.status === 'IN_TRANSIT' && canTransitionTo('DELIVERED') && (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      className="w-full"
-                      onClick={() => {
-                        setDeliverNote('');
-                        setDeliverProofUrl('');
-                        setDeliverModalOpen(true);
-                      }}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Mark delivered
-                    </Button>
-                  )}
+            {/* Logistics Actions — share/allocate when CONFIRMED or ALLOCATED, confirm delivery when IN_TRANSIT. */}
+            {(() => {
+              const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
+              const canShareToWhatsApp =
+                (order.status === 'CONFIRMED' || order.status === 'ALLOCATED') &&
+                locationsWithGroup.length > 0 &&
+                logisticsDispatchTemplates.length > 0;
+              const showCard =
+                (order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0) ||
+                (order.status === 'IN_TRANSIT' && canTransitionTo('DELIVERED')) ||
+                canShareToWhatsApp;
+              if (!showCard) return null;
+              return (
+                <div className="card">
+                  <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
+                  <div className="space-y-2">
+                    {order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        className="w-full"
+                        onClick={() => {
+                          setAllocateLocationId('');
+                          setAllocateModalOpen(true);
+                        }}
+                        disabled={fetcher.state === 'submitting'}
+                      >
+                        Allocate to 3PL
+                      </Button>
+                    )}
+                    {canShareToWhatsApp && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => {
+                          setShareError(null);
+                          // Default to the already-allocated location if set; else the first with a group link.
+                          const alreadyAllocated = order.logisticsLocationId
+                            ? locationsWithGroup.find((l) => l.id === order.logisticsLocationId)
+                            : undefined;
+                          const preselected = alreadyAllocated?.id ?? locationsWithGroup[0]?.id ?? '';
+                          setShareLocationId(preselected);
+                          setShareTemplateId(logisticsDispatchTemplates[0]?.id ?? '');
+                          setShareModalOpen(true);
+                        }}
+                        disabled={sharePending}
+                      >
+                        Share to 3PL (WhatsApp)
+                      </Button>
+                    )}
+                    {order.status === 'IN_TRANSIT' && canTransitionTo('DELIVERED') && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        className="w-full"
+                        onClick={() => {
+                          setDeliverNote('');
+                          setDeliverProofUrl('');
+                          setDeliverModalOpen(true);
+                        }}
+                        disabled={fetcher.state === 'submitting'}
+                      >
+                        Mark delivered
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS agents */}
             {canEditOrder && canPerformCSActionsOnOrder && (
@@ -1626,6 +1663,138 @@ export function OrderDetailPage({
           </div>
         </Modal>
       )}
+
+      {/* Share to 3PL modal (WhatsApp group) — Phase 4. Server renders the template, logs the
+          outbound message + timeline event, then we copy to clipboard and open the group link. */}
+      {shareModalOpen && (() => {
+        const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
+        const selectedLocation = locationsWithGroup.find((l) => l.id === shareLocationId);
+        const selectedTemplate = logisticsDispatchTemplates.find((t) => t.id === shareTemplateId);
+        // Local preview — server is the authority on the final rendered text.
+        const previewText = (selectedTemplate?.body ?? '')
+          .replace(/\{\{customer_name\}\}/g, order.customerName ?? '')
+          .replace(/\{\{order_id\}\}/g, order.id.slice(0, 8).toUpperCase())
+          .replace(/\{\{product_name\}\}/g, order.orderItems[0]?.productName ?? '')
+          .replace(/\{\{delivery_address\}\}/g, order.deliveryAddress ?? '')
+          .replace(/\{\{quantity\}\}/g, order.orderItems[0]?.quantity != null ? String(order.orderItems[0]?.quantity) : '')
+          .replace(/\{\{total_amount\}\}/g, order.totalAmount != null ? String(order.totalAmount) : '')
+          .replace(/\{\{payment_status\}\}/g, order.paymentStatus ?? '')
+          .replace(/\{\{estimated_date\}\}/g, '');
+        const canSubmit = !!shareLocationId && !!shareTemplateId && !sharePending;
+        return (
+          <Modal
+            open
+            onClose={() => setShareModalOpen(false)}
+            maxWidth="max-w-lg"
+            contentClassName="p-6 max-h-[90dvh] overflow-y-auto"
+          >
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Share to 3PL (WhatsApp)</h3>
+            <p className="text-sm text-app-fg-muted mb-3">
+              Pick a 3PL location and a template. Clicking <strong>Copy &amp; open group</strong> logs the message, copies the text to your clipboard, and opens the WhatsApp group. Paste with ⌘V / long-press then hit send.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="share-location" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                  3PL location
+                </label>
+                <select
+                  id="share-location"
+                  value={shareLocationId}
+                  onChange={(e) => setShareLocationId(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="">Select a location...</option>
+                  {locationsWithGroup.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+                {locationsWithGroup.length === 0 && (
+                  <p className="text-xs text-warning-600 mt-1">
+                    No 3PL locations have a WhatsApp group link configured. Ask Logistics to add one.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="share-template" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                  Template
+                </label>
+                <select
+                  id="share-template"
+                  value={shareTemplateId}
+                  onChange={(e) => setShareTemplateId(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="">Select a template...</option>
+                  {logisticsDispatchTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedTemplate && (
+                <div>
+                  <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                    Preview
+                  </label>
+                  <pre className="whitespace-pre-wrap text-sm p-3 rounded-lg bg-app-hover border border-app-border text-app-fg max-h-48 overflow-y-auto">
+                    {previewText}
+                  </pre>
+                </div>
+              )}
+
+              {shareError && (
+                <p className="text-sm text-danger-600 dark:text-danger-400">{shareError}</p>
+              )}
+            </div>
+
+            <div className="flex gap-2 mt-5 justify-end">
+              <Button type="button" variant="secondary" onClick={() => setShareModalOpen(false)} disabled={sharePending}>
+                Back
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!canSubmit}
+                loading={sharePending}
+                loadingText="Sharing..."
+                onClick={async () => {
+                  if (!selectedLocation || !selectedTemplate) return;
+                  setSharePending(true);
+                  setShareError(null);
+                  try {
+                    const result = await shareOrderToLogistics({
+                      orderId: order.id,
+                      locationId: selectedLocation.id,
+                      templateId: selectedTemplate.id,
+                    });
+                    // Copy rendered text to clipboard; fall back silently if the API isn't available.
+                    try {
+                      await navigator.clipboard.writeText(result.renderedBody);
+                    } catch {
+                      // ignore — user can still copy from the group if needed
+                    }
+                    window.open(result.groupLink, '_blank', 'noopener,noreferrer');
+                    setShareModalOpen(false);
+                    revalidator.revalidate();
+                  } catch (err) {
+                    setShareError(err instanceof Error ? err.message : 'Share failed');
+                  } finally {
+                    setSharePending(false);
+                  }
+                }}
+              >
+                Copy &amp; open group
+              </Button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* Call customer modal — VOIP: Start call + status + debug; VOIP off: reveal number, copy, open dialer */}
       {callCustomerModalOpen && (

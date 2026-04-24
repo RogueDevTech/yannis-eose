@@ -20,13 +20,14 @@ export interface User {
 export const ROLE_COLORS: Record<string, string> = {
   SUPER_ADMIN: 'badge-danger',
   ADMIN: 'badge-danger',
+  BRANCH_ADMIN: 'badge-warning',
   HEAD_OF_MARKETING: 'badge-brand',
   MEDIA_BUYER: 'badge-info',
   HEAD_OF_CS: 'badge-brand',
   CS_AGENT: 'badge-info',
   FINANCE_OFFICER: 'badge-success',
   HEAD_OF_LOGISTICS: 'badge-brand',
-  WAREHOUSE_MANAGER: 'badge-info',
+  STOCK_MANAGER: 'badge-info',
   TPL_MANAGER: 'badge-warning',
   TPL_RIDER: 'badge-warning',
   HR_MANAGER: 'badge-brand',
@@ -44,13 +45,14 @@ export const ROLE_OPTIONS = [
   'ALL',
   'SUPER_ADMIN',
   'ADMIN',
+  'BRANCH_ADMIN',
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
   'HEAD_OF_CS',
   'CS_AGENT',
   'FINANCE_OFFICER',
   'HEAD_OF_LOGISTICS',
-  'WAREHOUSE_MANAGER',
+  'STOCK_MANAGER',
   'TPL_MANAGER',
   'TPL_RIDER',
   'HR_MANAGER',
@@ -98,12 +100,18 @@ export interface ActiveHeadUser {
   primaryBranchId: string | null;
 }
 
+export interface FinanceHatHolder {
+  id: string;
+  name: string;
+}
+
 export interface UserCreateLoaderData {
   products: UserCreateProduct[];
   locations: UserCreateLocation[];
   plans: UserCreateCommissionPlan[];
   branches: UserCreateBranch[];
   activeHeads: ActiveHeadUser[];
+  currentFinanceOfficer: FinanceHatHolder | null;
 }
 
 // ─── User Detail Page Types ──────────────────────────────
@@ -123,6 +131,8 @@ export interface UserDetail {
   assignedProductIds?: string[];
   commissionPlanId: string | null;
   primaryBranchId: string | null;
+  /** True when this user wears the org-wide Finance hat (deputization). */
+  isFinanceOfficer?: boolean;
   createdAt: string;
   updatedAt: string;
   branchMemberships?: UserBranchMembership[];
@@ -233,6 +243,7 @@ export interface UserDetailLoaderData {
   financeActivity: Promise<{ approvals: UserApprovalRecord[]; total: number }> | null;
   pushStatus?: Promise<UserPushStatus | null>;
   activeHeads?: Promise<ActiveHeadUser[]>;
+  currentFinanceOfficer?: Promise<FinanceHatHolder | null>;
   branchesList?: Promise<Array<{ id: string; name: string; code: string; status: string }>>;
   canDisburseToThisUser?: boolean;
   isSuperAdmin?: boolean;
@@ -245,13 +256,14 @@ export interface UserDetailLoaderData {
 export const ROLE_AVATAR_GRADIENTS: Record<string, string> = {
   SUPER_ADMIN: 'from-red-500 to-rose-600',
   ADMIN: 'from-red-400 to-orange-500',
+  BRANCH_ADMIN: 'from-orange-400 to-yellow-500',
   HEAD_OF_MARKETING: 'from-brand-500 to-brand-700',
   MEDIA_BUYER: 'from-sky-400 to-blue-600',
   HEAD_OF_CS: 'from-brand-500 to-indigo-600',
   CS_AGENT: 'from-blue-400 to-cyan-600',
   FINANCE_OFFICER: 'from-emerald-400 to-green-600',
   HEAD_OF_LOGISTICS: 'from-violet-500 to-purple-700',
-  WAREHOUSE_MANAGER: 'from-amber-400 to-orange-600',
+  STOCK_MANAGER: 'from-amber-400 to-orange-600',
   TPL_MANAGER: 'from-orange-400 to-amber-600',
   TPL_RIDER: 'from-yellow-400 to-orange-500',
   HR_MANAGER: 'from-pink-400 to-rose-600',
@@ -260,13 +272,14 @@ export const ROLE_AVATAR_GRADIENTS: Record<string, string> = {
 export const ROLE_ICONS: Record<string, string> = {
   SUPER_ADMIN: 'shield',
   ADMIN: 'shield',
+  BRANCH_ADMIN: 'shield',
   HEAD_OF_MARKETING: 'megaphone',
   MEDIA_BUYER: 'chart-bar',
   HEAD_OF_CS: 'headset',
   CS_AGENT: 'phone',
   FINANCE_OFFICER: 'banknotes',
   HEAD_OF_LOGISTICS: 'truck',
-  WAREHOUSE_MANAGER: 'cube',
+  STOCK_MANAGER: 'cube',
   TPL_MANAGER: 'building',
   TPL_RIDER: 'bicycle',
   HR_MANAGER: 'users',

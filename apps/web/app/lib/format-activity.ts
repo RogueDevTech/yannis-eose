@@ -70,7 +70,7 @@ const ROLE_LABELS: Record<string, string> = {
   CS_AGENT: 'CS Agent',
   FINANCE_OFFICER: 'Finance Officer',
   HEAD_OF_LOGISTICS: 'Head of Logistics',
-  WAREHOUSE_MANAGER: 'Warehouse Manager',
+  STOCK_MANAGER: 'Stock Manager',
   TPL_MANAGER: '3PL Manager',
   TPL_RIDER: '3PL Rider',
   HR_MANAGER: 'HR Manager',

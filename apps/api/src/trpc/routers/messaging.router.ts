@@ -37,6 +37,10 @@ const ALLOWED_TEMPLATE_PLACEHOLDERS = new Set([
   'product_name',
   'delivery_address',
   'estimated_date',
+  // Logistics-dispatch placeholders (used by WHATSAPP_GROUP templates when CS shares an order to a 3PL).
+  'quantity',
+  'total_amount',
+  'payment_status',
 ]);
 
 function extractUnsupportedTemplatePlaceholders(body: string): string[] {
@@ -70,15 +74,24 @@ function resolvePlaceholders(body: string, order: {
   id: string;
   customerName: string | null;
   deliveryAddress: string | null;
-  items?: Array<{ productName?: string | null }>;
+  totalAmount?: string | number | null;
+  paymentStatus?: string | null;
+  items?: Array<{ productName?: string | null; quantity?: number | null }>;
 }): string {
-  const productName = order.items?.[0]?.productName ?? '';
+  const firstItem = order.items?.[0];
+  const productName = firstItem?.productName ?? '';
+  const quantity = firstItem?.quantity != null ? String(firstItem.quantity) : '';
+  const totalAmount = order.totalAmount != null ? String(order.totalAmount) : '';
+  const paymentStatus = order.paymentStatus ?? '';
   return body
     .replace(/\{\{customer_name\}\}/g, order.customerName ?? '')
     .replace(/\{\{order_id\}\}/g, order.id.slice(0, 8).toUpperCase())
     .replace(/\{\{product_name\}\}/g, productName)
     .replace(/\{\{delivery_address\}\}/g, order.deliveryAddress ?? '')
-    .replace(/\{\{estimated_date\}\}/g, '');  // Future: add estimated delivery date
+    .replace(/\{\{estimated_date\}\}/g, '')  // Future: add estimated delivery date
+    .replace(/\{\{quantity\}\}/g, quantity)
+    .replace(/\{\{total_amount\}\}/g, totalAmount)
+    .replace(/\{\{payment_status\}\}/g, paymentStatus);
 }
 
 /**
@@ -101,7 +114,7 @@ export const messagingRouter = router({
   'templates.list': authedProcedure
     .input(
       z.object({
-        channel: z.enum(['SMS', 'WHATSAPP']).optional(),
+        channel: z.enum(['SMS', 'WHATSAPP', 'WHATSAPP_GROUP']).optional(),
         includeArchived: z.boolean().optional(),
       }).optional(),
     )
@@ -139,7 +152,7 @@ export const messagingRouter = router({
     .input(
       z.object({
         name: z.string().min(2).max(100),
-        channel: z.enum(['SMS', 'WHATSAPP']),
+        channel: z.enum(['SMS', 'WHATSAPP', 'WHATSAPP_GROUP']),
         body: z.string().min(5).max(1600),
       }),
     )
@@ -309,6 +322,127 @@ export const messagingRouter = router({
   /**
    * List outbound messages for a specific order.
    */
+  /**
+   * Share an order to a 3PL via WhatsApp group (Phase 4 "Share to 3PL" flow).
+   * The server renders the template, logs an outbound_messages row (channel WHATSAPP_GROUP)
+   * and an order_timeline_events row in a single transaction, then returns the rendered text
+   * and group link so the client can copy + open WhatsApp. WhatsApp group invite links do not
+   * support pre-filled text, so this two-step (copy + open) is the best one-click UX available.
+   */
+  shareToLogistics: permissionProcedure('orders.read')
+    .input(
+      z.object({
+        orderId: z.string().uuid(),
+        locationId: z.string().uuid(),
+        templateId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+
+      const [orderRows, locationRows, templateRows] = await Promise.all([
+        db
+          .select({
+            id: schema.orders.id,
+            customerName: schema.orders.customerName,
+            deliveryAddress: schema.orders.deliveryAddress,
+            totalAmount: schema.orders.totalAmount,
+            paymentStatus: schema.orders.paymentStatus,
+            branchId: schema.orders.branchId,
+          })
+          .from(schema.orders)
+          .where(eq(schema.orders.id, input.orderId))
+          .limit(1),
+        db
+          .select({
+            id: schema.logisticsLocations.id,
+            name: schema.logisticsLocations.name,
+            whatsappGroupLink: schema.logisticsLocations.whatsappGroupLink,
+          })
+          .from(schema.logisticsLocations)
+          .where(eq(schema.logisticsLocations.id, input.locationId))
+          .limit(1),
+        db
+          .select()
+          .from(schema.messageTemplates)
+          .where(eq(schema.messageTemplates.id, input.templateId))
+          .limit(1),
+      ]);
+
+      const order = orderRows[0];
+      const location = locationRows[0];
+      const template = templateRows[0];
+      if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+      if (!location) throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics location not found' });
+      if (!template) throw new TRPCError({ code: 'NOT_FOUND', message: 'Template not found' });
+      if (template.status === 'ARCHIVED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Template is archived' });
+      }
+      if (!location.whatsappGroupLink) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `${location.name} has no WhatsApp group link configured. Ask Logistics to add one on the 3PL location settings.`,
+        });
+      }
+
+      // Fetch order items for product_name / quantity placeholders (join products for the name).
+      const items = await db
+        .select({
+          productName: schema.products.name,
+          quantity: schema.orderItems.quantity,
+        })
+        .from(schema.orderItems)
+        .innerJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+        .where(eq(schema.orderItems.orderId, order.id));
+
+      const renderedBody = resolvePlaceholders(template.body, {
+        id: order.id,
+        customerName: order.customerName,
+        deliveryAddress: order.deliveryAddress,
+        totalAmount: order.totalAmount,
+        paymentStatus: order.paymentStatus,
+        items,
+      });
+
+      await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(schema.outboundMessages)
+          .values({
+            orderId: order.id,
+            agentId: ctx.user.id,
+            channel: 'WHATSAPP_GROUP',
+            templateId: template.id,
+            renderedBody,
+            status: 'SENT',
+            branchId: order.branchId ?? ctx.user.currentBranchId ?? null,
+          })
+          .returning({ id: schema.outboundMessages.id });
+
+        await tx.insert(schema.orderTimelineEvents).values({
+          orderId: order.id,
+          eventType: 'WHATSAPP_SENT' as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? null,
+          description: `Order shared to ${location.name} via WhatsApp group`,
+          metadata: {
+            channel: 'WHATSAPP_GROUP',
+            outboundMessageId: inserted[0]?.id ?? null,
+            templateId: template.id,
+            locationId: location.id,
+            locationName: location.name,
+          },
+          branchId: order.branchId ?? ctx.user.currentBranchId ?? null,
+        });
+      });
+
+      return {
+        success: true,
+        renderedBody,
+        groupLink: location.whatsappGroupLink,
+        locationName: location.name,
+      };
+    }),
+
   outboxList: permissionProcedure('orders.read')
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input }) => {

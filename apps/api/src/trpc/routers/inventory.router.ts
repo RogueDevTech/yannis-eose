@@ -59,6 +59,19 @@ export const inventoryRouter = router({
     }),
 
   /**
+   * Single-inventory-row detail page loader — returns level + product/location names
+   * + batches + movements in one round-trip.
+   */
+  getLevelById: authedProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      limit: z.number().int().min(1).max(500).default(200),
+    }))
+    .query(async ({ input }) => {
+      return getInventoryService().getLevelById(input.id, input.limit);
+    }),
+
+  /**
    * Stock intake — receive new stock batch.
    * Stock Manager or SuperAdmin only.
    */

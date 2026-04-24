@@ -211,7 +211,7 @@ const navStructure: NavGroupDef[] = [
     ],
   },
   {
-    group: 'Warehouse',
+    group: 'Stock Management',
     items: [
       {
         label: 'Inventory',

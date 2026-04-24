@@ -56,3 +56,39 @@ export async function postUpdateMyFontScale(fontScale: FontScaleId): Promise<voi
     body: JSON.stringify({ fontScale }),
   });
 }
+
+export type ShareToLogisticsResult = {
+  success: boolean;
+  renderedBody: string;
+  groupLink: string;
+  locationName: string;
+};
+
+/**
+ * Calls messaging.shareToLogistics server-side (which logs the outbound message + timeline
+ * event) and returns the rendered body + group link so the client can copy to clipboard and
+ * open WhatsApp. WhatsApp group invites cannot be pre-filled, so the copy + open pattern is
+ * the best one-click UX available.
+ */
+export async function shareOrderToLogistics(input: {
+  orderId: string;
+  locationId: string;
+  templateId: string;
+}): Promise<ShareToLogisticsResult> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base || ''}/trpc/messaging.shareToLogistics`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const json = (await res.json()) as TrpcEnvelope<ShareToLogisticsResult> & {
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(json.error?.message ?? 'Share to 3PL failed');
+  }
+  const data = json.result?.data;
+  if (!data) throw new Error('No data returned from share');
+  return data;
+}

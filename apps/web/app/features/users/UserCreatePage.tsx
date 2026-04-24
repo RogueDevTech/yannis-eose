@@ -19,18 +19,25 @@ import type {
 } from './types';
 import { formatRole } from './types';
 
-const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'];
+// Roles limited to one active holder per branch. HR_MANAGER was added 2026-04-23 (CEO directive)
+// to follow the same rule as the HEAD_OF_* roles. Naming kept for continuity with backend.
+const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
 
 // ─── Constants ──────────────────────────────────────────
 
+// SUPER_ADMIN is intentionally excluded — it's a singleton created only via /auth/setup.
+// ADMIN + BRANCH_ADMIN are admin-class: if an HR user picks them, the backend will route the
+// request through the SuperAdmin approval flow (permission_requests).
 const ROLES = [
+  { value: 'ADMIN', label: 'Admin', description: 'Full platform access except managing other admins. Creating requires SuperAdmin approval.' },
+  { value: 'BRANCH_ADMIN', label: 'Branch Admin', description: 'Admin scoped to a single branch — users, settings, reports for that branch.' },
   { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing', description: 'Oversees all marketing campaigns and media buyers' },
   { value: 'MEDIA_BUYER', label: 'Media Buyer', description: 'Runs ad campaigns and manages ad spend' },
   { value: 'HEAD_OF_CS', label: 'Head of CS', description: 'Manages customer service team and order processing' },
   { value: 'CS_AGENT', label: 'CS Agent', description: 'Handles customer calls and order confirmation' },
   { value: 'FINANCE_OFFICER', label: 'Finance Officer', description: 'Manages financials, invoices, and payouts' },
   { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics', description: 'Oversees all logistics and 3PL partners' },
-  { value: 'WAREHOUSE_MANAGER', label: 'Warehouse Manager', description: 'Manages inventory and stock movements' },
+  { value: 'STOCK_MANAGER', label: 'Stock Manager', description: 'Manages inventory and stock movements' },
   { value: 'TPL_MANAGER', label: '3PL Manager', description: 'Manages a third-party logistics location' },
   { value: 'TPL_RIDER', label: '3PL Rider', description: 'Handles deliveries for a 3PL location' },
   { value: 'HR_MANAGER', label: 'HR Manager', description: 'Manages payroll, commissions, and staff' },
@@ -38,7 +45,7 @@ const ROLES = [
 
 // ─── Component ──────────────────────────────────────────
 
-export function UserCreatePage({ products, locations, plans, branches, activeHeads }: UserCreateLoaderData) {
+export function UserCreatePage({ products, locations, plans, branches, activeHeads, currentFinanceOfficer }: UserCreateLoaderData) {
   const actionData = useActionData<{ error?: string; success?: boolean; requiresApproval?: boolean; message?: string }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
@@ -59,6 +66,7 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
+  const [assignFinanceHat, setAssignFinanceHat] = useState(false);
 
   const conflictingHead =
     HEAD_ROLES.includes(selectedRole) && selectedBranchId
@@ -389,6 +397,39 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
                   Fixed salary, bonus, and flat commission amounts are monthly.
                 </p>
 
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Section 3b: Finance hat — deputize this user with Finance Officer powers on top of
+            their primary role. Exactly one user in the org can hold the hat at a time. */}
+        {selectedRole && (
+          <div className="card space-y-3">
+            <h2 className="text-lg font-semibold text-app-fg">Finance hat</h2>
+            <p className="text-sm text-app-fg-muted">
+              Assigning the Finance hat gives this user Finance Officer powers (column-level cost visibility, approvals, remittance) <strong>in addition to</strong> their primary role. Only one user can hold the hat at any time. Skip this unless you're deputizing someone to cover for an absent accountant.
+            </p>
+            {selectedRole === 'FINANCE_OFFICER' ? (
+              <p className="text-xs text-app-fg-muted">
+                Primary role is already Finance Officer — the hat isn't needed.
+              </p>
+            ) : (
+              <>
+                <input type="hidden" name="isFinanceOfficer" value={assignFinanceHat ? 'true' : 'false'} />
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={assignFinanceHat}
+                    onChange={(e) => setAssignFinanceHat((e.target as HTMLInputElement).checked)}
+                  />
+                  <span className="text-sm text-app-fg">Give this user the Finance hat</span>
+                </label>
+                {assignFinanceHat && currentFinanceOfficer && (
+                  <InlineNotification
+                    variant="warning"
+                    message={`The Finance hat is currently held by ${currentFinanceOfficer.name}. Creating this user with the hat will revoke it from them automatically.`}
+                  />
+                )}
               </>
             )}
           </div>

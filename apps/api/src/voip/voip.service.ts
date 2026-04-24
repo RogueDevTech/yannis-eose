@@ -2,10 +2,10 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, and, desc, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT, REDIS } from '../database/database.module';
+import { DRIZZLE, REDIS } from '../database/database.module';
+import { withActor } from '../common/db/with-actor';
 import { EventsService } from '../events/events.service';
 import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -42,7 +42,6 @@ export class VoipService {
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly events: EventsService,
     private readonly settingsService: SettingsService,
@@ -100,128 +99,132 @@ export class VoipService {
    * Returns the current call log (re-fetched after Twilio so FAILED is reflected) and optional twilioError for debugging.
    */
   async initiateCall(orderId: string, actor: SessionUser): Promise<{ callLog: CallLog; twilioError?: string }> {
-    // Set actor for audit trail
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    // 1. Verify order exists
-    const orderRows = await this.db
-      .select()
-      .from(schema.orders)
-      .where(eq(schema.orders.id, orderId))
-      .limit(1);
-
-    const order = orderRows[0];
-    if (!order) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
-    }
-
-    // 2. Verify order is in CS_ENGAGED status
-    if (order.status !== 'CS_ENGAGED') {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `Cannot initiate call: order is in ${order.status} status, must be CS_ENGAGED`,
-      });
-    }
-
-    // 3. Verify the agent is assigned to this order (or has elevated role)
-    const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
-    if (!isElevated && order.assignedCsId !== actor.id) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'You are not assigned to this order',
-      });
-    }
-
-    // 4. Check VOIP feature flag
     const voipEnabled = await this.isVoipEnabled();
 
-    if (!voipEnabled) {
-      // Fallback: create a manual call log entry (no Twilio, no mock)
-      const manualRows = await this.db
+    // All writes + validation reads run inside withActor so the audit trigger sees the caller.
+    // Twilio/mock dispatch and Socket.io emits are kept OUTSIDE the transaction: they don't
+    // need audit attribution and shouldn't block the commit on external IO.
+    type CallInitResult = { callLog: CallLog; order: typeof schema.orders.$inferSelect; isManual: boolean };
+    const { callLog, order, isManual } = await withActor(this.db, actor, async (tx): Promise<CallInitResult> => {
+      // 1. Verify order exists
+      const orderRows = await tx
+        .select()
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+
+      const foundOrder = orderRows[0];
+      if (!foundOrder) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+      }
+
+      // 2. Verify order is in CS_ENGAGED status
+      if (foundOrder.status !== 'CS_ENGAGED') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot initiate call: order is in ${foundOrder.status} status, must be CS_ENGAGED`,
+        });
+      }
+
+      // 3. Verify the agent is assigned to this order (or has elevated role)
+      const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
+      if (!isElevated && foundOrder.assignedCsId !== actor.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You are not assigned to this order',
+        });
+      }
+
+      if (!voipEnabled) {
+        // Fallback: create a manual call log entry (no Twilio, no mock)
+        const manualRows = await tx
+          .insert(schema.callLogs)
+          .values({
+            orderId,
+            agentId: actor.id,
+            callStatus: 'MANUAL_CALL',
+            callToken: null,
+            durationSeconds: null,
+            recordingUrl: null,
+            transcript: null,
+          })
+          .returning();
+
+        return { callLog: manualRows[0]!, order: foundOrder, isManual: true };
+      }
+
+      // 5. Check for active calls on this order
+      const activeCallRows = await tx
+        .select()
+        .from(schema.callLogs)
+        .where(
+          and(
+            eq(schema.callLogs.orderId, orderId),
+            or(
+              eq(schema.callLogs.callStatus, 'INITIATED'),
+              eq(schema.callLogs.callStatus, 'RINGING'),
+              eq(schema.callLogs.callStatus, 'IN_PROGRESS'),
+            ),
+          ),
+        )
+        .limit(1);
+
+      if (activeCallRows[0]) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `There is already an active call (${activeCallRows[0].callStatus}) for this order`,
+        });
+      }
+
+      // 6. Generate call token
+      const callToken = randomUUID();
+
+      // 7. Insert call log with INITIATED status
+      const insertedRows = await tx
         .insert(schema.callLogs)
         .values({
           orderId,
           agentId: actor.id,
-          callStatus: 'MANUAL_CALL',
-          callToken: null,
+          callToken,
+          callStatus: 'INITIATED',
           durationSeconds: null,
           recordingUrl: null,
           transcript: null,
         })
         .returning();
 
-      const manualLog = manualRows[0]!;
+      const inserted = insertedRows[0];
+      if (!inserted) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create call log',
+        });
+      }
 
+      // 8. Lock the order for 15 minutes (prevents other agents from taking it)
+      await tx
+        .update(schema.orders)
+        .set({
+          lockedBy: actor.id,
+          lockedUntil: new Date(Date.now() + LOCK_DURATION_MS),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId));
+
+      return { callLog: inserted, order: foundOrder, isManual: false };
+    });
+
+    // Manual-call short-circuit: emit the event and return.
+    if (isManual) {
       this.events.emitToRoom(`order:${orderId}`, 'call:status_changed', {
-        callLogId: manualLog.id,
+        callLogId: callLog.id,
         orderId,
         status: 'MANUAL_CALL',
       });
-
-      return { callLog: manualLog };
+      return { callLog };
     }
 
-    // ── VOIP Mode ─────────────────────────────────────────────
-
-    // 5. Check for active calls on this order
-    const activeCallRows = await this.db
-      .select()
-      .from(schema.callLogs)
-      .where(
-        and(
-          eq(schema.callLogs.orderId, orderId),
-          or(
-            eq(schema.callLogs.callStatus, 'INITIATED'),
-            eq(schema.callLogs.callStatus, 'RINGING'),
-            eq(schema.callLogs.callStatus, 'IN_PROGRESS'),
-          ),
-        ),
-      )
-      .limit(1);
-
-    if (activeCallRows[0]) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `There is already an active call (${activeCallRows[0].callStatus}) for this order`,
-      });
-    }
-
-    // 6. Generate call token
-    const callToken = randomUUID();
-
-    // 7. Insert call log with INITIATED status
-    const insertedRows = await this.db
-      .insert(schema.callLogs)
-      .values({
-        orderId,
-        agentId: actor.id,
-        callToken,
-        callStatus: 'INITIATED',
-        durationSeconds: null,
-        recordingUrl: null,
-        transcript: null,
-      })
-      .returning();
-
-    const callLog = insertedRows[0];
-    if (!callLog) {
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to create call log',
-      });
-    }
-
-    // 8. Lock the order for 15 minutes (prevents other agents from taking it)
-    await this.db
-      .update(schema.orders)
-      .set({
-        lockedBy: actor.id,
-        lockedUntil: new Date(Date.now() + LOCK_DURATION_MS),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId));
-
-    // 9. Initiate call: real Twilio or mock
+    // 9. Initiate call: real Twilio or mock (external IO, outside the transaction)
     let twilioError: string | undefined;
     if (process.env['TWILIO_ACCOUNT_SID'] && process.env['TWILIO_AUTH_TOKEN']) {
       const result = await this.initiateTwilioCall(callLog, order);
@@ -350,23 +353,28 @@ export class VoipService {
    * When actorId is provided (e.g. from tRPC), audit trail records that user.
    */
   async releaseExpiredLocks(actorId?: string | null): Promise<number> {
-    if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-    }
-    const result = await this.db
-      .update(schema.orders)
-      .set({
-        lockedBy: null,
-        lockedUntil: null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          sql`${schema.orders.lockedUntil} IS NOT NULL`,
-          sql`${schema.orders.lockedUntil} < NOW()`,
-        ),
-      )
-      .returning({ id: schema.orders.id });
+    // When actorId is set (tRPC user-initiated), run inside withActor so the audit trigger
+    // records the actual user. When called from a cron (no actor), the write is a system
+    // operation — fall back to a bare update; the trigger will record NULL (shows "System").
+    const runUpdate = async (db: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0]) =>
+      db
+        .update(schema.orders)
+        .set({
+          lockedBy: null,
+          lockedUntil: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            sql`${schema.orders.lockedUntil} IS NOT NULL`,
+            sql`${schema.orders.lockedUntil} < NOW()`,
+          ),
+        )
+        .returning({ id: schema.orders.id });
+
+    const result = actorId
+      ? await withActor(this.db, { id: actorId }, (tx) => runUpdate(tx))
+      : await runUpdate(this.db);
 
     if (result.length > 0) {
       this.logger.log(`Released ${result.length} expired order lock(s)`);

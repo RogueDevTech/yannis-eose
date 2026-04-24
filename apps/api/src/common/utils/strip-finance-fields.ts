@@ -33,13 +33,18 @@ const SENSITIVE_FIELDS = new Set([
 
 /**
  * Check if user has access to financial fields.
- * SUPER_ADMIN and ADMIN bypass. Others need finance.costView permission.
- * REST endpoints may not have permissions populated — fall back to role check.
+ * SUPER_ADMIN and ADMIN bypass. Others qualify via:
+ *   - `finance.costView` permission
+ *   - `FINANCE_OFFICER` primary role
+ *   - the "Finance hat" flag (`isFinanceOfficer`) — lets any user carry finance powers on top of
+ *     their primary role; exactly one user wears it at a time. See migration 0059.
+ * REST endpoints may not have permissions populated — fall back to role/flag check.
  */
-export function hasFinanceAccess(user: { role: string; permissions?: string[] }): boolean {
+export function hasFinanceAccess(user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean }): boolean {
   if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
   if (user.permissions?.includes('finance.costView')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
+  if (user.isFinanceOfficer === true) return true;
   return false;
 }
 

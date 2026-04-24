@@ -302,4 +302,44 @@ export const dashboardRouter = router({
       }
       return ordersService.getOrderPipelineChart(input?.startDate, input?.endDate, ctx.currentBranchId);
     }),
+
+  /**
+   * Lightweight admin landing snapshot — today-only, no materialized-view dependencies, no
+   * profit aggregation. Serves the /admin home so SuperAdmin/Admin land on a fast overview
+   * rather than the heavy Executive dashboard (which lives at /admin/ceo).
+   * Returns: today's status counts + total active orders + pending approvals count.
+   */
+  quickOverview: permissionProcedure('ceo.overview').query(async ({ ctx }) => {
+    if (!ordersService || !financeService) {
+      throw new Error('Dashboard services not initialized');
+    }
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+    const startIso = todayStart.toISOString();
+    const endIso = todayEnd.toISOString();
+
+    const [todayCounts, allTimeCounts, pendingApprovals] = await Promise.all([
+      ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
+      ordersService.getStatusCounts(undefined, undefined, undefined, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
+      financeService.countPendingApprovalRequests().catch(() => 0),
+    ]);
+
+    const today = (todayCounts ?? {}) as Record<string, number>;
+    const all = (allTimeCounts ?? {}) as Record<string, number>;
+    const activeStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT'];
+    const activeNow = activeStatuses.reduce((sum, s) => sum + (all[s] ?? 0), 0);
+
+    return {
+      today: {
+        newOrders: Object.values(today).reduce((sum, n) => sum + (n ?? 0), 0),
+        delivered: today['DELIVERED'] ?? 0,
+        cancelled: today['CANCELLED'] ?? 0,
+      },
+      activeNow,
+      unprocessedNow: all['UNPROCESSED'] ?? 0,
+      pendingApprovals,
+    };
+  }),
 });

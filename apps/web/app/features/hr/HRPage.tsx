@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { Fragment, useState, useEffect } from 'react';
+import { useFetcher, useSearchParams, useNavigation } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { exportToCsv } from '~/lib/csv-export';
@@ -19,6 +19,8 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { TextInput } from '~/components/ui/text-input';
+import { Pagination } from '~/components/ui/pagination';
+import { Spinner } from '~/components/ui/spinner';
 import type { CommissionPlan, Payout, Adjustment, HRUser, HRStreamData, PayoutSummary, SettlementConfig, SettlementPeriod } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
@@ -26,16 +28,31 @@ import type { CommissionPlan, Payout, Adjustment, HRUser, HRStreamData, PayoutSu
 const ROLE_OPTIONS = [
   'CS_AGENT', 'MEDIA_BUYER', 'HEAD_OF_CS', 'HEAD_OF_MARKETING',
   'FINANCE_OFFICER', 'HEAD_OF_LOGISTICS', 'LOGISTICS_MANAGER',
-  'TPL_MANAGER', 'TPL_RIDER', 'WAREHOUSE_MANAGER', 'HR_MANAGER',
+  'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER', 'HR_MANAGER',
 ];
 
 const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
 
 // ── Main Feature Component ───────────────────────────────────────
 
-export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, payoutSummary, users, settlementConfig, currentPeriod }: HRStreamData) {
+export function HRPage({
+  plans,
+  totalPlans,
+  payouts,
+  totalPayouts,
+  payoutPage,
+  totalPayoutPages,
+  payoutStatus,
+  adjustments,
+  payoutSummary,
+  users,
+  settlementConfig,
+  currentPeriod,
+}: HRStreamData) {
   const fetcher = useFetcher();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = useNavigation();
+  const isFilterLoading = navigation.state === 'loading';
   const [activeTab, setActiveTab] = useState<'payouts' | 'plans' | 'adjustments' | 'settlement'>('payouts');
   const [showAddPlan, setShowAddPlan] = useState(false);
 
@@ -396,6 +413,39 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
         ]}
       />
 
+      {/* Payouts filter bar — mirrors the Users / Orders list pattern. URL params drive the
+          loader so navigating here restores the filter state; state changes trigger a nav
+          and the Spinner shows while the next dataset loads. */}
+      {activeTab === 'payouts' && (
+        <div className="card">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <FormSelect
+              value={payoutStatus}
+              onChange={(e) => {
+                const next = new URLSearchParams(searchParams);
+                if (e.target.value === 'ALL') next.delete('payoutStatus');
+                else next.set('payoutStatus', e.target.value);
+                next.set('payoutPage', '1');
+                setSearchParams(next, { replace: true });
+              }}
+              options={[
+                { value: 'ALL', label: 'All statuses' },
+                { value: 'DRAFT', label: 'Draft' },
+                { value: 'APPROVED', label: 'Approved' },
+                { value: 'PAID', label: 'Paid' },
+                { value: 'REJECTED', label: 'Rejected' },
+              ]}
+              className="w-full sm:w-48"
+            />
+            {isFilterLoading && (
+              <span className="flex items-center text-app-fg-muted" aria-hidden>
+                <Spinner size="sm" className="shrink-0" />
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Payouts Tab — critical data, renders immediately */}
       {activeTab === 'payouts' && (
         <DeferredSection resolve={users} skeleton="table">
@@ -409,6 +459,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                   <table className="w-full">
                     <thead>
                       <tr>
+                        <th className="table-header w-10"></th>
                         <th className="table-header">Staff</th>
                         <th className="table-header">Period</th>
                         <th className="table-header text-right">Base</th>
@@ -417,13 +468,28 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                         <th className="table-header text-right">Deductions</th>
                         <th className="table-header text-right">Total</th>
                         <th className="table-header">Status</th>
-                        <th className="table-header">Action</th>
+                        <th className="table-header text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {payouts.map((p: Payout) => (
-                        <>
-                          <tr key={p.id} className="table-row cursor-pointer" onClick={() => setExpandedPayoutId(expandedPayoutId === p.id ? null : p.id)}>
+                      {payouts.map((p: Payout) => {
+                        const isExpanded = expandedPayoutId === p.id;
+                        return (
+                          <Fragment key={p.id}>
+                          <tr className="table-row">
+                            <td className="table-cell">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedPayoutId(isExpanded ? null : p.id)}
+                                className="text-app-fg-muted hover:text-app-fg p-1"
+                                aria-label={isExpanded ? 'Hide breakdown' : 'Show breakdown'}
+                                aria-expanded={isExpanded}
+                              >
+                                <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                </svg>
+                              </button>
+                            </td>
                             <td className="table-cell">
                               <div>
                                 <p className="text-sm font-medium text-app-fg">{getStaffName(p.staffId)}</p>
@@ -443,10 +509,10 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                             <td className="table-cell">
                               <StatusBadge status={p.status} />
                             </td>
-                            <td className="table-cell">
+                            <td className="table-cell text-right">
                               {p.status === 'DRAFT' && (
-                                <div className="flex gap-1.5">
-                                  <fetcher.Form method="post" className="inline" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex justify-end gap-1.5">
+                                  <fetcher.Form method="post" className="inline">
                                     <input type="hidden" name="intent" value="approvePayout" />
                                     <input type="hidden" name="payoutId" value={p.id} />
                                     <input type="hidden" name="status" value="APPROVED" />
@@ -454,7 +520,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                                       Approve
                                     </Button>
                                   </fetcher.Form>
-                                  <fetcher.Form method="post" className="inline" onClick={(e) => e.stopPropagation()}>
+                                  <fetcher.Form method="post" className="inline">
                                     <input type="hidden" name="intent" value="approvePayout" />
                                     <input type="hidden" name="payoutId" value={p.id} />
                                     <input type="hidden" name="status" value="REJECTED" />
@@ -469,10 +535,7 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                                   variant="success"
                                   size="sm"
                                   className="text-xs"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setMarkPaidConfirm({ payoutId: p.id, staffName: getStaffName(p.staffId), amount: Number(p.netPay) });
-                                  }}
+                                  onClick={() => setMarkPaidConfirm({ payoutId: p.id, staffName: getStaffName(p.staffId), amount: Number(p.netPay) })}
                                 >
                                   Mark Paid
                                 </Button>
@@ -480,9 +543,9 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                             </td>
                           </tr>
                           {/* Expanded breakdown */}
-                          {expandedPayoutId === p.id && (
-                            <tr key={`${p.id}-detail`}>
-                              <td colSpan={9} className="px-6 py-4 bg-app-hover">
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={10} className="px-6 py-4 bg-app-hover">
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                                   <div>
                                     <p className="text-xs text-app-fg-muted uppercase">Base Salary</p>
@@ -508,10 +571,11 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
                               </td>
                             </tr>
                           )}
-                        </>
-                      ))}
+                          </Fragment>
+                        );
+                      })}
                       {payouts.length === 0 && (
-                        <tr><td colSpan={9}><EmptyState title="No payouts yet" description="Generate payouts for a settlement period." /></td></tr>
+                        <tr><td colSpan={10}><EmptyState title={payoutStatus === 'ALL' ? 'No payouts yet' : 'No matching payouts'} description={payoutStatus === 'ALL' ? 'Generate payouts for a settlement period.' : 'Clear the filter or pick a different status.'} /></td></tr>
                       )}
                     </tbody>
                   </table>
@@ -586,6 +650,25 @@ export function HRPage({ plans, totalPlans, payouts, totalPayouts, adjustments, 
             );
           }}
         </DeferredSection>
+      )}
+
+      {/* Payouts pagination + count — only shown when there are rows. Mirrors Users list pattern. */}
+      {activeTab === 'payouts' && totalPayouts > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            Showing {payouts.length} of {totalPayouts} payouts
+          </p>
+          <Pagination
+            page={payoutPage}
+            totalPages={totalPayoutPages}
+            onPageChange={(nextPage) => {
+              const next = new URLSearchParams(searchParams);
+              next.set('payoutPage', String(nextPage));
+              setSearchParams(next, { replace: true });
+            }}
+            showLabel
+          />
+        </div>
       )}
 
       {/* Plans Tab — critical data, renders immediately */}

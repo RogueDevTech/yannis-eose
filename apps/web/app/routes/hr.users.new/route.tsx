@@ -10,6 +10,7 @@ import type {
   UserCreateBranch,
   UserCreateLoaderData,
   ActiveHeadUser,
+  FinanceHatHolder,
 } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -26,12 +27,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
-  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes] = await Promise.all([
+  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, financeHolderRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/products.list?input=${productsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/users.getCurrentFinanceOfficer', { method: 'GET', cookie }),
   ]);
 
   const extractData = (res: { ok: boolean; data: unknown }, key: string) => {
@@ -52,6 +54,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     activeHeads: ((activeHeadsRes.ok
       ? (activeHeadsRes.data as { result?: { data?: unknown[] } })?.result?.data
       : []) ?? []) as ActiveHeadUser[],
+    currentFinanceOfficer: (financeHolderRes.ok
+      ? (financeHolderRes.data as { result?: { data?: FinanceHatHolder | null } })?.result?.data ?? null
+      : null) as FinanceHatHolder | null,
   };
 }
 
@@ -91,12 +96,15 @@ export async function action({ request }: ActionFunctionArgs) {
   // Section 4: Contact
   const phone = formData.get('phone')?.toString() || undefined;
 
+  const isFinanceOfficer = formData.get('isFinanceOfficer') === 'true';
+
   // Build request body (password is auto-generated on the backend)
   const body: Record<string, unknown> = {
     name, email, role, status,
     phone,
     restrictProductAccess,
     primaryBranchId,
+    isFinanceOfficer,
   };
 
   if (capacityStr) body.capacity = parseInt(capacityStr, 10) || 10;

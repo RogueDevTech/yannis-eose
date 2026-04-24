@@ -4,7 +4,6 @@ import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
 import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type postgres from 'postgres';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -16,7 +15,8 @@ import type {
   OrderStatus,
 } from '@yannis/shared';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
-import { DRIZZLE, PG_CLIENT, REDIS } from '../database/database.module';
+import { DRIZZLE, REDIS } from '../database/database.module';
+import { withActor } from '../common/db/with-actor';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
@@ -37,7 +37,6 @@ const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
 export class OrdersService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
-    @Inject(PG_CLIENT) private readonly pgClient: ReturnType<typeof postgres>,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
@@ -87,11 +86,6 @@ export class OrdersService {
     actorId: string | null,
     orderSource?: 'edge-form' | null,
   ): Promise<{ id: string; authorizationUrl?: string }> {
-    // Set actor for audit trail
-    if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-    }
-
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
 
@@ -108,49 +102,55 @@ export class OrdersService {
       fallbackBranchId: null,
     });
 
-    const rows = await this.db
-      .insert(schema.orders)
-      .values({
-        campaignId: orderInput.campaignId ?? null,
-        mediaBuyerId: orderInput.mediaBuyerId ?? null,
-        branchId: branchId ?? null,
-        customerName: orderInput.customerName,
-        customerPhoneHash: orderInput.customerPhoneHash,
-        customerPhone: orderInput.customerPhone ?? null,
-        customerAddress: orderInput.customerAddress ?? null,
-        deliveryAddress: orderInput.deliveryAddress ?? null,
-        deliveryNotes: orderInput.deliveryNotes ?? null,
-        deliveryState: orderInput.deliveryState ?? null,
-        customerGender: orderInput.customerGender ?? null,
-        preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
-        customerEmail: orderInput.customerEmail ?? null,
-        paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
-        paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
-        paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
-        items: orderInput.items,
-        totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
-        status: 'UNPROCESSED',
-        orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
-      })
-      .returning();
+    const insertOrder = async (
+      dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
+    ) => {
+      const rows = await dbOrTx
+        .insert(schema.orders)
+        .values({
+          campaignId: orderInput.campaignId ?? null,
+          mediaBuyerId: orderInput.mediaBuyerId ?? null,
+          branchId: branchId ?? null,
+          customerName: orderInput.customerName,
+          customerPhoneHash: orderInput.customerPhoneHash,
+          customerPhone: orderInput.customerPhone ?? null,
+          customerAddress: orderInput.customerAddress ?? null,
+          deliveryAddress: orderInput.deliveryAddress ?? null,
+          deliveryNotes: orderInput.deliveryNotes ?? null,
+          deliveryState: orderInput.deliveryState ?? null,
+          customerGender: orderInput.customerGender ?? null,
+          preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
+          customerEmail: orderInput.customerEmail ?? null,
+          paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
+          paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
+          paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
+          items: orderInput.items,
+          totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
+          status: 'UNPROCESSED',
+          orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
+        })
+        .returning();
+      const created = rows[0];
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create order' });
+      }
+      if (orderInput.items.length > 0) {
+        await dbOrTx.insert(schema.orderItems).values(
+          orderInput.items.map((item) => ({
+            orderId: created.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: String(item.unitPrice),
+            offerLabel: item.offerLabel ?? null,
+          })),
+        );
+      }
+      return created;
+    };
 
-    const order = rows[0];
-    if (!order) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create order' });
-    }
-
-    // Create order items
-    if (orderInput.items.length > 0) {
-      await this.db.insert(schema.orderItems).values(
-        orderInput.items.map((item) => ({
-          orderId: order.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: String(item.unitPrice),
-          offerLabel: item.offerLabel ?? null,
-        })),
-      );
-    }
+    const order = actorId
+      ? await withActor(this.db, { id: actorId }, insertOrder)
+      : await insertOrder(this.db);
 
     // Emit real-time event for CS dispatch
     this.events.emitNewOrder({
@@ -265,10 +265,19 @@ export class OrdersService {
       });
       if (result) {
         authorizationUrl = result.authorizationUrl;
-        await this.db
-          .update(schema.orders)
-          .set({ paymentReference: result.reference })
-          .where(eq(schema.orders.id, order.id));
+        const updatePayRef = async (
+          dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
+        ) => {
+          await dbOrTx
+            .update(schema.orders)
+            .set({ paymentReference: result.reference })
+            .where(eq(schema.orders.id, order.id));
+        };
+        if (actorId) {
+          await withActor(this.db, { id: actorId }, updatePayRef);
+        } else {
+          await updatePayRef(this.db);
+        }
       }
     }
 
@@ -284,8 +293,6 @@ export class OrdersService {
     actorId: string,
     sessionBranchId?: string | null,
   ): Promise<{ id: string }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-
     const customerPhoneHash = this.hashPhone(input.customerPhone);
     const paymentMethod = input.paymentMethod ?? 'PAY_ON_DELIVERY';
 
@@ -313,47 +320,50 @@ export class OrdersService {
       fallbackBranchId: sessionBranchId ?? null,
     });
 
-    const rows = await this.db
-      .insert(schema.orders)
-      .values({
-        campaignId: input.campaignId ?? null,
-        mediaBuyerId: input.mediaBuyerId ?? null,
-        branchId: branchId ?? null,
-        assignedCsId: actorId,
-        customerName: input.customerName,
-        customerPhoneHash,
-        customerPhone: input.customerPhone,
-        customerAddress: input.customerAddress ?? null,
-        deliveryAddress: input.deliveryAddress ?? null,
-        deliveryNotes: input.deliveryNotes ?? null,
-        deliveryState: input.deliveryState ?? null,
-        customerGender: input.customerGender ?? null,
-        preferredDeliveryDate: input.preferredDeliveryDate ?? null,
-        customerEmail: input.customerEmail ?? null,
-        paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
-        paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
-        paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
-        items: input.items,
-        totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
-        status: 'CS_ASSIGNED',
-        orderSource: 'offline',
-      })
-      .returning();
+    const order = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.orders)
+        .values({
+          campaignId: input.campaignId ?? null,
+          mediaBuyerId: input.mediaBuyerId ?? null,
+          branchId: branchId ?? null,
+          assignedCsId: actorId,
+          customerName: input.customerName,
+          customerPhoneHash,
+          customerPhone: input.customerPhone,
+          customerAddress: input.customerAddress ?? null,
+          deliveryAddress: input.deliveryAddress ?? null,
+          deliveryNotes: input.deliveryNotes ?? null,
+          deliveryState: input.deliveryState ?? null,
+          customerGender: input.customerGender ?? null,
+          preferredDeliveryDate: input.preferredDeliveryDate ?? null,
+          customerEmail: input.customerEmail ?? null,
+          paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
+          paymentStatus: paymentMethod === 'PAY_ONLINE' ? 'PENDING' : null,
+          paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
+          items: input.items,
+          totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
+          status: 'CS_ASSIGNED',
+          orderSource: 'offline',
+        })
+        .returning();
 
-    const order = rows[0];
-    if (!order) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offline order' });
-    }
+      const created = rows[0];
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offline order' });
+      }
 
-    await this.db.insert(schema.orderItems).values(
-      input.items.map((item) => ({
-        orderId: order.id,
-        productId: item.productId,
-        quantity: item.quantity,
-        unitPrice: String(item.unitPrice),
-        offerLabel: item.offerLabel ?? null,
-      })),
-    );
+      await tx.insert(schema.orderItems).values(
+        input.items.map((item) => ({
+          orderId: created.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: String(item.unitPrice),
+          offerLabel: item.offerLabel ?? null,
+        })),
+      );
+      return created;
+    });
 
     this.events.emitNewOrder({
       orderId: order.id,
@@ -791,9 +801,6 @@ export class OrdersService {
    * Enforces the state machine, gates, and side effects.
    */
   async transition(input: TransitionOrderInput, actor: SessionUser) {
-    // Set actor for audit trail
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     // Get current order
     const rows = await this.db
       .select()
@@ -930,10 +937,12 @@ export class OrdersService {
 
     // Update agent's lastActionAt for dispatch tiebreaker + inactivity tracking
     if (actor.role === 'CS_AGENT' || actor.role === 'HEAD_OF_CS') {
-      await this.db
-        .update(schema.users)
-        .set({ lastActionAt: new Date() })
-        .where(eq(schema.users.id, actor.id));
+      await withActor(this.db, actor, async (tx) => {
+        await tx
+          .update(schema.users)
+          .set({ lastActionAt: new Date() })
+          .where(eq(schema.users.id, actor.id));
+      });
     }
 
     // Generate OTP on DISPATCHED (single-use, sent to customer)
@@ -1001,12 +1010,14 @@ export class OrdersService {
       updateFields['riderId'] = input.metadata.riderId;
     }
 
-    // Perform the update
-    const updatedRows = await this.db
-      .update(schema.orders)
-      .set(updateFields)
-      .where(eq(schema.orders.id, input.orderId))
-      .returning();
+    // Perform the update — wrapped in withActor so the temporal-audit trigger sees the actor.
+    const updatedRows = await withActor(this.db, actor, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set(updateFields)
+        .where(eq(schema.orders.id, input.orderId))
+        .returning(),
+    );
 
     const updated = updatedRows[0];
     if (!updated) {
@@ -1096,8 +1107,6 @@ export class OrdersService {
    * The temporal table automatically preserves old values.
    */
   async update(input: UpdateOrderInput, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     const existingRows = await this.db
       .select()
       .from(schema.orders)
@@ -1166,32 +1175,34 @@ export class OrdersService {
     if (effectiveInput.totalAmount !== undefined) updateFields['totalAmount'] = String(effectiveInput.totalAmount);
     if (effectiveInput.items !== undefined) updateFields['items'] = effectiveInput.items;
 
-    const updatedRows = await this.db
-      .update(schema.orders)
-      .set(updateFields)
-      .where(eq(schema.orders.id, input.orderId))
-      .returning();
+    const updated = await withActor(this.db, actor, async (tx) => {
+      const updatedRows = await tx
+        .update(schema.orders)
+        .set(updateFields)
+        .where(eq(schema.orders.id, input.orderId))
+        .returning();
 
-    const updated = updatedRows[0];
-    if (!updated) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update order' });
-    }
+      const row = updatedRows[0];
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update order' });
+      }
 
-    // Update order items if provided
-    if (effectiveInput.items) {
-      await this.db
-        .delete(schema.orderItems)
-        .where(eq(schema.orderItems.orderId, input.orderId));
+      if (effectiveInput.items) {
+        await tx
+          .delete(schema.orderItems)
+          .where(eq(schema.orderItems.orderId, input.orderId));
 
-      await this.db.insert(schema.orderItems).values(
-        effectiveInput.items.map((item) => ({
-          orderId: input.orderId,
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: String(item.unitPrice),
-        })),
-      );
-    }
+        await tx.insert(schema.orderItems).values(
+          effectiveInput.items.map((item) => ({
+            orderId: input.orderId,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: String(item.unitPrice),
+          })),
+        );
+      }
+      return row;
+    });
 
     const actorName = actor.name ?? 'CS agent';
     if (
@@ -1272,7 +1283,6 @@ export class OrdersService {
         return null;
       }
       const actorId = EDGE_FORM_ACTOR_ID;
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
 
       const { cartId, ...orderInput } = payload;
       const paystackBranchId = await this.resolveBranchIdForNewOrder({
@@ -1280,47 +1290,53 @@ export class OrdersService {
         mediaBuyerId: orderInput.mediaBuyerId ?? null,
         fallbackBranchId: null,
       });
-      const rows = await this.db
-        .insert(schema.orders)
-        .values({
-          campaignId: orderInput.campaignId ?? null,
-          mediaBuyerId: orderInput.mediaBuyerId ?? null,
-          branchId: paystackBranchId ?? null,
-          customerName: orderInput.customerName,
-          customerPhoneHash: orderInput.customerPhoneHash,
-          customerPhone: orderInput.customerPhone ?? null,
-          customerAddress: orderInput.customerAddress ?? null,
-          deliveryAddress: orderInput.deliveryAddress ?? null,
-          deliveryNotes: orderInput.deliveryNotes ?? null,
-          deliveryState: orderInput.deliveryState ?? null,
-          customerGender: orderInput.customerGender ?? null,
-          preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
-          customerEmail: orderInput.customerEmail ?? null,
-          paymentMethod: 'PAY_ONLINE',
-          paymentStatus: 'PAID',
-          paymentReference: reference,
-          paymentProvider: 'PAYSTACK',
-          items: orderInput.items,
-          totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
-          status: 'UNPROCESSED',
-        })
-        .returning();
 
-      const order = rows[0];
+      const order = await withActor(this.db, { id: actorId }, async (tx) => {
+        const rows = await tx
+          .insert(schema.orders)
+          .values({
+            campaignId: orderInput.campaignId ?? null,
+            mediaBuyerId: orderInput.mediaBuyerId ?? null,
+            branchId: paystackBranchId ?? null,
+            customerName: orderInput.customerName,
+            customerPhoneHash: orderInput.customerPhoneHash,
+            customerPhone: orderInput.customerPhone ?? null,
+            customerAddress: orderInput.customerAddress ?? null,
+            deliveryAddress: orderInput.deliveryAddress ?? null,
+            deliveryNotes: orderInput.deliveryNotes ?? null,
+            deliveryState: orderInput.deliveryState ?? null,
+            customerGender: orderInput.customerGender ?? null,
+            preferredDeliveryDate: orderInput.preferredDeliveryDate ?? null,
+            customerEmail: orderInput.customerEmail ?? null,
+            paymentMethod: 'PAY_ONLINE',
+            paymentStatus: 'PAID',
+            paymentReference: reference,
+            paymentProvider: 'PAYSTACK',
+            items: orderInput.items,
+            totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
+            status: 'UNPROCESSED',
+          })
+          .returning();
+
+        const created = rows[0];
+        if (!created) return null;
+
+        if (orderInput.items.length > 0) {
+          await tx.insert(schema.orderItems).values(
+            orderInput.items.map((item) => ({
+              orderId: created.id,
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: String(item.unitPrice),
+              offerLabel: item.offerLabel ?? null,
+            })),
+          );
+        }
+        return created;
+      });
+
       if (!order) {
         return null;
-      }
-
-      if (orderInput.items.length > 0) {
-        await this.db.insert(schema.orderItems).values(
-          orderInput.items.map((item) => ({
-            orderId: order.id,
-            productId: item.productId,
-            quantity: item.quantity,
-            unitPrice: String(item.unitPrice),
-            offerLabel: item.offerLabel ?? null,
-          })),
-        );
       }
 
       await this.redis.del(pendingKey);
@@ -1418,8 +1434,6 @@ export class OrdersService {
    * Only Head of CS or SuperAdmin may call this (Hot Swap). CS agents cannot self-initiate transfers.
    */
   async assignToCS(orderId: string, csAgentId: string, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     const existingRows = await this.db
       .select()
       .from(schema.orders)
@@ -1430,20 +1444,23 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
-    const updatedRows = await this.db
-      .update(schema.orders)
-      .set({
-        assignedCsId: csAgentId,
-        status: 'CS_ASSIGNED',
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId))
-      .returning();
+    const updated = await withActor(this.db, actor, async (tx) => {
+      const updatedRows = await tx
+        .update(schema.orders)
+        .set({
+          assignedCsId: csAgentId,
+          status: 'CS_ASSIGNED',
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId))
+        .returning();
 
-    const updated = updatedRows[0];
-    if (!updated) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to assign order' });
-    }
+      const row = updatedRows[0];
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to assign order' });
+      }
+      return row;
+    });
 
     // Notify the assigned agent (real-time + persistent)
     this.events.emitToUser(csAgentId, 'order:assigned', {
@@ -1493,22 +1510,22 @@ export class OrdersService {
     toAgentId: string,
     actor: SessionUser,
   ) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    const updated = await this.db
-      .update(schema.orders)
-      .set({
-        assignedCsId: toAgentId,
-        status: 'CS_ASSIGNED',
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          inArray(schema.orders.id, orderIds),
-          eq(schema.orders.assignedCsId, fromAgentId),
-        ),
-      )
-      .returning();
+    const updated = await withActor(this.db, actor, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set({
+          assignedCsId: toAgentId,
+          status: 'CS_ASSIGNED',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            inArray(schema.orders.id, orderIds),
+            eq(schema.orders.assignedCsId, fromAgentId),
+          ),
+        )
+        .returning(),
+    );
 
     // Notify both agents (real-time + persistent)
     this.events.emitToUser(fromAgentId, 'order:reassigned', {
@@ -1575,7 +1592,6 @@ export class OrdersService {
    * Returns the number of orders whose assignment was changed.
    */
   async redistributeCSOrders(actor: SessionUser): Promise<{ redistributed: number }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
     await this.releaseExpiredLocks(actor.id);
 
     const workloads = await this.getCSAgentWorkloads();
@@ -1672,7 +1688,6 @@ export class OrdersService {
    * agent from receiving orders. Returns the number of orders reassigned.
    */
   async redistributeOrdersFromAgent(agentId: string, actor: SessionUser): Promise<{ redistributed: number }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
     await this.releaseExpiredLocks(actor.id);
 
     const orders = await this.db
@@ -2052,19 +2067,23 @@ export class OrdersService {
    * When actorId is provided (e.g. from tRPC), audit trail records that user; otherwise system/cron.
    */
   async releaseExpiredLocks(actorId?: string | null): Promise<{ releasedCount: number }> {
-    if (actorId) {
-      await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-    }
-    const released = await this.db
-      .update(schema.orders)
-      .set({ lockedUntil: null, lockedBy: null, updatedAt: new Date() })
-      .where(
-        and(
-          sql`${schema.orders.lockedUntil} IS NOT NULL`,
-          sql`${schema.orders.lockedUntil} < NOW()`,
-        ),
-      )
-      .returning();
+    const run = async (
+      dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
+    ) =>
+      dbOrTx
+        .update(schema.orders)
+        .set({ lockedUntil: null, lockedBy: null, updatedAt: new Date() })
+        .where(
+          and(
+            sql`${schema.orders.lockedUntil} IS NOT NULL`,
+            sql`${schema.orders.lockedUntil} < NOW()`,
+          ),
+        )
+        .returning();
+
+    const released = actorId
+      ? await withActor(this.db, { id: actorId }, run)
+      : await run(this.db);
 
     return { releasedCount: released.length };
   }
@@ -2507,7 +2526,6 @@ export class OrdersService {
    * Restricted to Head of CS and SuperAdmin.
    */
   async distributeUnassignedOrders(actor: SessionUser): Promise<{ distributed: number }> {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
     await this.releaseExpiredLocks(actor.id);
 
     const unassigned = await this.db
@@ -2963,8 +2981,6 @@ export class OrdersService {
     actor: SessionUser,
     options?: { delayMinutes?: number; notes?: string },
   ) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     const rows = await this.db
       .select()
       .from(schema.orders)
@@ -2982,15 +2998,17 @@ export class OrdersService {
 
     if (currentAttempts >= maxAttempts) {
       // Auto-cancel: max callback attempts reached
-      await this.db
-        .update(schema.orders)
-        .set({
-          status: 'CANCELLED',
-          callbackScheduledAt: null,
-          callbackNotes: `Auto-cancelled: max callback attempts (${maxAttempts}) reached`,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.orders.id, orderId));
+      await withActor(this.db, actor, async (tx) =>
+        tx
+          .update(schema.orders)
+          .set({
+            status: 'CANCELLED',
+            callbackScheduledAt: null,
+            callbackNotes: `Auto-cancelled: max callback attempts (${maxAttempts}) reached`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.orders.id, orderId)),
+      );
 
       this.events.emitOrderStatusChange({
         orderId,
@@ -3022,19 +3040,21 @@ export class OrdersService {
 
     const scheduledAt = new Date(Date.now() + delayMinutes * 60 * 1000);
 
-    await this.db
-      .update(schema.orders)
-      .set({
-        callbackScheduledAt: scheduledAt,
-        callbackAttempts: currentAttempts + 1,
-        callbackNotes: options?.notes ?? null,
-        // Move to CS_ASSIGNED so order stays in same agent's queue
-        status: 'CS_ASSIGNED',
-        lockedUntil: null,
-        lockedBy: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId));
+    await withActor(this.db, actor, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set({
+          callbackScheduledAt: scheduledAt,
+          callbackAttempts: currentAttempts + 1,
+          callbackNotes: options?.notes ?? null,
+          // Move to CS_ASSIGNED so order stays in same agent's queue
+          status: 'CS_ASSIGNED',
+          lockedUntil: null,
+          lockedBy: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId)),
+    );
 
     this.events.emitOrderStatusChange({
       orderId,
@@ -3175,16 +3195,16 @@ export class OrdersService {
    * Flag an order as a potential duplicate of another order.
    */
   async flagDuplicate(orderId: string, duplicateOfId: string, actorId: string) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
-
-    await this.db
-      .update(schema.orders)
-      .set({
-        isDuplicate: 'FLAGGED',
-        duplicateOfId,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId));
+    await withActor(this.db, { id: actorId }, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set({
+          isDuplicate: 'FLAGGED',
+          duplicateOfId,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId)),
+    );
 
     return { flagged: true };
   }
@@ -3227,8 +3247,6 @@ export class OrdersService {
    * Merge a duplicate order into the original (combine quantities).
    */
   async mergeDuplicate(duplicateId: string, originalId: string, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
     // Get both orders
     const [dupRows, origRows] = await Promise.all([
       this.db.select().from(schema.orders).where(eq(schema.orders.id, duplicateId)).limit(1),
@@ -3248,51 +3266,53 @@ export class OrdersService {
       this.db.select().from(schema.orderItems).where(eq(schema.orderItems.orderId, originalId)),
     ]);
 
-    // Merge quantities: for matching products add quantities, for new products add items
-    for (const dupItem of dupItems) {
-      const matchingOrig = origItems.find((oi) => oi.productId === dupItem.productId);
-      if (matchingOrig) {
-        // Add quantities
-        await this.db
-          .update(schema.orderItems)
-          .set({ quantity: matchingOrig.quantity + dupItem.quantity })
-          .where(eq(schema.orderItems.id, matchingOrig.id));
-      } else {
-        // Add new item to original order
-        await this.db.insert(schema.orderItems).values({
-          orderId: originalId,
-          productId: dupItem.productId,
-          quantity: dupItem.quantity,
-          unitPrice: dupItem.unitPrice,
-        });
+    await withActor(this.db, actor, async (tx) => {
+      // Merge quantities: for matching products add quantities, for new products add items
+      for (const dupItem of dupItems) {
+        const matchingOrig = origItems.find((oi) => oi.productId === dupItem.productId);
+        if (matchingOrig) {
+          // Add quantities
+          await tx
+            .update(schema.orderItems)
+            .set({ quantity: matchingOrig.quantity + dupItem.quantity })
+            .where(eq(schema.orderItems.id, matchingOrig.id));
+        } else {
+          // Add new item to original order
+          await tx.insert(schema.orderItems).values({
+            orderId: originalId,
+            productId: dupItem.productId,
+            quantity: dupItem.quantity,
+            unitPrice: dupItem.unitPrice,
+          });
+        }
       }
-    }
 
-    // Update original order total
-    const newTotal =
-      parseFloat(original.totalAmount ?? '0') + parseFloat(duplicate.totalAmount ?? '0');
-    await this.db
-      .update(schema.orders)
-      .set({
-        totalAmount: newTotal.toFixed(2),
-        deliveryNotes: [original.deliveryNotes, `[Merged from order ${duplicateId}]`]
-          .filter(Boolean)
-          .join(' | '),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, originalId));
+      // Update original order total
+      const newTotal =
+        parseFloat(original.totalAmount ?? '0') + parseFloat(duplicate.totalAmount ?? '0');
+      await tx
+        .update(schema.orders)
+        .set({
+          totalAmount: newTotal.toFixed(2),
+          deliveryNotes: [original.deliveryNotes, `[Merged from order ${duplicateId}]`]
+            .filter(Boolean)
+            .join(' | '),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, originalId));
 
-    // Mark duplicate as merged and cancel it
-    await this.db
-      .update(schema.orders)
-      .set({
-        isDuplicate: 'MERGED',
-        duplicateOfId: originalId,
-        status: 'CANCELLED',
-        deliveryNotes: `Merged into order ${originalId}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, duplicateId));
+      // Mark duplicate as merged and cancel it
+      await tx
+        .update(schema.orders)
+        .set({
+          isDuplicate: 'MERGED',
+          duplicateOfId: originalId,
+          status: 'CANCELLED',
+          deliveryNotes: `Merged into order ${originalId}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, duplicateId));
+    });
 
     this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {}, actor.currentBranchId ?? null);
     return { merged: true, originalId, duplicateId };
@@ -3302,16 +3322,16 @@ export class OrdersService {
    * Dismiss a flagged duplicate — mark as legitimate new order.
    */
   async dismissDuplicate(orderId: string, actor: SessionUser) {
-    await this.pgClient`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`;
-
-    await this.db
-      .update(schema.orders)
-      .set({
-        isDuplicate: 'DISMISSED',
-        duplicateOfId: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.orders.id, orderId));
+    await withActor(this.db, actor, async (tx) =>
+      tx
+        .update(schema.orders)
+        .set({
+          isDuplicate: 'DISMISSED',
+          duplicateOfId: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.orders.id, orderId)),
+    );
 
     this.events.emitToRoom('cs-all', 'cs:duplicates_changed', {}, actor.currentBranchId ?? null);
     return { dismissed: true };

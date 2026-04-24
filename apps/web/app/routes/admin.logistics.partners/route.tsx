@@ -132,6 +132,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name: formData.get('name')?.toString() ?? '',
         address: formData.get('address')?.toString() ?? '',
         coordinates: formData.get('coordinates')?.toString() || undefined,
+        whatsappGroupLink: formData.get('whatsappGroupLink')?.toString() || undefined,
       },
     });
     if (!res.ok) {

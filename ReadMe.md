@@ -10,6 +10,9 @@ brew services list           # see status
 brew services stop redis     # stop now (does not unregister)
 brew services restart redis  # restart
 
+brew services stop redis
+brew services start redis
+brew services list | grep redis   # should now show "started"
 
 ```bash
 pnpm install
@@ -224,3 +227,6 @@ TURNSTILE_SECRET_KEY = "0x4AAAAAACwS5ss9tTk4mAVWT0jI_Nm-1Hw"
     "type": "secret_text"
   }
 ]
+
+
+

@@ -19,7 +19,7 @@ const KNOWN_ROLES = [
   'LOGISTICS_MANAGER',
   'TPL_MANAGER',
   'TPL_RIDER',
-  'WAREHOUSE_MANAGER',
+  'STOCK_MANAGER',
   'HR_MANAGER',
 ] as const;
 
@@ -56,7 +56,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
       {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} naira={naira} />}
       {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
-      {(role === 'WAREHOUSE_MANAGER') && <WarehouseDashboard data={data} />}
+      {(role === 'STOCK_MANAGER') && <WarehouseDashboard data={data} />}
       {(role === 'HR_MANAGER') && <HRDashboard data={data} naira={naira} />}
 
       {/* Unknown role: generic fallback */}
@@ -87,7 +87,7 @@ function getRoleDescription(role: string | null) {
     LOGISTICS_MANAGER: 'Your location operations overview.',
     TPL_MANAGER: 'Your 3PL location stock and deliveries.',
     TPL_RIDER: 'Your assigned deliveries for today.',
-    WAREHOUSE_MANAGER: 'Stock levels and inventory movements.',
+    STOCK_MANAGER: 'Stock levels and inventory movements.',
     HR_MANAGER: 'Payroll overview and pending actions.',
   };
   return descriptions[role] ?? "Here's an overview of your business.";
@@ -537,7 +537,7 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
             <Link to="/admin/returns" prefetch="intent" className="btn-secondary btn-sm">Returns</Link>
           </div>
         </div>
-        <QuickActionsCard role="WAREHOUSE_MANAGER" unprocessed={0} />
+        <QuickActionsCard role="STOCK_MANAGER" unprocessed={0} />
       </div>
     </>
   );
@@ -707,7 +707,7 @@ function getQuickActions(role: string, unprocessed: number) {
         { href: '/admin/finance/overview', label: 'Finance', description: 'Profit & invoices', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
         ...common,
       ];
-    case 'WAREHOUSE_MANAGER':
+    case 'STOCK_MANAGER':
       return [
         { href: '/admin/inventory', label: 'Inventory', description: 'Stock levels', icon: 'products', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
         { href: '/admin/transfers', label: 'Transfers', description: 'Stock transfers', icon: 'orders', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
