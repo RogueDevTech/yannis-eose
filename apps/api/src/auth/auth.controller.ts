@@ -215,6 +215,60 @@ export class AuthController {
   }
 
   /**
+   * Mirror Mode — start viewing the app as another user. Read-only: every mutation
+   * is blocked at the tRPC root middleware while `mirroredBy` is set on the session.
+   *
+   * Permission gate (canMirror) is enforced server-side in AuthService — clients
+   * cannot bypass by hitting this endpoint directly.
+   */
+  @Post('mirror/start')
+  @HttpCode(HttpStatus.OK)
+  async startMirror(
+    @Body() body: { targetUserId: string },
+    @Req() req: Request,
+    @CurrentUser() actor: SessionUser,
+  ) {
+    const sessionToken = this.extractSessionToken(req);
+    if (!sessionToken) {
+      throw new ForbiddenException('No active session.');
+    }
+    if (!body?.targetUserId) {
+      throw new ForbiddenException('targetUserId is required.');
+    }
+    const ipAddress =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
+      req.socket.remoteAddress ??
+      null;
+    const userAgent = (req.headers['user-agent'] as string) ?? null;
+
+    const session = await this.authService.startMirror(sessionToken, actor, body.targetUserId, {
+      ipAddress,
+      userAgent,
+    });
+    return {
+      message: 'Mirror mode started.',
+      user: session,
+    };
+  }
+
+  /**
+   * Exit Mirror Mode — restores the original admin session.
+   */
+  @Post('mirror/stop')
+  @HttpCode(HttpStatus.OK)
+  async stopMirror(@Req() req: Request, @CurrentUser() current: SessionUser) {
+    const sessionToken = this.extractSessionToken(req);
+    if (!sessionToken) {
+      throw new ForbiddenException('No active session.');
+    }
+    const restored = await this.authService.stopMirror(sessionToken, current);
+    return {
+      message: 'Exited mirror mode.',
+      user: restored,
+    };
+  }
+
+  /**
    * Returns the current authenticated user's session data.
    * Includes permissions for non-SuperAdmin users (SuperAdmin bypasses all checks).
    */

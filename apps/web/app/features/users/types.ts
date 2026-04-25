@@ -98,6 +98,8 @@ export interface ActiveHeadUser {
   name: string;
   role: string;
   primaryBranchId: string | null;
+  /** ACTIVE or PENDING — both block creating another head on the same branch. */
+  status?: string;
 }
 
 export interface FinanceHatHolder {
@@ -262,6 +264,18 @@ export interface UserDetailLoaderData {
    * visibleOrderStatuses); this flag tells the UI to show the limited Settings form.
    */
   canEditLimited?: boolean;
+  /**
+   * True when the viewer is allowed to start a Mirror Mode session for this profile
+   * (see CLAUDE.md → "Mirror Mode"). Real enforcement is server-side in
+   * `AuthService.startMirror`; this flag only controls whether the button renders.
+   */
+  viewerCanMirror?: boolean;
+  /**
+   * True when the viewer is opening their OWN profile (drives /admin/profile).
+   * Hides destructive admin actions (Reset Password, Deactivate, Mirror, Disburse) —
+   * users manage their own credentials in /admin/settings, not from the profile page.
+   */
+  isSelfView?: boolean;
 }
 
 // ─── Avatar gradient mapping by role ────────────────────

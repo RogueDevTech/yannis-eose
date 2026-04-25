@@ -278,22 +278,25 @@ export class UsersService {
     // literally a "head" (naming kept for continuity with migration 0056/0060 + callers).
     const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'] as const;
     if (HEAD_ROLES.includes(input.role as typeof HEAD_ROLES[number]) && input.primaryBranchId) {
+      // PENDING also blocks: a branch with an invited-but-not-yet-logged-in head should
+      // not accept a second invite. Only DEACTIVATED / INACTIVE / ARCHIVED frees the slot.
       const existingHead = await this.db
-        .select({ id: schema.users.id, name: schema.users.name })
+        .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
         .from(schema.users)
         .where(
           and(
             eq(schema.users.role, input.role as typeof schema.users.role._.data),
             eq(schema.users.primaryBranchId, input.primaryBranchId),
-            eq(schema.users.status, 'ACTIVE'),
+            inArray(schema.users.status, ['ACTIVE', 'PENDING']),
           ),
         )
         .limit(1);
 
       if (existingHead[0]) {
+        const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
         throw new TRPCError({
           code: 'CONFLICT',
-          message: `Branch already has an active ${input.role.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
+          message: `Branch already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} ${input.role.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
         });
       }
     }
@@ -754,19 +757,24 @@ export class UsersService {
     name: string;
     role: string;
     primaryBranchId: string | null;
+    status: string;
   }>> {
+    // Returns BOTH active and pending holders so the UI inline warning + blocking modal
+    // catch invited-but-not-yet-logged-in heads too (otherwise admins can stack pending
+    // duplicates on the same branch — see CLAUDE.md "One active holder per branch").
     return this.db
       .select({
         id: schema.users.id,
         name: schema.users.name,
         role: schema.users.role,
         primaryBranchId: schema.users.primaryBranchId,
+        status: schema.users.status,
       })
       .from(schema.users)
       .where(
         and(
           inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER']),
-          eq(schema.users.status, 'ACTIVE'),
+          inArray(schema.users.status, ['ACTIVE', 'PENDING']),
         ),
       )
       .orderBy(asc(schema.users.name));
@@ -955,13 +963,14 @@ export class UsersService {
       input.role // only run if role is actually changing
     ) {
       const existingHead = await this.db
-        .select({ id: schema.users.id, name: schema.users.name })
+        .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
         .from(schema.users)
         .where(
           and(
             eq(schema.users.role, roleBeingSet as typeof schema.users.role._.data),
             eq(schema.users.primaryBranchId, branchBeingSet),
-            eq(schema.users.status, 'ACTIVE'),
+            // PENDING + ACTIVE both block — see createStaff for rationale.
+            inArray(schema.users.status, ['ACTIVE', 'PENDING']),
             // exclude the user being updated themselves
             sql`${schema.users.id} != ${input.userId}`,
           ),
@@ -969,9 +978,10 @@ export class UsersService {
         .limit(1);
 
       if (existingHead[0]) {
+        const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
         throw new TRPCError({
           code: 'CONFLICT',
-          message: `Branch already has an active ${roleBeingSet.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
+          message: `Branch already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} ${roleBeingSet.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
         });
       }
     }

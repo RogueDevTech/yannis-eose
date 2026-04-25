@@ -104,4 +104,21 @@ export const auditRouter = router({
     .query(async ({ input }) => {
       return getAuditService().getUserNameMap(input.userIds);
     }),
+
+  /**
+   * Mirror Mode session log — separate from temporal audit because mirror sessions are
+   * append-only (not row-versioned). Anyone with audit access can see who mirrored whom.
+   */
+  mirrorSessions: authedProcedure
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(100).default(20),
+        actorId: z.string().uuid().optional(),
+        targetId: z.string().uuid().optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      return getAuditService().getMirrorSessions(input);
+    }),
 });

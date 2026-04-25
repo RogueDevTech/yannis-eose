@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { canMirror } from '~/lib/rbac';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { UserDetailPage } from '~/features/users/UserDetailPage';
 import type {
@@ -55,21 +56,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Access model for /hr/users/:id:
+  //  - Self-view: any authenticated user may open their own profile (drives /admin/profile).
   //  - Head of CS  may view their CS team (CS_AGENT, HEAD_OF_CS) — nothing else.
   //  - Head of Marketing may view their Marketing team (MEDIA_BUYER, HEAD_OF_MARKETING) — nothing else.
   //  - Everyone else must hold `hr.read` (HR_MANAGER) or be admin-level.
   // HoM/HoCS still carry `users.read` globally for other features (team leaderboards, push
   // target search, etc.), so we can't just require `users.read` — we'd leak unrelated profiles.
+  const isSelfView = currentUser.id === profileUser.id;
   const headOfCSViewingTeam =
     currentUser.role === 'HEAD_OF_CS' && ['CS_AGENT', 'HEAD_OF_CS'].includes(profileUser.role);
   const headOfMarketingViewingTeam =
     currentUser.role === 'HEAD_OF_MARKETING' && ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(profileUser.role);
   const isHoMOrHoCS = currentUser.role === 'HEAD_OF_MARKETING' || currentUser.role === 'HEAD_OF_CS';
 
-  if (isHoMOrHoCS && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
+  if (!isSelfView && isHoMOrHoCS && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
     throw new Response('This user is not on your team.', { status: 403 });
   }
-  if (!headOfCSViewingTeam && !headOfMarketingViewingTeam) {
+  if (!isSelfView && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
     await requirePermission(request, ['hr.read', 'users.update']);
   }
 
@@ -94,6 +97,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Disbursements page is Finance → HoM only; HoM distributes to Media Buyers from Marketing → Funding.
     const canDisburseToThisUser =
       user.role === 'HEAD_OF_MARKETING' && (isSuperAdmin || perms.includes('finance.disburse'));
+
+    // Mirror permission gate (UI-side mirror of canMirror() in apps/web/app/lib/rbac.ts).
+    // Real enforcement is server-side in apps/api/src/auth/auth.service.ts -> startMirror().
+    const viewerCanMirror = canMirror(
+      currentUser
+        ? {
+            id: currentUser.id,
+            role: currentUser.role,
+            currentBranchId: currentUser.currentBranchId ?? null,
+            mirroredBy: currentUser.mirroredBy ?? null,
+          }
+        : null,
+      { id: profileUser.id, role: profileUser.role, primaryBranchId: profileUser.primaryBranchId },
+    ) && profileUser.status === 'ACTIVE';
 
     // ── Build role-specific order filter ───────────────────
     const orderFilter: Record<string, unknown> = { limit: 10 };
@@ -345,7 +362,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => null)
     : Promise.resolve(null);
 
-    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, currentFinanceOfficer, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS, canEditLimited };
+    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, currentFinanceOfficer, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS, canEditLimited, viewerCanMirror, isSelfView };
   })();
 
   return defer({ userDetail: userDetailPromise });
@@ -603,6 +620,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     return json({ success: true, message: 'Password reset successfully' });
+  }
+
+  // Mirror Mode — view the app as this user (read-only). Permission gate is enforced
+  // server-side in AuthService.startMirror; this just forwards the cookie + target id and
+  // bounces to /admin so the freshly-mirrored session takes effect immediately.
+  if (intent === 'mirror') {
+    const res = await apiRequest<unknown>('/auth/mirror/start', {
+      method: 'POST', cookie, body: { targetUserId: userId },
+    });
+    if (!res.ok) {
+      const errorData = res.data as { message?: string; error?: string };
+      return json({ error: errorData?.message ?? errorData?.error ?? 'Failed to start mirror' }, { status: safeStatus(res.status) });
+    }
+    throw redirect('/admin');
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });

@@ -532,7 +532,7 @@ export function MarketingFundingPage({
                               )}
                             </DeferredSection>
                           </td>
-                          <td className="table-cell text-right font-medium"><NairaPrice value={Number(f.amount)} /></td>
+                          <td className="table-cell text-right font-medium"><NairaPrice amount={Number(f.amount)} /></td>
                           <td className="table-cell">
                             {f.receiptUrl ? (
                               <Button
@@ -597,7 +597,7 @@ export function MarketingFundingPage({
                   {funding.map((f: FundingRecord) => (
                     <div key={f.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="font-medium text-app-fg"><NairaPrice value={Number(f.amount)} /></span>
+                        <span className="font-medium text-app-fg"><NairaPrice amount={Number(f.amount)} /></span>
                         <StatusBadge status={f.status} />
                       </div>
                       <p className="text-sm text-app-fg-muted">
@@ -676,7 +676,7 @@ export function MarketingFundingPage({
                               )}
                             </DeferredSection>
                           </td>
-                          <td className="table-cell text-right font-medium"><NairaPrice value={Number(r.amount)} /></td>
+                          <td className="table-cell text-right font-medium"><NairaPrice amount={Number(r.amount)} /></td>
                           <td className="table-cell text-app-fg-muted text-sm max-w-[200px] truncate" title={r.reason ?? undefined}>
                             {r.reason ?? '\u2014'}
                           </td>
@@ -729,7 +729,7 @@ export function MarketingFundingPage({
                         </DeferredSection>
                         <StatusBadge status={r.status} />
                       </div>
-                      <p className="text-sm text-app-fg-muted"><NairaPrice value={Number(r.amount)} /></p>
+                      <p className="text-sm text-app-fg-muted"><NairaPrice amount={Number(r.amount)} /></p>
                       {r.reason && <p className="text-sm text-app-fg-muted">{r.reason}</p>}
                       <p className="text-xs text-app-fg-muted">
                         Requested{' '}
@@ -893,21 +893,15 @@ export function MarketingFundingPage({
               <div className="sm:col-span-2">
                 <dt className="text-app-fg-muted font-medium">Requester</dt>
                 <dd className="text-app-fg mt-0.5">
-                  <DeferredSection resolve={users} skeleton="inline">
-                    {(resolvedUsers: User[]) => (
-                      <>
-                        {previewingRequest.requesterName ??
-                          resolvedUsers.find((u) => u.id === previewingRequest.requesterId)?.name ??
-                          truncateId(previewingRequest.requesterId)}
-                      </>
-                    )}
-                  </DeferredSection>
+                  {previewingRequest.requesterName ??
+                    users.find((u) => u.id === previewingRequest.requesterId)?.name ??
+                    truncateId(previewingRequest.requesterId)}
                 </dd>
               </div>
               <div>
                 <dt className="text-app-fg-muted font-medium">Amount</dt>
                 <dd className="text-app-fg font-semibold mt-0.5">
-                  <NairaPrice value={Number(previewingRequest.amount)} />
+                  <NairaPrice amount={Number(previewingRequest.amount)} />
                 </dd>
               </div>
               <div>
@@ -948,13 +942,7 @@ export function MarketingFundingPage({
                   {(() => {
                     const resolverId = previewingRequest.resolvedBy;
                     if (!resolverId) return '\u2014';
-                    return (
-                      <DeferredSection resolve={users} skeleton="inline">
-                        {(resolvedUsers: User[]) =>
-                          resolvedUsers.find((u) => u.id === resolverId)?.name ?? truncateId(resolverId)
-                        }
-                      </DeferredSection>
-                    );
+                    return users.find((u) => u.id === resolverId)?.name ?? truncateId(resolverId);
                   })()}
                 </dd>
               </div>
@@ -1039,27 +1027,23 @@ export function MarketingFundingPage({
             <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
               <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Amount</p>
               <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-                <NairaPrice value={Number(fundingReceiptModal.amount)} />
+                <NairaPrice amount={Number(fundingReceiptModal.amount)} />
               </p>
-              <DeferredSection resolve={users} skeleton="inline">
-                {(resolvedUsers: User[]) => (
-                  <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
-                    <span>
-                      {fundingReceiptModal.senderName ??
-                        resolvedUsers.find((u) => u.id === fundingReceiptModal.senderId)?.name ??
-                        truncateId(fundingReceiptModal.senderId)}{' '}
-                      →{' '}
-                      {fundingReceiptModal.receiverName ??
-                        resolvedUsers.find((u) => u.id === fundingReceiptModal.receiverId)?.name ??
-                        truncateId(fundingReceiptModal.receiverId)}
-                    </span>
-                    <span>·</span>
-                    <span>{new Date(fundingReceiptModal.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                    <span>·</span>
-                    <StatusBadge status={fundingReceiptModal.status} />
-                  </div>
-                )}
-              </DeferredSection>
+              <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400">
+                <span>
+                  {fundingReceiptModal.senderName ??
+                    users.find((u) => u.id === fundingReceiptModal.senderId)?.name ??
+                    truncateId(fundingReceiptModal.senderId)}{' '}
+                  →{' '}
+                  {fundingReceiptModal.receiverName ??
+                    users.find((u) => u.id === fundingReceiptModal.receiverId)?.name ??
+                    truncateId(fundingReceiptModal.receiverId)}
+                </span>
+                <span>·</span>
+                <span>{new Date(fundingReceiptModal.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <span>·</span>
+                <StatusBadge status={fundingReceiptModal.status} />
+              </div>
             </div>
             <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover">
               <img

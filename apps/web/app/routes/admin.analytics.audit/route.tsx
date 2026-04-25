@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getCurrentUser, getSessionCookie, safeStatus } from '~/lib/api.server';
 import { AuditPage } from '~/features/audit/AuditPage';
-import type { AuditEntry, AuditStreamData } from '~/features/audit/types';
+import type { AuditEntry, AuditStreamData, ActorMap } from '~/features/audit/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Audit Trail — Yannis EOSE' },
@@ -56,7 +56,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       rows: [] as AuditEntry[],
       total: 0,
       filters,
-      actorNames: Promise.resolve({} as Record<string, { name: string; role: string }>),
+      actorNames: Promise.resolve({} as ActorMap),
       error,
     } satisfies AuditStreamData;
   }
@@ -71,6 +71,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     'sender_id', 'receiver_id', 'requester_id', 'requested_by', 'approver_id', 'approved_by',
     'assigned_cs_id', 'assigned_rider_id', 'media_buyer_id', 'staff_id', 'user_id', 'created_by',
     'cs_agent_id', 'rider_id',
+    // mirror_sessions row carries `actor_id` + `target_id`; loading their names lets the
+    // description renderer print "Kabir mirrored Amina" instead of UUID stubs.
+    'actor_id', 'target_id',
   ] as const;
   const ids = new Set<string>();
   for (const row of result.rows) {
@@ -91,13 +94,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       )
         .then((namesRes) => {
           if (namesRes.ok) {
-            const namesData = namesRes.data as { result?: { data?: Record<string, { name: string; role: string }> } };
+            const namesData = namesRes.data as { result?: { data?: ActorMap } };
             return namesData?.result?.data ?? {};
           }
-          return {} as Record<string, { name: string; role: string }>;
+          return {} as ActorMap;
         })
-        .catch(() => ({} as Record<string, { name: string; role: string }>))
-    : Promise.resolve({} as Record<string, { name: string; role: string }>);
+        .catch(() => ({} as ActorMap))
+    : Promise.resolve({} as ActorMap);
 
   return {
     ...result,

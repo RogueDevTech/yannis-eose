@@ -28,9 +28,15 @@ export interface NotificationsStateContextValue {
 interface NotificationsStateProviderProps {
   actionUrl: string;
   children: ReactNode;
+  /**
+   * When true, the provider treats every mark-read action as a no-op — no optimistic UI
+   * change, no server submit. Used in Mirror Mode so an admin viewing the user's bell
+   * doesn't accidentally mark the user's notifications as read on their behalf.
+   */
+  readOnly?: boolean;
 }
 
-export function NotificationsStateProvider({ actionUrl, children }: NotificationsStateProviderProps) {
+export function NotificationsStateProvider({ actionUrl, children, readOnly = false }: NotificationsStateProviderProps) {
   const [optimisticReadIds, setOptimisticReadIds] = useState<Set<string>>(new Set());
   const [markAllRead, setMarkAllRead] = useState(false);
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -57,6 +63,8 @@ export function NotificationsStateProvider({ actionUrl, children }: Notification
 
   const markAsRead = useCallback(
     (id: string) => {
+      // Mirror Mode is view-only — never touch the target user's read state.
+      if (readOnly) return;
       setOptimisticReadIds((prev) => new Set(prev).add(id));
       lastIntentRef.current = 'one';
       lastIdRef.current = id;
@@ -65,10 +73,11 @@ export function NotificationsStateProvider({ actionUrl, children }: Notification
         { method: 'post', action: actionUrl },
       );
     },
-    [actionUrl, fetcher],
+    [actionUrl, fetcher, readOnly],
   );
 
   const markAllReadFn = useCallback(() => {
+    if (readOnly) return;
     setMarkAllRead(true);
     lastIntentRef.current = 'all';
     lastIdRef.current = null;
@@ -76,7 +85,7 @@ export function NotificationsStateProvider({ actionUrl, children }: Notification
       { intent: 'markAllNotificationsRead' },
       { method: 'post', action: actionUrl },
     );
-  }, [actionUrl, fetcher]);
+  }, [actionUrl, fetcher, readOnly]);
 
   const syncReadIdsFromServer = useCallback((readIds: string[]) => {
     if (readIds.length === 0) return;

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Form, useLocation, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { NavProgressBar } from '~/components/ui/nav-progress-bar';
 import { RouteLoader } from '~/components/ui/route-loader';
 import { BottomNav, type BottomNavItem } from './bottom-nav';
 import { SidebarIcons } from './sidebar';
@@ -99,6 +100,7 @@ export function TplLayout({
 
   return (
     <div className="min-h-screen w-full bg-app-canvas text-app-fg">
+      <NavProgressBar />
       {/* Constrained content: max 1200px, centered */}
       <div className="mx-auto w-full max-w-tpl min-h-screen flex flex-col">
         {/* Header + nav: fixed on mobile (same as admin), in-flow on md+ */}

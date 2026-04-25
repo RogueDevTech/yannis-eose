@@ -147,6 +147,9 @@ export async function getCurrentUser(request: Request) {
       logisticsLocationId?: string | null;
       currentBranchId?: string | null;
       appTheme?: string | null;
+      isFinanceOfficer?: boolean;
+      /** Set when this session is in Mirror Mode — see CLAUDE.md "Mirror Mode". */
+      mirroredBy?: { id: string; name: string; role: string } | null;
     };
   }>('/auth/me', { method: 'POST', cookie });
 

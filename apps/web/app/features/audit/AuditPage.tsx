@@ -15,7 +15,38 @@ import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
-import type { AuditEntry, AuditPageProps } from './types';
+import type { ActorMap, AuditEntry, AuditPageProps } from './types';
+
+/**
+ * Resolve a user's name+role at a specific point in time. The audit map carries every
+ * historical version of each user (newest-first); we pick the slice covering `asOf`.
+ *
+ * Returns `null` when the user is not in the map (unknown actor / FK to a deleted user).
+ * Returns `isHistorical: true` when the matched slice is older than the current version,
+ * so the UI can render "Kabir (now Admin)" instead of just "Kabir".
+ */
+function resolveActor(
+  map: ActorMap,
+  userId: string,
+  asOf: string,
+): { name: string; role: string; nameNow: string; roleNow: string; isHistorical: boolean } | null {
+  const entry = map[userId];
+  if (!entry) return null;
+  for (const version of entry.history) {
+    const inRange = version.validFrom <= asOf && (version.validTo === null || asOf < version.validTo);
+    if (inRange) {
+      const isHistorical = version.validTo !== null;
+      return {
+        name: version.name,
+        role: version.role,
+        nameNow: entry.nameNow,
+        roleNow: entry.roleNow,
+        isHistorical: isHistorical || version.name !== entry.nameNow || version.role !== entry.roleNow,
+      };
+    }
+  }
+  return { name: entry.nameNow, role: entry.roleNow, nameNow: entry.nameNow, roleNow: entry.roleNow, isHistorical: false };
+}
 
 // ── Polling config ───────────────────────────────────────────────
 const POLL_INTERVAL_MS = 20_000;  // 20 seconds
@@ -368,7 +399,7 @@ function formatOffers(val: unknown): string {
   }).join('\n');
 }
 
-function formatValue(key: string, val: unknown, actorNames: Record<string, { name: string; role: string }>): string {
+function formatValue(key: string, val: unknown, actorNames: ActorMap, asOf: string): string {
   if (val === null || val === undefined) return '-';
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
 
@@ -382,10 +413,15 @@ function formatValue(key: string, val: unknown, actorNames: Record<string, { nam
   if (STATUS_LABELS[strVal]) return STATUS_LABELS[strVal];
   if (ROLE_LABELS[strVal]) return ROLE_LABELS[strVal];
 
-  // UUID fields that reference users — resolve to name
+  // UUID fields that reference users — resolve to name AS OF the audit row's timestamp.
+  // Renamed/role-changed users still render with their identity at that moment in history.
   if (isUUID(val) && (key.endsWith('_id') || key === 'created_by' || key === 'approved_by' || key === 'locked_by')) {
-    const actor = actorNames[strVal];
-    if (actor) return `${actor.name} (${ROLE_LABELS[actor.role] ?? actor.role})`;
+    const actor = resolveActor(actorNames, strVal, asOf);
+    if (actor) {
+      const role = ROLE_LABELS[actor.role] ?? actor.role;
+      const base = `${actor.name} (${role})`;
+      return actor.isHistorical ? `${base} — now ${actor.nameNow}` : base;
+    }
     return `${strVal.slice(0, 8)}...`;
   }
 
@@ -416,30 +452,34 @@ function formatValue(key: string, val: unknown, actorNames: Record<string, { nam
 
 function getActorDisplay(
   changedBy: string | null,
-  actorNames: Record<string, { name: string; role: string }>,
+  actorNames: ActorMap,
+  asOf: string,
 ): string {
   if (!changedBy) return 'System';
   if (changedBy === EDGE_FORM_ACTOR_ID) return 'Edge Form';
-  const actor = actorNames[changedBy];
-  if (actor) return actor.name;
-  return `${changedBy.slice(0, 8)}...`;
+  const actor = resolveActor(actorNames, changedBy, asOf);
+  if (!actor) return `${changedBy.slice(0, 8)}...`;
+  return actor.isHistorical ? `${actor.name} (now ${actor.nameNow})` : actor.name;
 }
 
 function isActorKnown(
   changedBy: string | null,
-  actorNames: Record<string, { name: string; role: string }>,
+  actorNames: ActorMap,
 ): boolean {
   if (!changedBy) return false;
   return !!actorNames[changedBy];
 }
 
-/** Resolve a user-reference field (e.g. sender_id) to a display name. Returns null if unknown. */
+/** Resolve a user-reference field (e.g. sender_id) to a display name AS OF the audit row's
+ * timestamp. Returns null if unknown. */
 function lookupName(
   value: unknown,
-  actorNames: Record<string, { name: string; role: string }>,
+  actorNames: ActorMap,
+  asOf: string,
 ): string | null {
   if (typeof value !== 'string' || value.length === 0) return null;
-  return actorNames[value]?.name ?? null;
+  const actor = resolveActor(actorNames, value, asOf);
+  return actor?.name ?? null;
 }
 
 // ── Unknown Actor Modal ──────────────────────────────────────────
@@ -508,7 +548,7 @@ function UnknownActorModal({
   );
 }
 
-function getEntityLink(tableName: string, recordId: string): string | null {
+function getEntityLink(tableName: string, recordId: string, data?: Record<string, unknown>): string | null {
   switch (tableName) {
     case 'users':
       return `/hr/users/${recordId}`;
@@ -516,6 +556,11 @@ function getEntityLink(tableName: string, recordId: string): string | null {
       return `/admin/orders/${recordId}`;
     case 'products':
       return `/admin/products/${recordId}`;
+    case 'mirror_sessions': {
+      // Click-through goes to the user that was mirrored, not the mirror_sessions row id.
+      const targetId = data?.['target_id'];
+      return typeof targetId === 'string' && targetId.length > 0 ? `/hr/users/${targetId}` : null;
+    }
     default:
       return null;
   }
@@ -529,11 +574,12 @@ interface DescriptionParts {
 
 function getDescriptionParts(
   entry: AuditEntry,
-  actorNames: Record<string, { name: string; role: string }>,
+  actorNames: ActorMap,
 ): DescriptionParts {
   const data = entry.data;
   const table = entry.tableName;
-  const actor = getActorDisplay(entry.changedBy, actorNames);
+  const asOf = entry.validFrom;
+  const actor = getActorDisplay(entry.changedBy, actorNames, asOf);
 
   const recordLabel =
     (data.name as string) ||
@@ -546,6 +592,31 @@ function getDescriptionParts(
     null;
 
   // ── Per-table descriptions ──────────────────────────────────
+  if (table === 'mirror_sessions') {
+    // Mirror sessions are surfaced inline alongside row-history entries. The "actor" is
+    // the original admin (data.actor_id), the "target" is the user whose perspective they
+    // viewed (data.target_id). action === 'INSERT' means active session; 'UPDATE' means
+    // ended_at was just stamped (i.e. session closed).
+    const targetId = (data.target_id as string | undefined) ?? null;
+    const targetInfo = targetId ? resolveActor(actorNames, targetId, asOf) : null;
+    const targetLabel = targetInfo?.name ?? (targetId ? `${targetId.slice(0, 8)}…` : 'user');
+    const isActive = entry.action === 'INSERT';
+    if (isActive) {
+      return { prefix: `${actor} started mirroring `, entityLabel: targetLabel, suffix: '' };
+    }
+    // Ended session — try to compute duration for context
+    const startedRaw = data.started_at as string | undefined;
+    const endedRaw = data.ended_at as string | undefined;
+    let durationLabel = '';
+    if (startedRaw && endedRaw) {
+      const ms = new Date(endedRaw).getTime() - new Date(startedRaw).getTime();
+      const mins = Math.floor(ms / 60000);
+      const secs = Math.floor((ms % 60000) / 1000);
+      durationLabel = mins > 0 ? ` (${mins}m ${secs}s)` : ` (${secs}s)`;
+    }
+    return { prefix: `${actor} mirrored `, entityLabel: targetLabel, suffix: durationLabel };
+  }
+
   if (table === 'users') {
     const role = data.role ? (ROLE_LABELS[data.role as string] ?? data.role) : '';
     const status = data.status as string | undefined;
@@ -659,8 +730,8 @@ function getDescriptionParts(
     const status = data.funding_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    const sender = lookupName(data.sender_id, actorNames);
-    const receiver = lookupName(data.receiver_id, actorNames);
+    const sender = lookupName(data.sender_id, actorNames, asOf);
+    const receiver = lookupName(data.receiver_id, actorNames, asOf);
     const parties = sender && receiver
       ? ` (${sender} → ${receiver})`
       : sender ? ` (from ${sender})` : receiver ? ` (to ${receiver})` : '';
@@ -682,7 +753,7 @@ function getDescriptionParts(
     const status = data.payout_status as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.net_amount ? ` — ${formatCurrency(data.net_amount)}` : '';
-    const staff = lookupName(data.staff_id ?? data.user_id, actorNames);
+    const staff = lookupName(data.staff_id ?? data.user_id, actorNames, asOf);
     const staffLine = staff ? ` for ${staff}` : '';
     const suffix = staffLine + amount + (statusLabel ? ` — ${statusLabel}` : '');
     return { prefix: `${actor} updated payout`, entityLabel: null, suffix };
@@ -692,7 +763,7 @@ function getDescriptionParts(
     const cat = data.category as string | undefined;
     const catLabel = cat ? cat.charAt(0) + cat.slice(1).toLowerCase() : '';
     const amount = data.amount ? ` of ${formatCurrency(data.amount)}` : '';
-    const staff = lookupName(data.user_id ?? data.staff_id, actorNames);
+    const staff = lookupName(data.user_id ?? data.staff_id, actorNames, asOf);
     const staffLine = staff ? ` for ${staff}` : '';
     if (catLabel) return { prefix: `${actor} added ${catLabel} adjustment`, entityLabel: null, suffix: staffLine + amount };
     return { prefix: `${actor} updated earnings adjustment`, entityLabel: null, suffix: staffLine + amount };
@@ -702,7 +773,7 @@ function getDescriptionParts(
     const status = (data.funding_request_status ?? data.status) as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    const requester = lookupName(data.requester_id, actorNames);
+    const requester = lookupName(data.requester_id, actorNames, asOf);
     const requesterLine = requester ? ` from ${requester}` : '';
     return { prefix: `${actor} updated funding request${requesterLine}${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
   }
@@ -732,8 +803,8 @@ function getDescriptionParts(
     const status = (data.approval_status ?? data.status) as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    const requester = lookupName(data.requester_id, actorNames);
-    const approver = lookupName(data.approver_id, actorNames);
+    const requester = lookupName(data.requester_id, actorNames, asOf);
+    const approver = lookupName(data.approver_id, actorNames, asOf);
     const parties = requester && approver
       ? ` (${requester} → ${approver})`
       : requester ? ` (from ${requester})` : approver ? ` (to ${approver})` : '';
@@ -770,8 +841,8 @@ function getDescriptionParts(
     const status = (data.permission_request_status ?? data.status) as string | undefined;
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const typeLabel = (data.type as string) ?? '';
-    const requester = lookupName(data.requested_by ?? data.requester_id, actorNames);
-    const approver = lookupName(data.approved_by ?? data.approver_id, actorNames);
+    const requester = lookupName(data.requested_by ?? data.requester_id, actorNames, asOf);
+    const approver = lookupName(data.approved_by ?? data.approver_id, actorNames, asOf);
     const parties = requester && approver
       ? ` (${requester} → ${approver})`
       : requester ? ` (from ${requester})` : '';
@@ -804,7 +875,7 @@ function getDescriptionParts(
 
 function generateDescription(
   entry: AuditEntry,
-  actorNames: Record<string, { name: string; role: string }>,
+  actorNames: ActorMap,
 ): string {
   const { prefix, entityLabel, suffix } = getDescriptionParts(entry, actorNames);
   const label = entityLabel ? `"${entityLabel}"` : '';
@@ -816,10 +887,10 @@ function AuditDescription({
   actorNames,
 }: {
   entry: AuditEntry;
-  actorNames: Record<string, { name: string; role: string }>;
+  actorNames: ActorMap;
 }) {
   const { prefix, entityLabel, suffix } = getDescriptionParts(entry, actorNames);
-  const href = getEntityLink(entry.tableName, entry.recordId);
+  const href = getEntityLink(entry.tableName, entry.recordId, entry.data);
 
   if (href && entityLabel) {
     return (
@@ -845,14 +916,17 @@ function AuditDescription({
 type StructuredValueProps = {
   value: unknown;
   fieldKey?: string;
-  actorNames: Record<string, { name: string; role: string }>;
+  actorNames: ActorMap;
+  /** Audit row's `validFrom` — drives time-aware actor resolution inside the structured display. */
+  asOf: string;
   depth?: number;
 };
 
 function formatLeafValue(
   key: string,
   val: unknown,
-  actorNames: Record<string, { name: string; role: string }>,
+  actorNames: ActorMap,
+  asOf: string,
 ): React.ReactNode {
   if (val === null || val === undefined) return <span className="text-app-fg-muted">-</span>;
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
@@ -863,8 +937,13 @@ function formatLeafValue(
   if (STATUS_LABELS[strVal]) return STATUS_LABELS[strVal];
   if (ROLE_LABELS[strVal]) return ROLE_LABELS[strVal];
   if (isUUID(val) && (key.endsWith('_id') || key === 'created_by' || key === 'approved_by' || key === 'locked_by')) {
-    const actor = actorNames[strVal];
-    if (actor) return `${actor.name} (${ROLE_LABELS[actor.role] ?? actor.role})`;
+    const actor = resolveActor(actorNames, strVal, asOf);
+    if (actor) {
+      const role = ROLE_LABELS[actor.role] ?? actor.role;
+      const label = `${actor.name} (${role})`;
+      if (actor.isHistorical) return `${label} — now ${actor.nameNow}`;
+      return label;
+    }
     // Linkable ID keys — audit detail shows the truncated UUID that jumps straight to the record.
     // Keep the truncated visual for density; the <Link> carries the full id via the URL.
     if (key === 'product_id') {
@@ -887,7 +966,7 @@ function formatLeafValue(
 
 const MAX_STRUCTURED_DEPTH = 10;
 
-function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }: StructuredValueProps): React.ReactNode {
+function StructuredValueDisplay({ value, fieldKey = '', actorNames, asOf, depth = 0 }: StructuredValueProps): React.ReactNode {
   if (depth > MAX_STRUCTURED_DEPTH) {
     return <span className="text-app-fg-muted italic">(nested too deep)</span>;
   }
@@ -914,7 +993,7 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
   }
 
   if (typeof resolved === 'string') {
-    return formatLeafValue(fieldKey, resolved, actorNames);
+    return formatLeafValue(fieldKey, resolved, actorNames, asOf);
   }
 
   if (Array.isArray(resolved)) {
@@ -932,9 +1011,9 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
                     </dt>
                     <dd className="text-app-fg">
                       {typeof v === 'object' && v !== null ? (
-                        <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} depth={depth + 1} />
+                        <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} asOf={asOf} depth={depth + 1} />
                       ) : (
-                        formatLeafValue(k, v, actorNames)
+                        formatLeafValue(k, v, actorNames, asOf)
                       )}
                     </dd>
                   </div>
@@ -943,9 +1022,9 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
             ) : (
               <span className="text-app-fg-muted">
                 {typeof item === 'object' && item !== null ? (
-                  <StructuredValueDisplay value={item} fieldKey={String(i)} actorNames={actorNames} depth={depth + 1} />
+                  <StructuredValueDisplay value={item} fieldKey={String(i)} actorNames={actorNames} asOf={asOf} depth={depth + 1} />
                 ) : (
-                  formatLeafValue(String(i), item, actorNames)
+                  formatLeafValue(String(i), item, actorNames, asOf)
                 )}
               </span>
             )}
@@ -967,9 +1046,9 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, depth = 0 }:
             </dt>
             <dd className="mt-0.5 pl-2 border-l-2 border-app-border">
               {typeof v === 'object' && v !== null ? (
-                <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} depth={depth + 1} />
+                <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} asOf={asOf} depth={depth + 1} />
               ) : (
-                formatLeafValue(k, v, actorNames)
+                formatLeafValue(k, v, actorNames, asOf)
               )}
             </dd>
           </div>
@@ -1017,7 +1096,7 @@ function DetailModal({
   onPreviewImage,
 }: {
   entry: AuditEntry;
-  actorNames: Record<string, { name: string; role: string }>;
+  actorNames: ActorMap;
   onClose: () => void;
   onUnknownActorClick?: (changedBy: string | null, displayName: string) => void;
   onPreviewImage?: (url: string) => void;
@@ -1025,9 +1104,10 @@ function DetailModal({
   const fields = Object.entries(entry.data).filter(
     ([key]) => !HIDDEN_FIELDS.has(key) && key !== 'id',
   );
+  const asOf = entry.validFrom;
 
-  const actorInfo = entry.changedBy ? actorNames[entry.changedBy] : null;
-  const actorDisplay = getActorDisplay(entry.changedBy, actorNames);
+  const actorInfo = entry.changedBy ? resolveActor(actorNames, entry.changedBy, asOf) : null;
+  const actorDisplay = getActorDisplay(entry.changedBy, actorNames, asOf);
   const actorKnown = isActorKnown(entry.changedBy, actorNames);
 
   return (
@@ -1120,10 +1200,10 @@ function DetailModal({
                       <AttachedFileDisplay url={value} onPreview={onPreviewImage} />
                     ) : (typeof value === 'object' && value !== null) || (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) ? (
                       <div className="py-1.5 min-w-0">
-                        <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} />
+                        <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} asOf={asOf} />
                       </div>
                     ) : (
-                      formatValue(key, value, actorNames)
+                      formatValue(key, value, actorNames, asOf)
                     )}
                   </td>
                 </tr>
@@ -1197,13 +1277,16 @@ function TimeTravelPanel({
   actorNames,
   onPreviewImage,
 }: {
-  actorNames: Record<string, { name: string; role: string }>;
+  actorNames: ActorMap;
   onPreviewImage?: (url: string) => void;
 }) {
   const fetcher = useFetcher();
   const [ttTable, setTtTable] = useState(AUDITABLE_TABLES[0]);
   const [ttRecordId, setTtRecordId] = useState('');
   const [ttTimestamp, setTtTimestamp] = useState('');
+  // Time-travel resolves names/roles AS OF the user-selected timestamp. Fall back to "now" while
+  // the picker is empty so initial paint doesn't crash actor resolution.
+  const ttAsOf = ttTimestamp || new Date().toISOString();
 
   const fetcherData = fetcher.data as { result?: Record<string, unknown>; error?: string } | undefined;
   const ttResult = fetcherData?.result ?? null;
@@ -1292,10 +1375,10 @@ function TimeTravelPanel({
                       <AttachedFileDisplay url={value} onPreview={onPreviewImage} />
                     ) : (typeof value === 'object' && value !== null) || (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) ? (
                       <div className="py-1.5 min-w-0">
-                        <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} />
+                        <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} asOf={ttAsOf} />
                       </div>
                     ) : (
-                      formatValue(key, value, actorNames)
+                      formatValue(key, value, actorNames, ttAsOf)
                     )}
                   </td>
                 </tr>
@@ -1423,10 +1506,13 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
           <div>
             <DeferredSection resolve={actorNames} skeleton="inline">
               {(resolvedActorNames) => {
+                // Filter dropdown shows actors by their CURRENT identity — when an admin renames
+                // themselves, the filter follows the new name. (Resolved-at-time only matters
+                // when rendering historical rows, not when picking who to filter on now.)
                 const uniqueActors = Object.entries(resolvedActorNames).map(([id, info]) => ({
                   id,
-                  name: info.name,
-                  role: info.role,
+                  name: info.nameNow,
+                  role: info.roleNow,
                 }));
                 return uniqueActors.length > 0 ? (
                   <FormSelect
@@ -1484,7 +1570,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                     timestamp: formatDate(entry.validFrom),
                     table: formatTableName(entry.tableName),
                     description: generateDescription(entry, resolvedActorNames),
-                    actor: getActorDisplay(entry.changedBy, resolvedActorNames),
+                    actor: getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom),
                     action: entry.action,
                     recordId: entry.recordId,
                     validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
@@ -1543,7 +1629,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                   <td className="table-cell text-xs text-app-fg-muted whitespace-nowrap">
                     <DeferredSection resolve={actorNames} skeleton="inline">
                       {(resolvedActorNames) => {
-                        const display = getActorDisplay(entry.changedBy, resolvedActorNames);
+                        const display = getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom);
                         const known = isActorKnown(entry.changedBy, resolvedActorNames);
                         if (known && entry.changedBy) {
                           return (
@@ -1619,7 +1705,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <DeferredSection resolve={actorNames} skeleton="inline">
                     {(resolvedActorNames) => {
-                      const display = getActorDisplay(entry.changedBy, resolvedActorNames);
+                      const display = getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom);
                       const known = isActorKnown(entry.changedBy, resolvedActorNames);
                       const actorNode = known && entry.changedBy ? (
                         <Link

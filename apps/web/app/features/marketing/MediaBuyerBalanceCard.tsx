@@ -5,13 +5,35 @@ import type { FundingBalanceRow } from './types';
 export interface MediaBuyerBalanceCardProps {
   row: FundingBalanceRow;
   className?: string;
+  /**
+   * Optional date filter forwarded to the "View orders" deep link so the orders page
+   * loads with the same range the user picked on the parent page.
+   */
+  ordersDateFilters?: { startDate: string; endDate: string; periodAllTime: boolean };
+}
+
+function buildOrdersHref(
+  userId: string,
+  filters?: { startDate: string; endDate: string; periodAllTime: boolean },
+): string {
+  const params = new URLSearchParams();
+  params.set('mediaBuyerId', userId);
+  if (filters) {
+    if (filters.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters.startDate) params.set('startDate', filters.startDate);
+      if (filters.endDate) params.set('endDate', filters.endDate);
+    }
+  }
+  return `/admin/marketing/orders?${params.toString()}`;
 }
 
 /**
  * Card used on Live Activities (Marketing) and Team page to represent a media buyer
  * with funding balance. Matches the card style used in the media buyer strip.
  */
-export function MediaBuyerBalanceCard({ row, className = '' }: MediaBuyerBalanceCardProps) {
+export function MediaBuyerBalanceCard({ row, className = '', ordersDateFilters }: MediaBuyerBalanceCardProps) {
   const initials = row.name
     .split(' ')
     .map((n) => n[0])
@@ -65,7 +87,7 @@ export function MediaBuyerBalanceCard({ row, className = '' }: MediaBuyerBalance
       </div>
       <div className="mt-3 flex flex-nowrap items-center gap-2">
         <Link
-          to={`/admin/marketing/orders?mediaBuyerId=${row.userId}`}
+          to={buildOrdersHref(row.userId, ordersDateFilters)}
           prefetch="intent"
           className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
         >

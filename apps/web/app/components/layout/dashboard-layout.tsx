@@ -16,6 +16,7 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { usePushSubscription } from '~/hooks/usePushSubscription';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
+import { NavProgressBar } from '~/components/ui/nav-progress-bar';
 import { RouteLoader } from '~/components/ui/route-loader';
 import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
@@ -41,6 +42,12 @@ interface DashboardLayoutProps {
     email: string;
     permissions?: string[];
     currentBranchId?: string | null;
+    /**
+     * When set, the layout renders the Mirror Mode chrome (green border + Exit pill in the
+     * header). The actor seeing the app is the original admin in `mirroredBy.id` — the rest
+     * of the session impersonates the target user.
+     */
+    mirroredBy?: { id: string; name: string; role: string } | null;
   } | null;
   notificationsPromise: NotificationsPromise;
   /** Route action URL for notification mark-read (e.g. /admin or /hr). */
@@ -630,8 +637,75 @@ function DashboardLayoutInner({
     localStorage.setItem('yannis_sidebar_collapsed', String(next));
   };
 
+  // Mirror Mode chrome: a 4px green border pinned to the viewport edges so admins always
+  // see when they're "in another user's shoes" — regardless of scroll position or content
+  // height. Rendered as a fixed overlay (not `ring-inset` on the layout div, which would
+  // hug the content area and miss the bottom of long pages). The Exit pill lives in Header.
+  const isMirroring = !!user?.mirroredBy;
+
+  // Expose the flag at the document root so view-only side-effect helpers can no-op without
+  // each one being threaded `mirroredBy` explicitly. Source of truth: `user.mirroredBy`.
+  // Consumers: `getSocket()` broadcasts (`agent:state_update`), push-ack on /push/ack, etc.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (isMirroring) document.documentElement.setAttribute('data-mirror', '1');
+    else document.documentElement.removeAttribute('data-mirror');
+    return () => {
+      if (typeof document !== 'undefined') document.documentElement.removeAttribute('data-mirror');
+    };
+  }, [isMirroring]);
+
+  // Full-screen "Mirroring …" / "Exiting …" overlay during the start/stop transition.
+  // The same DashboardLayout wraps both `/hr/*` (where Start Mirror is triggered) and `/admin/*`
+  // (the redirect target), so the overlay persists across the redirect — no flash of the old
+  // page between submit and the new identity rendering.
+  const mirrorIntent = navigation.formData?.get('intent');
+  const isMirrorTransition =
+    navigation.state !== 'idle' &&
+    (mirrorIntent === 'mirror' || mirrorIntent === 'exitMirror');
+  const mirrorTransitionLabel = mirrorIntent === 'exitMirror' ? 'Exiting mirror…' : 'Entering mirror mode…';
+
   return (
     <div className="min-h-screen bg-app-canvas text-app-fg">
+      {isMirroring && (
+        <div
+          className="fixed inset-0 pointer-events-none z-[80] border-4 border-success-500 dark:border-success-400 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.4)]"
+          aria-hidden
+        />
+      )}
+      {isMirrorTransition && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex flex-col items-center gap-4 rounded-2xl bg-app-elevated px-8 py-7 shadow-2xl border border-success-500/40 max-w-sm mx-4">
+            <div className="relative">
+              <div className="w-14 h-14 rounded-full border-4 border-success-200 dark:border-success-900/40" />
+              <div className="absolute inset-0 w-14 h-14 rounded-full border-4 border-transparent border-t-success-500 animate-spin" />
+              <svg
+                className="absolute inset-0 m-auto w-6 h-6 text-success-600 dark:text-success-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <div className="text-center">
+              <p className="text-base font-semibold text-app-fg">{mirrorTransitionLabel}</p>
+              <p className="text-xs text-app-fg-muted mt-1">
+                {mirrorIntent === 'exitMirror'
+                  ? 'Restoring your admin session…'
+                  : 'Switching context to view the app as the selected user.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      <NavProgressBar />
       <Sidebar
         groups={navGroups}
         collapsed={collapsed}
@@ -658,6 +732,7 @@ function DashboardLayoutInner({
         onClearRealtimeNotifications={clearRealtimeNotifications}
         branches={branches}
         currentBranchId={user?.currentBranchId}
+        mirroredBy={user?.mirroredBy ?? null}
       />
 
       <IosInstallBanner />
@@ -924,9 +999,15 @@ function DashboardLayoutInner({
 }
 
 export function DashboardLayout(props: DashboardLayoutProps) {
+  // Mirror Mode is view-only: tell the notifications context to no-op every mark-read so
+  // the admin's clicks don't bleed into the target user's data.
+  const isMirroring = !!props.user?.mirroredBy;
   return (
     <ToastProvider>
-      <NotificationsStateProvider actionUrl={props.notificationsActionUrl ?? '/admin'}>
+      <NotificationsStateProvider
+        actionUrl={props.notificationsActionUrl ?? '/admin'}
+        readOnly={isMirroring}
+      >
         <DashboardLayoutInner {...props} />
       </NotificationsStateProvider>
     </ToastProvider>

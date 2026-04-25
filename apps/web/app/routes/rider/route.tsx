@@ -4,6 +4,7 @@ import { Outlet, useLoaderData, Form } from '@remix-run/react';
 import { getCurrentUser } from '~/lib/api.server';
 import { useOfflineSync, useOnlineStatus, usePendingCount } from '~/hooks/useOnlineStatus';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
+import { NavProgressBar } from '~/components/ui/nav-progress-bar';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   let user;
@@ -37,6 +38,7 @@ export default function RiderLayout() {
 
   return (
     <div className="min-h-screen bg-app-canvas">
+      <NavProgressBar />
       {/* Offline banner */}
       {!isOnline && (
         <div className="bg-warning-600 text-white text-center text-xs py-1.5 px-4 font-medium">

@@ -317,7 +317,7 @@ export function MarketingAdSpendPage({
                       </DeferredSection>
                     </td>
                   )}
-                  <td className="table-cell text-right font-medium"><NairaPrice value={Number(s.spendAmount)} /></td>
+                  <td className="table-cell text-right font-medium"><NairaPrice amount={Number(s.spendAmount)} /></td>
                   <td className="table-cell text-sm text-app-fg-muted">
                     {s.productId ? (
                       <DeferredSection resolve={products} skeleton="inline">
@@ -374,7 +374,7 @@ export function MarketingAdSpendPage({
           {adSpend.map((s: AdSpendRecord) => (
             <div key={s.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-medium text-app-fg"><NairaPrice value={Number(s.spendAmount)} /></span>
+                <span className="font-medium text-app-fg"><NairaPrice amount={Number(s.spendAmount)} /></span>
                 <StatusBadge status={s.status ?? 'PENDING'} />
               </div>
               <p className="text-sm text-app-fg-muted">
@@ -441,7 +441,7 @@ export function MarketingAdSpendPage({
               <div>
                 <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Amount</p>
                 <p className="text-2xl font-bold text-brand-700 dark:text-brand-300 mt-1">
-                  <NairaPrice value={Number(adSpendDetailModal.spendAmount)} />
+                  <NairaPrice amount={Number(adSpendDetailModal.spendAmount)} />
                 </p>
               </div>
               <p className="text-sm text-brand-600 dark:text-brand-400">

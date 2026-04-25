@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
 import type { FundingBalanceRow } from '~/features/marketing/types';
+import { buildLeaderboardInput, resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 
 export const meta: MetaFunction = () => [
   { title: 'Team — Yannis EOSE' },
@@ -52,11 +53,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   if (!cookie) throw new Response('Session cookie missing', { status: 401 });
 
+  // Resolve URL date filters; defaults to current month so confirmation/delivery rates and
+  // the "View orders" deep-link reflect the picked range.
+  const url = new URL(request.url);
+  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
+  const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
+
   const [balancesRes, summaryRes, leaderboardRes] = await Promise.all([
     apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie }),
     apiRequest<unknown>(
-      `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify({ period: 'this_month' }))}`,
+      `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -90,10 +97,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : m;
   });
 
-  return { teamMembers: teamMembersWithMetrics, fundingSummary };
+  return { teamMembers: teamMembersWithMetrics, fundingSummary, dateFilters: filters, leaderboardPeriod };
 }
 
 export default function MarketingTeamRoute() {
   const data = useLoaderData<typeof loader>();
-  return <MarketingTeamPage teamMembers={data.teamMembers} fundingSummary={data.fundingSummary} />;
+  return (
+    <MarketingTeamPage
+      teamMembers={data.teamMembers}
+      fundingSummary={data.fundingSummary}
+      dateFilters={data.dateFilters}
+      leaderboardPeriod={data.leaderboardPeriod}
+    />
+  );
 }
