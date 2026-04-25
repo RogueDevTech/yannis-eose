@@ -41,6 +41,11 @@ interface HeaderProps {
   onClearRealtimeNotifications?: () => void;
   branches?: BranchInfo[];
   currentBranchId?: string | null;
+  /**
+   * When set, the header renders an "Exit Mirror" pill that posts to /auth/mirror/stop.
+   * Surfaced from the layout, threaded down from `getCurrentUser`.
+   */
+  mirroredBy?: { id: string; name: string; role: string } | null;
 }
 
 const NOTIFICATION_COLORS: Record<string, string> = {
@@ -99,6 +104,7 @@ export function Header({
   onClearRealtimeNotifications,
   branches,
   currentBranchId,
+  mirroredBy,
 }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileUserMenuOpen, setMobileUserMenuOpen] = useState(false);
@@ -244,6 +250,22 @@ export function Header({
 
       {/* Right side: PWA install + dark mode + notifications + user */}
       <div className="flex items-center gap-2 lg:gap-3">
+        {/* Mirror Mode pill — only shown when the session is mirroring another user.
+            POSTs to the same /admin action that exits mirror; returns to /admin when done. */}
+        {mirroredBy && (
+          <Form method="post" action="/admin?index" className="inline-flex">
+            <input type="hidden" name="intent" value="exitMirror" />
+            <button
+              type="submit"
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold bg-success-100 text-success-800 border border-success-300 hover:bg-success-200 dark:bg-success-700/30 dark:text-success-200 dark:border-success-600/60 dark:hover:bg-success-700/50 transition-colors"
+              title={`Mirroring ${user?.name ?? 'user'} as ${mirroredBy.name}`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse" />
+              <span className="hidden sm:inline">Exit mirror</span>
+              <span className="sm:hidden">Exit</span>
+            </button>
+          </Form>
+        )}
         {/* Notifications bell — deferred so layout loads immediately */}
         <div className="relative">
           <DeferredSection resolve={notificationsPromise} skeleton="inline">
@@ -528,7 +550,7 @@ export function Header({
 
                 <div className="py-1">
                   <a
-                    href="/admin/settings"
+                    href="/admin/profile"
                     className="flex items-center gap-2 px-4 py-2 text-sm text-app-fg-muted hover:bg-app-hover transition-colors"
                     onClick={() => setUserMenuOpen(false)}
                   >
@@ -663,7 +685,7 @@ export function Header({
 
               <div className="py-2">
                 <a
-                  href="/admin/settings"
+                  href="/admin/profile"
                   className="flex items-center gap-2 px-5 py-2.5 text-sm text-app-fg-muted hover:bg-app-hover transition-colors"
                   onClick={() => setMobileUserMenuOpen(false)}
                 >

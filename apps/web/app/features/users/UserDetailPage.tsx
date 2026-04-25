@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
+import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -108,14 +108,20 @@ export function UserDetailPage({
   isViewerHeadOfMarketing = false,
   isViewerHeadOfCS = false,
   canEditLimited = false,
+  viewerCanMirror = false,
+  isSelfView = false,
 }: UserDetailLoaderData) {
   const actionData = useActionData<{ error?: string; success?: boolean; message?: string; requiresApproval?: boolean }>();
   const navigation = useNavigation();
+  // Reset Password runs through its own fetcher so the form submission inside the portaled
+  // modal stays isolated from the page-level <Form>s — those compete for navigation state and
+  // were the source of the crash when the modal-portal Form's actionData reached an unmounted tree.
+  const resetFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
   const isSubmitting = navigation.state === 'submitting';
   const formIntent = navigation.formData?.get('intent')?.toString();
   const isDeactivating = isSubmitting && formIntent === 'deactivate';
   const isReactivating = isSubmitting && formIntent === 'reactivate';
-  const isResetting = isSubmitting && formIntent === 'resetPassword';
+  const isResetting = resetFetcher.state !== 'idle';
   const isUpdating = isSubmitting && formIntent === 'update';
   const isProcessingEmailChange = isSubmitting && formIntent === 'processEmailChange';
   const restrictHeadView = isViewerHeadOfMarketing || isViewerHeadOfCS;
@@ -170,12 +176,12 @@ export function UserDetailPage({
     };
   }, [activeHeads, branchesList]);
 
-  // Close reset modal on success
+  // Close reset modal on fetcher success.
   useEffect(() => {
-    if (actionData?.success && actionData?.message?.includes('Password')) {
+    if (resetFetcher.state === 'idle' && resetFetcher.data?.success) {
       setShowResetPassword(false);
     }
-  }, [actionData?.success, actionData?.message]);
+  }, [resetFetcher.state, resetFetcher.data?.success]);
 
   // Close email change modal on success
   useEffect(() => {
@@ -200,7 +206,8 @@ export function UserDetailPage({
     ...(showStockTab ? [{ id: 'stock' as const, label: 'Stock' }] : []),
     ...(showFinanceTab ? [{ id: 'finance' as const, label: 'Finance Activity' }] : []),
     { id: 'audit', label: 'Activity' },
-    ...((!isSuperAdminProfile && (canOpenSettingsTab || canEditLimited)) ? [{ id: 'edit' as const, label: 'Settings' }] : []),
+    // Self-view never gets the Settings tab — user manages their own account in /admin/settings.
+    ...((!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited)) ? [{ id: 'edit' as const, label: 'Settings' }] : []),
   ];
 
   // When viewing a user, ensure activeTab is valid for their role
@@ -210,11 +217,11 @@ export function UserDetailPage({
     if (showPayrollTab) validIds.add('payroll');
     if (showStockTab) validIds.add('stock');
     if (showFinanceTab) validIds.add('finance');
-    if (!isSuperAdminProfile && (canOpenSettingsTab || canEditLimited)) validIds.add('edit');
+    if (!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited)) validIds.add('edit');
     if (!validIds.has(activeTab)) {
       setActiveTab('overview');
     }
-  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showStockTab, showFinanceTab, isSuperAdminProfile, canOpenSettingsTab, canEditLimited]);
+  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showStockTab, showFinanceTab, isSuperAdminProfile, canOpenSettingsTab, canEditLimited, isSelfView]);
 
   // Edit form state
   const [selectedRole, setSelectedRole] = useState(user.role);
@@ -279,9 +286,13 @@ export function UserDetailPage({
     <div className="w-full space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <Link to="/hr/users" prefetch="intent" className="text-app-fg-muted hover:text-brand-500 transition-colors">
-          Users
-        </Link>
+        {isSelfView ? (
+          <span className="text-app-fg-muted">My Profile</span>
+        ) : (
+          <Link to="/hr/users" prefetch="intent" className="text-app-fg-muted hover:text-brand-500 transition-colors">
+            Users
+          </Link>
+        )}
         <svg className="w-4 h-4 text-app-border" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
@@ -337,7 +348,7 @@ export function UserDetailPage({
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <PageRefreshButton />
-                  {(canDisburseToThisUser || (!isSuperAdminProfile && !restrictHeadView)) && (
+                  {!isSelfView && (canDisburseToThisUser || (!isSuperAdminProfile && !restrictHeadView)) && (
                     <>
                     {canDisburseToThisUser && (
                       <Link
@@ -346,6 +357,25 @@ export function UserDetailPage({
                       >
                         Disburse
                       </Link>
+                    )}
+                    {viewerCanMirror && (
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="mirror" />
+                        <Button
+                          type="submit"
+                          variant="secondary"
+                          size="sm"
+                          className="flex items-center gap-1.5 border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                          loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+                          loadingText="Entering..."
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          Mirror user
+                        </Button>
+                      </Form>
                     )}
                     {!isSuperAdminProfile && !restrictHeadView && (
                       <>
@@ -1297,7 +1327,10 @@ export function UserDetailPage({
             <p className="text-sm text-app-fg-muted">
               Set a new password for <strong>{user.name}</strong>. This will log them out of all sessions.
             </p>
-            <Form method="post">
+            {resetFetcher.data?.error && (
+              <InlineNotification variant="danger" message={resetFetcher.data.error} />
+            )}
+            <resetFetcher.Form method="post" action=".">
               <input type="hidden" name="intent" value="resetPassword" />
               <div className="space-y-4">
                 <div>
@@ -1305,13 +1338,13 @@ export function UserDetailPage({
                   <input id="newPassword" name="newPassword" type="password" required minLength={8} className="input" placeholder="Minimum 8 characters" />
                 </div>
                 <div className="flex items-center justify-end gap-3">
-                  <Button type="button" variant="secondary" onClick={() => setShowResetPassword(false)}>Cancel</Button>
+                  <Button type="button" variant="secondary" onClick={() => setShowResetPassword(false)} disabled={isResetting}>Cancel</Button>
                   <Button type="submit" variant="primary" loading={isResetting} loadingText="Resetting...">
                     Reset Password
                   </Button>
                 </div>
               </div>
-            </Form>
+            </resetFetcher.Form>
         </Modal>
       )}
 

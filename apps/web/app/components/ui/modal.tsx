@@ -48,6 +48,12 @@ export function Modal({
   backdropBlur = false,
 }: ModalProps) {
   const [mounted, setMounted] = useState(false);
+  // ALL hooks must be declared before any conditional `return`. Previously this `useRef`
+  // sat below the `!open` early return, which violates the Rules of Hooks: on the first render
+  // (open=false) only 3 hooks ran; on the re-render where open flipped to true, React saw a
+  // 4th hook and crashed with "Rendered more hooks than during the previous render". That
+  // crash bubbled up to the page-level ErrorBoundary, so every modal trigger looked broken.
+  const downOnBackdropRef = useRef(false);
 
   useEffect(() => {
     setMounted(true);
@@ -73,7 +79,6 @@ export function Modal({
   // This survives:
   // - drag-select that begins inside the modal and releases over the backdrop
   // - phantom click events fired after native pickers (date / select) dismiss on iOS
-  const downOnBackdropRef = useRef(false);
   const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     downOnBackdropRef.current = e.target === e.currentTarget;
   };

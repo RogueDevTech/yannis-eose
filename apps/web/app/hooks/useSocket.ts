@@ -261,6 +261,10 @@ export function usePollingFallback(intervalMs = 30_000): void {
 /**
  * CS Agent — broadcasts current UI state for Team Live View.
  * Call this in route components for CS agents. Only emits if the socket is connected.
+ *
+ * Mirror Mode: when `<html data-mirror="1">` is set by DashboardLayout, the broadcast is
+ * skipped. An admin viewing the app as a CS agent would otherwise pollute the supervisor
+ * mirror view — and Mirror Mode is contractually view-only.
  */
 export function useAgentStateBroadcast(state: {
   currentRoute: string;
@@ -271,6 +275,9 @@ export function useAgentStateBroadcast(state: {
 
   useEffect(() => {
     if (!isConnected) return;
+    if (typeof document !== 'undefined' && document.documentElement.getAttribute('data-mirror') === '1') {
+      return;
+    }
     const socket = getSocket();
     socket.emit('agent:state_update', state);
   }, [isConnected, state.currentRoute, state.currentOrderId, state.currentPanel]);

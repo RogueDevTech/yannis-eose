@@ -261,13 +261,46 @@ Because the 3PL partners are not in-app yet, the assigned CS agent is the de fac
 - Every send is written to `outbound_messages` table AND triggers an `order_timeline_events` entry in the same transaction.
 - Template management: HoCS/SuperAdmin create/edit/archive `message_templates` (branch-scoped). New NestJS module: `messaging/`. New tRPC router: `messaging.router.ts`.
 
-**Supervisor Mirror View:**
+**Supervisor Mirror View** (Socket.io live screen-state — distinct from "Mirror Mode" below):
 - HoCS can open a read-only live view of any CS rep's current screen state
 - CS rep broadcasts `agent:state_update` event via Socket.io on every route/panel change: `{ agentId, currentRoute, currentOrderId, currentPanel, lastActionAt }`
 - Server stores last known agent state in Redis; relays to supervisor's room
 - `supervisor:watching` event sent back to rep when mirror is opened — rep must see an "Being Observed" indicator in the UI (transparency requirement)
 - Mirror View is strictly read-only. Supervisor cannot take actions through it.
 - New Socket.io events: `agent:state_update`, `supervisor:watching`, `supervisor:stopped_watching`
+
+**Mirror Mode** (full-session impersonation — distinct from Supervisor Mirror View above):
+The admin temporarily renders the entire app *as* another user — their role, branch, RLS, sidebar, theme, font scale. Different from Supervisor Mirror View, which only watches a rep's screen state via Socket.io. Mirror Mode actually **swaps the session identity**.
+
+- **Trigger**: "Mirror user" button on the user detail page (`/hr/users/:id`) when `viewerCanMirror` is true. POSTs `intent=mirror` to `/auth/mirror/start` then redirects to `/admin`.
+- **Permission gate** (`apps/api/src/common/authz.ts::canMirror`, mirrored on the frontend at `apps/web/app/lib/rbac.ts::canMirror`):
+  - SuperAdmin / Admin can mirror anyone except another admin-level user.
+  - HEAD_OF_CS → CS_AGENT on their branch.
+  - HEAD_OF_MARKETING → MEDIA_BUYER on their branch.
+  - HEAD_OF_LOGISTICS → LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER on their branch.
+  - HR_MANAGER cannot mirror anyone (per CEO directive — HR doesn't need it).
+  - Nobody can self-mirror; nested mirroring is forbidden (you must exit first).
+- **Read-only enforcement**: `apps/api/src/trpc/trpc.ts` has a root-level middleware (`blockMutationsWhileMirroring`) that rejects any tRPC `mutation` while `ctx.user.mirroredBy` is set. Returns a clear `FORBIDDEN` with the message "Read-only while mirroring user. Exit mirror mode to make changes." Backend services don't need to know about Mirror Mode — the gate is centralised.
+- **Session shape**: `SessionUser` carries `mirroredBy: { id, name, role } | null` and `mirrorSessionId: string | null`. The mirrored session has the **target user's** id, role, branch, theme, font-scale; `mirroredBy` points to the original admin. `/auth/me` returns these fields and `getCurrentUser` (web) re-exposes them on the loader user object.
+- **Audit trail** — `mirror_sessions` table (migration `0065_mirror_sessions.sql`):
+  - One row per mirror session (`actor_id`, `target_id`, `started_at`, `ended_at`, `ip_address`, `user_agent`).
+  - `started_at` stamped on `startMirror`. `ended_at` stamped on `stopMirror`. Rows are **permanent** — never delete; never reuse the row when a new mirror starts (open a fresh row).
+  - Indexed on `actor_id`, `target_id`, `started_at`, `ended_at`.
+  - Surfaced in the UI at `/admin/analytics/audit` as a separate "Mirror Mode sessions" card above the row-level audit table — populated by `audit.mirrorSessions` tRPC procedure (in `apps/api/src/audit/audit.service.ts::getMirrorSessions`). Active sessions render with a pulsing green "Active" badge.
+- **No side-effects on the target user** — Mirror Mode is *strictly* view-only:
+  - Server: `blockMutationsWhileMirroring` rejects every tRPC mutation.
+  - Notifications: `NotificationsStateProvider` receives `readOnly={!!user.mirroredBy}` from DashboardLayout — both `markAsRead` and `markAllReadFn` no-op so the admin's clicks never mark the target's notifications as read on their behalf. The bell still renders the user's notifications visually.
+  - Socket broadcasts: `useAgentStateBroadcast` reads `document.documentElement.dataset.mirror` before emitting and skips when set — admin navigation while mirroring a CS agent doesn't bleed into the supervisor mirror view or update the target's `lastActionAt`.
+  - DashboardLayout writes/clears `<html data-mirror="1">` on mount based on `user.mirroredBy`. Any new client-side side-effect helper MUST check this flag and bail.
+- **UI chrome** — when `mirroredBy` is set:
+  - A `fixed inset-0 pointer-events-none z-[80] border-4 border-success-500` overlay frames the entire viewport (not `ring-inset` on the layout div — that hugs the content area and misses the bottom of long pages).
+  - Full-screen "Entering mirror mode…" / "Exiting mirror…" loader is rendered while `useNavigation()` reports a `mirror` or `exitMirror` form submit. The same DashboardLayout wraps both `/hr/users/:id` (where mirror starts) and `/admin/*` (the redirect target), so the loader persists across the redirect — no flash of the old page.
+  - Header renders an "Exit mirror" pill (success-coloured, pulsing dot, tooltip showing both names) that posts `intent=exitMirror` to `/admin?index` → the admin layout action calls `/auth/mirror/stop` → the original session is restored and we redirect to `/admin`.
+  - Sidebar / branch switcher / notifications all render against the target's identity automatically — no special handling needed.
+- **Phone numbers stay masked**: when an admin mirrors a CS agent, the agent's regular phone-mask + Click-to-Call rules apply. Mirror Mode is not a side-channel for raw PII.
+- **Do NOT** add an "exit mirror" hard route at the API layer — the cookie + session is updated in place by `stopMirror`, and any redirect-based "logout" would also kill the original admin's session.
+- **Do NOT** use Mirror Mode to perform actions on the user's behalf — that's what `users.update` is for. Every mutation throws by design.
+- Files: `apps/api/src/auth/auth.service.ts` (start/stopMirror), `apps/api/src/auth/auth.controller.ts` (`POST /auth/mirror/start`, `POST /auth/mirror/stop`), `apps/api/src/common/decorators/current-user.decorator.ts` (SessionUser fields), `apps/api/src/common/authz.ts` (canMirror), `apps/api/src/trpc/trpc.ts` (mutation block middleware), `apps/web/app/components/layout/dashboard-layout.tsx` (green ring), `apps/web/app/components/layout/header.tsx` (Exit pill), `apps/web/app/features/users/UserDetailPage.tsx` (Mirror button), `apps/web/app/routes/hr.users.$id/route.tsx` (mirror intent → start), `apps/web/app/routes/admin/route.tsx` (exitMirror intent → stop).
 
 **Order Lifecycle Timeline (shared across ALL order detail pages):**
 - Every state transition service method MUST write an `order_timeline_events` row in the same transaction — never separately, never optionally
@@ -422,13 +455,17 @@ Finance is the ONLY role that can be worn on top of another primary role. Every 
 - Branch visibility: `canViewAllBranches` returns true for both.
 - `SENSITIVE_ROLES` includes both `SUPER_ADMIN` and `ADMIN` — creating/promoting anyone into an admin-level role generates a `permission_request` for SuperAdmin approval.
 
-**One active holder per branch (uniqueness rule):**
-Four roles are limited to at most one active holder per branch: `HEAD_OF_CS`, `HEAD_OF_MARKETING`, `HEAD_OF_LOGISTICS`, and **`HR_MANAGER`** (added 2026-04-23 per CEO directive, migration 0060). Enforcement lives at two layers:
-- **Service:** `UsersService.createStaff` and `UsersService.update` check the `HEAD_ROLES` tuple and reject with a friendly `CONFLICT` message (`"Branch already has an active Hr Manager (Mary). Deactivate them first."`) before writing.
-- **DB:** partial unique indexes `uq_active_head_of_*_per_branch` + `uq_active_hr_manager_per_branch` (migrations 0056 + 0060) — safety net catches any write path that skips the service.
-- **UI proactive warning:** `users.listActiveHeads` tRPC returns all current holders; user create / edit pages render an inline warning BEFORE submit if the admin picks a role+branch combo that's already taken. Constant `HEAD_ROLES` is mirrored in `apps/web/app/features/users/UserCreatePage.tsx` and `UserDetailPage.tsx`.
-- Note on naming: the constant stays `HEAD_ROLES` even though `HR_MANAGER` isn't literally a "head" — renaming would churn every call site for no functional benefit.
-- This is the **per-branch** uniqueness pattern, distinct from the **org-wide singleton** pattern used by the Finance hat (`is_finance_officer` flag). Do not conflate the two.
+**One holder per branch (uniqueness rule — both ACTIVE and PENDING count):**
+Four roles are limited to at most one holder per branch: `HEAD_OF_CS`, `HEAD_OF_MARKETING`, `HEAD_OF_LOGISTICS`, and **`HR_MANAGER`** (added 2026-04-23 per CEO directive, migration 0060).
+
+The rule covers both **ACTIVE** and **PENDING** statuses (tightened 2026-04-25 — earlier behaviour only blocked ACTIVE conflicts, which let admins stack multiple pending invites on the same branch). Only `INACTIVE` / `DEACTIVATED` / `ARCHIVED` frees the slot. Enforcement lives at:
+- **Service:** `UsersService.createStaff` and `UsersService.update` check the `HEAD_ROLES` tuple and reject with `CONFLICT` (`"Branch already has a pending Head Of Cs (Comfort). Deactivate them first."` or `"… an active Hr Manager (Mary). …"`) before writing. Filter: `inArray(status, ['ACTIVE', 'PENDING'])`.
+- **DB:** partial unique indexes `uq_active_head_of_*_per_branch` + `uq_active_hr_manager_per_branch` (migrations 0056 + 0060). **Note**: these still filter `status = 'ACTIVE'` only — the service check is the canonical guard. Tightening the index to include PENDING requires cleaning any existing PENDING duplicates in the DB first; see "Open data hygiene" below.
+- **UI proactive warning:** `users.listActiveHeads` tRPC returns ACTIVE + PENDING holders so the user create / edit pages can render an inline warning AND the blocking modal BEFORE submit. Constant `HEAD_ROLES` is mirrored in `apps/web/app/features/users/UserCreatePage.tsx` and `UserDetailPage.tsx`.
+- **Note on naming:** the constant stays `HEAD_ROLES` even though `HR_MANAGER` isn't literally a "head" — renaming would churn every call site for no functional benefit.
+- **This is the per-branch uniqueness pattern**, distinct from the **org-wide singleton** pattern used by the Finance hat (`is_finance_officer` flag). Do not conflate the two.
+
+**Edge case — heads with `primary_branch_id IS NULL`:** Heads created without a primary branch (legacy/seed data) bypass the per-branch check entirely. They show up in branch UIs via `user_branches` membership, but the uniqueness invariant is keyed on `primary_branch_id`. When you encounter one, set their `primary_branch_id` to a real branch (or deactivate them) so the invariant becomes enforceable.
 
 ---
 
@@ -475,6 +512,7 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | Date range filter | `<DateFilterBar />` |
 | Dropdown actions menu | `<ActionDropdown />` |
 | Loading spinner | `<Spinner />` |
+| Global page-loading indicator | `<NavProgressBar />` (mounted once per layout — do not add per-page) |
 
 ### When a new component IS needed
 If you need a UI pattern that isn't in the list above **and** it will appear in 2+ places:
@@ -564,6 +602,14 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT send raw phone numbers via SMS or WhatsApp — always route through the platform bridge
 - Do NOT write `order_timeline_events` rows outside of the same database transaction as the triggering mutation — timeline events must be atomic with their state change
 - Do NOT render the Mirror View with any interactive action buttons — it is read-only, always
+- Do NOT bypass the `blockMutationsWhileMirroring` tRPC middleware on any new router. Mirror Mode read-only enforcement lives at the root middleware so individual services don't have to know about it; if you ever build a non-tRPC mutation endpoint (REST controller, webhook handler, raw fetch handler), you MUST add `if (ctx.user?.mirroredBy) throw FORBIDDEN` before any write. See `apps/api/src/trpc/trpc.ts` for the canonical pattern.
+- Do NOT change `canMirror()` permission rules without a CEO directive. The matrix (SuperAdmin → anyone, Heads → their direct-report role on their branch, HR → nobody) is locked. If product asks to expand it, write a new memory entry first.
+- Do NOT delete `mirror_sessions` rows. The audit trail is permanent — even when a session ends, the row stays with `ended_at` stamped. Closed rows are how we answer "who looked through whose account, and when."
+- Do NOT let admin clicks during Mirror Mode mutate the target user's data — including soft-mutations like "mark notification as read", `lastActionAt` updates, `agent:state_update` socket broadcasts, push-ack receipts, or any client-side optimistic UI that pretends a write happened. Mirror Mode is **strictly view-only**. Implementation:
+  - Server: `blockMutationsWhileMirroring` middleware (already in place) rejects every tRPC mutation.
+  - Client: `NotificationsStateProvider` accepts a `readOnly` flag (set from `user.mirroredBy` in `DashboardLayout`); both `markAsRead` and `markAllReadFn` no-op when it's true.
+  - Socket: `useAgentStateBroadcast` checks `<html data-mirror="1">` before emitting and skips when set. `DashboardLayout` writes that attribute when mirroring.
+  - When adding a NEW client-side side-effect helper (e.g. "mark seen", "track view", "ping recently active"), check `document.documentElement.dataset.mirror === '1'` first and bail. The flag is the canonical "we are pretending; touch nothing" signal.
 - Do NOT fire a Web Push without first inserting the in-app notification row — push is always the mirror layer, not a standalone channel
 - Do NOT send push from an automation EVENT rule outside the triggering service method's transaction — inline check only
 - Do NOT delete a `push_delivery_log` row on failure — mark as `FAILED` and use resend flow
@@ -588,6 +634,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT set the audit actor with `this.pgClient\`SELECT set_config('yannis.current_user_id', ..., true)\``. It runs outside any drizzle transaction and the setting dies before the next `this.db.*` call — writes get attributed to "System" in the audit trail. Always use `withActor(this.db, actor, async (tx) => { ... })` from `apps/api/src/common/db/with-actor.ts` and route every write through `tx`, never `this.db`, inside the callback. See the "Actor Injection Pattern" section for the full rationale.
 - Do NOT remove `HR_MANAGER` from the `HEAD_ROLES` tuples in `users.service.ts` or the frontend equivalents. CEO directive 2026-04-23: HR follows the same one-per-branch rule as `HEAD_OF_CS` / `HEAD_OF_MARKETING` / `HEAD_OF_LOGISTICS`. Migration 0060 enforces it at the DB layer too.
 - Do NOT close `<Modal>` on a bare `onClick` of the backdrop. iOS dismisses native pickers (`<input type="date">`, native `<select>`) by firing a phantom click that bubbles to the backdrop and would dismiss the modal mid-interaction — losing whatever the user was about to submit. The `Modal` component in [apps/web/app/components/ui/modal.tsx](apps/web/app/components/ui/modal.tsx) only closes when `mousedown` AND `mouseup` both land on the backdrop itself (`e.target === e.currentTarget`). Do not revert to `onClick={onClose}`, do not add a separate `onClick={onClose}` on the inner content, and do not stop-propagation on the inner pane — the press-start-and-end check covers all the cases. Modals must NEVER auto-close while the user is still working on the form inside them; the only paths to close are the explicit Done/Save/Cancel buttons, the X icon, the Escape key, or a clean tap on the backdrop.
+- Every filterable page must show a loading indicator while the loader re-runs after a filter / sort / search / pagination change. The `<NavProgressBar />` component in [apps/web/app/components/ui/nav-progress-bar.tsx](apps/web/app/components/ui/nav-progress-bar.tsx) is mounted once at the top of each layout (`DashboardLayout`, `TplLayout`, `rider/route.tsx`) and listens to Remix `useNavigation()` — it ramps a thin brand-coloured bar at the top of the viewport for ANY non-idle navigation (route change, search-param update, fetcher action) and fades out when the loader resolves. New pages do NOT need to wire `useNavigation` themselves to indicate loading — the global bar covers it. Do NOT remove `<NavProgressBar />` from the layouts; do NOT pass non-Promise values to `<DeferredSection>`/`<Await>` and rely on this bar instead — `<Await>` requires a Promise and will throw if given a sync value. Per-page inline spinners next to specific filter controls are still allowed but no longer required.
 
 ---
 

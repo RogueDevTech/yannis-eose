@@ -19,6 +19,19 @@ export interface SessionUser {
    * on top of their primary role. Exactly one user in the org has this at any time.
    */
   isFinanceOfficer?: boolean;
+  /**
+   * Set when the session is in Mirror Mode — the API treats requests as the target user
+   * (RLS, branch, role, permissions all switch) but ALL mutations are blocked at the
+   * tRPC root middleware. The original admin who started the mirror is recorded here so
+   * the UI can show who is mirroring and the audit trail stays correct.
+   */
+  mirroredBy?: {
+    id: string;
+    name: string;
+    role: string;
+  } | null;
+  /** mirror_sessions row id — used by stopMirror to close out the active row. */
+  mirrorSessionId?: string | null;
 }
 
 /**

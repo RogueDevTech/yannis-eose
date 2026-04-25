@@ -5,6 +5,7 @@ import { TeamViewToggle } from '~/components/ui/team-view-toggle';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { formatNaira } from '~/lib/format-amount';
 import { MediaBuyerBalanceCard } from './MediaBuyerBalanceCard';
 import type { FundingBalanceRow } from './types';
@@ -12,6 +13,24 @@ import type { FundingBalanceRow } from './types';
 export interface MarketingTeamPageProps {
   teamMembers: FundingBalanceRow[];
   fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+  dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
+  leaderboardPeriod: 'this_month' | 'all_time';
+}
+
+/** Build the query string to forward the active date filter to /admin/marketing/orders. */
+function buildOrdersQuery(
+  mediaBuyerId: string,
+  dateFilters: { startDate: string; endDate: string; periodAllTime: boolean },
+): string {
+  const params = new URLSearchParams();
+  params.set('mediaBuyerId', mediaBuyerId);
+  if (dateFilters.periodAllTime) {
+    params.set('period', 'all_time');
+  } else {
+    if (dateFilters.startDate) params.set('startDate', dateFilters.startDate);
+    if (dateFilters.endDate) params.set('endDate', dateFilters.endDate);
+  }
+  return `/admin/marketing/orders?${params.toString()}`;
 }
 
 function memberInitials(name: string): string {
@@ -23,7 +42,7 @@ function memberInitials(name: string): string {
     .toUpperCase();
 }
 
-export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeamPageProps) {
+export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters }: MarketingTeamPageProps) {
   const [view, setView] = useState<'table' | 'grid'>('table');
 
   return (
@@ -32,6 +51,19 @@ export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeam
         title="Team"
         description="Media buyers and funding balance — same cards as Live Activities"
       />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+          <DateFilterBar
+            startDate={dateFilters.startDate}
+            endDate={dateFilters.endDate}
+            periodAllTime={dateFilters.periodAllTime}
+          />
+        </div>
+        <p className="text-xs text-app-fg-muted">
+          Confirmation and delivery rates use this range. Funding totals are lifetime.
+        </p>
+      </div>
 
       {/* Funding Summary */}
       <div className="card">
@@ -88,7 +120,7 @@ export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeam
             {/* Mobile: always render card grid (table is unusable on a narrow viewport) */}
             <div className="md:hidden grid grid-cols-1 gap-3">
               {teamMembers.map((m) => (
-                <MediaBuyerBalanceCard key={m.userId} row={m} />
+                <MediaBuyerBalanceCard key={m.userId} row={m} ordersDateFilters={dateFilters} />
               ))}
             </div>
 
@@ -146,7 +178,7 @@ export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeam
                       <td className="table-cell">
                         <div className="flex flex-wrap items-center gap-2">
                           <Link
-                            to={`/admin/marketing/orders?mediaBuyerId=${m.userId}`}
+                            to={buildOrdersQuery(m.userId, dateFilters)}
                             prefetch="intent"
                             className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
                           >
@@ -170,7 +202,7 @@ export function MarketingTeamPage({ teamMembers, fundingSummary }: MarketingTeam
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {teamMembers.map((m) => (
-              <MediaBuyerBalanceCard key={m.userId} row={m} />
+              <MediaBuyerBalanceCard key={m.userId} row={m} ordersDateFilters={dateFilters} />
             ))}
           </div>
             )}

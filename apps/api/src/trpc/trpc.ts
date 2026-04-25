@@ -39,8 +39,30 @@ const financeFieldsMiddleware = t.middleware(async ({ ctx, next }) => {
 export const publicProcedure = t.procedure;
 
 /**
+ * Mirror Mode read-only guard.
+ *
+ * When the session has `mirroredBy` set the actor is browsing the app through
+ * another user's account — every mutation must be rejected. Queries pass through
+ * unchanged so the admin can navigate, search, and view freely.
+ *
+ * The check uses the procedure type from `meta` because tRPC v11 doesn't expose
+ * `_def.mutation` on the params; instead we look at the `type` field on the
+ * runtime call info. `next()` returns the result wrapper either way.
+ */
+const blockMutationsWhileMirroring = t.middleware(async ({ ctx, type, next }) => {
+  if (type === 'mutation' && ctx.user?.mirroredBy) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Read-only while mirroring user. Exit mirror mode to make changes.',
+    });
+  }
+  return next();
+});
+
+/**
  * Authenticated procedure — requires a valid session.
  * Applies Column-Level Security (finance field stripping) automatically.
+ * Blocks mutations when in Mirror Mode.
  */
 export const authedProcedure = t.procedure
   .use(async ({ ctx, next }) => {
@@ -49,6 +71,7 @@ export const authedProcedure = t.procedure
     }
     return next({ ctx: { ...ctx, user: ctx.user } });
   })
+  .use(blockMutationsWhileMirroring)
   .use(financeFieldsMiddleware);
 
 /**

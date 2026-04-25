@@ -6,8 +6,8 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { canViewAllBranches } from '../common/authz';
-import { eq, sql, desc } from 'drizzle-orm';
+import { canMirror, canViewAllBranches } from '../common/authz';
+import { and, eq, isNull, sql, desc } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -80,8 +80,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    // Clear rate limit on successful login
-    await this.redis.del(`${RATE_LIMIT_PREFIX}${clientIp}`);
+    // Clear rate limit on successful login. Best-effort — if Redis is unreachable the rate-limit
+    // entry will simply expire on its own; we must not 500 the login over it.
+    try {
+      await this.redis.del(`${RATE_LIMIT_PREFIX}${clientIp}`);
+    } catch (err) {
+      this.logger.warn(`rate_limit_clear_failed ip=${clientIp} reason=${(err as Error).message}`);
+    }
 
     // Option B: first login — move PENDING → ACTIVE
     if (user.status === 'PENDING') {
@@ -145,6 +150,176 @@ export class AuthService {
    */
   async killUserSessions(targetUserId: string): Promise<number> {
     return this.sessionStore.deleteAllUserSessions(targetUserId);
+  }
+
+  /**
+   * Mirror Mode — replace the actor's session with the target user so the entire
+   * app renders as that user (RLS, branch, role, permissions, sidebar). Mutations
+   * are blocked at the tRPC root middleware while a `mirroredBy` field is set.
+   *
+   * Permission gating lives in `canMirror()` — see authz.ts. A new mirror_sessions
+   * audit row is opened (and closed on `stopMirror`) so we always know who saw
+   * what through whose account.
+   */
+  async startMirror(
+    sessionToken: string,
+    actor: SessionUser,
+    targetUserId: string,
+    requestMeta: { ipAddress?: string | null; userAgent?: string | null },
+  ): Promise<SessionUser> {
+    if (actor.mirroredBy) {
+      throw new ForbiddenException('Already in mirror mode — exit current mirror first.');
+    }
+
+    const targetRows = await this.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, targetUserId))
+      .limit(1);
+    const target = targetRows[0];
+    if (!target) {
+      throw new BadRequestException('Target user not found.');
+    }
+    if (target.status !== 'ACTIVE') {
+      throw new BadRequestException('Cannot mirror an inactive user.');
+    }
+
+    if (
+      !canMirror(
+        { id: actor.id, role: actor.role, currentBranchId: actor.currentBranchId, mirroredBy: actor.mirroredBy },
+        { id: target.id, role: target.role, primaryBranchId: target.primaryBranchId },
+      )
+    ) {
+      throw new ForbiddenException('You are not allowed to mirror this user.');
+    }
+
+    // Resolve the target user's branch context the same way login does.
+    let currentBranchId: string | null = null;
+    if (!canViewAllBranches({ role: target.role })) {
+      const memberships = await this.db
+        .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
+        .from(schema.userBranches)
+        .where(eq(schema.userBranches.userId, target.id))
+        .orderBy(desc(schema.userBranches.isPrimary))
+        .limit(10);
+      currentBranchId = memberships[0]?.branchId ?? target.primaryBranchId ?? null;
+      if (!currentBranchId) {
+        throw new BadRequestException('Target user has no branch — cannot mirror.');
+      }
+    }
+
+    const insertedRows = await this.db
+      .insert(schema.mirrorSessions)
+      .values({
+        actorId: actor.id,
+        targetId: target.id,
+        ipAddress: requestMeta.ipAddress ?? null,
+        userAgent: requestMeta.userAgent ?? null,
+      })
+      .returning({ id: schema.mirrorSessions.id });
+    const mirrorSessionId = insertedRows[0]?.id;
+    if (!mirrorSessionId) {
+      throw new BadRequestException('Failed to record mirror session.');
+    }
+
+    const mirroredSession: SessionUser = {
+      id: target.id,
+      email: target.email,
+      name: target.name,
+      role: target.role,
+      logisticsLocationId: target.logisticsLocationId,
+      currentBranchId,
+      // Surface the target's appearance so the admin sees the app exactly as the
+      // user would. The green border makes Mirror Mode obvious; the theme is part
+      // of the read-only "live walkthrough".
+      appTheme: target.appTheme ?? null,
+      fontScale: target.fontScale ?? null,
+      isFinanceOfficer: target.isFinanceOfficer === true,
+      mirroredBy: { id: actor.id, name: actor.name, role: actor.role },
+      mirrorSessionId,
+    };
+
+    await this.sessionStore.updateSession(sessionToken, mirroredSession, this.sessionTtl);
+    this.logger.log(`mirror_started actor=${actor.id} target=${target.id} session=${mirrorSessionId}`);
+    return mirroredSession;
+  }
+
+  /**
+   * Exit Mirror Mode — restores the original actor session and stamps `ended_at`
+   * on the active mirror_sessions row.
+   */
+  async stopMirror(sessionToken: string, currentSession: SessionUser): Promise<SessionUser> {
+    if (!currentSession.mirroredBy) {
+      throw new BadRequestException('Not currently mirroring.');
+    }
+
+    const originalActorId = currentSession.mirroredBy.id;
+    const mirrorSessionId = currentSession.mirrorSessionId ?? null;
+
+    // Close the audit row. Match by id when we have it; fall back to the most
+    // recent open row for this actor+target so a stale session still closes.
+    if (mirrorSessionId) {
+      await this.db
+        .update(schema.mirrorSessions)
+        .set({ endedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.mirrorSessions.id, mirrorSessionId),
+            isNull(schema.mirrorSessions.endedAt),
+          ),
+        );
+    } else {
+      await this.db
+        .update(schema.mirrorSessions)
+        .set({ endedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.mirrorSessions.actorId, originalActorId),
+            eq(schema.mirrorSessions.targetId, currentSession.id),
+            isNull(schema.mirrorSessions.endedAt),
+          ),
+        );
+    }
+
+    // Re-hydrate the original user fresh from DB.
+    const actorRows = await this.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, originalActorId))
+      .limit(1);
+    const actor = actorRows[0];
+    if (!actor) {
+      throw new BadRequestException('Original actor no longer exists; please log in again.');
+    }
+
+    let currentBranchId: string | null = null;
+    if (!canViewAllBranches({ role: actor.role })) {
+      const memberships = await this.db
+        .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
+        .from(schema.userBranches)
+        .where(eq(schema.userBranches.userId, actor.id))
+        .orderBy(desc(schema.userBranches.isPrimary))
+        .limit(10);
+      currentBranchId = memberships[0]?.branchId ?? actor.primaryBranchId ?? null;
+    }
+
+    const restored: SessionUser = {
+      id: actor.id,
+      email: actor.email,
+      name: actor.name,
+      role: actor.role,
+      logisticsLocationId: actor.logisticsLocationId,
+      currentBranchId,
+      appTheme: currentSession.appTheme ?? null,
+      fontScale: currentSession.fontScale ?? null,
+      isFinanceOfficer: actor.isFinanceOfficer === true,
+      mirroredBy: null,
+      mirrorSessionId: null,
+    };
+
+    await this.sessionStore.updateSession(sessionToken, restored, this.sessionTtl);
+    this.logger.log(`mirror_stopped actor=${actor.id} target=${currentSession.id}`);
+    return restored;
   }
 
   /**
@@ -295,13 +470,27 @@ export class AuthService {
 
   /**
    * Check if an IP has exceeded the login attempt rate limit.
+   * Rate limiting is best-effort: if Redis is unreachable we log + skip the check rather than
+   * 500 the login. Otherwise a transient Redis hiccup turns into "Internal server error" for
+   * every signed-out user trying to log in.
    */
   private async checkRateLimit(ip: string): Promise<void> {
     const key = `${RATE_LIMIT_PREFIX}${ip}`;
-    const attempts = await this.redis.get(key);
+    let attempts: string | null;
+    try {
+      attempts = await this.redis.get(key);
+    } catch (err) {
+      this.logger.warn(`rate_limit_check_skipped ip=${ip} reason=${(err as Error).message}`);
+      return;
+    }
 
     if (attempts && parseInt(attempts, 10) >= this.maxLoginAttempts) {
-      const ttl = await this.redis.ttl(key);
+      let ttl = this.rateLimitWindow;
+      try {
+        ttl = await this.redis.ttl(key);
+      } catch (err) {
+        this.logger.warn(`rate_limit_ttl_unavailable ip=${ip} reason=${(err as Error).message}`);
+      }
       throw new ForbiddenException(
         `Too many login attempts. Try again in ${Math.ceil(ttl / 60)} minute(s).`,
       );
@@ -310,14 +499,17 @@ export class AuthService {
 
   /**
    * Record a failed login attempt for rate limiting.
+   * Best-effort — Redis errors must not turn a wrong-password attempt into a 500.
    */
   private async recordFailedAttempt(ip: string): Promise<void> {
     const key = `${RATE_LIMIT_PREFIX}${ip}`;
-    const current = await this.redis.incr(key);
-
-    // Set expiry on first attempt
-    if (current === 1) {
-      await this.redis.expire(key, this.rateLimitWindow);
+    try {
+      const current = await this.redis.incr(key);
+      if (current === 1) {
+        await this.redis.expire(key, this.rateLimitWindow);
+      }
+    } catch (err) {
+      this.logger.warn(`rate_limit_record_skipped ip=${ip} reason=${(err as Error).message}`);
     }
   }
 }

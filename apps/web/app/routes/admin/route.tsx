@@ -96,6 +96,19 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // Exit Mirror Mode — restores the original admin session and bounces home.
+  // The success path always redirects so the freshly-restored cookie is used on the next render.
+  if (intent === 'exitMirror') {
+    const res = await apiRequest<unknown>('/auth/mirror/stop', {
+      method: 'POST', cookie, body: {},
+    });
+    if (!res.ok) {
+      const errorData = res.data as { message?: string };
+      return json({ success: false, error: errorData?.message ?? 'Failed to exit mirror' });
+    }
+    throw redirect('/admin');
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 

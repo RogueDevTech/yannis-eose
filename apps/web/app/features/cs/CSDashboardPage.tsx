@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
-import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
+import { Textarea } from '~/components/ui/textarea';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -730,6 +730,8 @@ export function CSDashboardPage({
   const [reassignToAgentId, setReassignToAgentId] = useState('');
   /** Pending confirm for Cancel order (replaces window.confirm) */
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ orderId: string; customerName: string } | null>(null);
+  /** Reason typed/picked in the cancel modal — required, min 10 chars before Submit enables. */
+  const [cancelReason, setCancelReason] = useState('Customer not picking');
   /** Selected live activity item for detail modal */
   const [selectedLiveCart, setSelectedLiveCart] = useState<LiveActivityItem | null>(null);
   /** Selected active (CS_ENGAGED) order for detail modal */
@@ -932,6 +934,7 @@ export function CSDashboardPage({
         }
         if (cancelConfirmOrder) {
           setCancelConfirmOrder(null);
+          setCancelReason('Customer not picking');
         }
       }
     }
@@ -2466,30 +2469,84 @@ export function CSDashboardPage({
       {/* Performance Quick Stats moved into top Overview card */}
 
       {cancelConfirmOrder && (
-        <ConfirmActionModal
-          open={!!cancelConfirmOrder}
-          onClose={() => setCancelConfirmOrder(null)}
-          title="Cancel order?"
-          description={
-            <>
-              Cancel order for <strong>{cancelConfirmOrder.customerName}</strong>? The order will be moved to Cancelled. You can add a reason on the order detail page if needed.
-            </>
-          }
-          confirmLabel="Cancel order"
-          variant="danger"
-          loading={fetcher.state === 'submitting'}
-          onConfirm={() => {
-            fetcher.submit(
-              {
-                intent: 'transition',
-                orderId: cancelConfirmOrder.orderId,
-                newStatus: 'CANCELLED',
-                reason: 'Cancelled by CS from dashboard',
-              },
-              { method: 'post' },
-            );
+        <Modal
+          open
+          onClose={() => {
+            setCancelConfirmOrder(null);
+            setCancelReason('Customer not picking');
           }}
-        />
+          maxWidth="max-w-md"
+          contentClassName="p-6"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">
+            Cancel order for {cancelConfirmOrder.customerName}?
+          </h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            Please provide a reason (at least 10 characters). The order will be moved to Cancelled.
+          </p>
+          {/* Preset reason chips — match the bulk cancel modal on the CS Orders page. */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            {['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate', 'Other'].map((preset) => {
+              const isOther = preset === 'Other';
+              const isActive = isOther
+                ? cancelReason.length > 0 && !['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate'].includes(cancelReason)
+                : cancelReason === preset;
+              return (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setCancelReason(isOther ? '' : preset)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700'
+                      : 'bg-app-hover text-app-fg-muted border border-app-border hover:bg-app-hover'
+                  }`}
+                >
+                  {preset}
+                </button>
+              );
+            })}
+          </div>
+          <Textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Enter cancellation reason..."
+            rows={3}
+          />
+          <div className="flex gap-2 mt-4 justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setCancelConfirmOrder(null);
+                setCancelReason('Customer not picking');
+              }}
+            >
+              Back
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              className="border-danger-500 bg-danger-500 hover:bg-danger-600 text-white"
+              disabled={cancelReason.trim().length < 10 || fetcher.state === 'submitting'}
+              loading={fetcher.state === 'submitting'}
+              loadingText="Cancelling..."
+              onClick={() => {
+                fetcher.submit(
+                  {
+                    intent: 'transition',
+                    orderId: cancelConfirmOrder.orderId,
+                    newStatus: 'CANCELLED',
+                    reason: cancelReason.trim(),
+                  },
+                  { method: 'post' },
+                );
+              }}
+            >
+              Cancel order
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {/* View all Closer workloads modal — 20 per page, Prev/Next */}

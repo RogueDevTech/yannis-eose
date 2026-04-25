@@ -45,3 +45,57 @@ export function canViewAllBranches(user: { role: string; permissions?: string[] 
 export function isAdminLevelRole(role: string): boolean {
   return ADMIN_LEVEL_ROLES.has(role);
 }
+
+/**
+ * Roles a Head of Logistics may mirror — anyone in the logistics chain on
+ * their branch (3PL managers, riders, stock managers, branch logistics manager).
+ */
+const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
+  'LOGISTICS_MANAGER',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+  'STOCK_MANAGER',
+]);
+
+/**
+ * Mirror Mode permission gate.
+ *
+ * Rules (per CEO directive):
+ * - SuperAdmin / Admin can mirror anyone EXCEPT another admin-level user.
+ * - HEAD_OF_CS can mirror CS_AGENT on their own branch.
+ * - HEAD_OF_MARKETING can mirror MEDIA_BUYER on their own branch.
+ * - HEAD_OF_LOGISTICS can mirror LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER on their own branch.
+ * - HR_MANAGER cannot mirror anyone (per directive — HR doesn't need it).
+ * - Nobody can mirror themselves.
+ *
+ * Already-mirroring sessions cannot start a nested mirror (no mirror chains).
+ */
+export function canMirror(
+  actor: {
+    id: string;
+    role: string;
+    currentBranchId?: string | null;
+    mirroredBy?: { id: string } | null;
+  },
+  target: { id: string; role: string; primaryBranchId?: string | null },
+): boolean {
+  // No mirror chains
+  if (actor.mirroredBy) return false;
+  // Cannot mirror yourself
+  if (actor.id === target.id) return false;
+  // Cannot mirror admin-level users
+  if (ADMIN_LEVEL_ROLES.has(target.role)) return false;
+
+  if (ADMIN_LEVEL_ROLES.has(actor.role)) return true;
+
+  const sameBranch =
+    !!actor.currentBranchId && target.primaryBranchId === actor.currentBranchId;
+  if (!sameBranch) return false;
+
+  if (actor.role === 'HEAD_OF_CS' && target.role === 'CS_AGENT') return true;
+  if (actor.role === 'HEAD_OF_MARKETING' && target.role === 'MEDIA_BUYER') return true;
+  if (actor.role === 'HEAD_OF_LOGISTICS' && HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role))
+    return true;
+
+  return false;
+}
