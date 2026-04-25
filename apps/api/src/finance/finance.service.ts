@@ -22,6 +22,12 @@ import { withActor } from '../common/db/with-actor';
 @Injectable()
 export class FinanceService {
   private readonly logger = new Logger(FinanceService.name);
+  /**
+   * Whether the materialized-view init has succeeded in THIS process. False on boot and after
+   * any refresh failure that looks like a missing view, so the next cron tick re-runs init
+   * and self-heals fresh deployments without anyone touching the admin endpoint.
+   */
+  private mvInitVerified = false;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
@@ -38,14 +44,28 @@ export class FinanceService {
   @Cron('0 */15 * * * *')
   async refreshMaterializedViewsCron() {
     try {
+      // Self-heal a fresh DB: if init hasn't been verified this process, run it before the
+      // first refresh. CREATE MATERIALIZED VIEW IF NOT EXISTS is idempotent, so re-running on
+      // an already-initialized DB is a no-op. Without this step, a fresh production DB sits
+      // emitting "relation does not exist" warnings every 15 min until an admin manually hits
+      // the init endpoint — which nobody ever does.
+      if (!this.mvInitVerified) {
+        await this.initMaterializedViews();
+        this.mvInitVerified = true;
+      }
+
       const results = await this.refreshMaterializedViews();
       const failures = Object.entries(results).filter(([, ok]) => ok !== true);
       if (failures.length > 0) {
+        // Reset the init flag so next tick retries init — covers the case where init partially
+        // succeeded or a view was dropped manually.
+        this.mvInitVerified = false;
         this.logger.warn(`mv_refresh_cron partial_failure count=${failures.length} views=${failures.map(([n]) => n).join(',')}`);
       } else {
         this.logger.log(`mv_refresh_cron success count=${Object.keys(results).length}`);
       }
     } catch (err) {
+      this.mvInitVerified = false;
       this.logger.error(`mv_refresh_cron error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }

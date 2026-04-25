@@ -37,12 +37,18 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
         } catch {
           // If URL parse fails, use as-is
         }
-        // Aiven and most cloud Postgres require SSL
-        // Keep pool small — managed Postgres (Neon, Supabase, Aiven) often limits to 10–20 connections
-        // connect_timeout 30s: remote/cold-start DBs often need more than 10s (CONNECT_TIMEOUT otherwise)
+        // Aiven and most cloud Postgres require SSL.
+        // Keep the pool small — managed Postgres tiers commonly cap at 22 connections, and
+        // PG_MAX_CONNECTIONS in production has actually been hit (error 53300, "remaining
+        // connection slots are reserved for roles with the SUPERUSER attribute"). At max=3
+        // with idle_timeout=10, even four parallel processes (PM2/cluster, deploy overlap,
+        // a stale orphan) stay inside ~12 active slots, leaving headroom for migrations,
+        // backups, and admin psql sessions. Tune up only after a connection pooler
+        // (PgBouncer / Aiven pooler) is in front; tune down further only if traffic is tiny.
+        // connect_timeout 30s: remote/cold-start DBs often need more than 10s.
         return postgres(connectionString, {
-          max: 5,
-          idle_timeout: 20,
+          max: 3,
+          idle_timeout: 10,
           connect_timeout: 30,
           ssl: { rejectUnauthorized: false },
         });

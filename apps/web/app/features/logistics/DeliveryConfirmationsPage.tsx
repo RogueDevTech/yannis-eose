@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
@@ -107,12 +108,12 @@ export function DeliveryConfirmationsPage({
                       <tr key={req.id} className="table-row">
                         <td className="table-cell whitespace-normal">
                           <div className="flex flex-col">
-                            <Link
-                              to={`/admin/logistics/orders/${req.orderId}`}
-                              className="font-medium text-brand-500 hover:text-brand-600"
-                            >
-                              {req.orderId.slice(0, 8)}…
-                            </Link>
+                            <OrderIdBadge
+                              id={req.orderId}
+                              ellipsis="…"
+                              linkTo={`/admin/logistics/orders/${req.orderId}`}
+                              textClassName="font-medium text-brand-500 hover:text-brand-600"
+                            />
                             {order && (
                               <span className="text-xs text-app-fg-muted">
                                 {order.customerName}

@@ -817,6 +817,7 @@ export function UserDetailPage({
                         <th className="table-header">Status</th>
                         <th className="table-header text-right">Amount</th>
                         <th className="table-header">Date</th>
+                        <th className="table-header text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -836,6 +837,19 @@ export function UserDetailPage({
                           </td>
                           <td className="table-cell text-sm text-app-fg-muted">
                             {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </td>
+                          <td className="table-cell text-center">
+                            <Link
+                              to={`/admin/orders/${order.id}`}
+                              prefetch="intent"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                              View
+                            </Link>
                           </td>
                         </tr>
                       ))}
@@ -1190,7 +1204,7 @@ export function UserDetailPage({
               </div>
               <div>
                 <label htmlFor="phone" className="block text-sm font-medium text-app-fg-muted mb-1.5">Phone</label>
-                <input id="phone" name="phone" type="tel" defaultValue="" placeholder="Enter new phone (current is masked)" className="input" />
+                <input id="phone" name="phone" type="tel" defaultValue="" placeholder="Enter new phone" className="input" />
                 <p className="text-xs text-app-fg-muted mt-1">Current: {user.phone ?? 'Not set'}. Leave blank to keep unchanged.</p>
               </div>
             </div>

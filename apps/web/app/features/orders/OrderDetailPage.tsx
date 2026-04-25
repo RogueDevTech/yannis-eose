@@ -8,6 +8,7 @@ import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useVoipDevice } from '~/hooks/useVoipDevice';
 import { useAgentStateBroadcast } from '~/hooks/useSocket';
@@ -972,7 +973,7 @@ export function OrderDetailPage({
         <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
-        <span className="text-app-fg font-medium truncate min-w-0">{order.id.slice(0, 8)}...</span>
+        <OrderIdBadge id={order.id} textClassName="text-app-fg font-medium truncate min-w-0" />
       </div>
 
       {/* Header */}

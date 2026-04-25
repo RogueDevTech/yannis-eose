@@ -6,6 +6,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { Pagination } from '~/components/ui/pagination';
 import { formatNaira } from '~/lib/format-amount';
 import { MediaBuyerBalanceCard } from './MediaBuyerBalanceCard';
 import type { FundingBalanceRow } from './types';
@@ -15,6 +16,8 @@ export interface MarketingTeamPageProps {
   fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
   dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
   leaderboardPeriod: 'this_month' | 'all_time';
+  page?: number;
+  totalPages?: number;
 }
 
 /** Build the query string to forward the active date filter to /admin/marketing/orders. */
@@ -42,7 +45,7 @@ function memberInitials(name: string): string {
     .toUpperCase();
 }
 
-export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters }: MarketingTeamPageProps) {
+export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters, page = 1, totalPages = 1 }: MarketingTeamPageProps) {
   const [view, setView] = useState<'table' | 'grid'>('table');
 
   return (
@@ -207,6 +210,10 @@ export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters }: 
           </div>
             )}
             </div>
+
+            {totalPages > 1 && (
+              <Pagination page={page} totalPages={totalPages} pageParam="page" />
+            )}
           </>
         )}
       </div>

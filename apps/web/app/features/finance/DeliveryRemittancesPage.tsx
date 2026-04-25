@@ -5,6 +5,7 @@ import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageNotification } from '~/components/ui/page-notification';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { useFetcherToast } from '~/components/ui/toast';
 import { exportToCsv } from '~/lib/csv-export';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -303,7 +304,7 @@ function ReceiptReviewModal({
                         )}
                       </div>
                       <div className="flex items-center justify-between gap-1.5">
-                        <span className="font-mono text-[10px] text-app-fg-muted truncate">{o.id.slice(0, 8)}</span>
+                        <OrderIdBadge id={o.id} ellipsis="" textClassName="font-mono text-[10px] text-app-fg-muted truncate" />
                         <span className="text-[10px] text-app-fg-muted shrink-0">
                           {o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '—'}
                         </span>

@@ -12,6 +12,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { Pagination } from '~/components/ui/pagination';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
 import type { Order } from '~/features/orders/types';
@@ -213,12 +214,7 @@ export function MarketingOrdersPage({
               {orders.map((order) => (
                 <tr key={order.id} className="table-row">
                   <td className="table-cell">
-                    <Link
-                      to={`/admin/orders/${order.id}`}
-                      className="text-brand-500 hover:text-brand-600 font-medium"
-                    >
-                      {order.id.slice(0, 8)}...
-                    </Link>
+                    <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />
                   </td>
                   <td className="table-cell font-medium text-app-fg">
                     {order.customerName}
@@ -321,7 +317,7 @@ export function MarketingOrdersPage({
                 </span>
               </div>
               <div className="flex items-center justify-between mt-1 text-xs text-app-fg-muted">
-                <span>{order.id.slice(0, 8)}...</span>
+                <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" />
                 <span>
                   {new Date(order.createdAt).toLocaleDateString('en-NG', {
                     month: 'short',

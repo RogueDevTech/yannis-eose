@@ -6,6 +6,8 @@ import { TeamViewToggle } from '~/components/ui/team-view-toggle';
 import { useToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { Pagination } from '~/components/ui/pagination';
 import type { CSTeamMemberOverview } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 
@@ -13,6 +15,8 @@ export interface CSTeamPageProps {
   teamMembers: CSTeamMemberOverview[];
   summary: { agentCount: number; totalPending: number; idleCount: number };
   canReassign?: boolean;
+  page?: number;
+  totalPages?: number;
 }
 
 function formatLastActive(lastActionAt: string | null): string {
@@ -160,7 +164,7 @@ function activityCell(member: CSTeamMemberOverview): string {
   return '\u2014';
 }
 
-export function CSTeamPage({ teamMembers, summary, canReassign = false }: CSTeamPageProps) {
+export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1, totalPages = 1 }: CSTeamPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string; redistributed?: number }>();
   const revalidator = useRevalidator();
   const { toast } = useToast();
@@ -189,23 +193,29 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false }: CSTeam
         description="Sales & CS team overview — workload, activity, and this month’s performance. View orders or profile per member."
       />
 
-      {teamMembers.length > 0 && (
-        <div className="card py-3 px-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-app-fg-muted">
-          <span>
-            <strong className="text-app-fg">{summary.agentCount}</strong> closers
-          </span>
-          <span>
-            <strong className="text-app-fg">{summary.totalPending}</strong> total pending
-          </span>
-          {summary.idleCount > 0 && (
-            <span>
-              <strong className="text-warning-600 dark:text-warning-400">{summary.idleCount}</strong> idle
-            </span>
-          )}
-          <Link to="/admin/cs/queue" prefetch="intent" className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 ml-auto">
-            Live activities →
-          </Link>
-        </div>
+      {summary.agentCount > 0 && (
+        <OverviewStatStrip
+          items={[
+            {
+              label: 'Closers',
+              value: summary.agentCount.toString(),
+              valueClassName: 'text-app-fg',
+            },
+            {
+              label: 'Total pending',
+              value: summary.totalPending.toString(),
+              valueClassName: 'text-app-fg',
+            },
+            {
+              label: 'Idle',
+              value: summary.idleCount.toString(),
+              valueClassName:
+                summary.idleCount > 0
+                  ? 'text-warning-600 dark:text-warning-400'
+                  : 'text-app-fg',
+            },
+          ]}
+        />
       )}
 
       {teamMembers.length === 0 ? (
@@ -371,6 +381,10 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false }: CSTeam
             </div>
           )}
           </div>
+
+          {totalPages > 1 && (
+            <Pagination page={page} totalPages={totalPages} pageParam="page" />
+          )}
         </div>
       )}
 

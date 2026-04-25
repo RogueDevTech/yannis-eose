@@ -2,7 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useFetcher } from '@remix-run/react';
 import { useEffect, useRef, useState } from 'react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
@@ -18,10 +18,19 @@ interface MessageTemplate {
   body: string;
   status: 'ACTIVE' | 'ARCHIVED';
   createdAt: string;
+  /** CS agents can only edit templates they themselves created. Heads/Admins can edit any. */
+  createdBy: string;
 }
 
+// CS agents can read & contribute templates (own templates editable; others read-only).
+// Heads/Admins (via cs.teamOverview) can edit anything.
+const TEMPLATE_ACCESS: { roles: string[]; permission: string } = {
+  roles: ['CS_AGENT'],
+  permission: 'cs.teamOverview',
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'cs.teamOverview');
+  const user = await requirePermissionOrRoles(request, TEMPLATE_ACCESS);
   const cookie = getSessionCookie(request);
 
   const res = await apiRequest<{ result?: { data?: MessageTemplate[] } }>(
@@ -30,11 +39,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   const templates: MessageTemplate[] = res.ok ? (res.data?.result?.data ?? []) : [];
-  return { templates };
+  return { templates, currentUserId: user.id, currentUserRole: user.role };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermission(request, 'cs.teamOverview');
+  await requirePermissionOrRoles(request, TEMPLATE_ACCESS);
   const cookie = getSessionCookie(request);
   const form = await request.formData();
   const intent = form.get('intent') as string;
@@ -244,8 +253,15 @@ function BodyEditor({
 }
 
 export default function MessageTemplatesRoute() {
-  const { templates } = useLoaderData<typeof loader>();
+  const { templates, currentUserId, currentUserRole } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  // Heads / Admins can edit any template. CS agents can only edit ones they authored.
+  const canEditAnyTemplate =
+    currentUserRole === 'SUPER_ADMIN' ||
+    currentUserRole === 'ADMIN' ||
+    currentUserRole === 'HEAD_OF_CS';
+  const canEditTemplate = (tpl: MessageTemplate) =>
+    canEditAnyTemplate || tpl.createdBy === currentUserId;
   useFetcherToast(fetcher.data, { successMessage: 'Template saved' });
   const fetcherResult = fetcher.data as { success?: boolean; error?: string } | undefined;
 
@@ -361,9 +377,13 @@ export default function MessageTemplatesRoute() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Button variant="secondary" size="sm" onClick={() => setEditTemplate(tpl)}>
-                      Edit
-                    </Button>
+                    {canEditTemplate(tpl) ? (
+                      <Button variant="secondary" size="sm" onClick={() => setEditTemplate(tpl)}>
+                        Edit
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-app-fg-muted">Read-only</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -405,9 +425,13 @@ export default function MessageTemplatesRoute() {
                 {toUiBody(tpl.body)}
               </p>
               <div className="mt-3">
-                <Button variant="secondary" size="sm" className="w-full" onClick={() => setEditTemplate(tpl)}>
-                  Edit
-                </Button>
+                {canEditTemplate(tpl) ? (
+                  <Button variant="secondary" size="sm" className="w-full" onClick={() => setEditTemplate(tpl)}>
+                    Edit
+                  </Button>
+                ) : (
+                  <p className="text-center text-xs text-app-fg-muted">Read-only — created by another user</p>
+                )}
               </div>
             </div>
           ))}

@@ -62,7 +62,8 @@ export async function action({ request }: ActionFunctionArgs) {
       {
         method: 'POST',
         cookie,
-        body: JSON.stringify({ cartId }),
+        // `apiRequest` calls `JSON.stringify(body)` internally — pass the object, not a string.
+        body: { cartId },
       },
     );
     if (!res.ok) {

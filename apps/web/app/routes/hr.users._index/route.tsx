@@ -22,7 +22,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const res = await apiRequest('/trpc/users.resendInvite', {
       method: 'POST',
       cookie,
-      body: JSON.stringify({ userId }),
+      // `apiRequest` calls `JSON.stringify(body)` internally — pass the object, not a string.
+      body: { userId },
     });
 
     if (!res.ok) {

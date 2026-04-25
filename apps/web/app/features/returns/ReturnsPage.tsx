@@ -8,6 +8,7 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Tabs } from '~/components/ui/tabs';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -192,7 +193,7 @@ export function ReturnsPage({
                 <tbody>
                   {returnedOrders.map((order: ReturnedOrder) => (
                     <tr key={order.id} className="table-row">
-                      <td className="table-cell font-mono text-sm">{order.id.slice(0, 8)}...</td>
+                      <td className="table-cell"><OrderIdBadge id={order.id} textClassName="font-mono text-sm text-app-fg-muted" /></td>
                       <td className="table-cell font-medium text-app-fg">
                         {order.customerName}
                       </td>

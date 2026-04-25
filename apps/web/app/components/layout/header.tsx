@@ -178,7 +178,13 @@ export function Header({
     setNotifOpen(false);
     setSelectedNotification(notif);
     if (!notif.read) {
-      markAsRead(notif.id);
+      // Synthetic realtime notifications (from Socket.io / Web Push) carry non-UUID
+      // ids (e.g. `push-<logId>`) and are not stored in the `notifications` table —
+      // their read state lives in `push_delivery_log` and is acked by the service
+      // worker. Calling notifications.markAsRead with their id fails the server
+      // Zod uuid check. Dismiss them client-side only.
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(notif.id);
+      if (isUuid) markAsRead(notif.id);
       onRemoveRealtimeNotification?.(notif.id);
     }
   }, [markAsRead, onRemoveRealtimeNotification]);
