@@ -40,13 +40,61 @@ export class UsersService {
   }
 
   /**
-   * Mask a phone number for API responses (Lead Fortress).
+   * Mask a phone number for API responses.
+   *
+   * The Lead Fortress pillar (CLAUDE.md) protects **customer** phone numbers absolutely —
+   * those never leave the server unmasked except via the VOIP bridge. This helper is for
+   * **staff** phone numbers, where the policy is different: staff need to call/text each
+   * other, so HR-class viewers, admins, and heads (viewing their direct reports) see the
+   * raw value, while peers fall back to a masked display.
+   *
    * 08031234567 → 0803****4567
    */
   private maskPhone(phone: string | null | undefined): string | null {
     if (!phone) return null;
     if (phone.length < 8) return '****';
     return phone.substring(0, 4) + '****' + phone.substring(phone.length - 4);
+  }
+
+  /**
+   * Decide whether the actor should see the unmasked staff phone for `target`.
+   *
+   * Visible to: the user themselves, admin-class roles, HR managers, anyone with
+   * `users.read` / `hr.read` permission, and heads viewing their direct-report role
+   * scope. Other authenticated users see the masked form.
+   *
+   * Note: this gates the *staff* phone field on `users.phone`. Customer phone numbers
+   * (on `orders`, `cart_submissions`, etc.) are governed by the column-level masking
+   * + VOIP bridge rules and never reach this helper.
+   */
+  private canSeeStaffPhone(
+    actor: { id: string; role: string; permissions?: string[] } | null | undefined,
+    target: { id: string; role: string },
+  ): boolean {
+    if (!actor) return false;
+    if (actor.id === target.id) return true;
+    if (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN' || actor.role === 'HR_MANAGER') return true;
+
+    const perms = actor.permissions ?? [];
+    if (perms.includes('users.read') || perms.includes('hr.read')) return true;
+
+    if (actor.role === 'HEAD_OF_CS' && target.role === 'CS_AGENT') return true;
+    if (actor.role === 'HEAD_OF_MARKETING' && target.role === 'MEDIA_BUYER') return true;
+    if (
+      actor.role === 'HEAD_OF_LOGISTICS' &&
+      ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'].includes(target.role)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /** Returns the raw phone when the actor is authorized; otherwise the masked form. */
+  private resolveStaffPhone(
+    actor: { id: string; role: string; permissions?: string[] } | null | undefined,
+    target: { id: string; role: string; phone: string | null },
+  ): string | null {
+    return this.canSeeStaffPhone(actor, target) ? target.phone : this.maskPhone(target.phone);
   }
 
   private async getUserBranchMemberships(userIds: string[]): Promise<Map<string, Array<{
@@ -528,15 +576,21 @@ export class UsersService {
 
     return {
       ...user,
-      phone: this.maskPhone(user.phone),
+      // Caller is the creator (passed `users.create` gate) — they always see the raw phone
+      // for the staff record they just created. Customer phones never flow through this path.
+      phone: user.phone,
     };
   }
 
   /**
    * Get a single user by ID.
-   * Never returns passwordHash. Phone is masked.
+   * Never returns passwordHash. Staff phone is unmasked for authorized viewers
+   * (self, admins, HR, heads viewing direct reports); masked for everyone else.
    */
-  async getById(userId: string) {
+  async getById(
+    userId: string,
+    actor: { id: string; role: string; permissions?: string[] } | null = null,
+  ) {
     const rows = await this.db
       .select({
         id: schema.users.id,
@@ -576,7 +630,7 @@ export class UsersService {
 
     return {
       ...user,
-      phone: this.maskPhone(user.phone),
+      phone: this.resolveStaffPhone(actor, { id: user.id, role: user.role, phone: user.phone }),
       branchMemberships,
       assignedProductIds,
     };
@@ -584,9 +638,15 @@ export class UsersService {
 
   /**
    * List users with filtering, search, and pagination.
-   * Phone numbers are masked in responses.
+   *
+   * Staff phone is unmasked for callers who pass `canSeeStaffPhone`. The router gates the
+   * procedure on `users.read` so any direct caller already qualifies, but the per-row check
+   * still runs so a future caller without that permission falls back to the masked form.
    */
-  async list(input: ListUsersInput) {
+  async list(
+    input: ListUsersInput,
+    actor: { id: string; role: string; permissions?: string[] } | null = null,
+  ) {
     const conditions = [];
 
     // When the caller asks for a specific set of IDs (e.g. resolving buyer names behind ad-spend
@@ -656,7 +716,7 @@ export class UsersService {
     return {
       users: users.map((u) => ({
         ...u,
-        phone: this.maskPhone(u.phone),
+        phone: this.resolveStaffPhone(actor, { id: u.id, role: u.role, phone: u.phone }),
         branchMemberships: membershipsByUser.get(u.id) ?? [],
       })),
       pagination: {
@@ -1199,7 +1259,9 @@ export class UsersService {
 
     return {
       ...updated,
-      phone: this.maskPhone(updated.phone),
+      // Caller passed the `users.update | cs.teamOverview | marketing.teamOverview` gate to
+      // edit this staff record — they always see the raw phone for the user they just saved.
+      phone: updated.phone,
       emailChangePending: emailChangePending || undefined,
     };
   }

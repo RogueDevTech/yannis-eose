@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { FileUpload } from '~/components/ui/file-upload';
 import { Tabs } from '~/components/ui/tabs';
@@ -503,7 +504,12 @@ export function LogisticsOrderDetailPage({
     <div className="space-y-4 overflow-x-hidden min-w-0">
       <PageHeader
         title={order.customerName}
-        description={`${order.id.slice(0, 8)}... · Created ${formatDate(order.createdAt)}`}
+        description={
+          <span className="inline-flex items-center gap-1.5">
+            <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" />
+            <span>· Created {formatDate(order.createdAt)}</span>
+          </span>
+        }
         breadcrumb={
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Link to={backLink} className="text-app-fg-muted hover:text-brand-500">
@@ -512,7 +518,7 @@ export function LogisticsOrderDetailPage({
             <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>
-            <span className="text-app-fg font-medium truncate min-w-0">{order.id.slice(0, 8)}...</span>
+            <OrderIdBadge id={order.id} textClassName="text-app-fg font-medium truncate min-w-0" />
           </div>
         }
         actions={

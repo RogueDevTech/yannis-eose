@@ -5,6 +5,7 @@ import { useFetcher, useRevalidator } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -267,8 +268,8 @@ function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboar
               <tbody>
                 {stuckOrders.map((order) => (
                   <tr key={order.orderId} className="table-row">
-                    <td className="table-cell font-mono text-xs text-app-fg-muted">
-                      {order.orderId.slice(0, 8)}...
+                    <td className="table-cell">
+                      <OrderIdBadge id={order.orderId} textClassName="font-mono text-xs text-app-fg-muted" />
                     </td>
                     <td className="table-cell">
                       <OrderStatusBadge status={order.status} />

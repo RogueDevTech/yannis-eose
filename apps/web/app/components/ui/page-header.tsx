@@ -12,7 +12,9 @@
 
 interface PageHeaderProps {
   title: string;
-  description?: string;
+  /** Subtitle below the title. Plain string for short copy, or ReactNode when
+   * the description needs inline elements (icons, badges, copyable IDs). */
+  description?: React.ReactNode;
   /** Breadcrumb path shown above the title */
   breadcrumb?: React.ReactNode;
   /** Right-side action buttons / controls */
@@ -31,7 +33,7 @@ export function PageHeader({ title, description, breadcrumb, actions, children, 
         <div className="min-w-0">
           <h1 className="truncate text-xl font-bold text-app-fg">{title}</h1>
           {description && (
-            <p className="mt-0.5 text-sm text-app-fg-muted">{description}</p>
+            <div className="mt-0.5 text-sm text-app-fg-muted">{description}</div>
           )}
         </div>
 

@@ -3,6 +3,7 @@ import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Tabs } from '~/components/ui/tabs';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { useOnlineStatus, usePendingCount } from '~/hooks/useOnlineStatus';
 import { queueDeliveryConfirmation } from '~/lib/offline-sync';
 import type { Order } from './types';
@@ -183,7 +184,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
               <div className="flex items-start justify-between">
                 <div>
                   <p className="font-semibold text-app-fg">{order.customerName}</p>
-                  <p className="mt-0.5 text-xs text-app-fg-muted">{order.id.slice(0, 8)}...</p>
+                  <div className="mt-0.5 text-xs text-app-fg-muted"><OrderIdBadge id={order.id} textClassName="text-app-fg-muted" /></div>
                 </div>
                 {order.totalAmount && (
                   <span className="text-sm font-semibold text-app-fg-muted">
@@ -242,9 +243,9 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
                 <p className="font-semibold text-app-fg">
                   {order.customerName}
                 </p>
-                <p className="mt-0.5 text-xs text-app-fg-muted">
-                  {order.id.slice(0, 8)}...
-                </p>
+                <div className="mt-0.5 text-xs text-app-fg-muted">
+                  <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" />
+                </div>
               </div>
               {order.totalAmount && (
                 <span className="text-sm font-semibold text-app-fg-muted">

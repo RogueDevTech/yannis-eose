@@ -146,9 +146,11 @@ export const messagingRouter = router({
     }),
 
   /**
-   * Create a message template (HoCS / SuperAdmin only).
+   * Create a message template. HoCS / Admin / SuperAdmin can create branch-shared templates;
+   * CS agents can also author their own (visible to the team but only editable by the
+   * creator and Heads).
    */
-  'templates.create': permissionProcedure('cs.teamOverview')
+  'templates.create': authedProcedure
     .input(
       z.object({
         name: z.string().min(2).max(100),
@@ -157,6 +159,11 @@ export const messagingRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_AGENT'];
+      if (!allowedRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS agents and CS leadership can create templates' });
+      }
+
       const db = getDb();
       assertSupportedTemplatePlaceholders(input.body);
       await db.insert(schema.messageTemplates).values({
@@ -171,9 +178,11 @@ export const messagingRouter = router({
     }),
 
   /**
-   * Update template name, body, or status (archive/restore). HoCS / SuperAdmin only.
+   * Update template name, body, or status (archive/restore).
+   * - HoCS / Admin / SuperAdmin: can update any template in their scope.
+   * - CS_AGENT: can only update templates they themselves created.
    */
-  'templates.update': permissionProcedure('cs.teamOverview')
+  'templates.update': authedProcedure
     .input(
       z.object({
         templateId: z.string().uuid(),
@@ -182,8 +191,30 @@ export const messagingRouter = router({
         status: z.enum(['ACTIVE', 'ARCHIVED']).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_AGENT'];
+      if (!allowedRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS agents and CS leadership can edit templates' });
+      }
+
       const db = getDb();
+
+      // CS agents may only edit their own templates. Heads can edit anything.
+      if (ctx.user.role === 'CS_AGENT') {
+        const [existing] = await db
+          .select({ createdBy: schema.messageTemplates.createdBy })
+          .from(schema.messageTemplates)
+          .where(eq(schema.messageTemplates.id, input.templateId))
+          .limit(1);
+        if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Template not found' });
+        if (existing.createdBy !== ctx.user.id) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You can only edit templates you created. Ask Head of CS to update shared templates.',
+          });
+        }
+      }
+
       const updates: Partial<typeof schema.messageTemplates.$inferInsert> = {};
       if (input.name !== undefined) updates.name = input.name;
       if (input.body !== undefined) {

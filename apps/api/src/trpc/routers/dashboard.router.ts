@@ -307,7 +307,11 @@ export const dashboardRouter = router({
    * Lightweight admin landing snapshot — today-only, no materialized-view dependencies, no
    * profit aggregation. Serves the /admin home so SuperAdmin/Admin land on a fast overview
    * rather than the heavy Executive dashboard (which lives at /admin/ceo).
-   * Returns: today's status counts + total active orders + pending approvals count.
+   *
+   * Returns two stat-card-shaped sections:
+   *   - `marketing.today.{newOrders,confirmed,delivered,cancelled}` — today's order pulse
+   *   - `cs.{closerCount,totalPending,idleCount,unassigned}` — current CS-floor snapshot
+   * Plus `pendingApprovals` for finance.
    */
   quickOverview: permissionProcedure('ceo.overview').query(async ({ ctx }) => {
     if (!ordersService || !financeService) {
@@ -320,25 +324,38 @@ export const dashboardRouter = router({
     const startIso = todayStart.toISOString();
     const endIso = todayEnd.toISOString();
 
-    const [todayCounts, allTimeCounts, pendingApprovals] = await Promise.all([
+    const [todayCounts, allTimeCounts, pendingApprovals, csWorkloads, inactiveAgents] = await Promise.all([
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
       ordersService.getStatusCounts(undefined, undefined, undefined, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
       financeService.countPendingApprovalRequests().catch(() => 0),
+      ordersService.getCSAgentWorkloads(ctx.currentBranchId).catch(() => [] as Array<{ pendingCount: number }>),
+      ordersService.getInactiveAgents(10).catch(() => [] as unknown[]),
     ]);
 
     const today = (todayCounts ?? {}) as Record<string, number>;
     const all = (allTimeCounts ?? {}) as Record<string, number>;
-    const activeStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT'];
-    const activeNow = activeStatuses.reduce((sum, s) => sum + (all[s] ?? 0), 0);
+
+    // CS snapshot — closerCount = how many agents have any workload row,
+    // totalPending = sum of pending across all agents.
+    const closerCount = csWorkloads.length;
+    const totalPending = csWorkloads.reduce((sum, w) => sum + (w.pendingCount ?? 0), 0);
+    const idleCount = inactiveAgents.length;
 
     return {
-      today: {
-        newOrders: Object.values(today).reduce((sum, n) => sum + (n ?? 0), 0),
-        delivered: today['DELIVERED'] ?? 0,
-        cancelled: today['CANCELLED'] ?? 0,
+      marketing: {
+        today: {
+          newOrders: Object.values(today).reduce((sum, n) => sum + (n ?? 0), 0),
+          confirmed: today['CONFIRMED'] ?? 0,
+          delivered: today['DELIVERED'] ?? 0,
+          cancelled: today['CANCELLED'] ?? 0,
+        },
       },
-      activeNow,
-      unprocessedNow: all['UNPROCESSED'] ?? 0,
+      cs: {
+        closerCount,
+        totalPending,
+        idleCount,
+        unassigned: all['UNPROCESSED'] ?? 0,
+      },
       pendingApprovals,
     };
   }),

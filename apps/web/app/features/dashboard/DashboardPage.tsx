@@ -239,6 +239,64 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
   const cancelled = counts['CANCELLED'] ?? 0;
   const pendingQueue = unprocessed + csAssigned;
 
+  // CS Agents get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
+  // No Order Pipeline (they don't manage flow), no Recent Orders feed (they have a dedicated
+  // queue/orders page) — keeps the landing page fast and focused on the metrics they care
+  // about: their own confirmation/delivery performance.
+  if (role === 'CS_AGENT') {
+    return (
+      <>
+        <DeferredSection resolve={data.metrics} fallback={<OverviewStatStripSkeleton count={5} />}>
+          {(metrics) => (
+            <OverviewStatStrip
+              tileClassName="min-w-[6rem]"
+              items={[
+                {
+                  label: 'Pending Queue',
+                  value: pendingQueue.toString(),
+                  valueClassName:
+                    pendingQueue > 20 ? 'text-danger-600 dark:text-danger-400' : pendingQueue > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-success-600 dark:text-success-400',
+                },
+                { label: 'Currently Engaged', value: engaged.toString(), valueClassName: 'text-app-fg' },
+                { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+                {
+                  label: 'Confirmation Rate',
+                  value: `${metrics.confirmationRate.toFixed(1)}%`,
+                  valueClassName: metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+                },
+                {
+                  label: 'Delivery Rate',
+                  value: `${metrics.deliveryRate.toFixed(1)}%`,
+                  valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+                },
+              ]}
+            />
+          )}
+        </DeferredSection>
+
+        <DeferredSection resolve={data.metrics} skeleton="card">
+          {(metrics) => (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="card">
+                <h2 className="text-lg font-semibold text-app-fg mb-4">Performance Summary</h2>
+                <div className="space-y-3">
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{metrics.totalOrders}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.confirmedOrders}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivery Rate</span><span className="text-sm font-medium text-app-fg">{metrics.deliveryRate.toFixed(1)}%</span></div>
+                </div>
+              </div>
+
+              <QuickActionsCard role={role} unprocessed={pendingQueue} />
+            </div>
+          )}
+        </DeferredSection>
+      </>
+    );
+  }
+
+  // Head of CS keeps the operational view: stats + full Order Pipeline + team controls + recent feed.
   return (
     <>
       <DeferredSection resolve={data.metrics} fallback={<OverviewStatStripSkeleton count={4} />}>
@@ -701,6 +759,12 @@ function getQuickActions(role: string, unprocessed: number) {
         { href: '/admin/marketing/funding', label: 'Funding', description: 'Ledger & requests', icon: 'revenue', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
         { href: '/admin/marketing/ad-spend', label: 'Ad spend', description: 'Log & approve spend', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
         { href: '/admin/marketing/forms', label: 'Forms', description: 'Manage forms', icon: 'orders', bg: 'bg-app-hover text-app-fg-muted' },
+      ];
+    case 'CS_AGENT':
+      return [
+        { href: '/admin/cs/queue', label: 'Live Queue', description: unprocessed > 0 ? `${unprocessed} pending` : 'Take new orders', icon: 'pending', bg: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400' },
+        { href: '/admin/cs/orders', label: 'My Orders', description: 'Orders assigned to you', icon: 'orders', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
+        { href: '/admin/cs/leaderboard', label: 'Leaderboard', description: 'See your ranking', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
       ];
     case 'FINANCE_OFFICER':
       return [

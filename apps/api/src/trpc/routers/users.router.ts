@@ -49,8 +49,8 @@ export const usersRouter = router({
    */
   list: permissionProcedure('users.read')
     .input(listUsersSchema)
-    .query(async ({ input }) => {
-      return getUsersService().list(input);
+    .query(async ({ input, ctx }) => {
+      return getUsersService().list(input, ctx.user);
     }),
 
   /**
@@ -92,8 +92,8 @@ export const usersRouter = router({
    */
   getById: authedProcedure
     .input(z.object({ userId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getUsersService().getById(input.userId);
+    .query(async ({ input, ctx }) => {
+      return getUsersService().getById(input.userId, ctx.user);
     }),
 
   /**

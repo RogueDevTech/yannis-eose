@@ -14,10 +14,11 @@ import { FormSelect } from '~/components/ui/form-select';
 import { Pagination } from '~/components/ui/pagination';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { Textarea } from '~/components/ui/textarea';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
-import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
+import { STATUS_OPTIONS, STATUS_LABELS, STATUS_TEXT_CLASS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
 import type { Order } from './types';
 
@@ -170,9 +171,15 @@ export function OrdersListPage({
     return qs ? `?${qs}` : '?';
   };
 
-  const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
-  const confirmedCount = statusCounts['CONFIRMED'] ?? 0;
-  const deliveredCount = statusCounts['DELIVERED'] ?? 0;
+  // Stat-strip pill per status — funnel order, per-status colors. Same pattern as
+  // MarketingOrdersPage so the strip surfaces every stage of the lifecycle, not just
+  // Unprocessed / Confirmed / Delivered.
+  const STATUS_KEYS = STATUS_OPTIONS.filter((s) => s !== 'ALL');
+  const statusItems = STATUS_KEYS.map((status) => ({
+    label: STATUS_LABELS[status] ?? formatStatus(status),
+    value: statusCounts[status] ?? 0,
+    valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
+  }));
 
   // Checkbox handlers
   const toggleSelect = (id: string) => {
@@ -304,12 +311,15 @@ export function OrdersListPage({
         />
       )}
 
-      {/* Page header — primary actions only on mobile; Export CSV + Live indicator lifted to secondary bar below */}
+      {/* Page header — Live tag sits directly in front of the refresh button per CS request. */}
       <PageHeader
         title={isCSAgent ? 'My Orders' : 'CS Orders'}
         description={isCSAgent ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {liveEvents != null && liveEvents.length > 0 && (
+              <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+            )}
             <PageRefreshButton />
             {canCreateOffline && (
               <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
@@ -321,11 +331,8 @@ export function OrdersListPage({
         }
       />
 
-      {/* Secondary action row — Live indicator + Export (date filter lives in the filters card below) */}
+      {/* Secondary action row — Export only (Live moved up next to refresh; date filter lives in filters card below) */}
       <div className="flex flex-wrap items-center gap-2 -mt-2">
-        {liveEvents != null && liveEvents.length > 0 && (
-          <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-        )}
         <div className="ml-auto">
           <Button
             variant="secondary"
@@ -356,6 +363,14 @@ export function OrdersListPage({
           </Button>
         </div>
       </div>
+
+      {/* Status totals — moved above My Workload so the funnel snapshot reads first. */}
+      <OverviewStatStrip
+        items={[
+          { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+          ...statusItems,
+        ]}
+      />
 
       {/* My workload (CS agent only) */}
       {isCSAgent && myWorkload && (
@@ -417,15 +432,6 @@ export function OrdersListPage({
           })()}
         </div>
       )}
-
-      <OverviewStatStrip
-        items={[
-          { label: 'Total', value: total, valueClassName: 'text-app-fg' },
-          { label: 'Unprocessed', value: unprocessedCount, valueClassName: 'text-warning-600 dark:text-warning-400' },
-          { label: 'Confirmed', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-          { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
-        ]}
-      />
 
       {/* Bulk Action Toolbar */}
       {selectedIds.size > 0 && canBulkAction && (
@@ -606,12 +612,7 @@ export function OrdersListPage({
                     </td>
                   )}
                   <td className="table-cell">
-                    <Link
-                      to={`/admin/orders/${order.id}`}
-                      className="text-brand-500 hover:text-brand-600 font-medium"
-                    >
-                      {order.id.slice(0, 8)}...
-                    </Link>
+                    <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />
                   </td>
                   <td className="table-cell font-medium text-app-fg">
                     {order.customerName}

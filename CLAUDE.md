@@ -501,6 +501,7 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | Pagination | `<Pagination />` |
 | Status badge (generic) | `<StatusBadge />` |
 | Order status badge | `<OrderStatusBadge />` |
+| Order ID + copy button | `<OrderIdBadge />` (renders truncated ID + click-to-copy of the full UUID; pass `linkTo` to wrap as a link, `uppercase`/`ellipsis=""` to match existing variants) |
 | ₦ price display | `<NairaPrice />` |
 | Filter pills / toggle group | `<FilterPills />` |
 | Key/value detail rows | `<DescriptionList />` |
@@ -586,7 +587,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 ## What NOT To Do
 
 - Do NOT use localStorage or sessionStorage for anything security-sensitive. Sessions live in Redis
-- Do NOT expose raw phone numbers in any API response, log, or error message — ever
+- Do NOT expose raw **customer** phone numbers in any API response, log, or error message — ever. The Lead Fortress pillar applies to `orders.customer_phone`, `cart_submissions.phone`, and any other PII column tied to leads. **Staff** phone numbers (`users.phone`) are different: they are contact info for HR/admins/heads to reach their team. The mask helper in `apps/api/src/users/users.service.ts::resolveStaffPhone` returns the raw phone to authorized viewers (self, admin-class, HR, heads viewing their direct-report role; or anyone with `users.read` / `hr.read` permission) and the masked form to other authenticated users — do not blanket-mask `users.phone`.
 - Do NOT use auto-incrementing IDs — use UUIDv7
 - Do NOT skip the actor injection (`SET LOCAL yannis.current_user_id` AND `SET LOCAL yannis.current_branch_id`) on any write operation
 - Do NOT allow state skipping in the order lifecycle — enforce the state machine

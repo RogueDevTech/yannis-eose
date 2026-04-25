@@ -8,6 +8,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { Spinner } from '~/components/ui/spinner';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FileUpload } from '~/components/ui/file-upload';
@@ -470,12 +471,7 @@ export function LogisticsOrdersPage({
                       />
                     </td>
                     <td className="table-cell">
-                      <Link
-                        to={`${orderDetailBasePath}/${order.id}`}
-                        className="text-brand-500 hover:text-brand-600 font-medium"
-                      >
-                        {order.id.slice(0, 8)}...
-                      </Link>
+                      <OrderIdBadge id={order.id} linkTo={`${orderDetailBasePath}/${order.id}`} />
                     </td>
                     <td className="table-cell font-medium text-app-fg">
                       {order.customerName}
@@ -593,12 +589,11 @@ export function LogisticsOrdersPage({
             return (
               <div key={order.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <Link
-                    to={`${orderDetailBasePath}/${order.id}`}
-                    className="font-medium text-brand-500 hover:text-brand-600"
-                  >
-                    {order.id.slice(0, 8)}...
-                  </Link>
+                  <OrderIdBadge
+                    id={order.id}
+                    linkTo={`${orderDetailBasePath}/${order.id}`}
+                    textClassName="font-medium text-brand-500 hover:text-brand-600"
+                  />
                   <OrderStatusBadge status={order.status} />
                 </div>
                 <p className="text-sm text-app-fg">{order.customerName}</p>

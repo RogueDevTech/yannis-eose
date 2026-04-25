@@ -194,9 +194,12 @@ export function RemitPage({
                       onChange={() => toggleOrder(order.id)}
                       disabled={isSubmittingDelivery}
                     />
-                    <span className="font-mono text-xs text-app-fg-muted shrink-0 w-20 truncate" title={order.id}>
-                      {order.id.slice(0, 8)}…
-                    </span>
+                    <OrderIdBadge
+                      id={order.id}
+                      ellipsis="…"
+                      className="shrink-0"
+                      textClassName="font-mono text-xs text-app-fg-muted"
+                    />
                     <span className="text-sm text-app-fg truncate min-w-0">{order.customerName}</span>
                     <span className="text-xs text-app-fg-muted shrink-0">
                       {order.deliveredAt ? new Date(order.deliveredAt).toLocaleDateString() : '—'}

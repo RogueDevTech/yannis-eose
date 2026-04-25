@@ -15,9 +15,8 @@ const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0
 const defaultProfit: DashboardData['profit'] = { revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0, trueProfit: 0, orderCount: 0, margin: 0 };
 
 const defaultQuickOverview: QuickOverviewData = {
-  today: { newOrders: 0, delivered: 0, cancelled: 0 },
-  activeNow: 0,
-  unprocessedNow: 0,
+  marketing: { today: { newOrders: 0, confirmed: 0, delivered: 0, cancelled: 0 } },
+  cs: { closerCount: 0, totalPending: 0, idleCount: 0, unassigned: 0 },
   pendingApprovals: 0,
 };
 

@@ -7,15 +7,28 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
  * `dashboard.quickOverview` (single tRPC call, ~50-150ms total).
  */
 export interface QuickOverviewData {
-  today: {
-    newOrders: number;
-    delivered: number;
-    cancelled: number;
+  marketing: {
+    today: {
+      /** All orders created today, any status. */
+      newOrders: number;
+      /** Orders that reached CONFIRMED today. */
+      confirmed: number;
+      /** Orders that reached DELIVERED today. */
+      delivered: number;
+      /** Orders that were cancelled today. */
+      cancelled: number;
+    };
   };
-  /** Total orders currently in any active state (UNPROCESSED..IN_TRANSIT). */
-  activeNow: number;
-  /** Orders sitting in UNPROCESSED waiting for CS assignment. */
-  unprocessedNow: number;
+  cs: {
+    /** CS agents with any workload row in the current branch. */
+    closerCount: number;
+    /** Sum of pending orders across all CS agents. */
+    totalPending: number;
+    /** CS agents flagged as idle (no action > threshold). */
+    idleCount: number;
+    /** Orders sitting in UNPROCESSED waiting for CS assignment. */
+    unassigned: number;
+  };
   /** Finance approval requests in PENDING state. */
   pendingApprovals: number;
 }
@@ -40,8 +53,7 @@ function getGreeting() {
  */
 export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
-  const hasUnprocessed = data.unprocessedNow > 0;
-  const hasPendingApprovals = data.pendingApprovals > 0;
+  const m = data.marketing.today;
 
   return (
     <div className="space-y-6">
@@ -60,64 +72,96 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
         </div>
       </div>
 
-      {/* Today's activity */}
-      <OverviewStatStrip
-        items={[
-          { label: 'New today', value: data.today.newOrders.toString(), valueClassName: 'text-app-fg' },
-          {
-            label: 'Delivered today',
-            value: data.today.delivered.toString(),
-            valueClassName: 'text-success-600 dark:text-success-400',
-          },
-          {
-            label: 'Cancelled today',
-            value: data.today.cancelled.toString(),
-            valueClassName:
-              data.today.cancelled > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-          },
-          { label: 'Active now', value: data.activeNow.toString(), valueClassName: 'text-app-fg' },
-        ]}
-      />
-
-      {/* Action rail — things that likely need attention */}
-      {(hasUnprocessed || hasPendingApprovals) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {hasUnprocessed && (
-            <Link
-              to="/admin/cs/queue"
-              className="card flex items-center justify-between hover:bg-app-hover/40 transition-colors"
-            >
-              <div>
-                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Unassigned orders</p>
-                <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">
-                  {data.unprocessedNow}
-                </p>
-                <p className="text-xs text-app-fg-muted mt-1">Assign in the CS queue →</p>
-              </div>
-              <svg className="w-6 h-6 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-          )}
-          {hasPendingApprovals && (
-            <Link
-              to="/admin/finance?tab=approvals"
-              className="card flex items-center justify-between hover:bg-app-hover/40 transition-colors"
-            >
-              <div>
-                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Pending approvals</p>
-                <p className="text-2xl font-bold text-warning-600 dark:text-warning-400 mt-1">
-                  {data.pendingApprovals}
-                </p>
-                <p className="text-xs text-app-fg-muted mt-1">Review in Finance →</p>
-              </div>
-              <svg className="w-6 h-6 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-          )}
+      {/* Marketing — today's order pulse. Click header to jump into the marketing module. */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-app-fg">Marketing — today</h2>
+          <Link
+            to="/admin/marketing/overview"
+            prefetch="intent"
+            className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+          >
+            Live activities →
+          </Link>
         </div>
-      )}
+        <OverviewStatStrip
+          embedded
+          showScrollControls={false}
+          items={[
+            {
+              label: 'New orders',
+              value: m.newOrders.toString(),
+              valueClassName: 'text-app-fg',
+              title: 'All orders created today, any status',
+            },
+            {
+              label: 'Confirmed',
+              value: m.confirmed.toString(),
+              valueClassName: 'text-success-600 dark:text-success-400',
+              title: 'Orders that reached CONFIRMED today',
+            },
+            {
+              label: 'Delivered',
+              value: m.delivered.toString(),
+              valueClassName: 'text-success-600 dark:text-success-400',
+              title: 'Orders that reached DELIVERED today',
+            },
+            {
+              label: 'Cancelled',
+              value: m.cancelled.toString(),
+              valueClassName:
+                m.cancelled > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+              title: 'Orders that were cancelled today',
+            },
+          ]}
+        />
+      </div>
+
+      {/* CS — current floor snapshot. */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-app-fg">CS — right now</h2>
+          <Link
+            to="/admin/cs/queue"
+            prefetch="intent"
+            className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+          >
+            CS queue →
+          </Link>
+        </div>
+        <OverviewStatStrip
+          embedded
+          showScrollControls={false}
+          items={[
+            {
+              label: 'Closers',
+              value: data.cs.closerCount.toString(),
+              valueClassName: 'text-app-fg',
+              title: 'CS agents with any workload row in the current branch',
+            },
+            {
+              label: 'Pending',
+              value: data.cs.totalPending.toString(),
+              valueClassName: 'text-app-fg',
+              title: 'Total in-flight orders assigned across all closers',
+            },
+            {
+              label: 'Idle',
+              value: data.cs.idleCount.toString(),
+              valueClassName:
+                data.cs.idleCount > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+              title: 'Closers with no action for >10 min',
+            },
+            {
+              label: 'Unassigned',
+              value: data.cs.unassigned.toString(),
+              valueClassName:
+                data.cs.unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+              title: 'Orders waiting in UNPROCESSED — assign from the CS queue',
+            },
+          ]}
+        />
+      </div>
 
       {/* Executive Overview card — the prominent entry point to the heavy report */}
       <Link

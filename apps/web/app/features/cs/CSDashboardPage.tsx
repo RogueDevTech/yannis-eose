@@ -11,6 +11,7 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
@@ -468,7 +469,7 @@ function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityItem | n
                 } />
               )}
               {item.linkedOrderId && (
-                <DetailRow label="Order ID" value={item.linkedOrderId.slice(0, 8).toUpperCase()} icon={
+                <DetailRow label="Order ID" value={<OrderIdBadge id={item.linkedOrderId} uppercase ellipsis="" textClassName="text-app-fg" />} icon={
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                   </svg>
@@ -590,7 +591,7 @@ function ActiveOrderDetailModal({
             <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
               <DetailRow
                 label="Order ID"
-                value={order.id.slice(0, 8).toUpperCase()}
+                value={<OrderIdBadge id={order.id} uppercase ellipsis="" textClassName="text-app-fg" />}
                 icon={
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -673,13 +674,13 @@ function ActiveOrderDetailModal({
   );
 }
 
-function DetailRow({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+function DetailRow({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3">
       <span className="shrink-0 text-app-fg-muted">{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted">{label}</p>
-        <p className="text-sm font-medium text-app-fg truncate mt-0.5">{value}</p>
+        <div className="text-sm font-medium text-app-fg truncate mt-0.5">{value}</div>
       </div>
     </div>
   );
@@ -1644,7 +1645,7 @@ export function CSDashboardPage({
                 <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
                   <DetailRow
                     label="Order ID"
-                    value={qOrder.id.slice(0, 8).toUpperCase()}
+                    value={<OrderIdBadge id={qOrder.id} uppercase ellipsis="" textClassName="text-app-fg" />}
                     icon={
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -1901,7 +1902,7 @@ export function CSDashboardPage({
                           <OrderStatusBadge status={order.status} />
                         </div>
                         <span className="text-xs text-app-fg-muted">
-                          {order.id.slice(0, 8)}... &middot; {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
+                          <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" /> &middot; {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
                         </span>
                       </div>
                     </label>
@@ -1985,12 +1986,13 @@ export function CSDashboardPage({
                             return (
                               <tr key={order.id} className="table-row">
                                 <td className="table-cell">
-                                  <Link
-                                    to={`/admin/orders/${order.id}`}
-                                    className="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
-                                  >
-                                    {order.id.slice(0, 8).toUpperCase()}
-                                  </Link>
+                                  <OrderIdBadge
+                                    id={order.id}
+                                    uppercase
+                                    ellipsis=""
+                                    linkTo={`/admin/orders/${order.id}`}
+                                    textClassName="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
+                                  />
                                 </td>
                                 <td className="table-cell">
                                   <p className="text-sm font-medium text-app-fg">{order.customerName}</p>
@@ -2043,12 +2045,13 @@ export function CSDashboardPage({
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <Link
-                                  to={`/admin/orders/${order.id}`}
-                                  className="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
-                                >
-                                  {order.id.slice(0, 8).toUpperCase()}
-                                </Link>
+                                <OrderIdBadge
+                                  id={order.id}
+                                  uppercase
+                                  ellipsis=""
+                                  linkTo={`/admin/orders/${order.id}`}
+                                  textClassName="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
+                                />
                                 <p className="text-sm font-medium text-app-fg mt-0.5">{order.customerName}</p>
                                 <p className="text-xs font-mono text-app-fg-muted">{order.customerPhoneDisplay}</p>
                                 {order.totalAmount && (
@@ -2248,12 +2251,11 @@ export function CSDashboardPage({
                           <div className="flex items-start justify-between gap-4">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 mb-1">
-                                <Link
-                                  to={`/admin/orders/${order.id}`}
-                                  className="text-brand-500 hover:text-brand-600 font-medium text-sm"
-                                >
-                                  {order.id.slice(0, 8)}...
-                                </Link>
+                                <OrderIdBadge
+                                  id={order.id}
+                                  linkTo={`/admin/orders/${order.id}`}
+                                  textClassName="text-brand-500 hover:text-brand-600 font-medium text-sm"
+                                />
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
                                   Attempt {order.callbackAttempts ?? 0}/3
                                 </span>
@@ -2334,8 +2336,9 @@ export function CSDashboardPage({
                     <div className="mt-2 space-y-2">
                       {pairs.slice(0, 3).map((pair: DuplicatePair) => (
                         <div key={pair.duplicate.id} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="text-app-fg-muted truncate">
-                            {pair.duplicate.customerName} — #{pair.duplicate.id.slice(0, 8)}
+                          <span className="inline-flex items-center gap-1 text-app-fg-muted truncate">
+                            {pair.duplicate.customerName} — #
+                            <OrderIdBadge id={pair.duplicate.id} ellipsis="" textClassName="text-app-fg-muted" />
                           </span>
                           <div className="flex items-center gap-1.5 shrink-0">
                             <Button

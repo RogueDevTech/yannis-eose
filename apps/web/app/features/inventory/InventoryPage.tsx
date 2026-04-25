@@ -9,6 +9,7 @@ import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/ov
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageHeader } from '~/components/ui/page-header';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
@@ -1181,7 +1182,7 @@ function ReturnsTab({
             <tbody>
               {returnedOrders.map((order) => (
                 <tr key={order.id} className="table-row">
-                  <td className="table-cell font-mono text-sm">{order.id.slice(0, 8)}...</td>
+                  <td className="table-cell"><OrderIdBadge id={order.id} textClassName="font-mono text-sm text-app-fg-muted" /></td>
                   <td className="table-cell font-medium text-app-fg">{order.customerName}</td>
                   <td className="table-cell text-app-fg-muted">{locationName(order.logisticsLocationId)}</td>
                   <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{order.deliveryNotes ?? '\u2014'}</td>

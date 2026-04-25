@@ -97,7 +97,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : m;
   });
 
-  return { teamMembers: teamMembersWithMetrics, fundingSummary, dateFilters: filters, leaderboardPeriod };
+  // Client-side pagination — `marketing.listFundingBalances` returns all members. With 20/page
+  // the loader is the single source of truth for which slice is shown.
+  const PAGE_SIZE = 20;
+  const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
+  const totalCount = teamMembersWithMetrics.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const page = Math.min(Math.max(1, Number.isFinite(pageRaw) ? pageRaw : 1), totalPages);
+  const start = (page - 1) * PAGE_SIZE;
+  const pagedMembers = teamMembersWithMetrics.slice(start, start + PAGE_SIZE);
+
+  return {
+    teamMembers: pagedMembers,
+    fundingSummary,
+    dateFilters: filters,
+    leaderboardPeriod,
+    page,
+    totalPages,
+    totalCount,
+  };
 }
 
 export default function MarketingTeamRoute() {
@@ -108,6 +126,8 @@ export default function MarketingTeamRoute() {
       fundingSummary={data.fundingSummary}
       dateFilters={data.dateFilters}
       leaderboardPeriod={data.leaderboardPeriod}
+      page={data.page}
+      totalPages={data.totalPages}
     />
   );
 }

@@ -103,12 +103,40 @@ export function CreateOfflineOrderModal({
 
   function onProductSelect(index: number, productId: string) {
     const product = products.find((p) => p.id === productId);
-    const price = product?.offers?.[0]?.price ?? '';
-    updateItem(index, 'productId', productId);
-    updateItem(index, 'unitPrice', price);
-    if (product?.offers?.[0]?.label) {
-      updateItem(index, 'offerLabel', product.offers[0].label);
+    // Pre-select the first offer when a product is chosen so the price isn't blank.
+    // The user can switch to another tier via the Offer dropdown next to it.
+    const firstOffer = product?.offers?.[0];
+    setItems((prev) =>
+      prev.map((row, i) =>
+        i === index
+          ? {
+              ...row,
+              productId,
+              unitPrice: firstOffer?.price ?? '',
+              offerLabel: firstOffer?.label ?? '',
+              quantity: firstOffer?.qty ?? row.quantity ?? 1,
+            }
+          : row,
+      ),
+    );
+  }
+
+  /** Apply an offer (tier) to a row — fills label, price, and the offer's quantity. */
+  function onOfferSelect(index: number, offerLabel: string) {
+    const product = products.find((p) => p.id === items[index]?.productId);
+    const offer = product?.offers?.find((o) => o.label === offerLabel);
+    if (!offer) {
+      // "Custom" — clear the offer label, keep current price/qty so the user can free-type.
+      updateItem(index, 'offerLabel', '');
+      return;
     }
+    setItems((prev) =>
+      prev.map((row, i) =>
+        i === index
+          ? { ...row, offerLabel: offer.label, unitPrice: offer.price, quantity: offer.qty }
+          : row,
+      ),
+    );
   }
 
   const totalAmount = items.reduce((sum, it) => {
@@ -178,7 +206,7 @@ export function CreateOfflineOrderModal({
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 px-1">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 px-4 sm:px-5 py-4">
             {actionError && !dismissedError && (
               <PageNotification
                 variant="error"
@@ -260,11 +288,11 @@ export function CreateOfflineOrderModal({
                 Preferred delivery date
               </label>
               <input
-                type="text"
+                type="date"
                 value={preferredDeliveryDate}
+                min={new Date().toISOString().split('T')[0]}
                 onChange={(e) => setPreferredDeliveryDate(e.target.value)}
                 className="input w-full"
-                placeholder="e.g. Tomorrow 10am"
               />
             </div>
           </div>
@@ -323,58 +351,83 @@ export function CreateOfflineOrderModal({
               </Button>
             </div>
             <div className="space-y-2">
-              {items.map((item, index) => (
-                <div key={index} className="flex flex-wrap items-end gap-2 p-2 rounded-lg bg-app-hover">
-                  <div className="flex-1 min-w-[140px]">
-                    <label className="block text-xs text-app-fg-muted mb-0.5">Product</label>
-                    <select
-                      required
-                      value={item.productId}
-                      onChange={(e) => onProductSelect(index, e.target.value)}
-                      className="input w-full text-sm"
+              {items.map((item, index) => {
+                const selectedProduct = products.find((p) => p.id === item.productId);
+                const offers = selectedProduct?.offers ?? [];
+                const hasOffers = offers.length > 0;
+                return (
+                  <div key={index} className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-app-hover">
+                    <div className="flex-1 min-w-[140px]">
+                      <label className="block text-xs text-app-fg-muted mb-0.5">Product</label>
+                      <select
+                        required
+                        value={item.productId}
+                        onChange={(e) => onProductSelect(index, e.target.value)}
+                        className="input w-full text-sm"
+                      >
+                        <option value="">Select product</option>
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {/* Offer / tier — shows the configured price tiers (e.g. "1 piece @ ₦7,500"
+                        vs "2 pieces @ ₦10,000"). Selecting one snaps the row's qty + price.
+                        "Custom" lets the rep type a non-standard price (rare, but allowed). */}
+                    {hasOffers && (
+                      <div className="flex-1 min-w-[180px]">
+                        <label className="block text-xs text-app-fg-muted mb-0.5">Offer / tier</label>
+                        <select
+                          value={item.offerLabel ?? ''}
+                          onChange={(e) => onOfferSelect(index, e.target.value)}
+                          className="input w-full text-sm"
+                        >
+                          {offers.map((o) => (
+                            <option key={o.label} value={o.label}>
+                              {o.label} — {o.qty} × ₦{Number(o.price).toLocaleString()}
+                            </option>
+                          ))}
+                          <option value="">Custom</option>
+                        </select>
+                      </div>
+                    )}
+                    <div className="w-20">
+                      <label className="block text-xs text-app-fg-muted mb-0.5">Qty</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={item.quantity}
+                        onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value, 10) || 1)}
+                        className="input w-full text-sm"
+                      />
+                    </div>
+                    <div className="w-28">
+                      <label className="block text-xs text-app-fg-muted mb-0.5">Unit price</label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        step={0.01}
+                        value={item.unitPrice}
+                        onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
+                        className="input w-full text-sm"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeItem(index)}
+                      disabled={items.length === 1}
+                      className="shrink-0"
                     >
-                      <option value="">Select product</option>
-                      {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
+                      Remove
+                    </Button>
                   </div>
-                  <div className="w-20">
-                    <label className="block text-xs text-app-fg-muted mb-0.5">Qty</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={item.quantity}
-                      onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value, 10) || 1)}
-                      className="input w-full text-sm"
-                    />
-                  </div>
-                  <div className="w-28">
-                    <label className="block text-xs text-app-fg-muted mb-0.5">Unit price</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      step={0.01}
-                      value={item.unitPrice}
-                      onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
-                      className="input w-full text-sm"
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeItem(index)}
-                    disabled={items.length === 1}
-                    className="shrink-0"
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <p className="text-sm text-app-fg-muted mt-1">
               Total: ₦{totalAmount.toFixed(2)}

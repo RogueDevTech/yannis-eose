@@ -97,14 +97,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Role-based: only these roles can redistribute (permission-based checks only when decided otherwise)
   const canReassign = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
 
+  // Client-side pagination — `users.listCSTeam` returns all members. With 20/page the loader
+  // is the single source of truth for which slice is shown.
+  const PAGE_SIZE = 20;
+  const url = new URL(request.url);
+  const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
+  const totalCount = teamMembers.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const page = Math.min(Math.max(1, Number.isFinite(pageRaw) ? pageRaw : 1), totalPages);
+  const start = (page - 1) * PAGE_SIZE;
+  const pagedMembers = teamMembers.slice(start, start + PAGE_SIZE);
+
   return {
-    teamMembers,
+    teamMembers: pagedMembers,
     summary: {
       agentCount: list.length,
       totalPending,
       idleCount,
     },
     canReassign,
+    page,
+    totalPages,
+    totalCount,
   };
 }
 
@@ -145,6 +159,8 @@ export default function CSTeamRoute() {
       teamMembers={data.teamMembers}
       summary={data.summary}
       canReassign={data.canReassign}
+      page={data.page}
+      totalPages={data.totalPages}
     />
   );
 }

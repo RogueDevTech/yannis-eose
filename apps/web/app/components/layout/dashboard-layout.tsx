@@ -96,7 +96,7 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
-        label: 'Marketing Orders',
+        label: 'Orders',
         href: '/admin/marketing/orders',
         icon: SidebarIcons.orders,
         permission: 'marketing.orders',
@@ -120,7 +120,7 @@ const navStructure: NavGroupDef[] = [
         permission: 'marketing.campaigns',
       },
       {
-        label: 'Marketing Leaderboard',
+        label: 'Leaderboard',
         href: '/admin/marketing/leaderboard',
         icon: SidebarIcons.leaderboards,
         permission: 'marketing.leaderboard',
@@ -145,13 +145,13 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
-        label: 'CS Orders',
+        label: 'Orders',
         href: '/admin/cs/orders',
         icon: SidebarIcons.orders,
         permission: 'orders.read',
       },
       {
-        label: 'CS Leaderboard',
+        label: 'Leaderboard',
         href: '/admin/cs/leaderboard',
         icon: SidebarIcons.leaderboards,
         permission: 'cs.leaderboard',
@@ -160,7 +160,10 @@ const navStructure: NavGroupDef[] = [
         label: 'Message Templates',
         href: '/admin/cs/message-templates',
         icon: SidebarIcons.notifications,
+        // CS agents need to author + use templates; HoCS / Admins manage shared ones via
+        // the same page (cs.teamOverview). Ownership-based edit gating is enforced server-side.
         permission: 'cs.teamOverview',
+        roles: ['CS_AGENT'],
       },
     ],
   },
@@ -174,7 +177,7 @@ const navStructure: NavGroupDef[] = [
         permission: 'logistics.read',
       },
       {
-        label: 'Logistics Orders',
+        label: 'Orders',
         labelShort: 'Logistics',
         href: '/admin/logistics/orders',
         icon: SidebarIcons.orders,
@@ -288,6 +291,11 @@ const navStructure: NavGroupDef[] = [
         label: 'Permission Requests',
         href: '/admin/permission-requests',
         icon: SidebarIcons.audit,
+        // Admins (SuperAdmin, Admin) bypass via roles; HR_MANAGER also explicitly allowed
+        // since they manage staff; otherwise gate by audit.read. CS / Marketing / Logistics /
+        // Stock have no business reading the queue of pending role grants.
+        permission: 'audit.read',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'],
       },
     ],
   },
