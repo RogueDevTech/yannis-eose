@@ -381,34 +381,64 @@ export function CSMessagingPanel({
         </button>
 
         {textPanelOpen && (
-          <div className="p-3 pt-2 space-y-3 border-t border-app-border bg-app-canvas/40">
-            <p className="text-xs text-app-fg-muted">Choose a channel to load templates and compose.</p>
-            <div className="flex rounded-lg border border-app-border p-0.5 bg-app-hover/30">
-              <button
-                type="button"
-                onClick={() => setTextChannel('sms')}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors duration-150 ${
-                  textChannel === 'sms'
-                    ? 'bg-primary-600 text-white shadow-sm'
-                    : 'text-app-fg-muted hover:text-app-fg'
-                }`}
-              >
-                <ChannelIcon channel="sms" />
-                SMS
-              </button>
-              <button
-                type="button"
-                onClick={() => setTextChannel('whatsapp')}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-xs font-medium transition-colors duration-150 ${
-                  textChannel === 'whatsapp'
-                    ? 'bg-primary-600 text-white shadow-sm'
-                    : 'text-app-fg-muted hover:text-app-fg'
-                }`}
-              >
-                <ChannelIcon channel="whatsapp" />
-                WhatsApp
-              </button>
-            </div>
+          <div className="p-3 pt-3 space-y-3 border-t border-app-border bg-app-canvas/40">
+            {!textChannel ? (
+              // Initial channel picker — two tactile cards. No helper paragraph; the icons + labels carry it.
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTextChannel('sms')}
+                  className="group flex flex-col items-center justify-center gap-1.5 rounded-xl border border-app-border bg-app-elevated px-3 py-4 text-app-fg transition-all duration-150 hover:border-primary-400 hover:shadow-sm hover:-translate-y-px focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                >
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400 group-hover:bg-primary-100 dark:group-hover:bg-primary-900/50 transition-colors">
+                    <ChannelIcon channel="sms" />
+                  </span>
+                  <span className="text-sm font-medium">SMS</span>
+                  <span className="text-[10px] text-app-fg-muted">160 char limit</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTextChannel('whatsapp')}
+                  className="group flex flex-col items-center justify-center gap-1.5 rounded-xl border border-app-border bg-app-elevated px-3 py-4 text-app-fg transition-all duration-150 hover:border-success-400 hover:shadow-sm hover:-translate-y-px focus:outline-none focus-visible:ring-2 focus-visible:ring-success-500"
+                >
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-success-50 text-success-600 dark:bg-success-900/30 dark:text-success-400 group-hover:bg-success-100 dark:group-hover:bg-success-900/50 transition-colors">
+                    <ChannelIcon channel="whatsapp" />
+                  </span>
+                  <span className="text-sm font-medium">WhatsApp</span>
+                  <span className="text-[10px] text-app-fg-muted">Templates · freeform</span>
+                </button>
+              </div>
+            ) : (
+              // Channel chosen — compact header with a "switch channel" affordance
+              <div className="flex items-center justify-between rounded-lg bg-app-elevated border border-app-border px-2.5 py-1.5">
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                    textChannel === 'whatsapp'
+                      ? 'bg-success-50 text-success-600 dark:bg-success-900/30 dark:text-success-400'
+                      : 'bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
+                  }`}>
+                    <ChannelIcon channel={textChannel === 'whatsapp' ? 'whatsapp' : 'sms'} />
+                  </span>
+                  <span className="text-sm font-medium text-app-fg">
+                    {textChannel === 'whatsapp' ? 'WhatsApp' : 'SMS'}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTextChannel(null);
+                    setMessageBody('');
+                    setSelectedTemplateId('');
+                  }}
+                  className="text-xs text-app-fg-muted hover:text-app-fg flex items-center gap-1 px-2 py-1 rounded hover:bg-app-hover transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h18" />
+                  </svg>
+                  Change
+                </button>
+              </div>
+            )}
 
             {textChannel && (
         <div className="relative space-y-3 pt-1 min-h-[200px]">
@@ -436,32 +466,68 @@ export function CSMessagingPanel({
               <p className="text-sm font-medium text-app-fg">Loading templates…</p>
             </div>
           )}
-          {/* Template picker */}
+          {/* Template picker — short list as pill row, longer lists fall back to a dropdown */}
           {channelTemplates.length > 0 && (
-            <div>
-              <label className="block text-xs font-medium text-app-fg-muted mb-1">
-                Use template (optional)
-              </label>
-              <select
-                value={selectedTemplateId}
-                onChange={(e) => {
-                  setSelectedTemplateId(e.target.value);
-                  if (e.target.value) {
-                    const tpl = channelTemplates.find((t) => t.id === e.target.value);
-                    if (tpl) setMessageBody(renderTemplateWithOrderData(tpl.body));
-                  }
-                }}
-                className="input w-full text-sm"
-              >
-                <option value="">
-                  {textChannel === 'whatsapp' ? 'No template (freeform WhatsApp)' : 'No template (freeform SMS)'}
-                </option>
-                {channelTemplates.map((tpl) => (
-                  <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                ))}
-              </select>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-app-fg-muted">
+                  Templates ({channelTemplates.length})
+                </span>
+                {selectedTemplateId && (
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedTemplateId(''); setMessageBody(''); }}
+                    className="text-[11px] text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
+                  >
+                    Clear · write freeform
+                  </button>
+                )}
+              </div>
+              {channelTemplates.length <= 5 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {channelTemplates.map((tpl) => {
+                    const active = tpl.id === selectedTemplateId;
+                    return (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTemplateId(tpl.id);
+                          setMessageBody(renderTemplateWithOrderData(tpl.body));
+                        }}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                          active
+                            ? textChannel === 'whatsapp'
+                              ? 'bg-success-600 text-white border-success-600'
+                              : 'bg-primary-600 text-white border-primary-600'
+                            : 'bg-app-elevated border-app-border text-app-fg-muted hover:text-app-fg hover:border-app-fg-muted'
+                        }`}
+                      >
+                        {tpl.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => {
+                    setSelectedTemplateId(e.target.value);
+                    if (e.target.value) {
+                      const tpl = channelTemplates.find((t) => t.id === e.target.value);
+                      if (tpl) setMessageBody(renderTemplateWithOrderData(tpl.body));
+                    }
+                  }}
+                  className="input w-full text-sm"
+                >
+                  <option value="">Pick a template…</option>
+                  {channelTemplates.map((tpl) => (
+                    <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                  ))}
+                </select>
+              )}
               {selectedTemplate && (
-                <div className="mt-2 p-2.5 rounded-lg bg-app-hover/60 text-xs text-app-fg-muted font-mono whitespace-pre-wrap border border-app-border">
+                <div className="p-2.5 rounded-lg bg-app-hover/60 text-xs text-app-fg-muted font-mono whitespace-pre-wrap border border-app-border">
                   {renderTemplateWithOrderData(selectedTemplate.body)}
                 </div>
               )}

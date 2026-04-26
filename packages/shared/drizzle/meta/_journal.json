@@ -70,6 +70,7 @@
     { "idx": 65, "version": "7", "when": 1777680000000, "tag": "0063_push_install_mode", "breakpoints": true },
     { "idx": 66, "version": "7", "when": 1777680100000, "tag": "0064_users_phone_unique", "breakpoints": true },
     { "idx": 67, "version": "7", "when": 1777767000000, "tag": "0065_mirror_sessions", "breakpoints": true },
-    { "idx": 68, "version": "7", "when": 1777853400000, "tag": "0066_fix_stamp_actor_empty_uuid", "breakpoints": true }
+    { "idx": 68, "version": "7", "when": 1777853400000, "tag": "0066_fix_stamp_actor_empty_uuid", "breakpoints": true },
+    { "idx": 69, "version": "7", "when": 1777939800000, "tag": "0067_payroll_batches", "breakpoints": true }
   ]
 }

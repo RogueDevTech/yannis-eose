@@ -411,12 +411,75 @@ Finance is the ONLY role that can be worn on top of another primary role. Every 
   - Fired from `UsersService.notifyFinanceHatChange()` AFTER the swap transaction commits — notifications must never roll back the assignment on failure.
 
 ### When Building the HR and Payroll Module
-- Settlement Window is CONFIGURABLE by HR: Weekly, Bi-weekly, or Monthly
+- Settlement Window is **monthly only** (CEO directive 2026-04-26). The `settlement_window` enum still carries `WEEKLY`/`BIWEEKLY` for legacy rows, but the UI no longer offers them and `setSettlementConfig` should always be called with `MONTHLY`. Do not reintroduce sub-month cadences without a new directive.
 - Commissions are calculated based on DELIVERED_AT timestamp, NOT CREATED_AT. A January order delivered in February is paid in the February cycle
 - Clawback Engine: if a delivered order is later returned, the system creates a PENDING_DEDUCTION for both the Media Buyer AND the CS agent. This is subtracted from their next payout as a negative line item
 - Add-on Earnings: HR can add manual bonuses (Special Service, Extra Shift, Performance Bonus). Each add-on requires Admin approval and appears as a DISTINCT line item in the staff payout breakdown — not lumped into base pay
 - Commission rules are stored as JSONB in a commission_plans table. The structure supports: base salary thresholds (if orders >= X, base = Y), performance multipliers (if delivery_rate > Z%, bonus = W per extra order), and category tags for different staff roles
 - Every staff member (CS, Media Buyer, Logistics, etc.) can have their own pay structure. The system is flexible enough that rules can be changed at any time by HR without developer intervention
+
+**Multi-stage payroll workflow (CEO directive 2026-04-26 — migration 0067):**
+
+Payroll is no longer a flat list of payouts that HR approves one by one. Each month, payroll is grouped into **batches** by `(branch_id × period_month × department)` so heads of department prepare their own team's payroll, HR reviews + adds adjustments, and Finance disburses. Tables: `payroll_batches`, plus `batch_id` FK on `payout_records`. Enums: `payroll_batch_status` (`DRAFT → PENDING_HR → PENDING_FINANCE → PAID`) and `payroll_department` (`CS | MARKETING | LOGISTICS | HR`).
+
+**Department → owning Head mapping (locked):**
+| Dept | Roles in batch | Owner who prepares |
+|---|---|---|
+| `CS` | `CS_AGENT` | `HEAD_OF_CS` |
+| `MARKETING` | `MEDIA_BUYER` | `HEAD_OF_MARKETING` |
+| `LOGISTICS` | `LOGISTICS_MANAGER`, `TPL_MANAGER`, `TPL_RIDER`, `STOCK_MANAGER` | `HEAD_OF_LOGISTICS` |
+| `HR` | `HR_MANAGER`, `HEAD_OF_*`, `BRANCH_ADMIN`, `FINANCE_OFFICER` | `HR_MANAGER` (own bucket — heads can't pay themselves) |
+
+`SUPER_ADMIN` / `ADMIN` are not on payroll. The mapping lives in `apps/api/src/hr/payroll-batch.service.ts::DEPARTMENT_ROLES` + `DEPARTMENT_OWNER_ROLE` — keep the two tables here in sync with that file.
+
+**Lifecycle + permission gates:**
+| Stage | Trigger | Gate (`apps/api/src/hr/payroll-batch.service.ts`) |
+|---|---|---|
+| `DRAFT` | `generateBatch()` derives payouts for staff in (branch, dept) | `canPrepareDept(viewer, branchId, dept)` — admin OR matching Head on their `currentBranchId` |
+| `PENDING_HR` | `submitBatch()` (DRAFT → PENDING_HR) | Same as DRAFT (the owner submits) |
+| `PENDING_FINANCE` | `approveBatch()` (PENDING_HR → PENDING_FINANCE) — HR may attach `hrNotes` and add per-staff adjustments via `addBatchAdjustment` while in this stage | `canReviewBatch` — admin OR `HR_MANAGER` |
+| `PAID` | `markBatchPaid({ financeReference })` cascades all child payouts to PAID | `canProcessBatch` — admin OR `FINANCE_OFFICER` OR Finance hat (`hasFinanceAccess`) |
+
+**Reject is an action, not a state.** `rejectBatch({ reason })`:
+- From `PENDING_HR` → `DRAFT` (HR rejects to head; reason ≥ 10 chars)
+- From `PENDING_FINANCE` → `PENDING_HR` (Finance rejects to HR)
+- The batch is never destroyed. Forward-stage timestamps clear; rejection metadata persists until the next forward transition.
+
+**HR adjustments during PENDING_HR** route through `earnings_adjustments` (existing pattern). `addBatchAdjustment` writes one row with `payoutId` set + auto-`approvedBy = actor`, then `recomputePayoutTotals` re-derives that payout's `addOnsTotal` / `deductionsTotal` / `totalPayout`, and `recomputeBatchTotals` re-derives the batch's `staffCount` / `totalAmount`. Do NOT manually edit `payout_records` numbers — always go through the adjustment path so the audit trail captures who added what.
+
+**Generation rules:**
+- `generateBatch` is only allowed for slots that are missing or in `DRAFT`. Submitted batches must be rejected first to be re-generated. Re-generating a `DRAFT` wipes its payouts and re-derives from the latest commission plans + delivered orders. Pending unattached `CLAWBACK` adjustments re-link to the new payout.
+- One non-rejected batch per `(branch_id, period_month, department)` — enforced by `uq_payroll_batch_per_branch_dept_month`.
+- A staff member with no commission plan is silently skipped (existing behavior).
+
+**Notifications (4 new types in `packages/shared/src/notifications/config.ts`):**
+- `hr:batch_submitted` → HR_MANAGER on the batch's branch (when head submits to HR)
+- `hr:batch_approved` → all FINANCE_OFFICER + Finance hat holders (when HR forwards to Finance)
+- `hr:batch_rejected` → owner of the previous stage (Head or HR)
+- `hr:batch_paid` → HR_MANAGER + owning Head + every staff member in the batch (per-staff sent as the existing `hr:payout_approved` so the existing in-app feed handles it)
+
+Deep-link mapper in `notifications.service.ts::getLinkPathForType` routes any `hr:batch_*` payload to `/hr/payroll?batchId=…` — the page auto-opens that batch's detail panel.
+
+**RBAC + UI:**
+- HR module is split across **two pages**, not one tabbed page (CEO directive 2026-04-26):
+  - `/hr/payroll` — Monthly Payrolls (multi-stage batches). Admins / HR_MANAGER / Heads / Finance can land here. Heads see only their dept's batches.
+  - `/hr/plans` — Commission Plans. Admins / HR_MANAGER / Heads can land here. Heads see + create + edit only their dept's roles.
+  - Legacy admin tabs (Payouts list, Adjustments, Settlement Config) live on `/hr/payroll` for HR + admins. Heads / Finance don't see them.
+  - Both sidebar entries are in the HR group (`dashboard-layout.tsx`). Do NOT merge them back into a tabbed page.
+- `listMonthlyPayrolls` auto-scopes:
+  - admins → all branches
+  - HR Manager / Finance → their `currentBranchId`
+  - Heads → their `currentBranchId` AND their dept only
+- `listCommissionPlans` / `createCommissionPlan` / `updateCommissionPlan` auto-scope by `getManageableRolesForViewer` (exported from `payroll-batch.service.ts`):
+  - admin / HR_MANAGER → every role across all departments
+  - HEAD_OF_CS → `CS_AGENT` only
+  - HEAD_OF_MARKETING → `MEDIA_BUYER` only
+  - HEAD_OF_LOGISTICS → `LOGISTICS_MANAGER` / `TPL_MANAGER` / `TPL_RIDER` / `STOCK_MANAGER`
+  - everyone else → empty (no plan management)
+  - The `createCommissionPlan` and `updateCommissionPlan` tRPC procedures are `authedProcedure` — they intentionally do NOT use `permissionProcedure('hr.write')` because Heads need to write without holding `hr.write`. The service layer is the canonical gate.
+- Branch context flows through `withActorAndBranch(this.db, { id, currentBranchId }, ...)` — every batch write sets both `yannis.current_user_id` and `yannis.current_branch_id` so RLS + audit attribution work.
+
+Files to know: [apps/api/src/hr/payroll-batch.service.ts](apps/api/src/hr/payroll-batch.service.ts), [apps/api/src/hr/hr.service.ts](apps/api/src/hr/hr.service.ts), [apps/api/src/trpc/routers/hr.router.ts](apps/api/src/trpc/routers/hr.router.ts), [apps/web/app/features/hr/MonthlyPayrolls.tsx](apps/web/app/features/hr/MonthlyPayrolls.tsx), [apps/web/app/features/hr/CommissionPlansPage.tsx](apps/web/app/features/hr/CommissionPlansPage.tsx), [apps/web/app/routes/hr.payroll/route.tsx](apps/web/app/routes/hr.payroll/route.tsx), [apps/web/app/routes/hr.plans/route.tsx](apps/web/app/routes/hr.plans/route.tsx), [apps/web/app/routes/hr.payroll-batch.$id/route.tsx](apps/web/app/routes/hr.payroll-batch.$id/route.tsx), [packages/shared/drizzle/0067_payroll_batches.sql](packages/shared/drizzle/0067_payroll_batches.sql).
 
 ---
 
@@ -634,6 +697,16 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT query a materialized view without applying the user's date filter to it. Every cost line in `getFastProfitReport` must be scoped by `startDate`/`endDate` (via `spend_date`, `period_month`, `delivery_date`, etc.). An unfiltered MV query silently returns all-time totals and corrupts the CEO dashboard.
 - Do NOT set the audit actor with `this.pgClient\`SELECT set_config('yannis.current_user_id', ..., true)\``. It runs outside any drizzle transaction and the setting dies before the next `this.db.*` call — writes get attributed to "System" in the audit trail. Always use `withActor(this.db, actor, async (tx) => { ... })` from `apps/api/src/common/db/with-actor.ts` and route every write through `tx`, never `this.db`, inside the callback. See the "Actor Injection Pattern" section for the full rationale.
 - Do NOT remove `HR_MANAGER` from the `HEAD_ROLES` tuples in `users.service.ts` or the frontend equivalents. CEO directive 2026-04-23: HR follows the same one-per-branch rule as `HEAD_OF_CS` / `HEAD_OF_MARKETING` / `HEAD_OF_LOGISTICS`. Migration 0060 enforces it at the DB layer too.
+- Do NOT let HR approve payroll batches one payout at a time. The unit of HR review is the **batch** (`payroll_batches`) — `approveBatch` / `rejectBatch` move the whole `(branch, dept, month)` slot together so the audit trail tells one coherent story per stage. Per-payout APIs (`hr.approvePayout`, `hr.generatePayouts`) still exist for legacy DRAFT rows, but new flows must use the batch lifecycle.
+- Do NOT bypass `withActorAndBranch()` on payroll batch writes. Every batch insert/update/transition must run inside that wrapper so both `yannis.current_user_id` AND `yannis.current_branch_id` are set on the same pinned connection — RLS on branch-scoped child tables (and audit attribution on `payroll_batches_history`) depend on it. See "Actor Injection Pattern".
+- Do NOT regenerate a non-DRAFT payroll batch. `generateBatch` rejects any slot already in `PENDING_HR` / `PENDING_FINANCE` / `PAID` with `CONFLICT`. To revise a submitted batch, the reviewer must first `rejectBatch` it (sends back to `DRAFT`), then the head re-generates and re-submits.
+- Do NOT add new departments or change the `DEPARTMENT_ROLES` mapping in `payroll-batch.service.ts` without updating both the table in CLAUDE.md → "When Building the HR and Payroll Module" → "Department → owning Head mapping" AND the corresponding `DEPT_OWNER_ROLE` map in [apps/web/app/features/hr/MonthlyPayrolls.tsx](apps/web/app/features/hr/MonthlyPayrolls.tsx). The frontend mirrors the backend mapping for UX-side action gating; drift breaks the Generate button visibility and the per-batch action permissions.
+- Do NOT reintroduce Weekly / Bi-Weekly cadences to the settlement config UI. CEO directive 2026-04-26: payroll runs monthly, period. The enum values stay in the DB for legacy rows but the form must always submit `MONTHLY`. If product asks for sub-month cadences, write a new memory entry first.
+- Do NOT collapse `/hr/payroll` and `/hr/plans` back into one tabbed page. They are intentionally split: Monthly Payrolls (the workflow heads + HR + Finance live in) is one page; Commission Plans (the rule-config tool heads + HR own) is another. Same role gating, different concerns. CEO directive 2026-04-26.
+- Do NOT inline `permissionProcedure('hr.write')` on the commission plan tRPC procedures. Heads of Department need to create + edit plans for their own dept's roles without holding the org-wide `hr.write` permission — the service layer (`HrService.createCommissionPlan` / `updateCommissionPlan` / `listCommissionPlans`) is the canonical gate via `getManageableRolesForViewer`. If you tighten the procedure to `permissionProcedure(...)`, every Head loses access silently.
+- Do NOT skip the "edit-against-existing-role" check in `updateCommissionPlan`. Reading the existing plan's role and verifying it's in the actor's `manageable` set is what stops a Head from taking over a plan in another department by knowing its planId. The check looks redundant alongside `createCommissionPlan`'s gate but covers a different attack surface.
+- Do NOT close Generate Monthly Payroll Batch (or any submit-driven modal) before the fetcher round-trip completes. The pattern in [apps/web/app/features/hr/MonthlyPayrolls.tsx](apps/web/app/features/hr/MonthlyPayrolls.tsx) — a `generateInFlightRef` + `useEffect` that closes only when `fetcher.state === 'idle' && fetcher.data?.success` — is the canonical setup for any modal whose action talks to a server: it surfaces server errors inline (e.g. `CONFLICT` for an already-submitted batch) instead of silently dropping them, and the backdrop dismissal is blocked while the request is in flight. Replicate this for any new "submit + maybe-fail" modal; do NOT regress to `onSubmit={() => setOpen(false)}`.
+- Do NOT leave the Month picker on the Generate batch modal blank. Always default `<input type="month">` to the current `YYYY-MM` so HoDs in the common case (running this month's payroll) just hit Generate. The default is computed inside a `useMemo([showGenerate])` so the value refreshes if the modal is reopened in a long-lived tab that has crossed midnight on the 1st.
 - Do NOT close `<Modal>` on a bare `onClick` of the backdrop. iOS dismisses native pickers (`<input type="date">`, native `<select>`) by firing a phantom click that bubbles to the backdrop and would dismiss the modal mid-interaction — losing whatever the user was about to submit. The `Modal` component in [apps/web/app/components/ui/modal.tsx](apps/web/app/components/ui/modal.tsx) only closes when `mousedown` AND `mouseup` both land on the backdrop itself (`e.target === e.currentTarget`). Do not revert to `onClick={onClose}`, do not add a separate `onClick={onClose}` on the inner content, and do not stop-propagation on the inner pane — the press-start-and-end check covers all the cases. Modals must NEVER auto-close while the user is still working on the form inside them; the only paths to close are the explicit Done/Save/Cancel buttons, the X icon, the Escape key, or a clean tap on the backdrop.
 - Every filterable page must show a loading indicator while the loader re-runs after a filter / sort / search / pagination change. The `<NavProgressBar />` component in [apps/web/app/components/ui/nav-progress-bar.tsx](apps/web/app/components/ui/nav-progress-bar.tsx) is mounted once at the top of each layout (`DashboardLayout`, `TplLayout`, `rider/route.tsx`) and listens to Remix `useNavigation()` — it ramps a thin brand-coloured bar at the top of the viewport for ANY non-idle navigation (route change, search-param update, fetcher action) and fades out when the loader resolves. New pages do NOT need to wire `useNavigation` themselves to indicate loading — the global bar covers it. Do NOT remove `<NavProgressBar />` from the layouts; do NOT pass non-Promise values to `<DeferredSection>`/`<Await>` and rely on this bar instead — `<Await>` requires a Promise and will throw if given a sync value. Per-page inline spinners next to specific filter controls are still allowed but no longer required.
 

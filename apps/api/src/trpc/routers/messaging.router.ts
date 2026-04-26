@@ -95,15 +95,16 @@ function resolvePlaceholders(body: string, order: {
 }
 
 /**
- * Send an outbound message.
- * In the absence of real Twilio SMS credentials, logs to DB and emits success.
- * Real integration: call Twilio Messaging API here using the raw phone.
+ * Send an outbound message. Mock implementation — logs the attempt and returns success.
+ * To go live: integrate Africa's Talking SMS API (their `/messaging` endpoint) here using
+ * the same `AT_USERNAME` + `AT_API_KEY` env vars already configured for voice. See
+ * https://developers.africastalking.com/docs/sms/sending. Sender ID can be a registered
+ * alphanumeric string (e.g. "Yannis") once approved by AT.
  */
 async function dispatchMessage(_phone: string, _channel: 'SMS' | 'WHATSAPP', _body: string): Promise<{ success: boolean; error?: string }> {
-  // TODO: Integrate Twilio SMS / WhatsApp API here.
-  // const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  // await twilioClient.messages.create({ body, from: process.env.TWILIO_FROM_NUMBER, to: phone });
-  // For now: mock success (no actual send)
+  // TODO: POST to https://api.africastalking.com/version1/messaging with form fields
+  // { username, to, message, from? } and headers { apiKey, Accept: 'application/json' }.
+  // For now: mock success (no actual send) — keeps the in-app messaging UX flowing in dev.
   return { success: true };
 }
 

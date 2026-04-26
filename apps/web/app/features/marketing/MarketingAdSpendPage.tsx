@@ -113,39 +113,39 @@ export function MarketingAdSpendPage({
 
   return (
     <div className="space-y-4">
-      <div className="space-y-4">
-        <PageHeader
-          title="Ad spend"
-          description={
-            <>
-              Log daily spend with Ads Manager screenshots.{' '}
-              <Link
-                to="/admin/marketing/funding"
-                className="text-brand-600 dark:text-brand-400 font-medium hover:underline"
-              >
-                Funding &amp; performance
-              </Link>
-            </>
-          }
-        />
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-            <DateFilterBar
-              startDate={dateFilters.startDate}
-              endDate={dateFilters.endDate}
-              periodAllTime={dateFilters.periodAllTime}
-            />
-          </div>
-          {isFilterLoading && (
-            <span className="flex items-center text-app-fg-muted" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
-          <Button variant="secondary" size="sm" onClick={() => setShowAdSpendForm(!showAdSpendForm)}>
-            {showAdSpendForm ? 'Close' : '+ Log Ad Spend'}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Ad spend"
+        description={
+          <>
+            Log daily spend with Ads Manager screenshots.{' '}
+            <Link
+              to="/admin/marketing/funding"
+              className="text-brand-600 dark:text-brand-400 font-medium hover:underline"
+            >
+              Funding &amp; performance
+            </Link>
+          </>
+        }
+        actions={
+          <>
+            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+              <DateFilterBar
+                startDate={dateFilters.startDate}
+                endDate={dateFilters.endDate}
+                periodAllTime={dateFilters.periodAllTime}
+              />
+            </div>
+            {isFilterLoading && (
+              <span className="flex items-center text-app-fg-muted" aria-hidden>
+                <Spinner size="sm" className="shrink-0" />
+              </span>
+            )}
+            <Button variant="primary" size="sm" onClick={() => setShowAdSpendForm(!showAdSpendForm)}>
+              {showAdSpendForm ? 'Close' : '+ Log Ad Spend'}
+            </Button>
+          </>
+        }
+      />
 
       {actionError && !dismissedError && (
         <PageNotification

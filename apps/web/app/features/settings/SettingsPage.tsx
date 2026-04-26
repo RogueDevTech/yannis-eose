@@ -52,10 +52,30 @@ interface NotificationEmailConfig {
   mandatory: NotificationTypeConfig[];
 }
 
+interface VoipProviderInfo {
+  name: 'africas_talking';
+  displayName: string;
+  configured: boolean;
+  requiredEnvVars: string[];
+  supportsBrowserClient: boolean;
+}
+interface VoipActiveInfo {
+  enabled: boolean;
+  provider: 'africas_talking';
+  providerDisplayName: string;
+  supportsBrowserClient: boolean;
+}
+export interface SettingsVoipState {
+  active: VoipActiveInfo;
+  providers: VoipProviderInfo[];
+}
+
 interface SettingsPageProps {
   user: SettingsUser | null;
   systemSettings?: SystemSetting[];
   notificationEmailConfig?: NotificationEmailConfig | null;
+  /** SuperAdmin/Admin only: active provider + list of all providers for the picker. */
+  voipState?: SettingsVoipState | null;
 }
 
 export type SettingsTabId = 'profile' | 'security' | 'push' | 'system' | 'orgEmails';
@@ -201,7 +221,7 @@ function tabLabel(tab: SettingsTabId): string {
   }
 }
 
-export function SettingsPage({ user, systemSettings = [], notificationEmailConfig }: SettingsPageProps) {
+export function SettingsPage({ user, systemSettings = [], notificationEmailConfig, voipState }: SettingsPageProps) {
   const fetcher = useFetcher();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -571,14 +591,16 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
-                    <p className="text-sm text-app-fg-muted">Twilio-powered voice calls for CS agents</p>
+                    <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for CS agents</p>
                   </div>
                 </div>
-                <div className="rounded-lg border border-app-border p-4">
+                <div className="rounded-lg border border-app-border p-4 space-y-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-1">
-                        <p className="text-sm font-semibold text-app-fg">VOIP Calling (Twilio)</p>
+                        <p className="text-sm font-semibold text-app-fg">
+                          VOIP Calling{voipState ? ` (${voipState.active.providerDisplayName})` : ''}
+                        </p>
                         {localVoipEnabled ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:text-success-400">
                             <span className="w-1.5 h-1.5 rounded-full bg-success-500" /> Enabled
@@ -591,7 +613,9 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                       </div>
                       <p className="text-xs text-app-fg-muted leading-relaxed">
                         {localVoipEnabled
-                          ? 'Agents use Twilio WebRTC to call customers. Calls are tracked, recorded, and the 15-second confirm gate is enforced. Orders are locked for 15 minutes during calls.'
+                          ? voipState?.active.supportsBrowserClient === false
+                            ? `Agents click Call → ${voipState.active.providerDisplayName} dials the agent's phone, then bridges to the customer. Calls are tracked and the 15-second confirm gate is enforced. Orders are locked for 15 minutes during calls.`
+                            : 'Agents use the browser SDK to call customers. Calls are tracked, recorded, and the 15-second confirm gate is enforced. Orders are locked for 15 minutes during calls.'
                           : 'VOIP is off. Agents will log manual calls. Less control over the call process.'}
                       </p>
                     </div>
@@ -613,6 +637,13 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                       />
                     </button>
                   </div>
+
+                  {/* Provider picker — separate fetcher so it submits on change rather than waiting
+                      for the System tab's main Save button. Surfaces unconfigured providers with a
+                      tooltip listing the env vars they need. */}
+                  {voipState && (
+                    <VoipProviderPicker active={voipState.active.provider} providers={voipState.providers} />
+                  )}
                 </div>
               </div>
 
@@ -780,13 +811,13 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
-                    <p className="text-sm text-app-fg-muted">Twilio-powered voice calls for CS agents</p>
+                    <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for CS agents</p>
                   </div>
                 </div>
                 <div className="rounded-lg border border-app-border p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1">
-                      <p className="text-sm font-semibold text-app-fg">VOIP Calling (Twilio)</p>
+                      <p className="text-sm font-semibold text-app-fg">VOIP Calling (Africa&apos;s Talking)</p>
                       <p className="text-xs text-app-fg-muted mt-1">{isVoipEnabled ? 'Enabled' : 'Disabled'}</p>
                     </div>
                     <div
@@ -994,6 +1025,106 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             </Button>
           </div>
         </Modal>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Provider picker — separate fetcher so switching submits immediately. Shows every registered
+ * provider; unconfigured providers are disabled with a tooltip listing the env vars the admin
+ * needs to set on the API server. The active provider's row is highlighted.
+ *
+ * Submits via intent=`setVoipProvider` to the route action, which calls `voip.setProvider`.
+ */
+function VoipProviderPicker({
+  active,
+  providers,
+}: {
+  active: 'africas_talking';
+  providers: Array<{
+    name: 'africas_talking';
+    displayName: string;
+    configured: boolean;
+    requiredEnvVars: string[];
+    supportsBrowserClient: boolean;
+  }>;
+}) {
+  const switchFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  const isSubmitting = switchFetcher.state === 'submitting';
+  const submittingProvider = (switchFetcher.formData?.get('provider') as string | null) ?? null;
+
+  return (
+    <div className="border-t border-app-border pt-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted mb-2">
+        Active VOIP Provider
+      </p>
+      <div className="space-y-2">
+        {providers.map((p) => {
+          const isActive = p.name === active;
+          const isPending = isSubmitting && submittingProvider === p.name;
+          const disabled = !p.configured || isActive || isSubmitting;
+          return (
+            <div
+              key={p.name}
+              className={`flex items-center justify-between gap-3 rounded-md border p-3 ${
+                isActive
+                  ? 'border-brand-300 bg-brand-50/40 dark:border-brand-700 dark:bg-brand-900/10'
+                  : 'border-app-border bg-app-elevated'
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-app-fg">{p.displayName}</p>
+                  {isActive && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 dark:bg-brand-900/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300">
+                      Active
+                    </span>
+                  )}
+                  {!p.configured && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warning-100 dark:bg-warning-900/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-700 dark:text-warning-400">
+                      Not configured
+                    </span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-xs text-app-fg-muted">
+                  {p.supportsBrowserClient
+                    ? 'Browser SDK — agent talks via the dashboard.'
+                    : "Phone-to-phone — provider rings the agent's phone, then bridges to the customer."}
+                </p>
+                {!p.configured && (
+                  <p className="mt-1 text-xs text-warning-700 dark:text-warning-400">
+                    Set env vars on the API server: {p.requiredEnvVars.join(', ')}.
+                  </p>
+                )}
+              </div>
+              <switchFetcher.Form method="post">
+                <input type="hidden" name="intent" value="setVoipProvider" />
+                <input type="hidden" name="provider" value={p.name} />
+                <Button
+                  type="submit"
+                  variant={isActive ? 'secondary' : 'primary'}
+                  size="sm"
+                  disabled={disabled}
+                  loading={isPending}
+                  loadingText="Switching…"
+                >
+                  {isActive ? 'Active' : 'Use this'}
+                </Button>
+              </switchFetcher.Form>
+            </div>
+          );
+        })}
+      </div>
+      {switchFetcher.data?.error && (
+        <p className="mt-2 text-xs text-danger-600 dark:text-danger-400">
+          {switchFetcher.data.error}
+        </p>
+      )}
+      {switchFetcher.data?.success && switchFetcher.data.message && (
+        <p className="mt-2 text-xs text-success-700 dark:text-success-400">
+          {switchFetcher.data.message}
+        </p>
       )}
     </div>
   );

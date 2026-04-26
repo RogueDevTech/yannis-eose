@@ -25,7 +25,8 @@ import { FinanceService } from '../finance/finance.service';
 import { setFinanceService } from './routers/finance.router';
 import { HrModule } from '../hr/hr.module';
 import { HrService } from '../hr/hr.service';
-import { setHrService } from './routers/hr.router';
+import { PayrollBatchService } from '../hr/payroll-batch.service';
+import { setHrService, setPayrollBatchService } from './routers/hr.router';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PushSchedulerService } from '../notifications/push-scheduler.service';
@@ -87,6 +88,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly marketingService: MarketingService,
     private readonly financeService: FinanceService,
     private readonly hrService: HrService,
+    private readonly payrollBatchService: PayrollBatchService,
     private readonly notificationsService: NotificationsService,
     private readonly pushSchedulerService: PushSchedulerService,
     private readonly auditService: AuditService,
@@ -111,6 +113,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setMarketingService(this.marketingService);
     setFinanceService(this.financeService);
     setHrService(this.hrService);
+    setPayrollBatchService(this.payrollBatchService);
     setNotificationsService(this.notificationsService);
     setPushSchedulerService(this.pushSchedulerService);
     setAuditService(this.auditService);

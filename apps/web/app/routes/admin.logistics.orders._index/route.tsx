@@ -67,7 +67,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
 
-  const [ordersRes, countsRes, locationsRes, ridersRes] = await Promise.all([
+  // Daily-counts series for the chart-view trend line. Mirrors the same scope filters the
+  // table uses (date range + 3PL location) so the trend matches what the user is reading.
+  const trendInput: { logisticsLocationId?: string; status?: string; startDate?: string; endDate?: string } = {};
+  if (effectiveLogisticsLocationId) trendInput.logisticsLocationId = effectiveLogisticsLocationId;
+  if (status) trendInput.status = status;
+  if (startDate) trendInput.startDate = startDate;
+  if (endDate) trendInput.endDate = endDate;
+  const trendInputEnc = encodeURIComponent(JSON.stringify(trendInput));
+
+  const [ordersRes, countsRes, locationsRes, ridersRes, trendRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(
@@ -75,7 +84,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
   ]);
+
+  const dailyCounts = trendRes.ok
+    ? ((trendRes.data as { result?: { data?: Array<{ date: string; orderCount: number }> } })?.result?.data ?? [])
+    : [];
 
   const ordersData = ordersRes.ok
     ? (ordersRes.data as { result?: { data?: { orders: LogisticsOrder[]; pagination: { total: number; totalPages: number } } } })
@@ -117,6 +131,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     searchFilter: search ?? '',
     locations,
     riders: ridersData,
+    dailyCounts,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',

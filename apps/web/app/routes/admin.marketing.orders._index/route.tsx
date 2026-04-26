@@ -64,10 +64,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (endDate) metricsInput.endDate = endDate;
   const metricsInputStr = encodeURIComponent(JSON.stringify(metricsInput));
 
-  const [res, countsRes, metricsRes] = await Promise.all([
+  // Daily-counts series for the "Orders over time" trend line on the chart view. Mirrors
+  // the same scope filters as the table so the trend matches what the user is reading.
+  const trendInput: { mediaBuyerId?: string; status?: string; startDate?: string; endDate?: string } = {};
+  if (mediaBuyerId) trendInput.mediaBuyerId = mediaBuyerId;
+  if (status) trendInput.status = status;
+  if (startDate) trendInput.startDate = startDate;
+  if (endDate) trendInput.endDate = endDate;
+  const trendInputStr = encodeURIComponent(JSON.stringify(trendInput));
+
+  const [res, countsRes, metricsRes, trendRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/marketing.metrics?input=${metricsInputStr}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputStr}`, { method: 'GET', cookie }),
   ]);
 
   const trpcData = res.ok
@@ -81,6 +91,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const metricsData = metricsRes.ok
     ? (metricsRes.data as { result?: { data?: { cpa: number; totalSpend: number } } })?.result?.data
     : null;
+
+  const dailyCounts = trendRes.ok
+    ? ((trendRes.data as { result?: { data?: Array<{ date: string; orderCount: number }> } })?.result?.data ?? [])
+    : [];
 
   const total = trpcData?.pagination?.total ?? 0;
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
@@ -104,6 +118,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     filters,
     cpa: metricsData?.cpa ?? null,
     totalAdSpend: metricsData?.totalSpend ?? null,
+    dailyCounts,
   };
 }
 

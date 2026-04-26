@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/react';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useSearchParams, useNavigation, useFetcher, useRevalidator } from '@remix-run/react';
+import { useToast } from '~/components/ui/toast';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -63,7 +64,44 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
   const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const fetcher = useFetcher<ChartDataPayload>();
+  const refreshFetcher = useFetcher<{
+    success?: boolean;
+    error?: string;
+    refreshedAt?: string;
+    durationMs?: number;
+    failedViews?: string[];
+  }>();
+  const revalidator = useRevalidator();
+  const { toast } = useToast();
   const topic = filters?.topic ?? 'orders';
+  const isRefreshing = refreshFetcher.state !== 'idle';
+
+  // Auto-trigger a refresh on first mount so visiting the page is the trigger to regenerate
+  // the report. Show the progress banner while the server is recomputing the materialized
+  // views, then revalidate the loader once it lands so the page re-reads with fresh numbers.
+  // The ref guard ensures we fire once per page load — not on every revalidation, filter
+  // change, or re-render.
+  const hasAutoRefreshedRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoRefreshedRef.current) return;
+    hasAutoRefreshedRef.current = true;
+    refreshFetcher.submit({ intent: 'refreshExecutiveData' }, { method: 'post' });
+  }, [refreshFetcher]);
+
+  // When the refresh mutation lands, revalidate the loader so the page re-reads from the
+  // now-fresh materialized views, then surface a quiet toast on manual triggers. We watch
+  // refreshFetcher.data with a flag so the effect fires once per response.
+  const [lastRefreshSeen, setLastRefreshSeen] = useState<unknown>(null);
+  useEffect(() => {
+    if (refreshFetcher.state !== 'idle' || !refreshFetcher.data) return;
+    if (refreshFetcher.data === lastRefreshSeen) return;
+    setLastRefreshSeen(refreshFetcher.data);
+    if (refreshFetcher.data.success) {
+      revalidator.revalidate();
+    } else if (refreshFetcher.data.error) {
+      toast.error('Refresh failed', refreshFetcher.data.error);
+    }
+  }, [refreshFetcher.state, refreshFetcher.data, lastRefreshSeen, revalidator, toast]);
 
   useEffect(() => {
     if (showChartView) {
@@ -137,6 +175,31 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             >
               {showChartView ? 'View as data' : 'View data in chart'}
             </button>
+            {/* Refresh — recomputes the finance materialized views (revenue, profit, ad spend,
+                commission rollups). The page never auto-refreshes. */}
+            <refreshFetcher.Form method="post" className="inline-flex">
+              <input type="hidden" name="intent" value="refreshExecutiveData" />
+              <button
+                type="submit"
+                disabled={isRefreshing}
+                className="btn-secondary btn-sm inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+                title="Recompute revenue, profit, ad spend, and commission rollups from live data"
+              >
+                {isRefreshing ? (
+                  <>
+                    <Spinner size="sm" />
+                    Refreshing…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                    Refresh data
+                  </>
+                )}
+              </button>
+            </refreshFetcher.Form>
             <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} />
             {showBackToDashboard && (
               <Link to="/admin" className="btn-secondary btn-sm">Back to Dashboard</Link>
@@ -144,6 +207,34 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
           </div>
         }
       />
+
+      {/* Regenerating-report banner — visible while the auto-trigger or a manual click is
+          recomputing the finance materialized views. Existing data stays readable below; the
+          page silently revalidates with fresh numbers when the bar finishes. */}
+      {isRefreshing && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-lg border border-brand-200 bg-brand-50 dark:border-brand-700/60 dark:bg-brand-900/20 overflow-hidden"
+        >
+          <div className="flex items-center gap-3 px-4 py-3">
+            <Spinner size="sm" className="text-brand-600 dark:text-brand-400 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-brand-700 dark:text-brand-300">
+                Regenerating report…
+              </p>
+              <p className="text-xs text-brand-600/80 dark:text-brand-400/80 mt-0.5">
+                Recomputing revenue, profit, ad spend, and commission rollups from live data. Existing numbers stay visible until the new ones arrive.
+              </p>
+            </div>
+          </div>
+          {/* Indeterminate progress bar. CSS animation defined in tailwind.css; falls back
+              to a static brand-coloured stripe if the keyframe isn't picked up. */}
+          <div className="h-1 bg-brand-100 dark:bg-brand-900/40 overflow-hidden">
+            <div className="h-full w-1/3 bg-brand-500 dark:bg-brand-400 animate-indeterminate-progress" />
+          </div>
+        </div>
+      )}
 
       {/* ── Chart view: all charts (Revenue & orders over time, pipeline, topic, cost, etc.) ───────────────── */}
       {showChartView && (

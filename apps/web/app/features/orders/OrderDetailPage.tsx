@@ -10,7 +10,6 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { useVoipDevice } from '~/hooks/useVoipDevice';
 import { useAgentStateBroadcast } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
 import { previewInvoicePdf } from '~/lib/invoice-pdf';
@@ -49,40 +48,6 @@ const CALL_STATUS_COLORS: Record<string, { bg: string; text: string; icon: strin
   NO_ANSWER: { bg: 'bg-danger-50 dark:bg-danger-700/20', text: 'text-danger-600 dark:text-danger-400', icon: 'text-danger-500' },
   BUSY: { bg: 'bg-warning-50 dark:bg-warning-700/20', text: 'text-warning-600 dark:text-warning-400', icon: 'text-warning-500' },
 };
-
-// ── Twilio error formatting (call modal + event log) ──
-
-interface ParsedTwilioError {
-  code?: number;
-  message?: string;
-  more_info?: string;
-  status?: number;
-}
-
-function parseTwilioError(raw: string | undefined): ParsedTwilioError | null {
-  if (!raw?.trim()) return null;
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return {
-      ...(typeof parsed.code === 'number' && { code: parsed.code }),
-      ...(typeof parsed.message === 'string' && { message: parsed.message }),
-      ...(typeof parsed.more_info === 'string' && { more_info: parsed.more_info }),
-      ...(typeof parsed.status === 'number' && { status: parsed.status }),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function formatTwilioErrorForLog(raw: string | undefined): string {
-  const parsed = parseTwilioError(raw);
-  if (parsed?.message != null) {
-    const codePart = parsed.code != null ? `Twilio ${parsed.code}: ` : 'Twilio: ';
-    const morePart = parsed.more_info ? ` (More info: ${parsed.more_info})` : '';
-    return codePart + parsed.message + morePart;
-  }
-  return raw != null ? `Twilio error: ${raw}` : 'Twilio error';
-}
 
 // ── Order Details field config (dynamic, show-only when value present or alwaysShow) ──
 
@@ -392,89 +357,7 @@ function formatCallTimer(seconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-function InCallOverlay({
-  duration,
-  muted,
-  callStatus,
-  onToggleMute,
-  onHangUp,
-}: {
-  duration: number;
-  muted: boolean;
-  callStatus: string | null;
-  onToggleMute: () => void;
-  onHangUp: () => void;
-}) {
-  const statusLabel =
-    callStatus === 'INITIATED' ? 'Connecting...' :
-    callStatus === 'RINGING' ? 'Ringing...' :
-    callStatus === 'IN_PROGRESS' ? 'On Call' :
-    callStatus ?? 'Unknown';
-
-  const isActive = callStatus === 'INITIATED' || callStatus === 'RINGING' || callStatus === 'IN_PROGRESS';
-
-  return (
-    <div className="rounded-xl bg-app-elevated border border-app-border p-4 sm:p-5 text-app-fg animate-fade-in w-full max-w-sm mx-auto max-h-[90dvh] overflow-y-auto">
-      {/* Status + pulsing dot */}
-      <div className="flex items-center justify-center gap-2 mb-3">
-        {isActive && (
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success-500" />
-          </span>
-        )}
-        <span className="text-sm font-medium">{statusLabel}</span>
-      </div>
-
-      {/* Timer */}
-      <div className="text-center mb-4">
-        <p className="text-3xl font-mono font-bold tracking-wider">{formatCallTimer(duration)}</p>
-        {duration >= 15 && (
-          <p className="text-xs text-success-400 mt-1">Confirm gate met</p>
-        )}
-      </div>
-
-      {/* Controls — touch-friendly min sizes */}
-      <div className="flex items-center justify-center gap-4">
-        {/* Mute button */}
-        <button
-          type="button"
-          onClick={onToggleMute}
-          className={`min-w-[48px] min-h-[48px] w-12 h-12 rounded-full flex items-center justify-center transition-colors touch-manipulation ${
-            muted
-              ? 'bg-danger-500 hover:bg-danger-600 text-white'
-              : 'bg-surface-700 hover:bg-surface-600 text-surface-300'
-          }`}
-          title={muted ? 'Unmute' : 'Mute'}
-        >
-          {muted ? (
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.531V19.94a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.506-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-            </svg>
-          ) : (
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-            </svg>
-          )}
-        </button>
-
-        {/* Hang up button */}
-        <button
-          type="button"
-          onClick={onHangUp}
-          className="min-w-[56px] min-h-[56px] w-14 h-14 rounded-full bg-danger-500 hover:bg-danger-600 text-white flex items-center justify-center transition-colors touch-manipulation"
-          title="Hang up"
-        >
-          <svg className="w-6 h-6 rotate-[135deg]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── VOIP Call Panel (with WebRTC integration) ───────────────────
+// ── VOIP Call Panel (Africa's Talking phone-bridge) ────────────
 
 function VoipCallPanel({
   order,
@@ -483,6 +366,7 @@ function VoipCallPanel({
   fetcher,
   hasActiveCall,
   onOpenCallModal,
+  voipProviderDisplayName = "Africa's Talking",
 }: {
   order: OrderDetailStreamData['order'];
   latestCall: CallLogEntry | null;
@@ -490,147 +374,60 @@ function VoipCallPanel({
   fetcher: ReturnType<typeof useFetcher>;
   hasActiveCall: boolean;
   onOpenCallModal?: () => void;
+  /** Display name kept as a prop so future provider work can swap brands without touching the panel. */
+  voipProviderDisplayName?: string;
 }) {
-  const revalidator = useRevalidator();
-
-  const voip = useVoipDevice({
-    onCallStatusChange: (status) => {
-      // Revalidate loader data when call completes to update callLogs
-      if (status === 'COMPLETED' || status === 'FAILED') {
-        if (revalidator.state === 'idle') {
-          revalidator.revalidate();
-        }
-      }
-    },
-  });
-
   const canShowCallPanel = order.status === 'CS_ENGAGED' || order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED';
-
-  // Auto-init device when Call panel is shown (CS_ENGAGED or assignable pre-engage)
-  useEffect(() => {
-    if (canShowCallPanel && !voip.ready && !voip.connecting) {
-      voip.initDevice();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order.status]);
-
   if (!canShowCallPanel) return null;
 
+  // With phone-to-phone bridging, the conversation happens on the agent's physical phone —
+  // no in-browser softphone overlay. We just show a status indicator while the call is active.
   const isServerCallActive = latestCall && ['INITIATED', 'RINGING', 'IN_PROGRESS'].includes(latestCall.callStatus);
-  const isLocalCallActive = voip.onCall;
-  const showInCallUI = isLocalCallActive || isServerCallActive;
 
   return (
     <div className="card">
       <div className="flex items-center gap-2 mb-3">
         <h2 className="text-lg font-semibold text-app-fg">VOIP Call</h2>
         <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-2 py-0.5 text-2xs font-medium text-success-700 dark:text-success-400">
-          VOIP Enabled
+          {voipProviderDisplayName}
         </span>
-        {voip.ready && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-success-50 dark:bg-success-700/20 px-1.5 py-0.5 text-2xs font-medium text-success-600 dark:text-success-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-success-500" />
-            Device Ready
-          </span>
-        )}
-        {voip.connecting && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-warning-50 dark:bg-warning-700/20 px-1.5 py-0.5 text-2xs font-medium text-warning-600 dark:text-warning-400">
-            Connecting...
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1 rounded-full bg-info-50 dark:bg-info-700/20 px-1.5 py-0.5 text-2xs font-medium text-info-700 dark:text-info-400">
+          Phone bridge
+        </span>
       </div>
 
-      {/* Device error — friendly message + technical details for debugging */}
-      {voip.error && (
-        <div className="rounded-lg bg-danger-50 dark:bg-danger-700/20 border border-danger-200 dark:border-danger-700/50 px-3 py-2.5 mb-3 flex items-start gap-2">
-          <svg className="w-4 h-4 text-danger-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-danger-700 dark:text-danger-300">Call service unavailable</p>
-            <p className="text-xs text-danger-600 dark:text-danger-400 mt-0.5">{voip.error}</p>
-            <Button
-              type="button"
-              variant="secondary"
-              className="mt-2 text-xs"
-              onClick={() => voip.initDevice()}
-            >
-              Try again
-            </Button>
-            {(voip.error?.toLowerCase().includes('31202') || voip.error?.toLowerCase().includes('jwt signature')) && (
-              <div className="mt-3 rounded-md border border-warning-300 dark:border-warning-600 bg-warning-50 dark:bg-warning-900/30 px-2 py-2 text-xs text-app-fg-muted">
-                <p className="font-semibold text-warning-800 dark:text-warning-200 mb-1">Twilio 31202 — JWT signature validation failed</p>
-                <p className="mb-1">Use an <strong>API Key Secret</strong> in <code className="bg-app-hover px-1 rounded">TWILIO_API_KEY_SECRET</code>, not the account Auth Token. In Twilio Console: Account → API keys → Create API Key, then copy the <strong>Secret</strong> (not the SID) into your API env.</p>
-                <p className="text-app-fg-muted">API Key SID should start with <code>SK</code>; Account SID starts with <code>AC</code>.</p>
-              </div>
-            )}
-            {(voip.debugInfo?.raw?.includes('53000') || voip.debugInfo?.phase === 'device_init') && (
-              <div className="mt-3 rounded-md border border-warning-300 dark:border-warning-600 bg-warning-50 dark:bg-warning-900/30 px-2 py-2 text-xs text-app-fg-muted">
-                <p className="font-semibold text-warning-800 dark:text-warning-200 mb-1">Error 53000 / device init — things to check:</p>
-                <ul className="list-disc list-inside space-y-0.5 ml-1">
-                  <li><strong>31202 in browser console?</strong> Use <strong>API Key Secret</strong> in <code className="bg-app-hover px-1 rounded">TWILIO_API_KEY_SECRET</code> (Console → API keys → Create → copy <strong>Secret</strong>), not the account Auth Token.</li>
-                  <li><code className="bg-app-hover px-1 rounded">TWILIO_API_KEY_SID</code> must start with <code>SK</code>; <code className="bg-app-hover px-1 rounded">TWILIO_TWIML_APP_SID</code> with <code>AP</code>.</li>
-                  <li>Identity uses only letters, numbers, underscore (no hyphens).</li>
-                  <li>If not in the US: set <code className="bg-app-hover px-1 rounded">TWILIO_VOICE_REGION=ie1</code> or <code className="bg-app-hover px-1 rounded">au1</code>.</li>
-                  <li>Network: firewall must allow WebSocket (wss) to Twilio.</li>
-                </ul>
-              </div>
-            )}
-            {voip.debugInfo && (
-              <details className="mt-3 border border-danger-200 dark:border-danger-700/50 rounded-md bg-danger-100/50 dark:bg-danger-800/30">
-                <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-medium text-danger-700 dark:text-danger-300">
-                  Technical details (for debugging)
-                </summary>
-                <pre className="p-2 text-[11px] text-app-fg-muted whitespace-pre-wrap break-all overflow-x-auto max-h-48 overflow-y-auto font-mono">
-                  {JSON.stringify(
-                    {
-                      phase: voip.debugInfo.phase,
-                      status: voip.debugInfo.status,
-                      errorMessage: voip.debugInfo.errorMessage,
-                      responseBody: voip.debugInfo.responseBody,
-                      raw: voip.debugInfo.raw,
-                      stack: voip.debugInfo.stack,
-                      timestamp: voip.debugInfo.timestamp,
-                    },
-                    null,
-                    2,
-                  )}
-                </pre>
-              </details>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Sets the agent's expectation about WHERE the call rings — the agent's physical phone,
+          not the browser. Always shown so first-time users immediately know what to expect. */}
+      <div className="mb-3 rounded-md bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-800/50 px-3 py-2 text-xs text-info-700 dark:text-info-300">
+        <p>
+          <strong>Click Call</strong> — {voipProviderDisplayName} will ring your phone first, then
+          bridge you to the customer. Make sure your phone number is set in your profile and
+          keep it nearby.
+        </p>
+      </div>
 
-      {/* In-call overlay with timer, mute, hangup */}
-      {showInCallUI && (
-        <div className="mb-3">
-          <InCallOverlay
-            duration={voip.callDuration}
-            muted={voip.muted}
-            callStatus={voip.callStatus ?? latestCall?.callStatus ?? null}
-            onToggleMute={voip.toggleMute}
-            onHangUp={voip.hangUp}
-          />
-        </div>
-      )}
-
-      {/* Server-side call status when no local WebRTC active */}
-      {latestCall && !showInCallUI && latestCall.callStatus === 'COMPLETED' && (
+      {/* Active-call status indicator — shown while the call is INITIATED/RINGING/IN_PROGRESS. */}
+      {isServerCallActive && latestCall && (
         <div className="mb-3">
           <CallStatusIndicator call={latestCall} />
         </div>
       )}
 
-      {/* Call button — opens modal when onOpenCallModal provided; otherwise submits form (legacy) */}
-      {!showInCallUI && (
+      {/* Last completed call summary */}
+      {latestCall && !isServerCallActive && latestCall.callStatus === 'COMPLETED' && (
+        <div className="mb-3">
+          <CallStatusIndicator call={latestCall} />
+        </div>
+      )}
+
+      {/* Call button — opens modal when onOpenCallModal provided; otherwise submits form (legacy). */}
+      {!isServerCallActive && (
         onOpenCallModal ? (
           <Button
             type="button"
             variant="primary"
             className="w-full"
-            disabled={hasActiveCall || !voip.ready}
-            title={!voip.ready ? 'VOIP device is initializing...' : undefined}
+            disabled={hasActiveCall}
             onClick={onOpenCallModal}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -645,10 +442,9 @@ function VoipCallPanel({
               type="submit"
               variant="primary"
               className="w-full"
-              disabled={hasActiveCall || !voip.ready}
+              disabled={hasActiveCall}
               loading={fetcher.state === 'submitting'}
               loadingText="Connecting..."
-              title={!voip.ready ? 'VOIP device is initializing...' : undefined}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
@@ -682,6 +478,7 @@ function VoipCallPanelWithPolling({
   fetcher,
   revalidate,
   onOpenCallModal,
+  voipProviderDisplayName,
 }: {
   order: OrderDetailStreamData['order'];
   resolvedCall: CallLogEntry | null;
@@ -689,6 +486,7 @@ function VoipCallPanelWithPolling({
   fetcher: ReturnType<typeof useFetcher>;
   revalidate: () => void;
   onOpenCallModal?: () => void;
+  voipProviderDisplayName?: string;
 }) {
   const isCallRelatedStatus =
     order.status === 'CS_ENGAGED' || order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED';
@@ -710,6 +508,7 @@ function VoipCallPanelWithPolling({
       fetcher={fetcher}
       hasActiveCall={isActiveCall}
       onOpenCallModal={onOpenCallModal}
+      voipProviderDisplayName={voipProviderDisplayName}
     />
   );
 }
@@ -721,6 +520,7 @@ export function OrderDetailPage({
   latestCall,
   timeline,
   voipEnabled,
+  voipProviderDisplayName = "Africa's Talking",
   canEditOrder = true,
   userRole,
   userId,
@@ -808,12 +608,12 @@ export function OrderDetailPage({
   // Append response to call debug log when initiateCall returns
   const prevFetcherStateRef = useRef(fetcher.state);
   useEffect(() => {
-    const data = fetcher.data as { callInitiated?: boolean; callLog?: { callStatus?: string }; twilioError?: string } | undefined;
+    const data = fetcher.data as { callInitiated?: boolean; callLog?: { callStatus?: string }; providerError?: string } | undefined;
     if (prevFetcherStateRef.current === 'submitting' && fetcher.state === 'idle' && data != null && (data.callInitiated ?? data.callLog)) {
       setCallDebugLog((prev) => [
         ...prev,
         `Response received at ${new Date().toLocaleTimeString()}`,
-        `Call status: ${data.callLog?.callStatus ?? '—'}${data.twilioError ? ` | ${formatTwilioErrorForLog(data.twilioError)}` : ''}`,
+        `Call status: ${data.callLog?.callStatus ?? '—'}${data.providerError ? ` | error: ${data.providerError}` : ''}`,
       ]);
     }
     prevFetcherStateRef.current = fetcher.state;
@@ -1416,6 +1216,7 @@ export function OrderDetailPage({
                           fetcher={fetcher}
                           revalidate={revalidate}
                           onOpenCallModal={() => setCallCustomerModalOpen(true)}
+                          voipProviderDisplayName={voipProviderDisplayName}
                         />
                       )}
                     </DeferredSection>
@@ -1896,42 +1697,14 @@ export function OrderDetailPage({
                     </svg>
                     Start call
                   </Button>
-                  {(fetcher.data as { callLog?: { callStatus?: string }; twilioError?: string })?.twilioError && (() => {
-                    const twilioError = (fetcher.data as { twilioError?: string }).twilioError;
-                    const parsed = parseTwilioError(twilioError);
+                  {(fetcher.data as { callLog?: { callStatus?: string }; providerError?: string })?.providerError && (() => {
+                    const providerError = (fetcher.data as { providerError?: string }).providerError;
+                    // AT errors are plain strings (the body of the failed POST). We render them
+                    // verbatim — they're typically short ("Insufficient credit", "Invalid phone").
                     return (
                       <div className="text-sm text-danger-600 dark:text-danger-400 rounded-md bg-danger-50 dark:bg-danger-900/20 p-3 space-y-2">
                         <p className="font-semibold">Call failed</p>
-                        {parsed ? (
-                          <>
-                            {parsed.message != null && <p>{parsed.message}</p>}
-                            {parsed.code != null && (
-                              <p className="text-xs opacity-90">Error code: {parsed.code}</p>
-                            )}
-                            {parsed.more_info && (
-                              <a
-                                href={parsed.more_info}
-                                target="_blank"
-                                rel="noreferrer noopener"
-                                className="text-xs underline hover:no-underline"
-                              >
-                                More info
-                              </a>
-                            )}
-                            {parsed.code === 21211 && (
-                              <p className="text-xs mt-2 pt-2 border-t border-danger-200 dark:border-danger-700">
-                                Tip: Phone numbers must be in E.164 format (e.g. +2348021300202 for Nigeria).
-                              </p>
-                            )}
-                            {parsed.code === 21219 && (
-                              <p className="text-xs mt-2 pt-2 border-t border-danger-200 dark:border-danger-700">
-                                Tip: Trial accounts can only call verified numbers. Add this number in Twilio Console under Phone Numbers → Verified Caller IDs, or upgrade your Twilio account.
-                              </p>
-                            )}
-                          </>
-                        ) : (
-                          <p>Twilio error: {twilioError}</p>
-                        )}
+                        <p>{voipProviderDisplayName} error: {providerError}</p>
                       </div>
                     );
                   })()}

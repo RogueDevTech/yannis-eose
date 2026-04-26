@@ -146,6 +146,39 @@ export const settlementWindowEnum = pgEnum('settlement_window', [
   'MONTHLY',
 ]);
 
+/**
+ * Payroll batch lifecycle. Distinct from payout_status (which lives on individual
+ * payout_records) — the batch is the unit of HR review and Finance disbursement.
+ *
+ * DRAFT       — Head of Department is preparing it (their team's payouts).
+ * PENDING_HR  — Submitted to HR for review + adjustments.
+ * PENDING_FINANCE — HR approved; Finance must record disbursement.
+ * PAID        — Finance recorded payment; immutable.
+ *
+ * Reject is an ACTION that transitions PENDING_* back one stage to DRAFT or PENDING_HR;
+ * there is no terminal REJECTED state. See CLAUDE.md → "Payroll Workflow" for the full state machine.
+ */
+export const payrollBatchStatusEnum = pgEnum('payroll_batch_status', [
+  'DRAFT',
+  'PENDING_HR',
+  'PENDING_FINANCE',
+  'PAID',
+]);
+
+/**
+ * Department a payroll batch belongs to. The owning Head role prepares the batch:
+ *   CS        → HEAD_OF_CS prepares; covers CS_AGENT
+ *   MARKETING → HEAD_OF_MARKETING prepares; covers MEDIA_BUYER
+ *   LOGISTICS → HEAD_OF_LOGISTICS prepares; covers LOGISTICS_MANAGER, TPL_MANAGER, TPL_RIDER, STOCK_MANAGER
+ *   HR        → HR_MANAGER prepares (own bucket — covers Heads themselves, BRANCH_ADMIN, FINANCE_OFFICER, HR_MANAGER)
+ */
+export const payrollDepartmentEnum = pgEnum('payroll_department', [
+  'CS',
+  'MARKETING',
+  'LOGISTICS',
+  'HR',
+]);
+
 export const recordStatusEnum = pgEnum('record_status', [
   'ACTIVE',
   'INACTIVE',

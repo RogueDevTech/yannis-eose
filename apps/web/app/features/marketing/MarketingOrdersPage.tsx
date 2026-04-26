@@ -13,6 +13,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
 import type { Order } from '~/features/orders/types';
@@ -36,6 +37,8 @@ interface MarketingOrdersPageProps {
   cpa?: number | null;
   /** Total approved ad spend in the period — from marketing.metrics. */
   totalAdSpend?: number | null;
+  /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
+  dailyCounts?: Array<{ date: string; orderCount: number }>;
 }
 
 export function MarketingOrdersPage({
@@ -53,6 +56,7 @@ export function MarketingOrdersPage({
   liveEvents,
   cpa,
   totalAdSpend: _totalAdSpend,
+  dailyCounts,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const liveState = useLiveIndicator(liveEvents ?? []);
@@ -60,6 +64,7 @@ export function MarketingOrdersPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
+  const [showChartView, setShowChartView] = useState(false);
 
   useEffect(() => {
     setSelectedStatus(statusFilter || 'ALL');
@@ -128,6 +133,14 @@ export function MarketingOrdersPage({
               />
             </div>
             <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowChartView((v) => !v)}
+            >
+              {showChartView ? 'View as data' : 'View data in chart'}
+            </Button>
+            <Button
               onClick={() =>
                 exportToCsv(
                   orders.map((o) => ({
@@ -193,6 +206,14 @@ export function MarketingOrdersPage({
         />
       </div>
 
+      {showChartView ? (
+        <OrdersChartView
+          statusCounts={statusCounts}
+          total={ordersInPeriodTotal}
+          scopeLabel="Marketing orders"
+          dailyCounts={dailyCounts}
+        />
+      ) : (
       <div className="card p-0 overflow-hidden scroll-mt-4">
         <div className="px-4 py-3 border-b border-app-border">
           <h2 className="text-lg font-semibold text-app-fg">Orders ({total})</h2>
@@ -336,6 +357,7 @@ export function MarketingOrdersPage({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -130,8 +130,12 @@ export interface OrderDetailStreamData {
   // Deferred (streaming promises)
   latestCall: Promise<CallLogEntry | null>;
   timeline: Promise<TimelineEvent[]>;
-  // VOIP feature flag
+  // VOIP feature flag + active provider context. The active provider (Africa's Talking)
+  // bridges the agent's physical phone to the customer, so the UI shows
+  // "Your phone is ringing" feedback rather than an in-browser softphone overlay.
   voipEnabled: boolean;
+  /** Display name of the active provider — kept as a string so the UI doesn't hard-code the brand. */
+  voipProviderDisplayName?: string;
 }
 
 /** Passed from route when user has view-only access (e.g. Media Buyer) */

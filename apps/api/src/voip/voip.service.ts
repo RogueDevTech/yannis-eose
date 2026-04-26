@@ -10,25 +10,24 @@ import { EventsService } from '../events/events.service';
 import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { randomUUID } from 'crypto';
+import { AfricasTalkingProvider } from './providers/africas-talking.provider';
+import type {
+  CallStatus,
+  VoipProvider,
+  VoipProviderName,
+} from './providers/voip-provider.interface';
 
 type CallLog = typeof schema.callLogs.$inferSelect;
-type CallStatus = 'INITIATED' | 'RINGING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'NO_ANSWER' | 'BUSY';
 
-const VOIP_SETTING_KEY = 'VOIP_ENABLED';
-const VOIP_CACHE_KEY = 'yannis:voip:enabled';
+const VOIP_ENABLED_KEY = 'VOIP_ENABLED';
+const VOIP_PROVIDER_KEY = 'VOIP_PROVIDER';
+const VOIP_ENABLED_CACHE_KEY = 'yannis:voip:enabled';
+const VOIP_PROVIDER_CACHE_KEY = 'yannis:voip:provider';
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
-/** Twilio Client identity must be alphanumeric + underscore only (no hyphens). See Twilio error 53000. */
-function toTwilioClientIdentity(agentId: string): string {
-  const safe = agentId.replace(/-/g, '_').replace(/[^a-zA-Z0-9_]/g, '_');
-  return `agent_${safe}`;
-}
+const DEFAULT_PROVIDER: VoipProviderName = 'africas_talking';
 
-/**
- * Normalize Nigerian local format (0XXXXXXXXX) to E.164 (+234XXXXXXXXX) for Twilio.
- * Twilio requires E.164; error 21211 means the number format is invalid.
- * Returns the original string if it doesn't look like Nigerian local (e.g. already +234...).
- */
+/** Normalize Nigerian local format (0XXXXXXXXX) to E.164 (+234XXXXXXXXX). Both providers expect E.164. */
 function toE164Nigeria(phone: string): string {
   const trimmed = phone.trim();
   const match = trimmed.match(/^0(\d{10})$/);
@@ -36,6 +35,19 @@ function toE164Nigeria(phone: string): string {
   return trimmed;
 }
 
+/**
+ * VOIP orchestrator. Owns the per-order locking, call-log lifecycle, and webhook fan-out.
+ * Provider-specific work (AT's phone-to-phone bridging via REST + voice-action XML) is
+ * delegated to the `VoipProvider` keyed by `VOIP_PROVIDER` in system settings. Africa's
+ * Talking is the only live provider; the abstraction stays so a future provider can be
+ * plugged in without touching the orchestrator.
+ *
+ * Adding a new provider:
+ *   1. Implement `VoipProvider` in `providers/<name>.provider.ts`.
+ *   2. Add it to `VoipModule` providers + `providerByName()` switch below.
+ *   3. Add a webhook route in `voip.controller.ts` if its payload format differs.
+ *   No DB changes — `call_logs.callToken` is provider-agnostic.
+ */
 @Injectable()
 export class VoipService {
   private readonly logger = new Logger(VoipService.name);
@@ -45,68 +57,131 @@ export class VoipService {
     @Inject(REDIS) private readonly redis: Redis,
     private readonly events: EventsService,
     private readonly settingsService: SettingsService,
+    private readonly atProvider: AfricasTalkingProvider,
   ) {}
 
-  // ─── Feature Flag ──────────────────────────────────────────────
+  // ─── Feature Flag (on/off) ─────────────────────────────────────
 
-  /**
-   * Check if VOIP is enabled via system settings.
-   * Cached in Redis for 60 seconds.
-   */
+  /** Whether VOIP is enabled at all. Cached in Redis 60s. */
   async isVoipEnabled(): Promise<boolean> {
-    const cached = await this.redis.get(VOIP_CACHE_KEY);
+    const cached = await this.redis.get(VOIP_ENABLED_CACHE_KEY).catch(() => null);
     if (cached !== null) return cached === '1';
 
-    const setting = await this.settingsService.get(VOIP_SETTING_KEY);
+    const setting = await this.settingsService.get(VOIP_ENABLED_KEY);
     const enabled = setting?.['enabled'] === true;
 
-    await this.redis.set(VOIP_CACHE_KEY, enabled ? '1' : '0', 'EX', 60);
+    await this.redis.set(VOIP_ENABLED_CACHE_KEY, enabled ? '1' : '0', 'EX', 60).catch(() => undefined);
     return enabled;
   }
 
   /**
-   * Toggle VOIP feature flag. SuperAdmin only (enforced at router level).
-   * Validates Twilio env vars are present before enabling.
+   * Toggle VOIP on/off. SuperAdmin only. Validates that the active provider's credentials
+   * are present before enabling — refuses with a clear error otherwise so the admin can
+   * configure env vars first instead of getting confusing call failures later.
    */
   async setVoipEnabled(enabled: boolean, actorId: string): Promise<{ enabled: boolean }> {
     if (enabled) {
-      const sid = process.env['TWILIO_ACCOUNT_SID'];
-      const token = process.env['TWILIO_AUTH_TOKEN'];
-      const phone = process.env['TWILIO_PHONE_NUMBER'];
-
-      if (!sid || !token || !phone) {
+      const provider = await this.getActiveProvider();
+      if (!provider.isConfigured()) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
-          message: 'Cannot enable VOIP: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER must be configured in environment variables.',
+          message: `Cannot enable VOIP: ${provider.displayName} requires these env vars to be set: ${provider.requiredEnvVars().join(', ')}.`,
         });
       }
     }
 
-    await this.settingsService.set(VOIP_SETTING_KEY, { enabled }, actorId);
-    await this.redis.del(VOIP_CACHE_KEY);
+    await this.settingsService.set(VOIP_ENABLED_KEY, { enabled }, actorId);
+    await this.redis.del(VOIP_ENABLED_CACHE_KEY).catch(() => undefined);
 
     this.logger.log(`VOIP ${enabled ? 'enabled' : 'disabled'} by ${actorId}`);
     return { enabled };
+  }
+
+  // ─── Active Provider ───────────────────────────────────────────
+
+  /**
+   * Read the active provider slug from settings, fall back to the default. Cached 60s.
+   * Returns the slug only — `getActiveProvider()` resolves it to the implementation.
+   */
+  async getActiveProviderName(): Promise<VoipProviderName> {
+    const cached = await this.redis.get(VOIP_PROVIDER_CACHE_KEY).catch(() => null);
+    if (cached === 'africas_talking') return cached;
+
+    const setting = await this.settingsService.get(VOIP_PROVIDER_KEY);
+    const stored = setting?.['provider'];
+    const name: VoipProviderName =
+      stored === 'africas_talking' ? stored : DEFAULT_PROVIDER;
+
+    await this.redis.set(VOIP_PROVIDER_CACHE_KEY, name, 'EX', 60).catch(() => undefined);
+    return name;
+  }
+
+  /** Resolve the active provider implementation. */
+  async getActiveProvider(): Promise<VoipProvider> {
+    const name = await this.getActiveProviderName();
+    return this.providerByName(name);
+  }
+
+  /** All registered providers — used by the settings UI to show what's selectable. */
+  listProviders(): VoipProvider[] {
+    return [this.atProvider];
+  }
+
+  /**
+   * SuperAdmin: switch the active provider. Refuses to switch to a provider whose env vars
+   * aren't set, so the admin doesn't end up enabled-but-broken.
+   */
+  async setActiveProvider(name: VoipProviderName, actorId: string): Promise<{ provider: VoipProviderName }> {
+    const provider = this.providerByName(name);
+    if (!provider.isConfigured()) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: `Cannot switch to ${provider.displayName}: missing env vars ${provider.requiredEnvVars().join(', ')}.`,
+      });
+    }
+
+    await this.settingsService.set(VOIP_PROVIDER_KEY, { provider: name }, actorId);
+    await this.redis.del(VOIP_PROVIDER_CACHE_KEY).catch(() => undefined);
+
+    this.logger.log(`VOIP provider switched to ${name} by ${actorId}`);
+    return { provider: name };
+  }
+
+  private providerByName(name: VoipProviderName): VoipProvider {
+    switch (name) {
+      case 'africas_talking':
+        return this.atProvider;
+      default: {
+        // Exhaustive match — TS will error if a new VoipProviderName is added without handling.
+        const _exhaustive: never = name;
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Unknown VOIP provider: ${String(_exhaustive)}`,
+        });
+      }
+    }
   }
 
   // ─── Initiate Call ─────────────────────────────────────────────
 
   /**
    * Initiate a call for a CS_ENGAGED order.
-   * When VOIP is enabled and Twilio is configured: places a real Twilio call.
-   * When VOIP is enabled but Twilio not configured: uses mock simulation.
-   * When VOIP is disabled: creates a MANUAL_CALL log (fallback mode).
-   * Returns the current call log (re-fetched after Twilio so FAILED is reflected) and optional twilioError for debugging.
+   *   - VOIP disabled        → log a MANUAL_CALL entry (no provider call).
+   *   - VOIP enabled         → delegate to the active provider's `initiateCall()`.
+   *   - Active provider unconfigured → fail loudly (not silent-mock — that hides bugs).
+   *
+   * `providerError` echoes any vendor-specific error string for client-side debugging.
+   * Re-fetches the call log after the provider returns so the client sees the latest status
+   * (e.g. FAILED set by the provider on REST error).
    */
-  async initiateCall(orderId: string, actor: SessionUser): Promise<{ callLog: CallLog; twilioError?: string }> {
+  async initiateCall(
+    orderId: string,
+    actor: SessionUser,
+  ): Promise<{ callLog: CallLog; providerError?: string }> {
     const voipEnabled = await this.isVoipEnabled();
 
-    // All writes + validation reads run inside withActor so the audit trigger sees the caller.
-    // Twilio/mock dispatch and Socket.io emits are kept OUTSIDE the transaction: they don't
-    // need audit attribution and shouldn't block the commit on external IO.
     type CallInitResult = { callLog: CallLog; order: typeof schema.orders.$inferSelect; isManual: boolean };
     const { callLog, order, isManual } = await withActor(this.db, actor, async (tx): Promise<CallInitResult> => {
-      // 1. Verify order exists
       const orderRows = await tx
         .select()
         .from(schema.orders)
@@ -117,8 +192,6 @@ export class VoipService {
       if (!foundOrder) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
       }
-
-      // 2. Verify order is in CS_ENGAGED status
       if (foundOrder.status !== 'CS_ENGAGED') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -126,17 +199,14 @@ export class VoipService {
         });
       }
 
-      // 3. Verify the agent is assigned to this order (or has elevated role)
-      const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
+      const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN';
       if (!isElevated && foundOrder.assignedCsId !== actor.id) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'You are not assigned to this order',
-        });
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You are not assigned to this order' });
       }
 
       if (!voipEnabled) {
-        // Fallback: create a manual call log entry (no Twilio, no mock)
+        // Manual fallback — VOIP feature flag is off; agent calls from their personal phone
+        // and the system records the attempt as a manual log entry.
         const manualRows = await tx
           .insert(schema.callLogs)
           .values({
@@ -149,11 +219,10 @@ export class VoipService {
             transcript: null,
           })
           .returning();
-
         return { callLog: manualRows[0]!, order: foundOrder, isManual: true };
       }
 
-      // 5. Check for active calls on this order
+      // Block if there's already an in-flight call on this order.
       const activeCallRows = await tx
         .select()
         .from(schema.callLogs)
@@ -176,10 +245,7 @@ export class VoipService {
         });
       }
 
-      // 6. Generate call token
       const callToken = randomUUID();
-
-      // 7. Insert call log with INITIATED status
       const insertedRows = await tx
         .insert(schema.callLogs)
         .values({
@@ -195,13 +261,9 @@ export class VoipService {
 
       const inserted = insertedRows[0];
       if (!inserted) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to create call log',
-        });
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create call log' });
       }
 
-      // 8. Lock the order for 15 minutes (prevents other agents from taking it)
       await tx
         .update(schema.orders)
         .set({
@@ -214,7 +276,7 @@ export class VoipService {
       return { callLog: inserted, order: foundOrder, isManual: false };
     });
 
-    // Manual-call short-circuit: emit the event and return.
+    // Manual-call path short-circuits — no provider involvement.
     if (isManual) {
       this.events.emitToRoom(`order:${orderId}`, 'call:status_changed', {
         callLogId: callLog.id,
@@ -224,31 +286,37 @@ export class VoipService {
       return { callLog };
     }
 
-    // 9. Initiate call: real Twilio or mock (external IO, outside the transaction)
-    let twilioError: string | undefined;
-    if (process.env['TWILIO_ACCOUNT_SID'] && process.env['TWILIO_AUTH_TOKEN']) {
-      const result = await this.initiateTwilioCall(callLog, order);
-      twilioError = result.twilioError;
+    // Provider delegation. If env isn't configured we still go through the provider so it
+    // can return a descriptive error — silent-mock paths used to hide misconfigurations
+    // until the first real call failed at runtime.
+    const provider = await this.getActiveProvider();
+    let providerError: string | undefined;
+    if (provider.isConfigured()) {
+      const result = await provider.initiateCall(callLog, order);
+      providerError = result.providerError;
     } else {
-      this.simulateMockCall(callLog.id, orderId);
+      // Configured-required path: fail visibly. Admins can either configure env or pick a
+      // different provider in Settings.
+      providerError = `${provider.displayName} is selected as the active provider but its credentials are not configured (${provider.requiredEnvVars().join(', ')}). Configure env vars or switch provider in Settings.`;
+      await this.db
+        .update(schema.callLogs)
+        .set({ callStatus: 'FAILED' })
+        .where(eq(schema.callLogs.id, callLog.id));
     }
 
-    // Emit initial event
     this.events.emitToRoom(`order:${orderId}`, 'call:status_changed', {
       callLogId: callLog.id,
       orderId,
       status: 'INITIATED',
     });
-
     this.events.emitToUser(actor.id, 'call:status_changed', {
       callLogId: callLog.id,
       orderId,
       status: 'INITIATED',
     });
 
-    // Re-fetch call log so client gets actual status (e.g. FAILED if Twilio failed)
     const reFetched = await this.getCallLog(callLog.id);
-    return { callLog: reFetched, twilioError };
+    return { callLog: reFetched, providerError };
   }
 
   // ─── Query Helpers ─────────────────────────────────────────────
@@ -264,7 +332,6 @@ export class VoipService {
     if (!callLog) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Call log not found' });
     }
-
     return callLog;
   }
 
@@ -287,16 +354,42 @@ export class VoipService {
     return rows[0] ?? null;
   }
 
+  // ─── Voice-action helpers (used by provider-specific controller routes) ──
+
+  /**
+   * Resolve the customer phone for a given callToken — used by the AT voice-action XML
+   * endpoint to know who to bridge the agent to once their leg goes active. Returns null when
+   * the call_log or order is missing or has no customer phone.
+   */
+  async lookupCustomerPhoneByCallToken(callToken: string): Promise<string | null> {
+    if (!callToken) return null;
+    const [row] = await this.db
+      .select({ customerPhone: schema.orders.customerPhone })
+      .from(schema.callLogs)
+      .innerJoin(schema.orders, eq(schema.callLogs.orderId, schema.orders.id))
+      .where(eq(schema.callLogs.callToken, callToken))
+      .limit(1);
+
+    const raw = row?.customerPhone?.trim();
+    if (!raw) return null;
+    // Reuse Nigerian E.164 normalization (kept as a static helper below) so the customer
+    // number going into the Dial XML is always +234... — AT requires this.
+    return toE164Nigeria(raw);
+  }
+
   // ─── Webhook ───────────────────────────────────────────────────
 
   /**
-   * Handle a Twilio StatusCallback webhook.
-   * Updates the call log status and duration, emits Socket.io event.
+   * Handle a status webhook from any provider. Caller (controller) is responsible for parsing
+   * the provider-specific payload and resolving the right provider so we can map its status
+   * vocabulary. The shared work — find the call log, persist new status, emit Socket.io events,
+   * release the order lock when terminal — happens here.
    */
   async handleWebhookStatusUpdate(
     callToken: string,
-    status: string,
-    duration?: number,
+    rawStatus: string,
+    duration: number | undefined,
+    providerName: VoipProviderName,
   ): Promise<CallLog> {
     const rows = await this.db
       .select()
@@ -306,23 +399,19 @@ export class VoipService {
 
     const callLog = rows[0];
     if (!callLog) {
-      throw new TRPCError({
-        code: 'NOT_FOUND',
-        message: 'Call log not found for this token',
-      });
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Call log not found for this token' });
     }
 
-    const mappedStatus = this.mapTwilioStatus(status);
+    const provider = this.providerByName(providerName);
+    const mappedStatus = provider.mapWebhookStatus(rawStatus);
     const updated = await this.updateCallStatus(callLog.id, mappedStatus, duration);
 
-    // Emit Socket.io events
     this.events.emitToRoom(`order:${callLog.orderId}`, 'call:status_changed', {
       callLogId: callLog.id,
       orderId: callLog.orderId,
       status: mappedStatus,
       durationSeconds: duration ?? null,
     });
-
     this.events.emitToUser(callLog.agentId, 'call:status_changed', {
       callLogId: callLog.id,
       orderId: callLog.orderId,
@@ -330,15 +419,10 @@ export class VoipService {
       durationSeconds: duration ?? null,
     });
 
-    // Release lock when call ends
     if (['COMPLETED', 'FAILED', 'BUSY', 'NO_ANSWER'].includes(mappedStatus)) {
       await this.db
         .update(schema.orders)
-        .set({
-          lockedBy: null,
-          lockedUntil: null,
-          updatedAt: new Date(),
-        })
+        .set({ lockedBy: null, lockedUntil: null, updatedAt: new Date() })
         .where(eq(schema.orders.id, callLog.orderId));
     }
 
@@ -347,23 +431,15 @@ export class VoipService {
 
   // ─── Lock Management ───────────────────────────────────────────
 
-  /**
-   * Release expired order locks.
-   * Can be called periodically via a cron or on-demand.
-   * When actorId is provided (e.g. from tRPC), audit trail records that user.
-   */
   async releaseExpiredLocks(actorId?: string | null): Promise<number> {
-    // When actorId is set (tRPC user-initiated), run inside withActor so the audit trigger
-    // records the actual user. When called from a cron (no actor), the write is a system
-    // operation — fall back to a bare update; the trigger will record NULL (shows "System").
-    const runUpdate = async (db: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0]) =>
+    const runUpdate = async (
+      db:
+        | PostgresJsDatabase<typeof schema>
+        | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
+    ) =>
       db
         .update(schema.orders)
-        .set({
-          lockedBy: null,
-          lockedUntil: null,
-          updatedAt: new Date(),
-        })
+        .set({ lockedBy: null, lockedUntil: null, updatedAt: new Date() })
         .where(
           and(
             sql`${schema.orders.lockedUntil} IS NOT NULL`,
@@ -379,7 +455,6 @@ export class VoipService {
     if (result.length > 0) {
       this.logger.log(`Released ${result.length} expired order lock(s)`);
     }
-
     return result.length;
   }
 
@@ -390,10 +465,7 @@ export class VoipService {
     status: CallStatus,
     durationSeconds?: number,
   ): Promise<CallLog> {
-    const updateFields: Record<string, unknown> = {
-      callStatus: status,
-    };
-
+    const updateFields: Record<string, unknown> = { callStatus: status };
     if (durationSeconds !== undefined) {
       updateFields['durationSeconds'] = durationSeconds;
     }
@@ -406,225 +478,8 @@ export class VoipService {
 
     const updated = updatedRows[0];
     if (!updated) {
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to update call status',
-      });
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update call status' });
     }
-
     return updated;
-  }
-
-  /**
-   * Simulate a mock VOIP call with timed status transitions.
-   * Used in development when Twilio credentials are not configured.
-   *
-   * Timeline: 0s→INITIATED, 2s→RINGING, 5s→IN_PROGRESS, 20s→COMPLETED(20s)
-   */
-  private simulateMockCall(callLogId: string, orderId: string): void {
-    setTimeout(async () => {
-      try {
-        await this.updateCallStatus(callLogId, 'RINGING');
-        this.events.emitToRoom(`order:${orderId}`, 'call:status_changed', {
-          callLogId, orderId, status: 'RINGING',
-        });
-      } catch { /* mock — swallow */ }
-    }, 2000);
-
-    setTimeout(async () => {
-      try {
-        await this.updateCallStatus(callLogId, 'IN_PROGRESS');
-        this.events.emitToRoom(`order:${orderId}`, 'call:status_changed', {
-          callLogId, orderId, status: 'IN_PROGRESS',
-        });
-      } catch { /* mock — swallow */ }
-    }, 5000);
-
-    setTimeout(async () => {
-      try {
-        await this.updateCallStatus(callLogId, 'COMPLETED', 20);
-        this.events.emitToRoom(`order:${orderId}`, 'call:status_changed', {
-          callLogId, orderId, status: 'COMPLETED', durationSeconds: 20,
-        });
-        // Release lock after mock call completes
-        const logRows = await this.db
-          .select({ orderId: schema.callLogs.orderId })
-          .from(schema.callLogs)
-          .where(eq(schema.callLogs.id, callLogId))
-          .limit(1);
-        if (logRows[0]) {
-          await this.db
-            .update(schema.orders)
-            .set({ lockedBy: null, lockedUntil: null, updatedAt: new Date() })
-            .where(eq(schema.orders.id, logRows[0].orderId));
-        }
-      } catch { /* mock — swallow */ }
-    }, 20000);
-  }
-
-  /**
-   * Initiate a real Twilio call.
-   * Connects the agent to the customer via a VOIP bridge.
-   * Returns { success, twilioError? } so caller can surface the error to the client.
-   */
-  private async initiateTwilioCall(
-    callLog: CallLog,
-    order: typeof schema.orders.$inferSelect,
-  ): Promise<{ success: boolean; twilioError?: string }> {
-    const accountSid = process.env['TWILIO_ACCOUNT_SID'];
-    const authToken = process.env['TWILIO_AUTH_TOKEN'];
-    const twilioPhoneNumber = process.env['TWILIO_PHONE_NUMBER'];
-    const webhookBaseUrl = process.env['VOIP_WEBHOOK_BASE_URL'] ?? process.env['API_PUBLIC_URL'] ?? 'http://localhost:4444';
-
-    if (!accountSid || !authToken || !twilioPhoneNumber) {
-      this.simulateMockCall(callLog.id, callLog.orderId);
-      return { success: true };
-    }
-
-    const customerPhone = order.customerPhone?.trim();
-    if (!customerPhone) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: 'Cannot place VOIP call: customer phone number is not available for this order.',
-      });
-    }
-
-    try {
-      const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`;
-
-      const toNumber = toE164Nigeria(customerPhone);
-      const params = new URLSearchParams();
-      params.append('To', toNumber);
-      params.append('From', twilioPhoneNumber);
-      params.append('StatusCallback', `${webhookBaseUrl}/voip/webhook/status?callToken=${callLog.callToken}`);
-      params.append('StatusCallbackEvent', 'initiated ringing answered completed');
-      params.append('StatusCallbackMethod', 'POST');
-      params.append('Twiml', '<Response><Say>Connecting you to an agent.</Say><Dial><Client>' + toTwilioClientIdentity(callLog.agentId) + '</Client></Dial></Response>');
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params.toString(),
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        this.logger.error(`Twilio API error orderId=${order.id} callLogId=${callLog.id}: ${errorBody}`);
-        await this.updateCallStatus(callLog.id, 'FAILED');
-        this.events.emitToRoom(`order:${callLog.orderId}`, 'call:status_changed', {
-          callLogId: callLog.id, orderId: callLog.orderId, status: 'FAILED',
-        });
-        return { success: false, twilioError: errorBody };
-      }
-
-      this.logger.log(`Twilio call initiated orderId=${order.id} callLogId=${callLog.id}`);
-      return { success: true };
-    } catch (error) {
-      const errMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Twilio call initiation error orderId=${order.id} callLogId=${callLog.id}:`, error);
-      await this.updateCallStatus(callLog.id, 'FAILED');
-      this.events.emitToRoom(`order:${callLog.orderId}`, 'call:status_changed', {
-        callLogId: callLog.id, orderId: callLog.orderId, status: 'FAILED',
-      });
-      return { success: false, twilioError: errMessage };
-    }
-  }
-
-  /**
-   * Generate a Twilio access token for WebRTC browser client.
-   * The token allows the agent's browser to register as a Twilio Device
-   * and receive/make calls via the VOIP bridge.
-   *
-   * Required env:
-   * - TWILIO_ACCOUNT_SID (starts with AC)
-   * - TWILIO_API_KEY_SID (starts with SK) — from Console → Account → API keys → Create API Key
-   * - TWILIO_API_KEY_SECRET — the SECRET of that API Key (NOT the Account Auth Token). Twilio error 31202 "JWT signature validation failed" means you used the wrong secret.
-   * - TWILIO_TWIML_APP_SID (starts with AP) — from Console → Voice → TwiML Apps
-   */
-  async generateAccessToken(agentId: string): Promise<{ token: string; identity: string }> {
-    const voipEnabled = await this.isVoipEnabled();
-    if (!voipEnabled) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: 'VOIP is not enabled. Enable it in Settings first.',
-      });
-    }
-
-    const accountSid = process.env['TWILIO_ACCOUNT_SID'];
-    const apiKeySid = process.env['TWILIO_API_KEY_SID'];
-    const apiKeySecret = process.env['TWILIO_API_KEY_SECRET'];
-    const twimlAppSid = process.env['TWILIO_TWIML_APP_SID'];
-
-    if (!apiKeySid?.startsWith('SK')) {
-      this.logger.warn(
-        'TWILIO_API_KEY_SID should start with SK (API Key SID from Console → API keys). Using Auth Token as secret causes Twilio error 31202.',
-      );
-    }
-
-    if (!accountSid || !apiKeySid || !apiKeySecret || !twimlAppSid) {
-      // In dev without full Twilio config, return a mock token
-      this.logger.warn('Twilio credentials not fully configured — returning mock access token');
-      return {
-        token: `mock_token_${agentId}_${Date.now()}`,
-        identity: toTwilioClientIdentity(agentId),
-      };
-    }
-
-    try {
-      // Use Twilio's JWT library to generate an access token
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const twilio = require('twilio');
-      const AccessToken = twilio.jwt.AccessToken;
-      const VoiceGrant = AccessToken.VoiceGrant;
-
-      const identity = toTwilioClientIdentity(agentId);
-
-      const voiceGrant = new VoiceGrant({
-        outgoingApplicationSid: twimlAppSid,
-        incomingAllow: true,
-      });
-
-      const token = new AccessToken(accountSid, apiKeySid, apiKeySecret, {
-        identity,
-        ttl: 3600, // 1 hour
-      });
-
-      token.addGrant(voiceGrant);
-
-      return {
-        token: token.toJwt(),
-        identity,
-      };
-    } catch (error) {
-      const errMessage = error instanceof Error ? error.message : String(error);
-      const errStack = error instanceof Error ? error.stack : undefined;
-      const errCode = error && typeof error === 'object' && 'code' in error ? (error as { code?: string }).code : undefined;
-      this.logger.error(
-        `Failed to generate Twilio access token: ${errMessage}${errCode != null ? ` [code=${String(errCode)}]` : ''}${errStack ? `\n${errStack}` : ''}`,
-      );
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to generate VOIP access token',
-      });
-    }
-  }
-
-  private mapTwilioStatus(twilioStatus: string): CallStatus {
-    const statusMap: Record<string, CallStatus> = {
-      'queued': 'INITIATED',
-      'initiated': 'INITIATED',
-      'ringing': 'RINGING',
-      'in-progress': 'IN_PROGRESS',
-      'completed': 'COMPLETED',
-      'failed': 'FAILED',
-      'busy': 'BUSY',
-      'no-answer': 'NO_ANSWER',
-      'canceled': 'FAILED',
-    };
-
-    return statusMap[twilioStatus.toLowerCase()] ?? 'FAILED';
   }
 }

@@ -1,6 +1,7 @@
-import type { LoaderFunctionArgs } from '@remix-run/node';
+import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
+import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
 import type { CEODashboardData } from '~/features/ceo/types';
@@ -66,6 +67,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : [];
 
   return { data, filters, branchBreakdown };
+}
+
+/**
+ * User-triggered refresh of the finance materialized views that back this page.
+ * Returns once the refresh completes; the client revalidates the loader after, which
+ * re-reads `dashboard.ceoOverview` against the now-fresh views.
+ */
+export async function action({ request }: ActionFunctionArgs) {
+  await requirePermission(request, 'ceo.overview');
+  const cookie = getSessionCookie(request);
+  const formData = await request.formData();
+  const intent = formData.get('intent')?.toString();
+
+  if (intent === 'refreshExecutiveData') {
+    const res = await apiRequest<{ result?: { data?: { success: boolean; refreshedAt: string; durationMs: number; failedViews: string[] } } }>(
+      '/trpc/dashboard.refreshExecutiveData',
+      { method: 'POST', cookie, body: {} },
+    );
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json(
+        { success: false, error: errorData?.error?.message ?? 'Failed to refresh executive data' },
+        { status: safeStatus(res.status) },
+      );
+    }
+    const result = res.data?.result?.data;
+    return json({
+      success: true,
+      refreshedAt: result?.refreshedAt ?? new Date().toISOString(),
+      durationMs: result?.durationMs ?? 0,
+      failedViews: result?.failedViews ?? [],
+    });
+  }
+
+  return json({ error: 'Unknown action' }, { status: 400 });
 }
 
 export default function CEODashboardRoute() {

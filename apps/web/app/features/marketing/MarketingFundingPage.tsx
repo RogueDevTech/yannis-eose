@@ -234,23 +234,21 @@ export function MarketingFundingPage({
 
   return (
     <div className="space-y-4">
-      <div className="space-y-4">
-        <PageHeader
-          title="Funding"
-          description={
-            <>
-              {isMediaBuyerView ? 'Funding sent to you.' : 'Funding ledger and performance metrics.'}{' '}
-              <Link
-                to="/admin/marketing/ad-spend"
-                className="text-brand-600 dark:text-brand-400 font-medium hover:underline"
-              >
-                Ad spend logging
-              </Link>
-            </>
-          }
-        />
-        <div className="flex flex-wrap items-center gap-3 w-full">
-          <div className="flex flex-wrap items-center gap-2 min-w-0">
+      <PageHeader
+        title="Funding"
+        description={
+          <>
+            {isMediaBuyerView ? 'Funding sent to you.' : 'Funding ledger and performance metrics.'}{' '}
+            <Link
+              to="/admin/marketing/ad-spend"
+              className="text-brand-600 dark:text-brand-400 font-medium hover:underline"
+            >
+              Ad spend logging
+            </Link>
+          </>
+        }
+        actions={
+          <>
             <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
               <DateFilterBar
                 startDate={dateFilters.startDate}
@@ -263,21 +261,19 @@ export function MarketingFundingPage({
                 <Spinner size="sm" className="shrink-0" />
               </span>
             )}
-          </div>
-          <div className="flex items-center gap-2 ml-auto shrink-0">
             {canSendFunding && (
               <Button variant="primary" size="sm" onClick={() => setShowFundingForm(!showFundingForm)}>
                 {showFundingForm ? 'Close' : '+ Send Funding'}
               </Button>
             )}
             {canRequestFunding && (
-              <Button variant="outline" size="sm" onClick={() => setShowRequestFundingForm(!showRequestFundingForm)}>
+              <Button variant="secondary" size="sm" onClick={() => setShowRequestFundingForm(!showRequestFundingForm)}>
                 {showRequestFundingForm ? 'Close' : '+ Request Funds'}
               </Button>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {actionError && !dismissedError && (
         <PageNotification

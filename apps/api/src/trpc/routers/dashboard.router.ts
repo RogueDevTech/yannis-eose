@@ -45,6 +45,11 @@ async function _ceoOverviewFetch(params: {
     return undefined;
   };
 
+  // Materialized views are refreshed ONLY when the user explicitly clicks the Refresh
+  // button on the page (`dashboard.refreshExecutiveData`). The page read here always uses
+  // whatever snapshot is currently in the MVs — fast and deterministic. Numbers stay fixed
+  // until the user asks for fresh data.
+
   const hasDateRange = Boolean(startDate && endDate);
   const [
     fastProfitResult,
@@ -215,6 +220,44 @@ export const dashboardRouter = router({
 
       return _ceoOverviewFetch({ startDate, endDate, branchId });
     }),
+
+  /**
+   * User-triggered refresh of the finance materialized views that back the Executive
+   * Overview. The page never auto-refreshes — when the CEO/admin wants fresher numbers
+   * they click "Refresh data" and we run REFRESH MATERIALIZED VIEW CONCURRENTLY across
+   * all 4 finance views, clear the 60s Redis cache for ceoOverview, and return.
+   *
+   * The mutation awaits the refresh so the next page revalidation (triggered by the
+   * client after this resolves) reads the now-fresh snapshot.
+   */
+  refreshExecutiveData: permissionProcedure('ceo.overview').mutation(async () => {
+    if (!financeService) {
+      throw new Error('Dashboard services not initialized');
+    }
+
+    const startedAt = Date.now();
+    // Use the user-path helper so init self-heals on a fresh DB before refreshing.
+    const results = await financeService.refreshMaterializedViewsForUser();
+    const durationMs = Date.now() - startedAt;
+
+    const failures = Object.entries(results).filter(([, ok]) => ok !== true);
+    const allOk = failures.length === 0;
+
+    // Wipe the per-branch ceoOverview cache so the next read recomputes from the
+    // freshly-refreshed views instead of returning the cached stale aggregate.
+    if (allOk && cacheService) {
+      await cacheService.delPattern('cache:ceo:*').catch(() => {
+        /* delPattern logs internally; cache miss is the worst case here */
+      });
+    }
+
+    return {
+      success: allOk,
+      refreshedAt: new Date().toISOString(),
+      durationMs,
+      failedViews: failures.map(([name]) => name),
+    };
+  }),
 
   /**
    * CEO Overview time-series — daily revenue, delivered orders, and order volume (created) for chart.

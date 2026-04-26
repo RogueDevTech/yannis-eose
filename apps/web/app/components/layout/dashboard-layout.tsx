@@ -265,7 +265,26 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'HR',
     items: [
-      { label: 'Payroll', href: '/hr/payroll', icon: SidebarIcons.hr, permission: 'hr.read' },
+      // Payroll (Monthly Batches): HR + admins via permission, Heads + Finance via explicit role
+      // allow-list. Heads see only their dept's batches; Finance sees PENDING_FINANCE+. See
+      // CLAUDE.md → "Payroll Workflow".
+      {
+        label: 'Payroll',
+        href: '/hr/payroll',
+        icon: SidebarIcons.hr,
+        permission: 'hr.read',
+        roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'FINANCE_OFFICER'],
+      },
+      // Commission Plans: separate page so Heads can manage their own dept's plans (CEO directive
+      // 2026-04-26). Backend `hr.listPlans` / `hr.createPlan` / `hr.updatePlan` auto-scope per
+      // viewer — Heads only see/edit roles in their dept; HR + admins see/edit all.
+      {
+        label: 'Commission Plans',
+        href: '/hr/plans',
+        icon: SidebarIcons.leaderboards,
+        permission: 'hr.read',
+        roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'],
+      },
       // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
       // Head of Marketing / Head of CS hold `users.read` for other features but must not see
       // this link — they manage their team from the Marketing / CS team pages instead.
@@ -275,6 +294,9 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'Config',
     items: [
+      // Personal profile entry — mirrors the "My Profile" link in the header dropdown so
+      // users can reach it from the sidebar too. Open to every authenticated user, no permission gate.
+      { label: 'My Profile', href: '/admin/profile', icon: SidebarIcons.profile },
       {
         label: 'Notifications',
         href: '/admin/notifications',

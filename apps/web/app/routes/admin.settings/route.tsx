@@ -58,7 +58,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  return { user, systemSettings, notificationEmailConfig };
+  // VOIP provider state — needed so the System tab can render the provider picker. The
+  // backend exposes the list (which is configured) and the active selection separately,
+  // so the dropdown can disable unconfigured options + show which env vars are missing.
+  let voipState: VoipState | null = null;
+  if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') {
+    const [activeRes, listRes] = await Promise.all([
+      apiRequest<unknown>('/trpc/voip.isEnabled', { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/voip.listProviders', { method: 'GET', cookie }),
+    ]);
+    const active = activeRes.ok
+      ? (activeRes.data as { result?: { data?: VoipActive } })?.result?.data ?? null
+      : null;
+    const list = listRes.ok
+      ? (listRes.data as { result?: { data?: VoipProviderInfo[] } })?.result?.data ?? null
+      : null;
+    if (active && list) voipState = { active, providers: list };
+  }
+
+  return { user, systemSettings, notificationEmailConfig, voipState };
+}
+
+interface VoipActive {
+  enabled: boolean;
+  provider: 'africas_talking';
+  providerDisplayName: string;
+  supportsBrowserClient: boolean;
+}
+interface VoipProviderInfo {
+  name: 'africas_talking';
+  displayName: string;
+  configured: boolean;
+  requiredEnvVars: string[];
+  supportsBrowserClient: boolean;
+}
+export interface VoipState {
+  active: VoipActive;
+  providers: VoipProviderInfo[];
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -187,7 +223,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Route VOIP_ENABLED through the dedicated voip.setEnabled procedure
-    // which validates Twilio credentials before enabling
+    // which validates the active provider's credentials (AT) before enabling
     if (key === 'VOIP_ENABLED') {
       const enabled = value['enabled'] === true;
       const res = await apiRequest<unknown>('/trpc/voip.setEnabled', {
@@ -212,6 +248,23 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: errorData?.error?.message ?? 'Failed to update setting' }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Setting updated' });
+  }
+
+  if (intent === 'setVoipProvider') {
+    const provider = formData.get('provider')?.toString() ?? '';
+    if (provider !== 'africas_talking') {
+      return json({ error: 'Unknown VOIP provider' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/voip.setProvider', {
+      method: 'POST',
+      cookie,
+      body: { provider },
+    });
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to switch VOIP provider' }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, message: `VOIP provider switched to Africa's Talking` });
   }
 
   if (intent === 'updateNotificationEmailConfig') {
@@ -239,12 +292,13 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SettingsRoute() {
-  const { user, systemSettings, notificationEmailConfig } = useLoaderData<typeof loader>();
+  const { user, systemSettings, notificationEmailConfig, voipState } = useLoaderData<typeof loader>();
   return (
     <SettingsPage
       user={user}
       systemSettings={systemSettings}
       notificationEmailConfig={notificationEmailConfig}
+      voipState={voipState}
     />
   );
 }

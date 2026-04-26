@@ -14,6 +14,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
+import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -65,6 +66,8 @@ interface LogisticsOrdersPageProps {
   canEditDeliveryDate?: boolean;
   /** Label for DISPATCHED → IN_TRANSIT button (e.g. "Mark In Transit" for TPL, default "Start Delivery") */
   markInTransitLabel?: string;
+  /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
+  dailyCounts?: Array<{ date: string; orderCount: number }>;
 }
 
 export function LogisticsOrdersPage({
@@ -86,8 +89,10 @@ export function LogisticsOrdersPage({
   allocationOnDetailOnly = false,
   canEditDeliveryDate = false,
   markInTransitLabel = 'Start Delivery',
+  dailyCounts,
 }: LogisticsOrdersPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showChartView, setShowChartView] = useState(false);
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'CONFIRMED');
@@ -249,6 +254,13 @@ export function LogisticsOrdersPage({
                   periodAllTime={filters.periodAllTime}
                 />
               </div>
+              <button
+                type="button"
+                className="btn-secondary btn-sm"
+                onClick={() => setShowChartView((v) => !v)}
+              >
+                {showChartView ? 'View as data' : 'View data in chart'}
+              </button>
             </div>
           }
         />
@@ -432,6 +444,14 @@ export function LogisticsOrdersPage({
         )}
       </div>
 
+      {showChartView ? (
+        <OrdersChartView
+          statusCounts={statusCounts}
+          total={totalOrdersCount}
+          scopeLabel="Logistics orders"
+          dailyCounts={dailyCounts}
+        />
+      ) : (
       <div className="card p-0 overflow-hidden">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
@@ -682,8 +702,9 @@ export function LogisticsOrdersPage({
           })}
         </div>
       </div>
+      )}
 
-      {totalPages > 1 && (
+      {!showChartView && totalPages > 1 && (
         <Pagination page={page} totalPages={totalPages} pageParam="page" />
       )}
 

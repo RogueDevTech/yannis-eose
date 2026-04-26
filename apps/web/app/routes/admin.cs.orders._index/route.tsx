@@ -67,11 +67,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const input = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
 
-  const [res, countsRes, myWorkloadRes] = await Promise.all([
+  // Daily-counts series for the chart-view trend line. Mirrors the same scope filters the
+  // table uses so the trend matches what the user is reading.
+  const trendInput: { assignedCsId?: string; status?: string; startDate?: string; endDate?: string } = {};
+  if (assignedCsId) trendInput.assignedCsId = assignedCsId;
+  if (status) trendInput.status = status;
+  if (startDate) trendInput.startDate = startDate;
+  if (endDate) trendInput.endDate = endDate;
+  const trendInputEnc = encodeURIComponent(JSON.stringify(trendInput));
+
+  const [res, countsRes, myWorkloadRes, trendRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
     isCSAgent ? apiRequest<unknown>('/trpc/orders.myCSWorkload', { method: 'GET', cookie }) : Promise.resolve(null),
+    apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
   ]);
+
+  const dailyCounts = trendRes.ok
+    ? ((trendRes.data as { result?: { data?: Array<{ date: string; orderCount: number }> } })?.result?.data ?? [])
+    : [];
 
   const trpcData = res.ok
     ? (res.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
@@ -128,6 +142,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     csAgentsForFilter,
     canCreateOffline,
     productsForOfflineOrder,
+    dailyCounts,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',

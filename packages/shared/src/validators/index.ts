@@ -271,6 +271,16 @@ export {
   createAdjustmentSchema,
   approveAdjustmentSchema,
   setSettlementConfigSchema,
+  payrollDepartmentSchema,
+  payrollBatchStatusSchema,
+  generateBatchSchema,
+  submitBatchSchema,
+  approveBatchSchema,
+  rejectBatchSchema,
+  markBatchPaidSchema,
+  listMonthlyPayrollsSchema,
+  getBatchSchema,
+  addBatchAdjustmentSchema,
 } from './hr';
 
 export type {
@@ -283,6 +293,16 @@ export type {
   CreateAdjustmentInput,
   ApproveAdjustmentInput,
   SetSettlementConfigInput,
+  PayrollDepartment,
+  PayrollBatchStatus,
+  GenerateBatchInput,
+  SubmitBatchInput,
+  ApproveBatchInput,
+  RejectBatchInput,
+  MarkBatchPaidInput,
+  ListMonthlyPayrollsInput,
+  GetBatchInput,
+  AddBatchAdjustmentInput,
 } from './hr';
 
 // Push Notification Center validators

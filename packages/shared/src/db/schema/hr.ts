@@ -1,7 +1,14 @@
-import { uuid, pgTable, text, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
-import { payoutStatusEnum, adjustmentCategoryEnum, userRoleEnum } from './enums';
+import { uuid, pgTable, text, numeric, jsonb, timestamp, integer, date } from 'drizzle-orm/pg-core';
+import {
+  payoutStatusEnum,
+  adjustmentCategoryEnum,
+  userRoleEnum,
+  payrollBatchStatusEnum,
+  payrollDepartmentEnum,
+} from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
+import { branches } from './branches';
 
 // Table 17: commission_plans — JSONB commission rules
 export const commissionPlans = pgTable('commission_plans', {
@@ -18,9 +25,64 @@ export const commissionPlans = pgTable('commission_plans', {
   ...timestampColumns,
 });
 
+/**
+ * Table: payroll_batches — monthly grouping of payouts by (branch × department × month).
+ *
+ * Lifecycle: DRAFT → PENDING_HR → PENDING_FINANCE → PAID. Reject sends PENDING_* one
+ * stage back. One row per (branch_id, period_month, department) — enforced by
+ * unique index `uq_payroll_batch_per_branch_dept_month`.
+ *
+ * `staff_count` and `total_amount` are denormalised summaries recomputed on every
+ * status transition or payout edit so the monthly list view doesn't need to aggregate
+ * payouts per row. Source of truth remains payout_records.
+ */
+export const payrollBatches = pgTable('payroll_batches', {
+  id: uuidv7Pk(),
+  branchId: uuid('branch_id')
+    .notNull()
+    .references(() => branches.id),
+  /** First day of the month this batch covers, e.g. 2026-04-01 for April 2026. */
+  periodMonth: date('period_month').notNull(),
+  department: payrollDepartmentEnum('department').notNull(),
+  status: payrollBatchStatusEnum('status').default('DRAFT').notNull(),
+
+  /** Head/HR who initially generated the batch (null = system auto-generated). */
+  preparedBy: uuid('prepared_by').references(() => users.id),
+  preparedAt: timestamp('prepared_at', { withTimezone: true }),
+
+  /** When/who submitted DRAFT → PENDING_HR. */
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  submittedBy: uuid('submitted_by').references(() => users.id),
+
+  /** When/who approved PENDING_HR → PENDING_FINANCE. */
+  hrReviewedAt: timestamp('hr_reviewed_at', { withTimezone: true }),
+  hrReviewedBy: uuid('hr_reviewed_by').references(() => users.id),
+  hrNotes: text('hr_notes'),
+
+  /** When/who closed PENDING_FINANCE → PAID. */
+  financeProcessedAt: timestamp('finance_processed_at', { withTimezone: true }),
+  financeProcessedBy: uuid('finance_processed_by').references(() => users.id),
+  /** Free-form payment reference (bank transfer ID, cheque number, batch payout reference). */
+  financeReference: text('finance_reference'),
+
+  /** Last rejection note — clears on next forward transition; see audit history for full trail. */
+  rejectionReason: text('rejection_reason'),
+  rejectedAt: timestamp('rejected_at', { withTimezone: true }),
+  rejectedBy: uuid('rejected_by').references(() => users.id),
+
+  /** Denormalised summary for the monthly list view; recomputed on every payout edit. */
+  staffCount: integer('staff_count').default(0).notNull(),
+  totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).default('0').notNull(),
+
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
 // Table 18: payout_records — staff settlement periods
 export const payoutRecords = pgTable('payout_records', {
   id: uuidv7Pk(),
+  /** Parent batch — null only on legacy rows from before payroll batches existed. */
+  batchId: uuid('batch_id').references(() => payrollBatches.id),
   staffId: uuid('staff_id')
     .notNull()
     .references(() => users.id),
