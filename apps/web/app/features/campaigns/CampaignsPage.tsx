@@ -7,7 +7,6 @@ import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
-import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { Checkbox } from '~/components/ui/checkbox';
 import { PageHeader } from '~/components/ui/page-header';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -140,7 +139,6 @@ export function FormsPage({
   const statusFetcher = useFetcher();
   const { revalidate } = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [showAddForm, setShowAddForm] = useState(false);
   const [deploymentModal, setDeploymentModal] = useState<Campaign | null>(null);
   const [deploymentCopiedSection, setDeploymentCopiedSection] = useState<DeploymentCopySection | null>(null);
   const deploymentCopyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -185,11 +183,10 @@ export function FormsPage({
     }
   }, [statusFetcher.state, statusFetcher.data]);
 
-  // Close Edit Form modal (and Add Form panel) when fetcher returns success
+  // Close Edit Form modal when fetcher returns success
   useEffect(() => {
     if (actionSuccess && fetcher.state === 'idle') {
       setEditingForm(null);
-      setShowAddForm(false);
       revalidate();
     }
   }, [actionSuccess, fetcher.state, revalidate]);
@@ -203,7 +200,6 @@ export function FormsPage({
         sessionStorage.setItem(SAVED_TOAST_KEY, '1');
         toast.success('Saved successfully');
       }
-      setShowAddForm(false);
       if (!clearedSavedRef.current) {
         clearedSavedRef.current = true;
         const next = new URLSearchParams(searchParams);
@@ -259,9 +255,9 @@ export function FormsPage({
             : 'Create and manage order forms for your products'
         }
         actions={
-          <Button variant="primary" size="sm" onClick={() => setShowAddForm(!showAddForm)}>
-            {showAddForm ? 'Close' : '+ New Form'}
-          </Button>
+          <Link to="/admin/marketing/forms/new" className="btn-primary btn-sm inline-flex items-center justify-center">
+            + New Form
+          </Link>
         }
       />
 
@@ -288,7 +284,11 @@ export function FormsPage({
         <div className="rounded-lg bg-info-50 dark:bg-info-700/20 border border-info-200 dark:border-info-700/50 px-4 py-3">
           {isMediaBuyer ? (
             <p className="text-sm text-info-800 dark:text-info-200">
-              You don&apos;t have any forms yet. Only forms you create appear here. Use <strong>+ New Form</strong> to create one.
+              You don&apos;t have any forms yet. Only forms you create appear here. Use{' '}
+              <Link to="/admin/marketing/forms/new" className="font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+                + New Form
+              </Link>{' '}
+              to create one.
             </p>
           ) : viewMode === 'mine' ? (
             <p className="text-sm text-info-800 dark:text-info-200">
@@ -296,7 +296,11 @@ export function FormsPage({
             </p>
           ) : (
             <p className="text-sm text-info-800 dark:text-info-200">
-              No forms yet. Use <strong>+ New Form</strong> to create one.
+              No forms yet. Use{' '}
+              <Link to="/admin/marketing/forms/new" className="font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+                + New Form
+              </Link>{' '}
+              to create one.
             </p>
           )}
         </div>
@@ -317,91 +321,6 @@ export function FormsPage({
           />
         )}
       </DeferredSection>
-
-      {/* Add Form */}
-      <ResponsiveFormPanel open={showAddForm} onClose={() => setShowAddForm(false)}>
-        <fetcher.Form method="post" className="card space-y-3">
-          <h3 className="text-lg font-semibold text-app-fg">New Form</h3>
-          <input type="hidden" name="intent" value="createForm" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <TextInput name="name" required placeholder="Form name" />
-            <DeferredSection resolve={products} skeleton="inline">
-              {(resolvedProducts) => (
-                <FormSelect
-                  name="productId"
-                  required
-                  options={resolvedProducts.map((p) => ({
-                    value: p.id,
-                    label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})`,
-                  }))}
-                  placeholder="Select product..."
-                />
-              )}
-            </DeferredSection>
-          </div>
-          <div className="border-t border-app-border pt-3">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-2">
-              Form Customization (Optional)
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <TextInput name="formHeading" placeholder="Form heading (default: Place Your Order)" />
-              <TextInput name="formSubtitle" placeholder="Form subtitle" />
-              <TextInput name="formButtonText" placeholder="Button text (default: Submit Order)" />
-              <div className="flex items-center gap-2">
-                <input name="formAccentColor" type="color" defaultValue="#6366f1" className="w-10 h-9 rounded border border-app-border cursor-pointer" />
-                <span className="text-sm text-app-fg-muted">Accent color</span>
-              </div>
-              {/* Optional success-callback URL — full URL the buyer is redirected to after a
-                  successful submit (their funnel's thank-you page). Leave blank to use the
-                  default inline success message. Only http(s) URLs are accepted. */}
-              <TextInput
-                name="successCallbackUrl"
-                type="url"
-                placeholder="Success URL (e.g. https://funnel.example.com/thank-you)"
-                hint="Optional — full URL of your funnel's thank-you page. Skips the inline success message."
-                className="sm:col-span-2"
-              />
-            </div>
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">
-              Optional Form Fields
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showDeliveryAddress" defaultChecked={false} />
-                <span className="text-sm text-app-fg-muted">Delivery Address</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showDeliveryNotes" defaultChecked={false} />
-                <span className="text-sm text-app-fg-muted">Delivery Notes</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showDeliveryState" defaultChecked={false} />
-                <span className="text-sm text-app-fg-muted">Delivery State</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showGender" defaultChecked={false} />
-                <span className="text-sm text-app-fg-muted">Gender</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showPreferredDeliveryDate" defaultChecked={false} />
-                <span className="text-sm text-app-fg-muted">Preferred Delivery Date</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showPaymentMethod" defaultChecked={false} />
-                <span className="text-sm text-app-fg-muted">Payment method (Pay on delivery / Pay online)</span>
-              </label>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
-              Create Form
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddForm(false)}>
-              Cancel
-            </Button>
-          </div>
-        </fetcher.Form>
-      </ResponsiveFormPanel>
 
       {/* All / Mine tabs (HoM/SuperAdmin only — Media Buyer always sees own forms) */}
       {!isMediaBuyer && currentUserId && (
@@ -522,7 +441,7 @@ export function FormsPage({
           <div className="col-span-full">
             <EmptyState
               title="No forms yet"
-              description="Create one with + New Form above."
+              description="Use + New Form in the header to open the full-page builder and create your first form."
             />
           </div>
         )}
@@ -574,7 +493,7 @@ export function FormsPage({
                     type="url"
                     placeholder="Success URL (e.g. https://funnel.example.com/thank-you)"
                     hint="Optional — full URL of your funnel's thank-you page. Skips the inline success message."
-                    defaultValue={(editingForm.formConfig?.successCallbackUrl as string | undefined) ?? ''}
+                    defaultValue={editingForm.formConfig?.successCallbackUrl ?? ''}
                     className="sm:col-span-2"
                   />
                 </div>
