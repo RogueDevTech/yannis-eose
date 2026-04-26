@@ -89,6 +89,31 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'updatePlan') {
+    // Optional rules — only include keys the user typed something into. Unset fields stay as-is
+    // server-side because we send the rules object only when at least one key is present.
+    const rules: Record<string, number> = {};
+    const fields = ['baseSalary', 'baseThreshold', 'perOrderRate', 'bonusPerExtraOrder', 'penaltyPerReturn', 'deliveryRateThreshold'] as const;
+    for (const f of fields) {
+      const v = formData.get(f)?.toString();
+      if (v !== undefined && v !== '') rules[f] = Number(v);
+    }
+
+    const body: Record<string, unknown> = { planId: formData.get('planId')?.toString() ?? '' };
+    const planName = formData.get('planName')?.toString();
+    const effectiveTo = formData.get('effectiveTo')?.toString();
+    if (planName) body['planName'] = planName;
+    if (Object.keys(rules).length) body['rules'] = rules;
+    if (effectiveTo) body['effectiveTo'] = effectiveTo;
+
+    const res = await apiRequest<unknown>('/trpc/hr.updatePlan', { method: 'POST', cookie, body });
+    if (!res.ok) {
+      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to update plan';
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 

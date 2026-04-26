@@ -38,6 +38,7 @@ export function MarketingAdSpendPage({
   totalPages,
   statusFilter,
   searchFilter,
+  productIdFilter,
   statusCounts,
   metrics,
   leaderboard,
@@ -55,6 +56,7 @@ export function MarketingAdSpendPage({
   const isFilterLoading = navigation.state === 'loading';
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
+  const [selectedProductId, setSelectedProductId] = useState(productIdFilter || 'ALL');
   const [showAdSpendForm, setShowAdSpendForm] = useState(false);
   const [adSpendDetailModal, setAdSpendDetailModal] = useState<AdSpendRecord | null>(null);
   const [dismissedError, setDismissedError] = useState(false);
@@ -62,9 +64,10 @@ export function MarketingAdSpendPage({
   useEffect(() => {
     setSelectedStatus(statusFilter || 'ALL');
     setSearchQuery(searchFilter || '');
-  }, [statusFilter, searchFilter]);
+    setSelectedProductId(productIdFilter || 'ALL');
+  }, [statusFilter, searchFilter, productIdFilter]);
 
-  const getListParams = (overrides: { page?: number; status?: string; search?: string }) => {
+  const getListParams = (overrides: { page?: number; status?: string; search?: string; productId?: string }) => {
     const params = new URLSearchParams(searchParams);
     if (overrides.page !== undefined) params.set('page', String(overrides.page));
     if (overrides.status !== undefined) {
@@ -74,6 +77,10 @@ export function MarketingAdSpendPage({
     if (overrides.search !== undefined) {
       if (overrides.search) params.set('search', overrides.search);
       else params.delete('search');
+    }
+    if (overrides.productId !== undefined) {
+      if (overrides.productId === 'ALL' || !overrides.productId) params.delete('productId');
+      else params.set('productId', overrides.productId);
     }
     return params;
   };
@@ -86,6 +93,12 @@ export function MarketingAdSpendPage({
   const handleAdSpendStatusChange = (status: string) => {
     setSelectedStatus(status);
     setSearchParams(getListParams({ status: status === 'ALL' ? 'ALL' : status, page: 1 }));
+  };
+
+  /** Switching the product filter resets to page 1 — the new filtered set has different rows. */
+  const handleAdSpendProductChange = (productId: string) => {
+    setSelectedProductId(productId);
+    setSearchParams(getListParams({ productId, page: 1 }));
   };
 
   const handleAdSpendSearchSubmit = (e: React.FormEvent) => {
@@ -282,6 +295,19 @@ export function MarketingAdSpendPage({
               label: `${opt.label}${opt.value === 'ALL' ? ` (${statusCounts.ALL})` : opt.value === 'PENDING' ? ` (${statusCounts.PENDING})` : opt.value === 'APPROVED' ? ` (${statusCounts.APPROVED})` : ''}`,
             }))}
             wrapperClassName="w-auto min-w-[11rem]"
+          />
+          {/* Product filter — narrows the list to spend on a single product. Useful for HoM
+              auditing per-product CPA / ROAS, or for an MB scoping their own log down to one
+              campaign's product. Loaded from the same `products` array used by the create form,
+              so for media buyers it's already pre-scoped to their assigned products. */}
+          <FormSelect
+            value={selectedProductId}
+            onChange={(e) => handleAdSpendProductChange(e.target.value)}
+            options={[
+              { value: 'ALL', label: 'All products' },
+              ...products.map((p: Product) => ({ value: p.id, label: p.name })),
+            ]}
+            wrapperClassName="w-auto min-w-[12rem]"
           />
           {isFilterLoading && (
             <span className="flex items-center text-app-fg-muted" aria-hidden>

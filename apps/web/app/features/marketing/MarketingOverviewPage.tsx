@@ -247,31 +247,10 @@ export function MarketingOverviewPage({
         </div>
       </div>
 
-      {/* Stats strip — CS-style horizontal scroll */}
+      {/* Stats strip — arrows sit in-line on the right (matches the CS queue layout). */}
       <div className="card">
-        <div className="flex justify-end items-center gap-0.5 sm:gap-2 mb-3">
-          <button
-            type="button"
-            onClick={() => scrollStatsStrip(-280)}
-            className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-            aria-label="Scroll stats left"
-          >
-            <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => scrollStatsStrip(280)}
-            className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-            aria-label="Scroll stats right"
-          >
-            <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        </div>
-        <div ref={statsScrollRef} className="flex flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <div ref={statsScrollRef} className="flex flex-1 min-w-0 flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
             <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Media Buyers
@@ -343,6 +322,30 @@ export function MarketingOverviewPage({
             <p className="text-xl font-bold text-app-fg mt-1">
               {formatNaira(Math.round(metrics.deliveredRevenue))}
             </p>
+          </div>
+          </div>
+          {/* Scroll arrows — placed in-line on the right next to the strip (CS queue layout). */}
+          <div className="hidden md:flex shrink-0 items-center gap-0.5 sm:gap-1.5 self-center">
+            <button
+              type="button"
+              onClick={() => scrollStatsStrip(-280)}
+              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+              aria-label="Scroll stats left"
+            >
+              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollStatsStrip(280)}
+              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+              aria-label="Scroll stats right"
+            >
+              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>

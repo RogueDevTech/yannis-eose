@@ -116,25 +116,13 @@ export interface HRPageProps {
   currentPeriod: SettlementPeriod | null;
 }
 
-/** What the loader returns — mix of resolved data + streaming promises */
+/**
+ * Loader → HRPage. The HRPage focus narrowed to Monthly Payrolls + Adjustments after the
+ * 2026-04-26 split (Plans → /hr/plans, Payouts → /hr/payouts, Settlement Config removed).
+ */
 export interface HRStreamData {
-  // Critical (resolved immediately)
-  plans: CommissionPlan[];
-  totalPlans: number;
-  payouts: Payout[];
-  totalPayouts: number;
-  /** Current page for the payouts table (from URL `payoutPage` param). */
-  payoutPage: number;
-  /** Total pages available for the current filter. */
-  totalPayoutPages: number;
-  /** Current status filter for payouts (`'ALL'` or a PayoutStatus). */
-  payoutStatus: string;
   adjustments: Adjustment[];
-  payoutSummary: PayoutSummary;
   users: HRUser[];
-  settlementConfig: SettlementConfig | null;
-  currentPeriod: SettlementPeriod | null;
-  // Multi-stage payroll batches
   monthlyPayrolls: MonthlyPayrollGroup[];
   branches: BranchOption[];
   viewer: ViewerInfo;

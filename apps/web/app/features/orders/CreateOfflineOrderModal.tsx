@@ -4,6 +4,8 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { useFetcherToast } from '~/components/ui/toast';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
 
 export interface ProductOption {
   id: string;
@@ -218,124 +220,102 @@ export function CreateOfflineOrderModal({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Customer name *
-              </label>
-              <input
+              <TextInput
                 type="text"
+                label="Customer name *"
                 required
                 minLength={2}
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                className="input w-full"
                 placeholder="Full name"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Customer phone *
-              </label>
-              <input
+              <TextInput
                 type="tel"
+                label="Customer phone *"
                 required
                 value={customerPhone}
                 onChange={(e) => setCustomerPhone(e.target.value)}
-                className="input w-full"
                 placeholder="e.g. 08012345678"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-app-fg-muted mb-1">
-              Customer address
-            </label>
-            <input
+            <TextInput
               type="text"
+              label="Customer address"
               value={customerAddress}
               onChange={(e) => setCustomerAddress(e.target.value)}
-              className="input w-full"
               placeholder="Address"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-app-fg-muted mb-1">
-              Delivery address
-            </label>
-            <input
+            <TextInput
               type="text"
+              label="Delivery address"
               value={deliveryAddress}
               onChange={(e) => setDeliveryAddress(e.target.value)}
-              className="input w-full"
               placeholder="Delivery address"
             />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Delivery state
-              </label>
-              <input
+              <TextInput
                 type="text"
+                label="Delivery state"
                 value={deliveryState}
                 onChange={(e) => setDeliveryState(e.target.value)}
-                className="input w-full"
                 placeholder="State"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Preferred delivery date
-              </label>
-              <input
+              <TextInput
                 type="date"
+                label="Preferred delivery date"
                 value={preferredDeliveryDate}
                 min={new Date().toISOString().split('T')[0]}
                 onChange={(e) => setPreferredDeliveryDate(e.target.value)}
-                className="input w-full"
               />
             </div>
           </div>
           <div className="flex gap-3">
             <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Gender
-              </label>
-              <select
+              <FormSelect
+                id="offline-order-gender"
+                label="Gender"
                 value={customerGender}
                 onChange={(e) => setCustomerGender(e.target.value as 'male' | 'female' | '')}
-                className="input"
-              >
-                <option value="">—</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-              </select>
+                placeholder="—"
+                options={[
+                  { value: 'male', label: 'Male' },
+                  { value: 'female', label: 'Female' },
+                ]}
+              />
             </div>
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Payment method
-              </label>
-              <select
+            <div className="flex-1 min-w-0">
+              <FormSelect
+                id="offline-order-payment"
+                label="Payment method"
                 value={paymentMethod}
                 onChange={(e) => setPaymentMethod(e.target.value as 'PAY_ON_DELIVERY' | 'PAY_ONLINE')}
-                className="input w-full"
-              >
-                <option value="PAY_ON_DELIVERY">Pay on delivery</option>
-                <option value="PAY_ONLINE">Pay online</option>
-              </select>
+                options={[
+                  { value: 'PAY_ON_DELIVERY', label: 'Pay on delivery' },
+                  { value: 'PAY_ONLINE', label: 'Pay online' },
+                ]}
+                wrapperClassName="w-full"
+              />
             </div>
           </div>
           {paymentMethod === 'PAY_ONLINE' && (
             <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">
-                Customer email *
-              </label>
-              <input
+              <TextInput
                 type="email"
+                label="Customer email *"
                 required={paymentMethod === 'PAY_ONLINE'}
                 value={customerEmail}
                 onChange={(e) => setCustomerEmail(e.target.value)}
-                className="input w-full"
                 placeholder="email@example.com"
               />
             </div>
@@ -358,61 +338,62 @@ export function CreateOfflineOrderModal({
                 return (
                   <div key={index} className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-app-hover">
                     <div className="flex-1 min-w-[140px]">
-                      <label className="block text-xs text-app-fg-muted mb-0.5">Product</label>
-                      <select
+                      <FormSelect
+                        id={`offline-item-product-${index}`}
+                        label="Product"
                         required
                         value={item.productId}
                         onChange={(e) => onProductSelect(index, e.target.value)}
-                        className="input w-full text-sm"
-                      >
-                        <option value="">Select product</option>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
+                        placeholder="Select product"
+                        options={products.map((p) => ({ value: p.id, label: p.name }))}
+                        controlSize="sm"
+                        wrapperClassName="w-full"
+                      />
                     </div>
                     {/* Offer / tier — shows the configured price tiers (e.g. "1 piece @ ₦7,500"
                         vs "2 pieces @ ₦10,000"). Selecting one snaps the row's qty + price.
                         "Custom" lets the rep type a non-standard price (rare, but allowed). */}
                     {hasOffers && (
                       <div className="flex-1 min-w-[180px]">
-                        <label className="block text-xs text-app-fg-muted mb-0.5">Offer / tier</label>
-                        <select
+                        <FormSelect
+                          id={`offline-item-offer-${index}`}
+                          label="Offer / tier"
                           value={item.offerLabel ?? ''}
                           onChange={(e) => onOfferSelect(index, e.target.value)}
-                          className="input w-full text-sm"
-                        >
-                          {offers.map((o) => (
-                            <option key={o.label} value={o.label}>
-                              {o.label} — {o.qty} × ₦{Number(o.price).toLocaleString()}
-                            </option>
-                          ))}
-                          <option value="">Custom</option>
-                        </select>
+                          options={[
+                            ...offers.map((o) => ({
+                              value: o.label,
+                              label: `${o.label} — ${o.qty} × ₦${Number(o.price).toLocaleString()}`,
+                            })),
+                            { value: '', label: 'Custom' },
+                          ]}
+                          controlSize="sm"
+                          wrapperClassName="w-full"
+                        />
                       </div>
                     )}
                     <div className="w-20">
-                      <label className="block text-xs text-app-fg-muted mb-0.5">Qty</label>
-                      <input
+                      <TextInput
                         type="number"
+                        label="Qty"
                         min={1}
-                        value={item.quantity}
+                        value={String(item.quantity)}
                         onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value, 10) || 1)}
-                        className="input w-full text-sm"
+                        controlSize="sm"
+                        wrapperClassName="w-full"
                       />
                     </div>
                     <div className="w-28">
-                      <label className="block text-xs text-app-fg-muted mb-0.5">Unit price</label>
-                      <input
+                      <TextInput
                         type="number"
+                        label="Unit price"
                         required
                         min={0}
                         step={0.01}
                         value={item.unitPrice}
                         onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
-                        className="input w-full text-sm"
+                        controlSize="sm"
+                        wrapperClassName="w-full"
                       />
                     </div>
                     <Button
@@ -435,14 +416,11 @@ export function CreateOfflineOrderModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-app-fg-muted mb-1">
-              Delivery notes
-            </label>
-            <input
+            <TextInput
               type="text"
+              label="Delivery notes"
               value={deliveryNotes}
               onChange={(e) => setDeliveryNotes(e.target.value)}
-              className="input w-full"
               placeholder="Notes"
             />
           </div>

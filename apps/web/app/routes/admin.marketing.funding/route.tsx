@@ -3,30 +3,55 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { MarketingFundingPage } from '~/features/marketing/MarketingFundingPage';
-import type { FundingRequestStatusFilter, Metrics, MarketingFundingLoaderData } from '~/features/marketing/types';
+import type {
+  FundingRequestStatusFilter,
+  FundingSection,
+  FundingTab,
+  FundingSliceData,
+  FundingRequestsSliceData,
+  MarketingFundingLoaderData,
+} from '~/features/marketing/types';
 import {
   buildLeaderboardInput,
-  emptyMetrics,
   getMarketingRoleFlags,
   parseFunding,
+  parseFundingDirectionSummary,
   parseFundingRequestsPage,
   parseFundingRequestStatusCounts,
   parseFundingStatusCounts,
-  parseFundingSummary,
   parseLeaderboard,
-  parseMetrics,
   parseUsers,
   parseBalancesList,
   resolveMarketingDateFilters,
   runMarketingFundingAction,
 } from '~/lib/marketing-pages.server';
 
-const FUNDING_PER_PAGE = 20;
-const FUNDING_LEDGER_STATUSES = ['SENT', 'COMPLETED', 'DISPUTED'] as const;
-const FUNDING_REQUEST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+const PER_PAGE = 20;
+const LEDGER_STATUSES = ['SENT', 'COMPLETED', 'DISPUTED'] as const;
+const REQUEST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 
 export const meta: MetaFunction = () => [{ title: 'Funding — Marketing — Yannis EOSE' }];
 
+/**
+ * Funding page loader — fetches data for a two-section model that mirrors the funding tier:
+ *
+ *   Section 1 — "Funds I've Received" (always shown)
+ *     • Transfers tab: incoming `marketing_funding` rows where receiverId = me
+ *     • Requests tab:  `marketing_funding_requests` where requesterId = me
+ *
+ *   Section 2 — "Funds I Distribute" (HoM/Admin only — `canDistribute`)
+ *     • Transfers tab: outgoing `marketing_funding` rows where senderId = me
+ *     • Requests tab:  MB requests pending my approval (excludeSelfAsRequester)
+ *
+ * URL state:
+ *   ?section=received|distributing  (defaults to 'received')
+ *   ?tab=transfers|requests          (defaults to 'transfers')
+ *   ?page, ?status, ?requestStatus, ?search apply only to the active section/tab
+ *
+ * Counts for ALL FOUR slices are fetched on every load so the tab badges stay accurate
+ * regardless of which section/tab the user is viewing. Records are fetched only for the
+ * active slice — switching tabs/sections re-runs the loader and pulls the new slice.
+ */
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.read');
   const cookie = getSessionCookie(request);
@@ -34,77 +59,100 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
   const { isMediaBuyer, isFundingAdmin, canRequestFunding } = getMarketingRoleFlags(user.role);
 
-  const showFundingRequestsFeed = isMediaBuyer || isFundingAdmin;
-  const feedParam = url.searchParams.get('feed');
-  const feed: MarketingFundingLoaderData['feed'] =
-    feedParam === 'ledger'
-      ? 'ledger'
-      : feedParam === 'requests' && showFundingRequestsFeed
-        ? 'requests'
-        : showFundingRequestsFeed
-          ? 'requests'
-          : 'ledger';
+  // HoM/Admin can disburse to MBs; Media Buyers cannot. Drives whether Section 2 renders.
+  const canDistribute = !isMediaBuyer;
+
+  // ── URL state with safe defaults ────────────────────────
+  const sectionParam = url.searchParams.get('section');
+  const activeSection: FundingSection =
+    sectionParam === 'distributing' && canDistribute ? 'distributing' : 'received';
+
+  const tabParam = url.searchParams.get('tab');
+  const activeTab: FundingTab = tabParam === 'requests' ? 'requests' : 'transfers';
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const searchRaw = url.searchParams.get('search')?.trim();
-  const searchFilter = searchRaw && searchRaw.length > 0 ? searchRaw : undefined;
+
   const statusParam = url.searchParams.get('status') ?? undefined;
   const statusFilter =
-    statusParam &&
-    (FUNDING_LEDGER_STATUSES as readonly string[]).includes(statusParam)
-      ? statusParam
-      : undefined;
+    statusParam && (LEDGER_STATUSES as readonly string[]).includes(statusParam) ? statusParam : undefined;
 
   const requestStatusParam = url.searchParams.get('requestStatus') ?? undefined;
   const requestStatusFilter: FundingRequestStatusFilter | undefined =
-    requestStatusParam &&
-    (FUNDING_REQUEST_STATUSES as readonly string[]).includes(requestStatusParam)
+    requestStatusParam && (REQUEST_STATUSES as readonly string[]).includes(requestStatusParam)
       ? (requestStatusParam as FundingRequestStatusFilter)
       : undefined;
 
-  const requestSearchRaw = url.searchParams.get('requestSearch')?.trim();
-  const requestSearchFilter = requestSearchRaw && requestSearchRaw.length > 0 ? requestSearchRaw : undefined;
+  const searchRaw = url.searchParams.get('search')?.trim();
+  const searchFilter = searchRaw && searchRaw.length > 0 ? searchRaw : undefined;
 
-  const fundingScope = {
-    ...(isMediaBuyer ? { receiverId: user.id } : {}),
+  // ── Build per-slice query inputs ────────────────────────
+  const dateRange = {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
   };
-  const fundingInput = JSON.stringify({
-    page,
-    limit: FUNDING_PER_PAGE,
-    ...fundingScope,
-    ...(statusFilter && { status: statusFilter }),
-    ...(searchFilter && { search: searchFilter }),
-  });
-  const countsInput = JSON.stringify({
-    ...fundingScope,
-    ...(searchFilter && { search: searchFilter }),
-  });
-  const requestCountsInput = JSON.stringify({
-    ...(startDate && { startDate }),
-    ...(endDate && { endDate }),
-  });
-  const requestCountsP = showFundingRequestsFeed
-    ? apiRequest<unknown>(
-        `/trpc/marketing.fundingRequestStatusCounts?input=${encodeURIComponent(requestCountsInput)}`,
-        { method: 'GET', cookie },
-      )
-    : Promise.resolve({ ok: false as const, data: {} });
-  const metricsInput = JSON.stringify({
-    ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
-    ...(startDate && { startDate }),
-    ...(endDate && { endDate }),
-  });
 
-  const metricsP = apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, { method: 'GET', cookie });
+  // Per-slice count queries (all four run on every load)
+  const incomingCountsInput = JSON.stringify({ receiverId: user.id, ...dateRange });
+  const myRequestsCountsInput = JSON.stringify({ requesterId: user.id, ...dateRange });
+  const outgoingCountsInput = JSON.stringify({ senderId: user.id, ...dateRange });
+  const mbRequestsCountsInput = JSON.stringify({ excludeSelfAsRequester: true, ...dateRange });
 
-  const summaryP = isFundingAdmin
-    ? apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie })
-    : Promise.resolve({ ok: true, data: { result: { data: { totalSent: '0', totalCompleted: '0', totalDisputed: '0' } } } });
-  const usersP = isFundingAdmin
-    ? apiRequest<unknown>('/trpc/users.list', { method: 'GET', cookie })
-    : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
+  // Active slice's records (only the rows the user is currently viewing)
+  let recordsUrl: string;
+  let recordsKind: 'transfers' | 'requests';
+  if (activeSection === 'received' && activeTab === 'transfers') {
+    const input = JSON.stringify({
+      page,
+      limit: PER_PAGE,
+      receiverId: user.id,
+      ...dateRange,
+      ...(statusFilter && { status: statusFilter }),
+      ...(searchFilter && { search: searchFilter }),
+    });
+    recordsUrl = `/trpc/marketing.listFunding?input=${encodeURIComponent(input)}`;
+    recordsKind = 'transfers';
+  } else if (activeSection === 'received' && activeTab === 'requests') {
+    const input = JSON.stringify({
+      page,
+      limit: PER_PAGE,
+      requesterId: user.id,
+      ...dateRange,
+      ...(requestStatusFilter && { status: requestStatusFilter }),
+      ...(searchFilter && { search: searchFilter }),
+    });
+    recordsUrl = `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(input)}`;
+    recordsKind = 'requests';
+  } else if (activeSection === 'distributing' && activeTab === 'transfers') {
+    const input = JSON.stringify({
+      page,
+      limit: PER_PAGE,
+      senderId: user.id,
+      ...dateRange,
+      ...(statusFilter && { status: statusFilter }),
+      ...(searchFilter && { search: searchFilter }),
+    });
+    recordsUrl = `/trpc/marketing.listFunding?input=${encodeURIComponent(input)}`;
+    recordsKind = 'transfers';
+  } else {
+    // distributing + requests → MB requests inbox
+    const input = JSON.stringify({
+      page,
+      limit: PER_PAGE,
+      excludeSelfAsRequester: true,
+      ...dateRange,
+      ...(requestStatusFilter && { status: requestStatusFilter }),
+      ...(searchFilter && { search: searchFilter }),
+    });
+    recordsUrl = `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(input)}`;
+    recordsKind = 'requests';
+  }
+
+  // ── Supporting fetches ──────────────────────────────────
+  const directionSummaryInput = JSON.stringify(dateRange);
+  const directionSummaryP = apiRequest<unknown>(
+    `/trpc/marketing.fundingByDirectionSummary?input=${encodeURIComponent(directionSummaryInput)}`,
+    { method: 'GET', cookie },
+  );
 
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
   const leaderboardP = apiRequest<unknown>(
@@ -112,95 +160,145 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { method: 'GET', cookie },
   ).catch(() => ({ ok: false, data: { result: { data: [] } } }));
 
-  const balancesListP = isFundingAdmin
+  const usersP = isFundingAdmin
+    ? apiRequest<unknown>('/trpc/users.list', { method: 'GET', cookie })
+    : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
+
+  const balancesListP: Promise<ReturnType<typeof parseBalancesList> | undefined> = isFundingAdmin
     ? apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie })
         .then(parseBalancesList)
-        .catch(() => [] as ReturnType<typeof parseBalancesList>)
-    : undefined;
+        .catch(() => undefined)
+    : Promise.resolve(undefined);
 
-  let fundingData = null as ReturnType<typeof parseFunding>;
-  let statusCounts = { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
-  let fundingRequests: MarketingFundingLoaderData['fundingRequests'] = [];
-  let totalFunding = 0;
-  let totalFundingRequests = 0;
-  let requestStatusCounts = parseFundingRequestStatusCounts({ ok: false, data: {} });
+  const incomingCountsP = apiRequest<unknown>(
+    `/trpc/marketing.fundingStatusCounts?input=${encodeURIComponent(incomingCountsInput)}`,
+    { method: 'GET', cookie },
+  );
+  const myRequestsCountsP = apiRequest<unknown>(
+    `/trpc/marketing.fundingRequestStatusCounts?input=${encodeURIComponent(myRequestsCountsInput)}`,
+    { method: 'GET', cookie },
+  );
+  const outgoingCountsP = canDistribute
+    ? apiRequest<unknown>(
+        `/trpc/marketing.fundingStatusCounts?input=${encodeURIComponent(outgoingCountsInput)}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: false as const, data: {} });
+  const mbRequestsCountsP = canDistribute
+    ? apiRequest<unknown>(
+        `/trpc/marketing.fundingRequestStatusCounts?input=${encodeURIComponent(mbRequestsCountsInput)}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: false as const, data: {} });
 
-  if (feed === 'ledger') {
-    const fundingP = apiRequest<unknown>(`/trpc/marketing.listFunding?input=${encodeURIComponent(fundingInput)}`, {
-      method: 'GET',
-      cookie,
-    });
-    const fundingCountsP = apiRequest<unknown>(
-      `/trpc/marketing.fundingStatusCounts?input=${encodeURIComponent(countsInput)}`,
-      { method: 'GET', cookie },
-    );
-    const [fundingRes, countsRes, reqCountsRes] = await Promise.all([fundingP, fundingCountsP, requestCountsP]);
-    fundingData = parseFunding(fundingRes);
-    statusCounts = parseFundingStatusCounts(countsRes);
-    requestStatusCounts = parseFundingRequestStatusCounts(reqCountsRes);
-    totalFunding = fundingData?.pagination?.total ?? 0;
-  } else {
-    const requestsListInput = JSON.stringify({
+  const recordsP = apiRequest<unknown>(recordsUrl, { method: 'GET', cookie });
+
+  const [
+    recordsRes,
+    incomingCountsRes,
+    myRequestsCountsRes,
+    outgoingCountsRes,
+    mbRequestsCountsRes,
+    directionSummaryRes,
+    leaderboardRes,
+    usersRes,
+    balancesList,
+  ] = await Promise.all([
+    recordsP,
+    incomingCountsP,
+    myRequestsCountsP,
+    outgoingCountsP,
+    mbRequestsCountsP,
+    directionSummaryP,
+    leaderboardP,
+    usersP,
+    balancesListP,
+  ]);
+
+  // ── Parse counts ────────────────────────────────────────
+  const incomingCounts = parseFundingStatusCounts(incomingCountsRes);
+  const myRequestsCounts = parseFundingRequestStatusCounts(myRequestsCountsRes);
+  const outgoingCounts = canDistribute
+    ? parseFundingStatusCounts(outgoingCountsRes)
+    : { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
+  const mbRequestsCounts = canDistribute
+    ? parseFundingRequestStatusCounts(mbRequestsCountsRes)
+    : { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+
+  // ── Empty slices (for inactive tabs — counts populated, records empty) ──
+  const emptyTransfers = (counts: FundingSliceData['statusCounts']): FundingSliceData => ({
+    records: [],
+    total: 0,
+    page: 1,
+    totalPages: 1,
+    statusCounts: counts,
+  });
+  const emptyRequests = (counts: FundingRequestsSliceData['statusCounts']): FundingRequestsSliceData => ({
+    records: [],
+    total: 0,
+    page: 1,
+    totalPages: 1,
+    statusCounts: counts,
+  });
+
+  let receivedTransfers = emptyTransfers(incomingCounts);
+  let myRequests = emptyRequests(myRequestsCounts);
+  let outgoingTransfers: FundingSliceData | undefined = canDistribute ? emptyTransfers(outgoingCounts) : undefined;
+  let mbRequests: FundingRequestsSliceData | undefined = canDistribute ? emptyRequests(mbRequestsCounts) : undefined;
+
+  // ── Hydrate the active slice with the records we fetched ──
+  if (recordsKind === 'transfers') {
+    const fundingData = parseFunding(recordsRes);
+    const total = fundingData?.pagination?.total ?? 0;
+    const slice: FundingSliceData = {
+      records: fundingData?.records ?? [],
+      total,
       page,
-      limit: FUNDING_PER_PAGE,
-      ...(startDate && { startDate }),
-      ...(endDate && { endDate }),
-      ...(requestStatusFilter && { status: requestStatusFilter }),
-      ...(requestSearchFilter && { search: requestSearchFilter }),
-    });
-    const requestsP = apiRequest<unknown>(
-      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(requestsListInput)}`,
-      { method: 'GET', cookie },
-    );
-    const [requestsRes, reqCountsRes] = await Promise.all([requestsP, requestCountsP]);
-    const requestsData = parseFundingRequestsPage(requestsRes);
-    fundingRequests = requestsData?.records ?? [];
-    totalFundingRequests = requestsData?.pagination?.total ?? 0;
-    requestStatusCounts = parseFundingRequestStatusCounts(reqCountsRes);
+      totalPages: Math.max(1, Math.ceil(total / PER_PAGE)),
+      statusCounts: activeSection === 'received' ? incomingCounts : outgoingCounts,
+      statusFilter,
+      searchFilter,
+    };
+    if (activeSection === 'received') receivedTransfers = slice;
+    else outgoingTransfers = slice;
+  } else {
+    const requestsData = parseFundingRequestsPage(recordsRes);
+    const total = requestsData?.pagination?.total ?? 0;
+    const slice: FundingRequestsSliceData = {
+      records: requestsData?.records ?? [],
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / PER_PAGE)),
+      statusCounts: activeSection === 'received' ? myRequestsCounts : mbRequestsCounts,
+      statusFilter: requestStatusFilter,
+      searchFilter,
+    };
+    if (activeSection === 'received') myRequests = slice;
+    else mbRequests = slice;
   }
 
-  const totalPages = Math.max(1, Math.ceil(totalFunding / FUNDING_PER_PAGE));
-  const totalPagesRequests = Math.max(1, Math.ceil(totalFundingRequests / FUNDING_PER_PAGE));
-
-  const [metrics, fundingSummary, leaderboard, usersData, balancesList] = await Promise.all([
-    metricsP.then(parseMetrics).catch((): Metrics => emptyMetrics()),
-    summaryP.then(parseFundingSummary).catch(() => ({
-      totalSent: '0',
-      totalCompleted: '0',
-      totalDisputed: '0',
-    })),
-    leaderboardP.then((r) => parseLeaderboard(r)).catch(() => []),
-    usersP.then(parseUsers).catch(() => []),
-    balancesListP ?? Promise.resolve(undefined),
-  ]);
+  const directionSummary = parseFundingDirectionSummary(directionSummaryRes);
+  const leaderboard = parseLeaderboard(leaderboardRes);
+  const usersList = parseUsers(usersRes);
 
   const data: MarketingFundingLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',
     currentUserId: user.id,
+    currentUserRole: user.role,
     canSendFunding: isFundingAdmin,
     canRequestFunding,
-    funding: fundingData?.records ?? [],
-    totalFunding,
-    page,
-    limit: FUNDING_PER_PAGE,
-    totalPages,
-    statusFilter,
-    searchFilter,
-    statusCounts,
-    fundingRequests,
-    feed,
-    showFundingRequestsFeed,
-    requestStatusFilter,
-    requestSearchFilter,
-    requestStatusCounts,
-    totalFundingRequests,
-    totalPagesRequests,
-    metrics,
-    fundingSummary,
-    leaderboard,
-    users: usersData,
-    leaderboardPeriod,
+    canDistribute,
+    activeSection,
+    activeTab,
     filters,
+    receivedTransfers,
+    myRequests,
+    outgoingTransfers,
+    mbRequests,
+    directionSummary,
+    leaderboard,
+    leaderboardPeriod,
+    users: usersList,
     balancesList,
   };
 

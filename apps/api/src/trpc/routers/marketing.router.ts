@@ -4,6 +4,7 @@ import {
   listFundingSchema,
   fundingStatusCountsSchema,
   fundingRequestStatusCountsSchema,
+  fundingDirectionSummarySchema,
   listFundingRequestsSchema,
   getFundingBalanceSchema,
   approveFundingRequestSchema,
@@ -74,6 +75,14 @@ export const marketingRouter = router({
       return getMarketingService().getFundingSummary(ctx.currentBranchId);
     }),
 
+  /** Per-actor directional summary used by the Funding page top strip — totals received,
+   * totals distributed, plus pending mark-received and disputed counts (action signals). */
+  fundingByDirectionSummary: authedProcedure
+    .input(fundingDirectionSummarySchema)
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().fundingByDirectionSummary(ctx.user.id, input);
+    }),
+
   /** Funding balance for one user. Allowed: own; HoM viewing MB; SA/FO; users.read viewing HoM/MB. */
   getFundingBalance: permissionProcedure('marketing.fundingSummary', 'marketing.read', 'users.read')
     .input(getFundingBalanceSchema)
@@ -123,13 +132,20 @@ export const marketingRouter = router({
   listFundingRequests: authedProcedure
     .input(listFundingRequestsSchema)
     .query(async ({ input, ctx }) => {
+      // MB visibility is always self-only (defense-in-depth). For other roles,
+      // honour the explicit `requesterId` or `excludeSelfAsRequester` filters from the caller.
       const requesterId = ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : input.requesterId;
+      const excludeSelfAsRequester =
+        ctx.user.role !== 'MEDIA_BUYER' && !requesterId && input.excludeSelfAsRequester;
       return getMarketingService().listFundingRequests(
         {
           requesterId,
+          excludeSelfAsRequester,
+          callerId: ctx.user.id,
           startDate: input.startDate,
           endDate: input.endDate,
           status: input.status,
+          search: input.search,
           page: input.page,
           limit: input.limit,
         },

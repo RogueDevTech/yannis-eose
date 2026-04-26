@@ -205,14 +205,14 @@ export function Header({
 
   return (
     <header
-      className={`fixed top-0 right-0 z-30 h-[var(--header-height)] bg-app-elevated border-b border-app-border text-app-fg flex items-center justify-between px-4 lg:px-6 transition-all duration-300 left-0 ${
+      className={`fixed top-0 right-0 z-30 h-[var(--header-height)] bg-app-elevated border-b border-app-border text-app-fg flex items-center px-4 lg:px-6 transition-all duration-300 left-0 ${
         sidebarCollapsed
           ? 'lg:left-[var(--sidebar-collapsed-width)]'
           : 'lg:left-[var(--sidebar-width)]'
       }`}
     >
-      {/* Left: mobile menu + logo (mobile) */}
-      <div className="flex items-center gap-3 flex-1 max-w-lg">
+      {/* Left: mobile menu + logo (mobile). Desktop: no flex-grow so branch + actions stay one cluster. */}
+      <div className="flex items-center gap-3 flex-1 min-w-0 max-w-lg lg:flex-none lg:max-w-none">
         {/* Mobile hamburger — before logo */}
         <button
           onClick={onMobileMenuToggle}
@@ -243,19 +243,17 @@ export function Header({
 
       </div>
 
-      {/* Centre: Branch switcher — desktop only */}
-      {branches && branches.length > 0 && (
-        <div className="hidden lg:flex items-center">
-          <HeaderBranchSwitcher
-            branches={branches}
-            currentBranchId={currentBranchId ?? null}
-            userRole={user?.role ?? ''}
-          />
-        </div>
-      )}
-
-      {/* Right side: PWA install + dark mode + notifications + user */}
-      <div className="flex items-center gap-2 lg:gap-3">
+      {/* Branch + actions: single row with even gaps (avoids justify-between wedge between branch and bell). */}
+      <div className="flex items-center gap-2 lg:gap-3 ml-auto min-w-0">
+        {branches && branches.length > 0 && (
+          <div className="hidden lg:flex items-center shrink-0">
+            <HeaderBranchSwitcher
+              branches={branches}
+              currentBranchId={currentBranchId ?? null}
+              userRole={user?.role ?? ''}
+            />
+          </div>
+        )}
         {/* Mirror Mode pill — only shown when the session is mirroring another user.
             POSTs to the same /admin action that exits mirror; returns to /admin when done. */}
         {mirroredBy && (

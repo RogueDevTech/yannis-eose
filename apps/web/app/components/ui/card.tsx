@@ -18,7 +18,8 @@ interface CardProps {
   accent?: 'danger' | 'warning' | 'success' | 'info' | 'brand';
   className?: string;
   children: React.ReactNode;
-  onClick?: React.MouseEventHandler<HTMLDivElement>;
+  /** Works for any `as` element (`div`, `li`, etc.) */
+  onClick?: React.MouseEventHandler<HTMLElement>;
   as?: 'div' | 'article' | 'section' | 'li';
 }
 

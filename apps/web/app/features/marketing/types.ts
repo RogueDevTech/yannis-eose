@@ -137,40 +137,79 @@ export interface FundingRequestStatusCounts {
   ALL: number;
 }
 
-export type FundingActivityFeed = 'ledger' | 'requests';
-
 export type FundingRequestStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
 
-/** `/admin/marketing/funding` loader + component props */
-export interface MarketingFundingLoaderData {
-  funding: FundingRecord[];
-  totalFunding: number;
+/**
+ * Funding page section — mirrors the two-tier model so the URL matches the user's
+ * mental map: "Funds I've Received" or "Funds I Distribute".
+ */
+export type FundingSection = 'received' | 'distributing';
+
+/** Within a section, which list is showing — Transfers (money) or Requests (asks). */
+export type FundingTab = 'transfers' | 'requests';
+
+/** A paginated transfers slice (one section/tab combination's worth of rows + counts). */
+export interface FundingSliceData {
+  records: FundingRecord[];
+  total: number;
   page: number;
-  limit: number;
   totalPages: number;
+  statusCounts: FundingStatusCounts;
   statusFilter?: string;
   searchFilter?: string;
-  statusCounts: FundingStatusCounts;
-  fundingRequests: FundingRequestRecord[];
-  /** URL feed: transfers vs funding requests (same table shell). */
-  feed: FundingActivityFeed;
-  showFundingRequestsFeed: boolean;
-  requestStatusFilter?: FundingRequestStatusFilter;
-  requestSearchFilter?: string;
-  requestStatusCounts: FundingRequestStatusCounts;
-  totalFundingRequests: number;
-  totalPagesRequests: number;
-  metrics: Metrics;
-  fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
-  leaderboard: LeaderboardEntry[];
-  users: User[];
-  leaderboardPeriod: 'this_month' | 'all_time';
-  balancesList?: FundingBalanceRow[];
-  filters: MarketingDateFilters;
+}
+
+/** A paginated requests slice. */
+export interface FundingRequestsSliceData {
+  records: FundingRequestRecord[];
+  total: number;
+  page: number;
+  totalPages: number;
+  statusCounts: FundingRequestStatusCounts;
+  statusFilter?: FundingRequestStatusFilter;
+  searchFilter?: string;
+}
+
+/** Per-actor directional summary used by the page top strip. */
+export interface FundingDirectionSummary {
+  totalReceived: string;
+  totalDistributed: string;
+  pendingMarkReceived: number;
+  disputedAsReceiver: number;
+  disputedAsSender: number;
+}
+
+/** `/admin/marketing/funding` loader + component props (post 2026-04-26 split) */
+export interface MarketingFundingLoaderData {
+  /** Role flags + identity */
   viewMode: 'admin' | 'media_buyer';
+  currentUserId: string;
+  currentUserRole: string;
   canSendFunding: boolean;
   canRequestFunding: boolean;
-  currentUserId: string;
+  /** Whether to render Section 2 ("Funds I Distribute"). True for HoM/Admin; false for MB. */
+  canDistribute: boolean;
+
+  /** URL state */
+  activeSection: FundingSection;
+  activeTab: FundingTab;
+  filters: MarketingDateFilters;
+
+  /** Section 1 — "Funds I've Received" (always shown) */
+  receivedTransfers: FundingSliceData;
+  myRequests: FundingRequestsSliceData;
+
+  /** Section 2 — "Funds I Distribute" (HoM / Admin only) */
+  outgoingTransfers?: FundingSliceData;
+  mbRequests?: FundingRequestsSliceData;
+
+  /** Top strip + supporting data */
+  directionSummary: FundingDirectionSummary;
+  /** Used by the HighCpaWarningBanner (HoM/Admin only). */
+  leaderboard: LeaderboardEntry[];
+  leaderboardPeriod: 'this_month' | 'all_time';
+  users: User[];
+  balancesList?: FundingBalanceRow[];
 }
 
 export type AdSpendStatusFilter = 'PENDING' | 'APPROVED';
@@ -185,6 +224,9 @@ export interface MarketingAdSpendLoaderData {
   totalPages: number;
   statusFilter?: AdSpendStatusFilter;
   searchFilter?: string;
+  /** Currently selected product filter — narrows the list to one product so HoM can audit
+   * spend product-by-product. `undefined` = all products. */
+  productIdFilter?: string;
   statusCounts: AdSpendStatusCounts;
   campaigns: Campaign[];
   metrics: Metrics;

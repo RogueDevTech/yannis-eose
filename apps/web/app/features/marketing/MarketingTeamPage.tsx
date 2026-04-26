@@ -1,7 +1,5 @@
-import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { TeamViewToggle } from '~/components/ui/team-view-toggle';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -46,8 +44,6 @@ function memberInitials(name: string): string {
 }
 
 export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters, page = 1, totalPages = 1 }: MarketingTeamPageProps) {
-  const [view, setView] = useState<'table' | 'grid'>('table');
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -99,12 +95,6 @@ export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters, pa
               Funding received (confirmed) minus approved ad spend
             </p>
           </div>
-          {/* Toggle is desktop-only; mobile always uses the card grid */}
-          {teamMembers.length > 0 && (
-            <div className="hidden md:block">
-              <TeamViewToggle value={view} onChange={setView} />
-            </div>
-          )}
         </div>
 
         {teamMembers.length === 0 ? (
@@ -123,10 +113,10 @@ export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters, pa
               ))}
             </div>
 
-            {/* Desktop: respect the table/grid toggle */}
+            {/* Desktop: table view (Grid toggle removed per CEO directive 2026-04-26 — the
+                grid duplicated the mobile card layout for desktop with no extra info). */}
             <div className="hidden md:block">
-            {view === 'table' ? (
-          <div className="card p-0 overflow-hidden">
+              <div className="card p-0 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px]">
                 <thead>
@@ -198,13 +188,6 @@ export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters, pa
               </table>
             </div>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {teamMembers.map((m) => (
-              <MediaBuyerBalanceCard key={m.userId} row={m} ordersDateFilters={dateFilters} />
-            ))}
-          </div>
-            )}
             </div>
 
             {totalPages > 1 && (

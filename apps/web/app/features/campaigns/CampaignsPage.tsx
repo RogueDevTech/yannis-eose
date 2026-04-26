@@ -351,6 +351,16 @@ export function FormsPage({
                 <input name="formAccentColor" type="color" defaultValue="#6366f1" className="w-10 h-9 rounded border border-app-border cursor-pointer" />
                 <span className="text-sm text-app-fg-muted">Accent color</span>
               </div>
+              {/* Optional success-callback URL — full URL the buyer is redirected to after a
+                  successful submit (their funnel's thank-you page). Leave blank to use the
+                  default inline success message. Only http(s) URLs are accepted. */}
+              <TextInput
+                name="successCallbackUrl"
+                type="url"
+                placeholder="Success URL (e.g. https://funnel.example.com/thank-you)"
+                hint="Optional — full URL of your funnel's thank-you page. Skips the inline success message."
+                className="sm:col-span-2"
+              />
             </div>
             <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">
               Optional Form Fields
@@ -462,6 +472,19 @@ export function FormsPage({
                 {EditIcon}
                 <span>Edit</span>
               </button>
+              {/* Form Builder — dedicated page for managing custom fields (dropdowns,
+                  checkbox groups, etc.) the MB wants on top of the standard fields. */}
+              <Link
+                to={`/admin/marketing/forms/${c.id}/builder`}
+                prefetch="intent"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded-lg transition-colors duration-150"
+                title="Add custom fields (dropdowns, checkboxes, etc.) to this form"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6M5 8h14a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zm6-3v3M9 5h6" />
+                </svg>
+                <span>Form Builder</span>
+              </Link>
               {c.status === 'ACTIVE' && (
                 <button
                   type="button"
@@ -546,6 +569,14 @@ export function FormsPage({
                     <input name="formAccentColor" type="color" defaultValue={editingForm.formConfig?.accentColor ?? '#6366f1'} className="w-10 h-9 rounded border border-app-border cursor-pointer" />
                     <span className="text-sm text-app-fg-muted">Accent color</span>
                   </div>
+                  <TextInput
+                    name="successCallbackUrl"
+                    type="url"
+                    placeholder="Success URL (e.g. https://funnel.example.com/thank-you)"
+                    hint="Optional — full URL of your funnel's thank-you page. Skips the inline success message."
+                    defaultValue={(editingForm.formConfig?.successCallbackUrl as string | undefined) ?? ''}
+                    className="sm:col-span-2"
+                  />
                 </div>
                 <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">
                   Optional Form Fields

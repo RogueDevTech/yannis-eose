@@ -1,9 +1,12 @@
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
+import { Pagination } from '~/components/ui/pagination';
 import { Spinner } from '~/components/ui/spinner';
-import { useNavigation } from '@remix-run/react';
+import { useNavigation, useSearchParams } from '@remix-run/react';
 import type { CSLeaderboardEntry } from '~/features/cs/types';
+
+const LEADERBOARD_PAGE_SIZE = 10;
 
 interface CSLeaderboardPageProps {
   csLeaderboard: CSLeaderboardEntry[];
@@ -27,6 +30,9 @@ export function CSLeaderboardPage({
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pageParam = Number(searchParams.get('page') ?? '1');
+  const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
 
   return (
     <div className="space-y-6 px-3 sm:px-0">
@@ -60,17 +66,22 @@ export function CSLeaderboardPage({
               </div>
             );
           }
+          // 10/page client-side. Rank still reflects global position so #1 stays #1 regardless of page.
+          const totalPages = Math.max(1, Math.ceil(lb.length / LEADERBOARD_PAGE_SIZE));
+          const safePage = Math.min(page, totalPages);
+          const startIdx = (safePage - 1) * LEADERBOARD_PAGE_SIZE;
+          const pagedLb = lb.slice(startIdx, startIdx + LEADERBOARD_PAGE_SIZE);
           return (
             <div className="card p-0 overflow-hidden">
               <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
                 <h2 className="text-base font-semibold text-app-fg sm:text-lg">Closer performance</h2>
                 <p className="text-xs text-app-fg-muted mt-0.5">
-                  Ranked by delivery rate ({periodLabel})
+                  Ranked by delivery rate ({periodLabel}) · {lb.length} closer{lb.length === 1 ? '' : 's'}
                 </p>
               </div>
               <div className="space-y-4 px-4 py-4">
-                {lb.map((e, idx) => {
-                  const rank = idx + 1;
+                {pagedLb.map((e, idx) => {
+                  const rank = startIdx + idx + 1;
                   const isTopThree = rank <= 3;
                   return (
                     <div
@@ -129,6 +140,22 @@ export function CSLeaderboardPage({
                   );
                 })}
               </div>
+              {totalPages > 1 && (
+                <div className="border-t border-app-border px-4 py-3 flex items-center justify-between">
+                  <p className="text-xs text-app-fg-muted">
+                    Showing {startIdx + 1}–{Math.min(startIdx + LEADERBOARD_PAGE_SIZE, lb.length)} of {lb.length}
+                  </p>
+                  <Pagination
+                    page={safePage}
+                    totalPages={totalPages}
+                    onPageChange={(nextPage) => {
+                      const next = new URLSearchParams(searchParams);
+                      next.set('page', String(nextPage));
+                      setSearchParams(next, { replace: true });
+                    }}
+                  />
+                </div>
+              )}
             </div>
           );
         }}

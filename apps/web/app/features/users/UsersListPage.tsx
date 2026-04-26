@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -9,8 +9,10 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { Pagination } from '~/components/ui/pagination';
 import { Spinner } from '~/components/ui/spinner';
 import { useFetcherToast } from '~/components/ui/toast';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
+import { RoleBadge } from '~/components/ui/role-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 
 interface UsersListPageProps {
@@ -37,6 +39,11 @@ export function UsersListPage({
   const safeTotalPages = Math.max(1, totalPages);
   const resendFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
   useFetcherToast(resendFetcher.data, { successMessage: 'Invite re-sent with new credentials' });
+  // Confirmation modal — Resend invite mutates the user's password (a fresh temp password is
+  // generated and emailed) which invalidates any older invite link. Easy to fire by accident
+  // from a long table, so confirm before sending.
+  const [resendConfirm, setResendConfirm] = useState<{ id: string; name: string; email: string } | null>(null);
+  const isResending = resendFetcher.state !== 'idle';
 
   const handleStatusChange = (value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -179,7 +186,7 @@ export function UsersListPage({
                   </td>
                   <td className="table-cell text-app-fg-muted">{user.email}</td>
                   <td className="table-cell">
-                    <StatusBadge status={user.role} label={formatRole(user.role)} />
+                    <RoleBadge role={user.role} label={formatRole(user.role)} />
                   </td>
                   <td className="table-cell">
                     <UserBranchBadges branches={user.branchMemberships} compact />
@@ -198,17 +205,14 @@ export function UsersListPage({
                   <td className="table-cell text-right">
                     <div className="flex items-center justify-end gap-2">
                       {user.status === 'PENDING' && (
-                        <resendFetcher.Form method="post">
-                          <input type="hidden" name="intent" value="resendInvite" />
-                          <input type="hidden" name="userId" value={user.id} />
-                          <button
-                            type="submit"
-                            className="btn-secondary btn-sm text-brand-600 dark:text-brand-400"
-                            disabled={resendFetcher.state !== 'idle'}
-                          >
-                            Resend Invite
-                          </button>
-                        </resendFetcher.Form>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm text-brand-600 dark:text-brand-400"
+                          disabled={isResending}
+                          onClick={() => setResendConfirm({ id: user.id, name: user.name, email: user.email })}
+                        >
+                          Resend Invite
+                        </button>
                       )}
                       <Link
                         to={`/hr/users/${user.id}`}
@@ -258,7 +262,7 @@ export function UsersListPage({
                   <StatusBadge status={user.status} />
                 </div>
                 <div className="flex items-center justify-between">
-                  <StatusBadge status={user.role} label={formatRole(user.role)} />
+                  <RoleBadge role={user.role} label={formatRole(user.role)} />
                   <span className="text-xs text-app-fg-muted">
                     {new Date(user.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
@@ -273,17 +277,14 @@ export function UsersListPage({
               </Link>
               {user.status === 'PENDING' && (
                 <div className="mt-3 pt-3 border-t border-app-border">
-                  <resendFetcher.Form method="post">
-                    <input type="hidden" name="intent" value="resendInvite" />
-                    <input type="hidden" name="userId" value={user.id} />
-                    <button
-                      type="submit"
-                      className="btn-secondary btn-sm w-full text-brand-600 dark:text-brand-400"
-                      disabled={resendFetcher.state !== 'idle'}
-                    >
-                      Resend Invite
-                    </button>
-                  </resendFetcher.Form>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm w-full text-brand-600 dark:text-brand-400"
+                    disabled={isResending}
+                    onClick={() => setResendConfirm({ id: user.id, name: user.name, email: user.email })}
+                  >
+                    Resend Invite
+                  </button>
                 </div>
               )}
             </div>
@@ -303,6 +304,61 @@ export function UsersListPage({
         </p>
         <Pagination page={page} totalPages={safeTotalPages} onPageChange={goToPage} showLabel />
       </div>
+
+      {/* Resend invite confirmation — guards against fat-finger sends from a long table.
+          Resending generates a fresh temporary password and invalidates any prior link. */}
+      {resendConfirm && (
+        <ConfirmActionModal
+          open
+          onClose={() => {
+            if (!isResending) setResendConfirm(null);
+          }}
+          title="Resend invite?"
+          description={
+            <>
+              Send a new invite to <strong className="text-app-fg">{resendConfirm.name}</strong> at{' '}
+              <span className="font-mono text-xs">{resendConfirm.email}</span>? This generates a
+              fresh temporary password and invalidates any previously sent link.
+            </>
+          }
+          confirmLabel="Resend invite"
+          cancelLabel="Cancel"
+          variant="warning"
+          loading={isResending}
+          error={!isResending && resendFetcher.data?.error ? resendFetcher.data.error : null}
+          onConfirm={() => {
+            resendFetcher.submit(
+              { intent: 'resendInvite', userId: resendConfirm.id },
+              { method: 'post' },
+            );
+            // Modal stays open through the submit so the user sees the spinner; close once
+            // the fetcher returns success — handled below.
+          }}
+        />
+      )}
+      <ResendInviteAutoClose
+        fetcher={resendFetcher}
+        onClose={() => setResendConfirm(null)}
+      />
     </div>
   );
+}
+
+/** Closes the resend-invite modal once the fetcher reports success. Watches the fetcher's
+ *  data through a ref so the effect fires once per response instead of on every render. */
+function ResendInviteAutoClose({
+  fetcher,
+  onClose,
+}: {
+  fetcher: ReturnType<typeof useFetcher<{ success?: boolean; error?: string }>>;
+  onClose: () => void;
+}) {
+  const lastSeenRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (fetcher.state !== 'idle' || !fetcher.data) return;
+    if (fetcher.data === lastSeenRef.current) return;
+    lastSeenRef.current = fetcher.data;
+    if (fetcher.data.success) onClose();
+  }, [fetcher.state, fetcher.data, onClose]);
+  return null;
 }

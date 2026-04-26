@@ -159,6 +159,7 @@ export {
   listFundingSchema,
   fundingStatusCountsSchema,
   fundingRequestStatusCountsSchema,
+  fundingDirectionSummarySchema,
   listFundingRequestsSchema,
   approveFundingRequestSchema,
   rejectFundingRequestSchema,
@@ -173,6 +174,9 @@ export {
   createCampaignSchema,
   updateCampaignSchema,
   listCampaignsSchema,
+  customFormFieldSchema,
+  formConfigSchema,
+  FORM_FIELD_TYPES,
 } from './marketing';
 
 export type {
@@ -181,6 +185,7 @@ export type {
   ListFundingInput,
   FundingStatusCountsInput,
   FundingRequestStatusCountsInput,
+  FundingDirectionSummaryInput,
   ListFundingRequestsInput,
   ApproveFundingRequestInput,
   RejectFundingRequestInput,
@@ -195,6 +200,9 @@ export type {
   CreateCampaignInput,
   UpdateCampaignInput,
   ListCampaignsInput,
+  CustomFormField,
+  FormConfig,
+  FormFieldType,
 } from './marketing';
 
 // Finance validators

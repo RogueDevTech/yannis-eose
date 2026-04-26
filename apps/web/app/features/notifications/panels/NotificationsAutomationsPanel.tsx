@@ -1,5 +1,8 @@
 import { useFetcher } from '@remix-run/react';
 import { useState, useEffect } from 'react';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
+import { Textarea } from '~/components/ui/textarea';
 
 export interface AutomationRule {
   id: string;
@@ -386,19 +389,13 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
 
               {form.triggerType === 'EVENT_BASED' && (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-app-fg-muted">Event trigger</label>
-                  <select
+                  <FormSelect
                     name="eventTrigger"
+                    label="Event trigger"
                     value={form.eventTrigger}
                     onChange={(e) => setField('eventTrigger', e.target.value)}
-                    className="input"
-                  >
-                    {EVENT_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={EVENT_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+                  />
                 </div>
               )}
 
@@ -423,28 +420,23 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
                   ))}
                 </div>
                 {form.targetType === 'ROLE' && (
-                  <select
+                  <FormSelect
                     name="targetRole"
                     value={form.targetRole}
                     onChange={(e) => setField('targetRole', e.target.value)}
-                    className="input mt-2"
-                  >
-                    <option value="">Select a role…</option>
-                    {ALL_ROLES.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Select a role…"
+                    options={ALL_ROLES.map((r) => ({ value: r.value, label: r.label }))}
+                    wrapperClassName="mt-2"
+                  />
                 )}
                 {form.targetType === 'USER' && (
-                  <input
+                  <TextInput
                     type="text"
                     name="targetUserId"
                     value={form.targetUserId}
                     onChange={(e) => setField('targetUserId', e.target.value)}
                     placeholder="User ID"
-                    className="input mt-2"
+                    wrapperClassName="mt-2"
                   />
                 )}
               </div>
@@ -458,14 +450,13 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
                     {form.titleTemplate.length}/{TITLE_MAX}
                   </span>
                 </div>
-                <input
+                <TextInput
                   type="text"
                   name="titleTemplate"
                   value={form.titleTemplate}
                   onChange={(e) => setField('titleTemplate', e.target.value)}
                   maxLength={TITLE_MAX}
                   placeholder="e.g. Hi {{user_name}}, daily check-in!"
-                  className="input"
                 />
                 <PlaceholderChips onInsert={(chip) => setField('titleTemplate', form.titleTemplate + chip)} />
               </div>
@@ -479,14 +470,15 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
                     {form.bodyTemplate.length}/{BODY_MAX}
                   </span>
                 </div>
-                <textarea
+                <Textarea
                   name="bodyTemplate"
                   value={form.bodyTemplate}
                   onChange={(e) => setField('bodyTemplate', e.target.value)}
                   maxLength={BODY_MAX}
                   rows={3}
                   placeholder="e.g. You have {{order_count}} orders pending today."
-                  className="input resize-none"
+                  showCount
+                  className="resize-none"
                 />
                 <PlaceholderChips onInsert={(chip) => setField('bodyTemplate', form.bodyTemplate + chip)} />
               </div>

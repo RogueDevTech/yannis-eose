@@ -91,7 +91,7 @@ export const inventoryRouter = router({
     }),
 
   /**
-   * Verify transfer receipt — 3PL Manager.
+   * Verify transfer receipt — 3PL Manager, Stock Manager, or Head of Logistics (when 3PL is not on-platform).
    */
   verifyTransfer: permissionProcedure('inventory.verifyTransfer')
     .input(verifyTransferSchema)

@@ -1,6 +1,7 @@
 import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { StatCard } from '~/components/ui/card';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -155,16 +156,25 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
       {/* Secondary KPIs — all deferred */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <DeferredSection resolve={data.profit} skeleton="stat">
-          {(profit) => <StatCard label="Margin" value={`${profit.margin.toFixed(1)}%`} icon="margin" highlight={profit.margin >= 20 ? 'success' : profit.margin > 0 ? 'warning' : 'danger'} />}
+          {(profit) => (
+            <StatCard
+              label="Margin"
+              value={`${profit.margin.toFixed(1)}%`}
+              accent={profit.margin >= 20 ? 'success' : profit.margin > 0 ? 'warning' : 'danger'}
+              icon={<StatIcon type="margin" />}
+            />
+          )}
         </DeferredSection>
         <DeferredSection resolve={data.metrics} skeleton="stat">
-          {(metrics) => <StatCard label="True ROAS" value={`${metrics.trueRoas.toFixed(2)}x`} icon="roas" />}
+          {(metrics) => (
+            <StatCard label="True ROAS" value={`${metrics.trueRoas.toFixed(2)}x`} accent="brand" icon={<StatIcon type="roas" />} />
+          )}
         </DeferredSection>
         <DeferredSection resolve={data.totalProducts} skeleton="stat">
-          {(total) => <StatCard label="Products" value={total.toString()} icon="products" />}
+          {(total) => <StatCard label="Products" value={total.toString()} accent="brand" icon={<StatIcon type="products" />} />}
         </DeferredSection>
         <DeferredSection resolve={data.totalUsers} skeleton="stat">
-          {(total) => <StatCard label="Staff" value={total.toString()} icon="users" />}
+          {(total) => <StatCard label="Staff" value={total.toString()} accent="brand" icon={<StatIcon type="users" />} />}
         </DeferredSection>
       </div>
 
@@ -783,28 +793,6 @@ function getQuickActions(role: string, unprocessed: number) {
         { href: '/admin/settings', label: 'Settings', description: 'Account settings', icon: 'settings', bg: 'bg-app-hover text-app-fg-muted' },
       ];
   }
-}
-
-function StatCard({ label, value, icon, highlight }: { label: string; value: string; icon: string; highlight?: 'warning' | 'success' | 'danger' }) {
-  const valueColor = highlight
-    ? { warning: 'text-warning-600 dark:text-warning-400', success: 'text-success-600 dark:text-success-400', danger: 'text-danger-600 dark:text-danger-400' }[highlight]
-    : 'text-app-fg';
-
-  const iconBg = highlight
-    ? { warning: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400', success: 'bg-success-50 dark:bg-success-700/20 text-success-600 dark:text-success-400', danger: 'bg-danger-50 dark:bg-danger-700/20 text-danger-600 dark:text-danger-400' }[highlight]
-    : 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400';
-
-  return (
-    <div className="card">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">{label}</p>
-        <div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}>
-          <StatIcon type={icon} />
-        </div>
-      </div>
-      <p className={`text-2xl font-bold mt-2 truncate ${valueColor}`}>{value}</p>
-    </div>
-  );
 }
 
 function StatIcon({ type }: { type: string }) {

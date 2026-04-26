@@ -29,6 +29,7 @@ import {
 import { CartService } from '../cart/cart.service';
 import { PaystackService } from '../payments/paystack.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isAdminLevel } from '../common/authz';
 
 const PENDING_PAYMENT_PREFIX = 'pending_payment:';
 const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
@@ -130,6 +131,7 @@ export class OrdersService {
           totalAmount: orderInput.totalAmount != null ? String(orderInput.totalAmount) : null,
           status: 'UNPROCESSED',
           orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
+          customFields: orderInput.customFields ?? null,
         })
         .returning();
       const created = rows[0];
@@ -162,15 +164,8 @@ export class OrdersService {
       mediaBuyerId: order.mediaBuyerId ?? null,
     });
 
-    // Notify Admin, Head of CS, Head of Marketing, and all CS agents (every new order)
-    this.notifications
-      .createForRole('SUPER_ADMIN', {
-        type: 'order:new',
-        title: 'New order received',
-        body: 'A new order needs attention.',
-        data: { orderId: order.id },
-      })
-      .catch(() => {});
+    // Notify Head of CS + Head of Marketing only on new order (not every CS agent — they get
+    // order:assigned when Hot Swap / auto-dispatch / claim assigns them). SuperAdmin excluded (volume).
     this.notifications
       .createForRole('HEAD_OF_CS', {
         type: 'order:new',
@@ -184,14 +179,6 @@ export class OrdersService {
         type: 'order:new',
         title: 'New order received',
         body: 'A new order has been created.',
-        data: { orderId: order.id },
-      })
-      .catch(() => {});
-    this.notifications
-      .createForRole('CS_AGENT', {
-        type: 'order:new',
-        title: 'New order in queue',
-        body: 'A new order has been received and may be assigned to you.',
         data: { orderId: order.id },
       })
       .catch(() => {});
@@ -543,7 +530,11 @@ export class OrdersService {
         : Promise.resolve([]),
       order.campaignId
         ? this.db
-            .select({ id: schema.campaigns.id, name: schema.campaigns.name })
+            // Pull formConfig too — the order-detail UI needs `formConfig.customFields[]`
+            // to map the saved `orders.custom_fields` response object back into labelled
+            // rows ("Shirt size: Large"). Without the field definitions all the UI has is
+            // an opaque { fieldId: value } map.
+            .select({ id: schema.campaigns.id, name: schema.campaigns.name, formConfig: schema.campaigns.formConfig })
             .from(schema.campaigns)
             .where(eq(schema.campaigns.id, order.campaignId))
             .limit(1)
@@ -570,6 +561,25 @@ export class OrdersService {
     const riderName = order.riderId ? userNames.get(order.riderId) ?? null : null;
     const lockedByName = order.lockedBy ? userNames.get(order.lockedBy) ?? null : null;
     const campaignName = campaignRow[0]?.name ?? null;
+    /**
+     * Field definitions for the campaign's form-builder custom fields. Returned alongside
+     * the order so order-detail UIs can render `label: value` pairs from the response object
+     * stored in `orders.custom_fields`. Empty array when the campaign has no custom fields
+     * (or when the order has no campaign at all).
+     */
+    const campaignCustomFieldDefs: Array<{
+      id: string;
+      type: string;
+      label: string;
+      order: number;
+      options?: string[];
+    }> = (() => {
+      const fc = campaignRow[0]?.formConfig as { customFields?: unknown } | undefined | null;
+      if (!fc || !Array.isArray(fc.customFields)) return [];
+      return (fc.customFields as Array<{ id: string; type: string; label: string; order: number; options?: string[] }>)
+        .filter((f) => f && typeof f.id === 'string')
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    })();
     const logisticsProviderName = providerRow[0]?.name ?? null;
     const logisticsLocationName = locationRow[0]?.name ?? null;
 
@@ -600,6 +610,7 @@ export class OrdersService {
       assignedCsName,
       mediaBuyerName,
       campaignName,
+      campaignCustomFieldDefs,
       logisticsProviderName,
       logisticsLocationName,
       riderName,
@@ -830,13 +841,20 @@ export class OrdersService {
       });
     }
 
-    // Role check: CS-only transitions (engagement, confirm, cancel) require CS_AGENT (assigned when applicable) or HEAD_OF_CS or SUPER_ADMIN
+    // Role check: CS-only transitions (engagement, confirm, cancel) require CS_AGENT (assigned when applicable),
+    // Head of CS, Branch Admin (same branch as order), or admin-class (SuperAdmin / Admin).
     const csOnlyTransitions =
       (currentStatus === 'UNPROCESSED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
       (currentStatus === 'CS_ASSIGNED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
       (currentStatus === 'CS_ENGAGED' && (newStatus === 'CONFIRMED' || newStatus === 'CANCELLED'));
     if (csOnlyTransitions) {
-      const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
+      const branchAdminSameBranch =
+        actor.role === 'BRANCH_ADMIN' &&
+        !!order.branchId &&
+        !!actor.currentBranchId &&
+        order.branchId === actor.currentBranchId;
+      const isElevated =
+        actor.role === 'HEAD_OF_CS' || isAdminLevel(actor) || branchAdminSameBranch;
       if ((currentStatus === 'UNPROCESSED' || currentStatus === 'CS_ASSIGNED') && newStatus === 'CS_ENGAGED') {
         if (!isElevated && actor.role !== 'CS_AGENT') {
           throw new TRPCError({
@@ -849,7 +867,8 @@ export class OrdersService {
         if (!isElevated && !isAssignedCs) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: 'Only the assigned CS agent or Head of CS can perform this transition',
+            message:
+              'Only the assigned CS agent, Head of CS, Branch Admin (same branch), or an Admin may perform this transition',
           });
         }
       }
@@ -1026,7 +1045,7 @@ export class OrdersService {
     }
 
     // Execute side effects (stock reservation, deduction, etc.)
-    await this.executeTransitionSideEffects(newStatus, order, actor.id);
+    await this.executeTransitionSideEffects(newStatus, order, updated, actor, input.metadata);
 
     // Auto-generate a draft invoice the first time an order is CONFIRMED. Idempotent
     // (skips if an invoice for this orderId already exists). Failures don't block the
@@ -1374,10 +1393,8 @@ export class OrdersService {
         branchId: order.branchId ?? null,
         mediaBuyerId: order.mediaBuyerId ?? null,
       });
-      this.notifications.createForRole('SUPER_ADMIN', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
       this.notifications.createForRole('HEAD_OF_CS', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
       this.notifications.createForRole('HEAD_OF_MARKETING', { type: 'order:new', title: 'New order received', body: 'A new order has been created.', data: { orderId: order.id } }).catch(() => {});
-      this.notifications.createForRole('CS_AGENT', { type: 'order:new', title: 'New order in queue', body: 'A new order has been received and may be assigned to you.', data: { orderId: order.id } }).catch(() => {});
       if (order.mediaBuyerId) {
         this.notifications.create({ userId: order.mediaBuyerId, type: 'order:new_campaign', title: 'New order from your campaign', body: 'A new order has been created from your campaign.', data: { orderId: order.id } }).catch(() => {});
       }
@@ -2513,12 +2530,36 @@ export class OrdersService {
       return { success: false, message: 'Order already claimed by another agent or no longer available.' };
     }
 
+    const [claimedRow] = await this.db
+      .select({ customerName: schema.orders.customerName, branchId: schema.orders.branchId })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+
+    this.events.emitToUser(actor.id, 'order:assigned', {
+      orderId,
+      customerName: claimedRow?.customerName ?? undefined,
+    });
+    this.events.emitToRoom('cs-all', 'order:assigned', {
+      orderId,
+      customerName: claimedRow?.customerName ?? undefined,
+    }, claimedRow?.branchId ?? actor.currentBranchId ?? null);
     this.events.emitToRoom('cs-all', 'order:status_changed', {
       orderId,
       oldStatus: 'UNPROCESSED',
       newStatus: 'CS_ASSIGNED',
       assignedCsId: actor.id,
     }, actor.currentBranchId ?? null);
+
+    this.notifications
+      .create({
+        userId: actor.id,
+        type: 'order:assigned',
+        title: 'Order assigned to you',
+        body: 'You claimed this order from the queue. Please attend to it.',
+        data: { orderId },
+      })
+      .catch(() => {});
 
     this.writeTimelineEvent({
       orderId,
@@ -2631,41 +2672,92 @@ export class OrdersService {
       }
 
       case 'CONFIRMED': {
-        // Check VOIP feature flag to determine confirm gate behavior
         const voipSetting = await this.settingsService.get('VOIP_ENABLED');
         const isVoipEnabled = voipSetting?.['enabled'] === true;
 
-        const callRows = await this.db
-          .select()
-          .from(schema.callLogs)
-          .where(
-            and(
-              eq(schema.callLogs.orderId, order.id),
-              eq(schema.callLogs.agentId, actor.id),
-            ),
-          )
-          .orderBy(desc(schema.callLogs.startedAt))
-          .limit(1);
+        const branchAdminSameBranch =
+          actor.role === 'BRANCH_ADMIN' &&
+          !!order.branchId &&
+          !!actor.currentBranchId &&
+          order.branchId === actor.currentBranchId;
+        const bypassCallGate = isAdminLevel(actor) || branchAdminSameBranch;
 
-        const lastCall = callRows[0];
+        const hoCsSameBranch =
+          actor.role === 'HEAD_OF_CS' &&
+          !!order.branchId &&
+          !!actor.currentBranchId &&
+          order.branchId === actor.currentBranchId;
 
-        if (isVoipEnabled) {
-          // VOIP mode: require VOIP call with duration >= 15 seconds
-          if (!lastCall || (lastCall.durationSeconds ?? 0) < 15) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: 'Cannot confirm: VOIP call duration must be at least 15 seconds',
-            });
-          }
-        } else {
-          // Manual mode: require at least one call log (MANUAL_CALL counts)
-          if (!lastCall) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: 'Cannot confirm: you must click Call before confirming',
-            });
+        if (!bypassCallGate) {
+          if (hoCsSameBranch) {
+            // Head of CS may confirm using any rep's qualifying call on this order (oversight path).
+            if (isVoipEnabled) {
+              const qualifying = await this.db
+                .select()
+                .from(schema.callLogs)
+                .where(
+                  and(
+                    eq(schema.callLogs.orderId, order.id),
+                    gte(schema.callLogs.durationSeconds, 15),
+                  ),
+                )
+                .orderBy(desc(schema.callLogs.startedAt))
+                .limit(1);
+              if (!qualifying[0]) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message:
+                    'Cannot confirm: no qualifying VOIP call (≥ 15 seconds) on this order yet. Have a rep complete a call first.',
+                });
+              }
+            } else {
+              const anyCall = await this.db
+                .select()
+                .from(schema.callLogs)
+                .where(eq(schema.callLogs.orderId, order.id))
+                .orderBy(desc(schema.callLogs.startedAt))
+                .limit(1);
+              if (!anyCall[0]) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: 'Cannot confirm: no call has been logged on this order yet.',
+                });
+              }
+            }
+          } else {
+            const callRows = await this.db
+              .select()
+              .from(schema.callLogs)
+              .where(
+                and(
+                  eq(schema.callLogs.orderId, order.id),
+                  eq(schema.callLogs.agentId, actor.id),
+                ),
+              )
+              .orderBy(desc(schema.callLogs.startedAt))
+              .limit(1);
+
+            const lastCall = callRows[0];
+
+            if (isVoipEnabled) {
+              if (!lastCall || (lastCall.durationSeconds ?? 0) < 15) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: 'Cannot confirm: VOIP call duration must be at least 15 seconds',
+                });
+              }
+            } else {
+              if (!lastCall) {
+                throw new TRPCError({
+                  code: 'BAD_REQUEST',
+                  message: 'Cannot confirm: you must click Call before confirming',
+                });
+              }
+            }
           }
         }
+
+        await this.inventoryService.assertGlobalAvailabilityForOrder(order.id);
         break;
       }
 
@@ -2695,6 +2787,7 @@ export class OrdersService {
               'Dispatch is locked at this location. Resolve pending stock reconciliations in Returns & Restock to unlock.',
           });
         }
+        await this.inventoryService.assertLocationCanFulfillOrder(order.id, locationId);
         break;
       }
 
@@ -2862,77 +2955,64 @@ export class OrdersService {
 
   private async executeTransitionSideEffects(
     newStatus: OrderStatus,
-    order: typeof schema.orders.$inferSelect,
-    actorId: string,
+    previousOrder: typeof schema.orders.$inferSelect,
+    updatedOrder: typeof schema.orders.$inferSelect,
+    actor: SessionUser,
+    metadata: TransitionOrderInput['metadata'] | undefined,
   ) {
     const orderItems = await this.db
       .select()
       .from(schema.orderItems)
-      .where(eq(schema.orderItems.orderId, order.id));
+      .where(eq(schema.orderItems.orderId, updatedOrder.id));
 
     switch (newStatus) {
       case 'CONFIRMED': {
-        // Reserve stock for each item (Available → Reserved)
-        // and calculate total landed cost using FIFO batch costing
         let totalLandedCost = 0;
 
-        for (const item of orderItems) {
-          await this.db
-            .insert(schema.stockMovements)
-            .values({
+        await withActor(this.db, actor, async (tx) => {
+          for (const item of orderItems) {
+            await tx.insert(schema.stockMovements).values({
               productId: item.productId,
               movementType: 'RESERVATION',
               quantity: item.quantity,
-              referenceId: order.id,
-              reason: `Stock reserved for order ${order.id}`,
-              actorId,
+              referenceId: updatedOrder.id,
+              reason: `Stock reserved for order ${updatedOrder.id}`,
+              actorId: actor.id,
             });
 
-          // FIFO: walk through batches oldest-first to calculate weighted landed cost
-          const batches = await this.db
-            .select()
-            .from(schema.stockBatches)
-            .where(eq(schema.stockBatches.productId, item.productId))
-            .orderBy(asc(schema.stockBatches.receivedAt));
+            const batches = await tx
+              .select()
+              .from(schema.stockBatches)
+              .where(eq(schema.stockBatches.productId, item.productId))
+              .orderBy(asc(schema.stockBatches.receivedAt));
 
-          let remaining = item.quantity;
-          for (const batch of batches) {
-            if (remaining <= 0) break;
-            const batchRemaining = batch.remainingQuantity ?? 0;
-            if (batchRemaining <= 0) continue;
+            let remaining = item.quantity;
+            for (const batch of batches) {
+              if (remaining <= 0) break;
+              const batchRemaining = batch.remainingQuantity ?? 0;
+              if (batchRemaining <= 0) continue;
 
-            const units = Math.min(remaining, batchRemaining);
-            const costPerUnit = parseFloat(batch.totalLandedCost ?? '0');
-            totalLandedCost += units * costPerUnit;
-            remaining -= units;
+              const units = Math.min(remaining, batchRemaining);
+              const costPerUnit = parseFloat(batch.totalLandedCost ?? '0');
+              totalLandedCost += units * costPerUnit;
+              remaining -= units;
+            }
           }
-        }
 
-        // Persist the calculated landed cost on the order
-        await this.db
-          .update(schema.orders)
-          .set({ landedCost: totalLandedCost.toFixed(2) })
-          .where(eq(schema.orders.id, order.id));
+          await tx
+            .update(schema.orders)
+            .set({ landedCost: totalLandedCost.toFixed(2) })
+            .where(eq(schema.orders.id, updatedOrder.id));
+        });
         break;
       }
 
       case 'ALLOCATED': {
-        // Look up the logistics provider's rate card and set deliveryFee
-        const locationId = order.logisticsLocationId;
+        const locationId =
+          updatedOrder.logisticsLocationId ??
+          (typeof metadata?.logisticsLocationId === 'string' ? metadata.logisticsLocationId : undefined);
         if (locationId) {
-          // Per-item ALLOCATION movement — earmarks the reserved stock against a specific 3PL
-          // location so the inventory detail drawer can show "intaken → allocated → delivered".
-          for (const item of orderItems) {
-            await this.db.insert(schema.stockMovements).values({
-              productId: item.productId,
-              movementType: 'ALLOCATION',
-              quantity: item.quantity,
-              toLocationId: locationId,
-              referenceId: order.id,
-              reason: `Allocated to 3PL for order ${order.id}`,
-              actorId,
-            });
-          }
+          await this.inventoryService.reserveForAllocateWithMovements(updatedOrder.id, locationId, actor);
 
           const locationRows = await this.db
             .select()
@@ -2951,7 +3031,6 @@ export class OrdersService {
             const provider = providerRows[0];
             if (provider?.rateCard) {
               const rateCard = provider.rateCard as Record<string, unknown>;
-              // rateCard may contain a flat deliveryFee or a per-item rate
               const flatFee = parseFloat(String(rateCard.deliveryFee ?? rateCard.delivery_fee ?? '0'));
               const perItemRate = parseFloat(String(rateCard.perItemRate ?? rateCard.per_item_rate ?? '0'));
 
@@ -2962,10 +3041,12 @@ export class OrdersService {
               }
 
               if (deliveryFee > 0) {
-                await this.db
-                  .update(schema.orders)
-                  .set({ deliveryFee: deliveryFee.toFixed(2) })
-                  .where(eq(schema.orders.id, order.id));
+                await withActor(this.db, actor, async (tx) => {
+                  await tx
+                    .update(schema.orders)
+                    .set({ deliveryFee: deliveryFee.toFixed(2) })
+                    .where(eq(schema.orders.id, updatedOrder.id));
+                });
               }
             }
           }
@@ -2974,64 +3055,32 @@ export class OrdersService {
       }
 
       case 'DELIVERED': {
-        // FIFO: consume oldest batch first, then log delivery movement
-        for (const item of orderItems) {
-          const batches = await this.db
-            .select()
-            .from(schema.stockBatches)
-            .where(eq(schema.stockBatches.productId, item.productId))
-            .orderBy(schema.stockBatches.receivedAt);
-
-          let remaining = item.quantity;
-          for (const batch of batches) {
-            if (remaining <= 0) break;
-            const batchRemaining = batch.remainingQuantity ?? 0;
-            if (batchRemaining <= 0) continue;
-
-            const deduct = Math.min(remaining, batchRemaining);
-            await this.db
-              .update(schema.stockBatches)
-              .set({ remainingQuantity: batchRemaining - deduct })
-              .where(eq(schema.stockBatches.id, batch.id));
-
-            remaining -= deduct;
-          }
-
-          await this.db
-            .insert(schema.stockMovements)
-            .values({
-              productId: item.productId,
-              movementType: 'DELIVERY',
-              quantity: -item.quantity,
-              // Stock leaves the 3PL that fulfilled the order — attribute the reduction to that location.
-              fromLocationId: order.logisticsLocationId ?? undefined,
-              referenceId: order.id,
-              reason: `Delivered: order ${order.id}`,
-              actorId,
-            });
-
-          // Low-stock alert for the 3PL that just fulfilled.
-          if (order.logisticsLocationId) {
-            await this.inventoryService.checkLowStockAndNotify(item.productId, order.logisticsLocationId);
-          }
+        const fulfillmentLocationId = updatedOrder.logisticsLocationId;
+        if (!fulfillmentLocationId) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Cannot record delivery: order has no fulfillment location (allocate to a 3PL first).',
+          });
         }
+        await this.inventoryService.completeDeliveryInventory(
+          updatedOrder.id,
+          fulfillmentLocationId,
+          actor,
+        );
         break;
       }
 
       case 'CANCELLED': {
-        // Release any reserved stock if order was confirmed
-        if (order.status === 'CONFIRMED') {
+        if (previousOrder.status === 'CONFIRMED') {
           for (const item of orderItems) {
-            await this.db
-              .insert(schema.stockMovements)
-              .values({
-                productId: item.productId,
-                movementType: 'ADJUSTMENT',
-                quantity: item.quantity,
-                referenceId: order.id,
-                reason: `Released: order ${order.id} cancelled`,
-                actorId,
-              });
+            await this.db.insert(schema.stockMovements).values({
+              productId: item.productId,
+              movementType: 'ADJUSTMENT',
+              quantity: item.quantity,
+              referenceId: updatedOrder.id,
+              reason: `Released: order ${updatedOrder.id} cancelled`,
+              actorId: actor.id,
+            });
           }
         }
         break;
@@ -3039,56 +3088,48 @@ export class OrdersService {
 
       case 'RETURNED': {
         for (const item of orderItems) {
-          await this.db
-            .insert(schema.stockMovements)
-            .values({
-              productId: item.productId,
-              movementType: 'RETURN',
-              quantity: item.quantity,
-              // Units come back to the 3PL that attempted delivery (pending Restock vs WriteOff decision).
-              toLocationId: order.logisticsLocationId ?? undefined,
-              referenceId: order.id,
-              reason: `Returned: order ${order.id}`,
-              actorId,
-            });
+          await this.db.insert(schema.stockMovements).values({
+            productId: item.productId,
+            movementType: 'RETURN',
+            quantity: item.quantity,
+            toLocationId: updatedOrder.logisticsLocationId ?? undefined,
+            referenceId: updatedOrder.id,
+            reason: `Returned: order ${updatedOrder.id}`,
+            actorId: actor.id,
+          });
         }
         break;
       }
 
       case 'RESTOCKED': {
         for (const item of orderItems) {
-          await this.db
-            .insert(schema.stockMovements)
-            .values({
-              productId: item.productId,
-              movementType: 'RESTOCK',
-              quantity: item.quantity,
-              toLocationId: order.logisticsLocationId ?? undefined,
-              referenceId: order.id,
-              reason: `Restocked at 3PL: order ${order.id}`,
-              actorId,
-            });
+          await this.db.insert(schema.stockMovements).values({
+            productId: item.productId,
+            movementType: 'RESTOCK',
+            quantity: item.quantity,
+            toLocationId: updatedOrder.logisticsLocationId ?? undefined,
+            referenceId: updatedOrder.id,
+            reason: `Restocked at 3PL: order ${updatedOrder.id}`,
+            actorId: actor.id,
+          });
         }
         break;
       }
 
       case 'WRITTEN_OFF': {
         for (const item of orderItems) {
-          await this.db
-            .insert(schema.stockMovements)
-            .values({
-              productId: item.productId,
-              movementType: 'WRITE_OFF',
-              quantity: -item.quantity,
-              // Units disappear from the 3PL that was holding them.
-              fromLocationId: order.logisticsLocationId ?? undefined,
-              referenceId: order.id,
-              reason: `Written off: order ${order.id}`,
-              actorId,
-            });
+          await this.db.insert(schema.stockMovements).values({
+            productId: item.productId,
+            movementType: 'WRITE_OFF',
+            quantity: -item.quantity,
+            fromLocationId: updatedOrder.logisticsLocationId ?? undefined,
+            referenceId: updatedOrder.id,
+            reason: `Written off: order ${updatedOrder.id}`,
+            actorId: actor.id,
+          });
 
-          if (order.logisticsLocationId) {
-            await this.inventoryService.checkLowStockAndNotify(item.productId, order.logisticsLocationId);
+          if (updatedOrder.logisticsLocationId) {
+            await this.inventoryService.checkLowStockAndNotify(item.productId, updatedOrder.logisticsLocationId);
           }
         }
         break;

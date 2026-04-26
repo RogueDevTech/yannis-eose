@@ -60,6 +60,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Filters from URL
   const statusFilter = url.searchParams.get('status') || undefined;
   const receiverFilter = url.searchParams.get('receiver') || undefined;
+  // `search` matches against sender name, receiver name, or funding row ID server-side
+  // (see marketing.service.ts → listFunding). Trimmed to 200 chars per the Zod schema.
+  const searchFilter = url.searchParams.get('search')?.trim() || undefined;
   const pageParam = parseInt(url.searchParams.get('page') || '1', 10);
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
 
@@ -81,6 +84,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     periodAllTime,
     status: statusFilter ?? '',
     receiver: receiverFilter ?? '',
+    search: searchFilter ?? '',
   };
 
   const listFundingInput: Record<string, unknown> = { page, limit: 20 };
@@ -88,6 +92,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (endDate) listFundingInput.endDate = endDate;
   if (statusFilter) listFundingInput.status = statusFilter;
   if (receiverFilter) listFundingInput.receiverId = receiverFilter;
+  if (searchFilter) listFundingInput.search = searchFilter;
 
   const [fundingRes, balancesRes, summaryRes, fundingRequestsRes, usersListRes] = await Promise.all([
     apiRequest<unknown>(

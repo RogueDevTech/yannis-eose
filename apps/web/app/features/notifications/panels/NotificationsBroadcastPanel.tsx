@@ -1,6 +1,9 @@
 import { useFetcher } from '@remix-run/react';
 import { useState, useId, useRef, useEffect, useCallback } from 'react';
 import { Button } from '~/components/ui/button';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
+import { Textarea } from '~/components/ui/textarea';
 import { PageNotification } from '~/components/ui/page-notification';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -68,7 +71,7 @@ function getInitials(name: string): string {
   return name
     .split(' ')
     .slice(0, 2)
-    .map((n) => n[0])
+    .map((n) => (n[0] ?? ''))
     .join('')
     .toUpperCase();
 }
@@ -87,7 +90,7 @@ const AVATAR_COLORS = [
 function avatarColor(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+  return AVATAR_COLORS[h % AVATAR_COLORS.length] ?? 'bg-violet-500';
 }
 
 // ─── Push badge ───────────────────────────────────────────────────────────────
@@ -251,7 +254,8 @@ function UserPicker({ value, onChange }: UserPickerProps) {
     if (!open || !sentinelRef.current) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && !loadingInitial) {
+        const first = entries[0];
+        if (first?.isIntersecting && hasMore && !loadingMore && !loadingInitial) {
           fetchNextPage(query, offset);
         }
       },
@@ -275,7 +279,8 @@ function UserPicker({ value, onChange }: UserPickerProps) {
       setActiveIdx((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter' && activeIdx >= 0) {
       e.preventDefault();
-      selectUser(users[activeIdx]);
+      const picked = users[activeIdx];
+      if (picked) selectUser(picked);
     } else if (e.key === 'Escape') {
       setOpen(false);
     }
@@ -624,23 +629,16 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
 
                 {targetType === 'ROLE' && (
                   <div>
-                    <label htmlFor="broadcast-role" className="mb-1 block text-sm font-medium text-app-fg-muted">
-                      Role
-                    </label>
-                    <select
+                    <FormSelect
                       id="broadcast-role"
                       name="targetRole"
+                      label="Role"
                       value={targetRole}
                       onChange={(e) => setTargetRole(e.target.value)}
+                      placeholder="Select a role…"
+                      options={availableRoles.map((r) => ({ value: r.value, label: r.label }))}
                       className={selectClass}
-                    >
-                      <option value="">Select a role…</option>
-                      {availableRoles.map((r) => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </div>
                 )}
 
@@ -696,7 +694,7 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
                       {title.length}/{TITLE_MAX}
                     </span>
                   </div>
-                  <input
+                  <TextInput
                     id={titleId}
                     type="text"
                     name="title"
@@ -704,7 +702,6 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
                     onChange={(e) => setTitle(e.target.value)}
                     maxLength={TITLE_MAX}
                     placeholder="Short headline…"
-                    className="input"
                   />
                 </div>
                 <div>
@@ -718,7 +715,7 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
                       {body.length}/{BODY_MAX}
                     </span>
                   </div>
-                  <textarea
+                  <Textarea
                     id={bodyId}
                     name="body"
                     value={body}
@@ -726,7 +723,8 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
                     maxLength={BODY_MAX}
                     rows={4}
                     placeholder="Supporting text…"
-                    className="input min-h-[100px] resize-y"
+                    showCount
+                    className="min-h-[100px] resize-y"
                   />
                 </div>
               </div>

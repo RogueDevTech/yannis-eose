@@ -131,6 +131,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     canEditOrder: user.role !== 'MEDIA_BUYER',
     userRole: user.role,
     userId: user.id,
+    currentBranchId: user.currentBranchId ?? null,
     permissions: user.permissions ?? [],
     csAgentsForAssign: csAgentsForAssign,
     logisticsLocations,
@@ -463,7 +464,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed', 'order:assigned', 'order:transfer_accepted', 'order:transfer_rejected'] as const;
 
 export default function OrderDetailRoute() {
-  const { orderDetail, canEditOrder, userRole, userId, permissions, csAgentsForAssign, logisticsLocations, logisticsDispatchTemplates, invoice } = useLoaderData<typeof loader>();
+  const {
+    orderDetail,
+    canEditOrder,
+    userRole,
+    userId,
+    currentBranchId,
+    permissions,
+    csAgentsForAssign,
+    logisticsLocations,
+    logisticsDispatchTemplates,
+    invoice,
+  } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
   return (
@@ -490,6 +502,7 @@ export default function OrderDetailRoute() {
             canEditOrder={canEditOrder}
             userRole={userRole}
             userId={userId}
+            currentBranchId={currentBranchId}
             permissions={permissions}
             csAgentsForAssign={csAgentsForAssign}
             logisticsLocations={logisticsLocations}

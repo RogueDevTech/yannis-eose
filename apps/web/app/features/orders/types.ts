@@ -58,6 +58,8 @@ export interface OrderDetail {
     startedAt: string;
   }>;
   allowedTransitions: string[];
+  /** Order branch — used for Branch Admin RBAC on CS actions */
+  branchId?: string | null;
   /** Optional fields returned by API from orders table; shown dynamically in Details */
   campaignId?: string | null;
   mediaBuyerId?: string | null;
@@ -94,6 +96,23 @@ export interface OrderDetail {
   remittanceStatus?: string | null;
   /** Delivery remittance batch ID — null if not yet remitted */
   remittanceId?: string | null;
+  /**
+   * Form-builder responses keyed by `customField.id`. Persisted to `orders.custom_fields`
+   * JSONB. Render via `campaignCustomFieldDefs` (which provides label + type for each id).
+   */
+  customFields?: Record<string, string | number | boolean | string[]> | null;
+  /**
+   * Field definitions for the campaign that produced this order — pulled from the
+   * campaign's `formConfig.customFields` so the UI can render `label: value` rows.
+   * Empty array when the campaign has no custom fields or the order has no campaign.
+   */
+  campaignCustomFieldDefs?: Array<{
+    id: string;
+    type: string;
+    label: string;
+    order: number;
+    options?: string[];
+  }>;
 }
 
 export interface HistoryEntry {
@@ -143,6 +162,8 @@ export interface OrderDetailPageExtraProps {
   canEditOrder?: boolean;
   userRole: string;
   userId: string;
+  /** Active branch from session — paired with `order.branchId` for Branch Admin gates */
+  currentBranchId?: string | null;
   permissions: string[];
   csAgentsForAssign?: Array<{ id: string; name: string }>;
   logisticsLocations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }>;
