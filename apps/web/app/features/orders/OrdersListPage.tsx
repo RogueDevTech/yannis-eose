@@ -516,7 +516,10 @@ export function OrdersListPage({
       {/* Filters bar */}
       <div className="card">
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Date pill — same chrome we use on MarketingTeamPage so the filter is visually
+              prominent and easy to spot. The bare DateFilterBar is just a text button which
+              disappears into the toolbar; the pill wrapper makes it a clear control. */}
+          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
             <DateFilterBar
               startDate={filters?.startDate ?? ''}
               endDate={filters?.endDate ?? ''}

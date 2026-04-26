@@ -7,6 +7,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Modal } from './modal';
+import { FormSelect } from './form-select';
+import { Textarea } from './textarea';
 
 interface MessageTemplate {
   id: string;
@@ -509,22 +511,22 @@ export function CSMessagingPanel({
                   })}
                 </div>
               ) : (
-                <select
+                <FormSelect
+                  id="cs-msg-template-select"
                   value={selectedTemplateId}
                   onChange={(e) => {
-                    setSelectedTemplateId(e.target.value);
-                    if (e.target.value) {
-                      const tpl = channelTemplates.find((t) => t.id === e.target.value);
+                    const v = e.target.value;
+                    setSelectedTemplateId(v);
+                    if (v) {
+                      const tpl = channelTemplates.find((t) => t.id === v);
                       if (tpl) setMessageBody(renderTemplateWithOrderData(tpl.body));
                     }
                   }}
-                  className="input w-full text-sm"
-                >
-                  <option value="">Pick a template…</option>
-                  {channelTemplates.map((tpl) => (
-                    <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                  ))}
-                </select>
+                  placeholder="Pick a template…"
+                  options={channelTemplates.map((tpl) => ({ value: tpl.id, label: tpl.name }))}
+                  controlSize="md"
+                  wrapperClassName="w-full"
+                />
               )}
               {selectedTemplate && (
                 <div className="p-2.5 rounded-lg bg-app-hover/60 text-xs text-app-fg-muted font-mono whitespace-pre-wrap border border-app-border">
@@ -536,22 +538,16 @@ export function CSMessagingPanel({
 
           {/* Freeform message body for SMS and WhatsApp */}
           {!selectedTemplateId && (
-            <div>
-              <label className="block text-xs font-medium text-app-fg-muted mb-1">
-                Message
-              </label>
-              <textarea
-                value={messageBody}
-                onChange={(e) => setMessageBody(e.target.value)}
-                rows={3}
-                maxLength={textChannel === 'whatsapp' ? 1600 : 160}
-                placeholder={textChannel === 'whatsapp' ? 'Type your WhatsApp message…' : 'Type your SMS message…'}
-                className="input w-full text-sm resize-none"
-              />
-              <p className="text-[10px] text-app-fg-muted mt-0.5 text-right">
-                {messageBody.length}/{textChannel === 'whatsapp' ? 1600 : 160}
-              </p>
-            </div>
+            <Textarea
+              label="Message"
+              value={messageBody}
+              onChange={(e) => setMessageBody(e.target.value)}
+              rows={3}
+              maxLength={textChannel === 'whatsapp' ? 1600 : 160}
+              placeholder={textChannel === 'whatsapp' ? 'Type your WhatsApp message…' : 'Type your SMS message…'}
+              showCount
+              className="text-sm"
+            />
           )}
 
           {templatesFetcher.state === 'idle' && channelTemplates.length === 0 && (

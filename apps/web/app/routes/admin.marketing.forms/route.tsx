@@ -82,6 +82,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const subtitle = formData.get('formSubtitle')?.toString();
     const buttonText = formData.get('formButtonText')?.toString();
     const accentColor = formData.get('formAccentColor')?.toString();
+    // Optional success callback URL — full redirect URL the Edge Worker sends the buyer to
+    // after a successful submission (their funnel's thank-you page). Empty/missing => use the
+    // default inline success message instead.
+    const successCallbackUrl = formData.get('successCallbackUrl')?.toString()?.trim() || undefined;
     const showDeliveryAddress = formData.get('showDeliveryAddress') === 'on';
     const showDeliveryNotes = formData.get('showDeliveryNotes') === 'on';
     const showDeliveryState = formData.get('showDeliveryState') === 'on';
@@ -89,11 +93,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const showPreferredDeliveryDate = formData.get('showPreferredDeliveryDate') === 'on';
     const showPaymentMethod = formData.get('showPaymentMethod') === 'on';
     const hasToggles = showDeliveryAddress || showDeliveryNotes || showDeliveryState || showGender || showPreferredDeliveryDate || showPaymentMethod;
-    const formConfig = (heading || subtitle || buttonText || accentColor || hasToggles) ? {
+    const formConfig = (heading || subtitle || buttonText || accentColor || successCallbackUrl || hasToggles) ? {
       ...(heading ? { heading } : {}),
       ...(subtitle ? { subtitle } : {}),
       ...(buttonText ? { buttonText } : {}),
       ...(accentColor ? { accentColor } : {}),
+      ...(successCallbackUrl ? { successCallbackUrl } : {}),
       showDeliveryAddress,
       showDeliveryNotes,
       showDeliveryState,
@@ -129,6 +134,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const subtitle = formData.get('formSubtitle')?.toString()?.trim();
     const buttonText = formData.get('formButtonText')?.toString()?.trim();
     const accentColor = formData.get('formAccentColor')?.toString()?.trim();
+    const successCallbackUrl = formData.get('successCallbackUrl')?.toString()?.trim() || undefined;
     const showDeliveryAddress = formData.get('showDeliveryAddress') === 'on';
     const showDeliveryNotes = formData.get('showDeliveryNotes') === 'on';
     const showDeliveryState = formData.get('showDeliveryState') === 'on';
@@ -141,6 +147,7 @@ export async function action({ request }: ActionFunctionArgs) {
       ...(subtitle ? { subtitle } : {}),
       ...(buttonText ? { buttonText } : {}),
       ...(accentColor ? { accentColor } : {}),
+      ...(successCallbackUrl ? { successCallbackUrl } : {}),
       showDeliveryAddress,
       showDeliveryNotes,
       showDeliveryState,

@@ -1,11 +1,13 @@
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
+import { Pagination } from '~/components/ui/pagination';
 import { Spinner } from '~/components/ui/spinner';
-import { useNavigation } from '@remix-run/react';
+import { useNavigation, useSearchParams } from '@remix-run/react';
 import type { LeaderboardEntry } from '~/features/marketing/types';
 
 const HIGH_CPA_THRESHOLD = 5000;
+const LEADERBOARD_PAGE_SIZE = 10;
 
 interface MarketingLeaderboardPageProps {
   mediaBuyerLeaderboard: LeaderboardEntry[];
@@ -22,6 +24,9 @@ export function MarketingLeaderboardPage({
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pageParam = Number(searchParams.get('page') ?? '1');
+  const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
 
   return (
     <div className="space-y-6 px-3 sm:px-0">
@@ -55,17 +60,22 @@ export function MarketingLeaderboardPage({
               </div>
             );
           }
+          // 10/page client-side. Rank stays global so #1 is #1 across pages.
+          const totalPages = Math.max(1, Math.ceil(lb.length / LEADERBOARD_PAGE_SIZE));
+          const safePage = Math.min(page, totalPages);
+          const startIdx = (safePage - 1) * LEADERBOARD_PAGE_SIZE;
+          const pagedLb = lb.slice(startIdx, startIdx + LEADERBOARD_PAGE_SIZE);
           return (
             <div className="card p-0 overflow-hidden">
               <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
                 <h2 className="text-base font-semibold text-app-fg sm:text-lg">Media Buyer Performance</h2>
                 <p className="text-xs text-app-fg-muted mt-0.5">
-                  Ranked by True ROAS ({periodLabel})
+                  Ranked by True ROAS ({periodLabel}) · {lb.length} buyer{lb.length === 1 ? '' : 's'}
                 </p>
               </div>
               <div className="space-y-4 px-4 py-4">
-                {lb.map((b, idx) => {
-                  const rank = idx + 1;
+                {pagedLb.map((b, idx) => {
+                  const rank = startIdx + idx + 1;
                   const isTopThree = rank <= 3;
                   const isHighCpa = b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0;
                   return (
@@ -136,6 +146,22 @@ export function MarketingLeaderboardPage({
                   );
                 })}
               </div>
+              {totalPages > 1 && (
+                <div className="border-t border-app-border px-4 py-3 flex items-center justify-between">
+                  <p className="text-xs text-app-fg-muted">
+                    Showing {startIdx + 1}–{Math.min(startIdx + LEADERBOARD_PAGE_SIZE, lb.length)} of {lb.length}
+                  </p>
+                  <Pagination
+                    page={safePage}
+                    totalPages={totalPages}
+                    onPageChange={(nextPage) => {
+                      const next = new URLSearchParams(searchParams);
+                      next.set('page', String(nextPage));
+                      setSearchParams(next, { replace: true });
+                    }}
+                  />
+                </div>
+              )}
             </div>
           );
         }}

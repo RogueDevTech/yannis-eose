@@ -40,9 +40,11 @@ export function PullToRefresh({ children, disabled = false }: PullToRefreshProps
     (e: TouchEvent) => {
       if (disabled || isLoading || refreshing) return;
       if (getScrollTop() > SCROLL_TOP_TOLERANCE) return;
+      const touch = e.touches[0];
+      if (!touch) return;
       pullingRef.current = true;
       reachedThresholdRef.current = false;
-      startYRef.current = e.touches[0].clientY;
+      startYRef.current = touch.clientY;
       setPullDistance(0);
     },
     [disabled, isLoading, refreshing],
@@ -56,7 +58,9 @@ export function PullToRefresh({ children, disabled = false }: PullToRefreshProps
         setPullDistance(0);
         return;
       }
-      const rawDelta = e.touches[0].clientY - startYRef.current;
+      const moveTouch = e.touches[0];
+      if (!moveTouch) return;
+      const rawDelta = moveTouch.clientY - startYRef.current;
       if (rawDelta <= PULL_DEAD_ZONE) return;
       e.preventDefault();
       const value = Math.min((rawDelta - PULL_DEAD_ZONE) * RESISTANCE, PULL_MAX);

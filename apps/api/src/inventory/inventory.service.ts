@@ -1064,4 +1064,243 @@ export class InventoryService {
 
     return rows[0]?.dispatchLocked ?? false;
   }
+
+  // ── Order lifecycle inventory integrity (global + per-location) ─────────────
+
+  private async loadAggregatedOrderLineQuantities(orderId: string): Promise<Map<string, number>> {
+    const rows = await this.db
+      .select({
+        productId: schema.orderItems.productId,
+        quantity: schema.orderItems.quantity,
+      })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, orderId));
+
+    const byProduct = new Map<string, number>();
+    for (const row of rows) {
+      byProduct.set(row.productId, (byProduct.get(row.productId) ?? 0) + row.quantity);
+    }
+    return byProduct;
+  }
+
+  /**
+   * CONFIRMED gate: total (stock − reserved) across all locations and FIFO batch
+   * remaining must cover every product on the order.
+   */
+  async assertGlobalAvailabilityForOrder(orderId: string): Promise<void> {
+    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
+    if (byProduct.size === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items to confirm against inventory.' });
+    }
+
+    for (const [productId, need] of byProduct) {
+      const levels = await this.db
+        .select()
+        .from(schema.inventoryLevels)
+        .where(eq(schema.inventoryLevels.productId, productId));
+      const shelfAvailable = levels.reduce((sum, l) => sum + (l.stockCount - l.reservedCount), 0);
+      if (shelfAvailable < need) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot confirm: insufficient sellable shelf stock for this order (need ${need}, have ${shelfAvailable} across locations).`,
+        });
+      }
+
+      const batches = await this.db
+        .select({ remaining: schema.stockBatches.remainingQuantity })
+        .from(schema.stockBatches)
+        .where(eq(schema.stockBatches.productId, productId));
+      const fifoAvailable = batches.reduce((sum, b) => sum + (b.remaining ?? 0), 0);
+      if (fifoAvailable < need) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot confirm: insufficient FIFO batch remaining for a product on this order (need ${need}, have ${fifoAvailable}).`,
+        });
+      }
+    }
+  }
+
+  /**
+   * ALLOCATED gate: each line must fit in unreserved stock at the chosen 3PL location.
+   */
+  async assertLocationCanFulfillOrder(orderId: string, locationId: string): Promise<void> {
+    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
+    if (byProduct.size === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items to allocate.' });
+    }
+
+    for (const [productId, need] of byProduct) {
+      const rows = await this.db
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, productId),
+            eq(schema.inventoryLevels.locationId, locationId),
+          ),
+        )
+        .limit(1);
+      const level = rows[0];
+      if (!level) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            'This 3PL location has no inventory row for a product on the order. Receive stock (intake or verified transfer) before allocating.',
+        });
+      }
+      const avail = level.stockCount - level.reservedCount;
+      if (avail < need) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Insufficient stock at the selected location for this order (available ${avail}, need ${need} for one SKU).`,
+        });
+      }
+    }
+  }
+
+  /**
+   * ALLOCATED side effect: bump reserved_count at the 3PL and append ALLOCATION movements in one transaction.
+   */
+  async reserveForAllocateWithMovements(orderId: string, locationId: string, actor: SessionUser): Promise<void> {
+    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
+    if (byProduct.size === 0) return;
+
+    await withActor(this.db, actor, async (tx) => {
+      for (const [productId, qty] of byProduct) {
+        const rows = await tx
+          .select()
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, productId),
+              eq(schema.inventoryLevels.locationId, locationId),
+            ),
+          )
+          .limit(1);
+        const level = rows[0];
+        if (!level) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Inventory row disappeared between validation and reservation.',
+          });
+        }
+        const avail = level.stockCount - level.reservedCount;
+        if (avail < qty) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Stock changed while allocating — not enough free units left at this location.',
+          });
+        }
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            reservedCount: sql`${schema.inventoryLevels.reservedCount} + ${qty}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.inventoryLevels.id, level.id));
+
+        await tx.insert(schema.stockMovements).values({
+          productId,
+          movementType: 'ALLOCATION',
+          quantity: qty,
+          toLocationId: locationId,
+          referenceId: orderId,
+          reason: `Allocated to 3PL for order ${orderId}`,
+          actorId: actor.id,
+        });
+      }
+    });
+  }
+
+  /**
+   * DELIVERED: consume FIFO batches, decrement shelf + reserved at the fulfillment location,
+   * and append DELIVERY movements — one atomic transaction with actor attribution.
+   */
+  async completeDeliveryInventory(
+    orderId: string,
+    logisticsLocationId: string,
+    actor: SessionUser,
+  ): Promise<void> {
+    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
+    if (byProduct.size === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items for delivery.' });
+    }
+
+    await withActor(this.db, actor, async (tx) => {
+      for (const [productId, lineQty] of byProduct) {
+        const batches = await tx
+          .select()
+          .from(schema.stockBatches)
+          .where(eq(schema.stockBatches.productId, productId))
+          .orderBy(asc(schema.stockBatches.receivedAt));
+
+        let remaining = lineQty;
+        for (const batch of batches) {
+          if (remaining <= 0) break;
+          const batchRemaining = batch.remainingQuantity ?? 0;
+          if (batchRemaining <= 0) continue;
+          const deduct = Math.min(remaining, batchRemaining);
+          await tx
+            .update(schema.stockBatches)
+            .set({ remainingQuantity: batchRemaining - deduct })
+            .where(eq(schema.stockBatches.id, batch.id));
+          remaining -= deduct;
+        }
+        if (remaining > 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Cannot record delivery: insufficient FIFO batch remaining for a product on this order.',
+          });
+        }
+
+        await tx.insert(schema.stockMovements).values({
+          productId,
+          movementType: 'DELIVERY',
+          quantity: -lineQty,
+          fromLocationId: logisticsLocationId,
+          referenceId: orderId,
+          reason: `Delivered: order ${orderId}`,
+          actorId: actor.id,
+        });
+
+        const levelRows = await tx
+          .select()
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, productId),
+              eq(schema.inventoryLevels.locationId, logisticsLocationId),
+            ),
+          )
+          .limit(1);
+        const level = levelRows[0];
+        if (!level) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'Cannot record delivery: no inventory level at the fulfillment location for a product on this order.',
+          });
+        }
+        if (level.stockCount < lineQty) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Cannot record delivery: shelf count at location is below shipped quantity.',
+          });
+        }
+        const reservedRelease = Math.min(level.reservedCount, lineQty);
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} - ${lineQty}`,
+            reservedCount: sql`${schema.inventoryLevels.reservedCount} - ${reservedRelease}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.inventoryLevels.id, level.id));
+      }
+    });
+
+    for (const productId of byProduct.keys()) {
+      await this.checkLowStockAndNotify(productId, logisticsLocationId);
+    }
+  }
 }

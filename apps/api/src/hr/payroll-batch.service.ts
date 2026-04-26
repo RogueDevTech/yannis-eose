@@ -202,9 +202,13 @@ export class PayrollBatchService {
 
       const generatedPayouts: PayoutRow[] = [];
 
+      // CEO directive 2026-04-26: every active staff member in (branch × dept) gets a payout row,
+      // even if the commission plan is missing or computes to zero. This gives HR a full roster to
+      // review + adjust manually before submitting. Previously we skipped staff with no plan,
+      // which left them invisible in the batch.
       for (const member of staff) {
-        const computed = await this.computePayoutForMember(tx, member, periodStart, periodEnd);
-        if (!computed) continue; // No plan or nothing to pay
+        const computed = (await this.computePayoutForMember(tx, member, periodStart, periodEnd))
+          ?? { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
         const inserted = await tx
           .insert(schema.payoutRecords)
           .values({

@@ -39,6 +39,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusParam && (AD_SPEND_STATUSES as readonly string[]).includes(statusParam)
       ? (statusParam as AdSpendStatusFilter)
       : undefined;
+  // UUIDv7 is hex-with-dashes; cheap regex avoids passing garbage through to the API.
+  const productIdParam = url.searchParams.get('productId')?.trim();
+  const productIdFilter = productIdParam && /^[0-9a-f-]{32,36}$/i.test(productIdParam)
+    ? productIdParam
+    : undefined;
 
   const adSpendScope = {
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
@@ -46,17 +51,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
     ...(statusFilter && { status: statusFilter }),
     ...(searchFilter && { search: searchFilter }),
+    ...(productIdFilter && { productId: productIdFilter }),
   };
   const adSpendInput = JSON.stringify({
     page,
     limit: AD_SPEND_PER_PAGE,
     ...adSpendScope,
   });
+  // Status counts share the product filter so the pill counts match the visible list.
   const countsInput = JSON.stringify({
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
     ...(searchFilter && { search: searchFilter }),
+    ...(productIdFilter && { productId: productIdFilter }),
   });
   const metricsInput = JSON.stringify({
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
@@ -138,6 +146,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalPages,
     statusFilter,
     searchFilter,
+    productIdFilter,
     statusCounts,
     campaigns: parseCampaigns(campaignsRes),
     metrics,

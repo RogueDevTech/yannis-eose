@@ -22,6 +22,14 @@ export interface Env {
 
 // ── Types ──────────────────────────────────────────────────────
 
+/**
+ * Custom field response value sent from the Edge Form. The shape mirrors `CustomFormField.type`
+ * on the campaign config: text/email/phone/number/dropdown/radio/date → string, toggle → boolean,
+ * checkbox_group → string[]. Edge Worker does not validate per-field rules — that's the
+ * builder's job at save time + the API's job on create. Edge just collects + forwards.
+ */
+type CustomFieldValue = string | number | boolean | string[];
+
 interface SubmissionPayload {
   campaignId?: string;
   mediaBuyerId?: string;
@@ -43,6 +51,8 @@ interface SubmissionPayload {
   }>;
   totalAmount?: string;
   cartId?: string;
+  /** Form-builder responses, keyed by `customField.id`. */
+  customFields?: Record<string, CustomFieldValue>;
 }
 
 interface OrderCreatePayload {
@@ -71,6 +81,8 @@ interface OrderCreatePayload {
   source?: 'edge-form';
   /** Cart ID from prior cart save — marks cart as CONVERTED when order created */
   cartId?: string;
+  /** Form-builder responses, keyed by `customField.id`. Persisted to `orders.custom_fields` JSONB. */
+  customFields?: Record<string, CustomFieldValue>;
 }
 
 /** Validated cart form data (has raw customerPhone from form) */
@@ -116,6 +128,13 @@ interface CampaignConfig {
     buttonText?: string;
     accentColor?: string;
     successMessage?: string;
+    /**
+     * Optional URL to redirect the buyer to on a successful submit (their funnel's
+     * thank-you page). When undefined/empty, the form falls back to the default inline
+     * success message. Bypassed when the order has a Paystack `authorizationUrl` —
+     * payment redirect always wins.
+     */
+    successCallbackUrl?: string;
     showDeliveryAddress?: boolean;
     showDeliveryNotes?: boolean;
     showDeliveryState?: boolean;
@@ -124,6 +143,21 @@ interface CampaignConfig {
     showPaymentMethod?: boolean;
     deliveryStateOptions?: string[];
     preferredDeliveryDateOptions?: string[];
+    /** Form-builder output. The Edge Worker renders these between the standard fields and
+     *  the submit button. Submission collects values into `customFields[id] = value` keyed
+     *  by `field.id` and forwards them to the API → `orders.custom_fields` JSONB. */
+    customFields?: Array<{
+      id: string;
+      type: 'text' | 'textarea' | 'email' | 'phone' | 'number' | 'date' | 'dropdown' | 'radio' | 'checkbox_group' | 'toggle';
+      label: string;
+      placeholder?: string;
+      helpText?: string;
+      required: boolean;
+      order: number;
+      options?: string[];
+      min?: number | string;
+      max?: number | string;
+    }>;
   };
 }
 
@@ -246,6 +280,25 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
     }
   }
 
+  // Custom field responses: object keyed by field id with primitive / string[] values.
+  // Edge Worker doesn't enforce per-field rules — that's the API's job. We just sanity-check
+  // the top-level shape so a malformed payload doesn't hand garbage to the API.
+  let customFields: Record<string, CustomFieldValue> | undefined;
+  const rawCf = b['customFields'];
+  if (rawCf && typeof rawCf === 'object' && !Array.isArray(rawCf)) {
+    const safe: Record<string, CustomFieldValue> = {};
+    for (const [k, v] of Object.entries(rawCf as Record<string, unknown>)) {
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+        safe[k] = v;
+      } else if (Array.isArray(v)) {
+        // Force every element to string and cap the array to 50 items
+        safe[k] = v.slice(0, 50).map((item) => String(item));
+      }
+      // Drop unknown shapes silently — never throw on a custom field.
+    }
+    if (Object.keys(safe).length > 0) customFields = safe;
+  }
+
   return {
     valid: true,
     data: {
@@ -264,6 +317,7 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
       items: normalisedItems as SubmissionPayload['items'],
       totalAmount: typeof b['totalAmount'] === 'string' ? b['totalAmount'] : typeof b['totalAmount'] === 'number' ? String(b['totalAmount']) : undefined,
       cartId: typeof b['cartId'] === 'string' ? b['cartId'] : undefined,
+      customFields,
     },
   };
 }
@@ -872,6 +926,58 @@ function getFormScript(
           btn.textContent = form.dataset.btnText || 'Submit Order';
           return;
         }
+        // ── Custom fields (form builder) ───────────────────────────────────────
+        // Walk every element with [data-yannis-cf] and fold into a single object keyed
+        // by field id. Multi-select types (checkbox_group) collect into arrays.
+        // Required-checkbox-group: at least one option must be checked, else block submit.
+        var customFields = {};
+        var cfRequiredFail = '';
+        var cfNodes = form.querySelectorAll('[data-yannis-cf]');
+        for (var i = 0; i < cfNodes.length; i++) {
+          var el = cfNodes[i];
+          var fid = el.getAttribute('data-yannis-cf');
+          var ftype = el.getAttribute('data-yannis-cf-type');
+          if (!fid || !ftype) continue;
+
+          if (ftype === 'checkbox_group') {
+            // Append to array; first occurrence creates it.
+            if (el.checked) {
+              if (!customFields[fid]) customFields[fid] = [];
+              customFields[fid].push(el.value);
+            } else if (!customFields[fid]) {
+              customFields[fid] = [];
+            }
+          } else if (ftype === 'radio') {
+            if (el.checked) customFields[fid] = el.value;
+            else if (!(fid in customFields)) customFields[fid] = '';
+          } else if (ftype === 'toggle') {
+            customFields[fid] = !!el.checked;
+          } else if (ftype === 'number') {
+            var nv = el.value;
+            customFields[fid] = nv === '' ? '' : Number(nv);
+          } else {
+            customFields[fid] = el.value;
+          }
+        }
+        // Validate required checkbox groups (browser-required only enforces >=1 on radios).
+        var cfGroups = form.querySelectorAll('[data-cf-required="1"]');
+        for (var g = 0; g < cfGroups.length; g++) {
+          var grp = cfGroups[g];
+          var checked = grp.querySelectorAll('input[type="checkbox"]:checked');
+          if (checked.length === 0) {
+            var lbl = (grp.previousElementSibling && grp.previousElementSibling.textContent) || 'a required field';
+            cfRequiredFail = 'Please select at least one option for ' + lbl.replace(/\\s*\\*\\s*$/, '').trim();
+            break;
+          }
+        }
+        if (cfRequiredFail) {
+          msg.className = 'msg msg-error';
+          msg.textContent = cfRequiredFail;
+          btn.disabled = false;
+          btn.textContent = form.dataset.btnText || 'Submit Order';
+          return;
+        }
+
         var orderData = {
           campaignId: '${campaignId}',
           mediaBuyerId: ${mediaBuyerIdJson},
@@ -886,7 +992,8 @@ function getFormScript(
           customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
           items: [{ productId: selectedProduct, quantity: selectedOffer.qty, unitPrice: selectedOffer.price, offerLabel: selectedOffer.label }],
           cartId: savedCartId || undefined,
-          totalAmount: (selectedOffer.qty * parseFloat(selectedOffer.price)).toString()
+          totalAmount: (selectedOffer.qty * parseFloat(selectedOffer.price)).toString(),
+          customFields: Object.keys(customFields).length > 0 ? customFields : undefined
         };
 
         if (!isOnline) {
@@ -917,10 +1024,19 @@ function getFormScript(
           if (result.ok) {
             var authUrl = result.data.authorizationUrl;
             if (authUrl) {
+              // Payment redirect always wins over the campaign-level success URL — the buyer
+              // needs to complete payment before any thank-you page.
               if (showInlineSuccess('Order created successfully. Continue to secure payment.', authUrl)) {
                 return;
               }
               window.location.href = authUrl;
+              return;
+            }
+            // Optional Media Buyer success callback — redirects to their funnel's thank-you page.
+            // Validated as a full URL on save; redirect only if it parses as http(s).
+            var callbackUrl = (form.dataset.successCallback || '').trim();
+            if (callbackUrl && /^https?:\\/\\//i.test(callbackUrl)) {
+              window.location.href = callbackUrl;
               return;
             }
             if (showInlineSuccess(result.data.message || 'Order received successfully! We will contact you shortly.')) {
@@ -1066,7 +1182,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
     <p class="subtitle">${escapeHtml(subtitle)}</p>
     <div id="yannisOffline" class="offline-badge hidden">Offline</div>
     <div id="yannisMsg" class="msg hidden"></div>
-    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${fc.showPaymentMethod ? 'true' : 'false'}"${singleProductAttr}>
+    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${fc.showPaymentMethod ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}"${singleProductAttr}>
       ${!hasSingleProduct ? `<label>Select Product</label>
       <div class="product-selector">${productOptionsHtml}</div>` : ''}
       <label>Select Offer</label>
@@ -1111,9 +1227,106 @@ function getFormInnerHTML(config: CampaignConfig): string {
         <label for="customerEmail">Email (for payment receipt) <span class="required">*</span></label>
         <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com">
       </div>` : ''}
+      ${renderCustomFields(fc.customFields)}
       <button type="submit" class="btn" id="yannisSubmitBtn">${escapeHtml(buttonText)}</button>
     </form>
   `;
+}
+
+/**
+ * Render the form-builder custom fields between the standard delivery / payment block and
+ * the submit button. The Edge Worker is just an HTML template renderer — no per-type
+ * validation here beyond what the browser handles via `required` / `type` / `min` / `max`
+ * attributes. The form-submit JS reads these via `[data-yannis-cf]` and folds them into
+ * the `customFields` payload sent to the API.
+ */
+function renderCustomFields(
+  fields: NonNullable<CampaignConfig['formConfig']>['customFields'] | undefined,
+): string {
+  if (!fields || fields.length === 0) return '';
+  // Always render in `order` ascending so reordering on the builder is reflected on the form.
+  const sorted = [...fields].sort((a, b) => a.order - b.order);
+  return sorted.map((field) => {
+    const id = `yannis-cf-${field.id}`;
+    const required = field.required ? 'required' : '';
+    const placeholder = field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : '';
+    const helpHtml = field.helpText
+      ? `<p class="help-text">${escapeHtml(field.helpText)}</p>`
+      : '';
+    const labelHtml = `<label for="${id}">${escapeHtml(field.label)}${field.required ? ' <span class="required">*</span>' : ''}</label>`;
+
+    switch (field.type) {
+      case 'text':
+        return `${labelHtml}
+          <input id="${id}" name="${id}" type="text" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="text" ${required} ${placeholder}
+            ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
+            ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}>
+          ${helpHtml}`;
+      case 'textarea':
+        return `${labelHtml}
+          <textarea id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="textarea" ${required} ${placeholder}
+            ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
+            ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}></textarea>
+          ${helpHtml}`;
+      case 'email':
+        return `${labelHtml}
+          <input id="${id}" name="${id}" type="email" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="email" ${required} ${placeholder}>
+          ${helpHtml}`;
+      case 'phone':
+        return `${labelHtml}
+          <input id="${id}" name="${id}" type="tel" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="phone" ${required} ${placeholder}>
+          ${helpHtml}`;
+      case 'number':
+        return `${labelHtml}
+          <input id="${id}" name="${id}" type="number" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="number" ${required} ${placeholder}
+            ${field.min != null ? `min="${Number(field.min)}"` : ''}
+            ${field.max != null ? `max="${Number(field.max)}"` : ''}>
+          ${helpHtml}`;
+      case 'date':
+        return `${labelHtml}
+          <input id="${id}" name="${id}" type="date" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="date" ${required}
+            ${field.min ? `min="${escapeHtml(String(field.min))}"` : ''}
+            ${field.max ? `max="${escapeHtml(String(field.max))}"` : ''}>
+          ${helpHtml}`;
+      case 'dropdown': {
+        const options = (field.options ?? []).map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('\n');
+        return `${labelHtml}
+          <select id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="dropdown" ${required}>
+            <option value="">Select...</option>
+            ${options}
+          </select>
+          ${helpHtml}`;
+      }
+      case 'radio': {
+        const options = (field.options ?? []).map((o, i) => `
+          <label class="radio-option">
+            <input type="radio" name="${id}" value="${escapeHtml(o)}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="radio" ${i === 0 && field.required ? 'required' : ''}>
+            <span>${escapeHtml(o)}</span>
+          </label>`).join('\n');
+        return `${labelHtml}
+          <div class="radio-group" role="radiogroup" data-cf-group="${escapeHtml(field.id)}">${options}</div>
+          ${helpHtml}`;
+      }
+      case 'checkbox_group': {
+        const options = (field.options ?? []).map((o) => `
+          <label class="checkbox-option">
+            <input type="checkbox" name="${id}" value="${escapeHtml(o)}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="checkbox_group">
+            <span>${escapeHtml(o)}</span>
+          </label>`).join('\n');
+        return `${labelHtml}
+          <div class="checkbox-group" data-cf-group="${escapeHtml(field.id)}" ${field.required ? 'data-cf-required="1"' : ''}>${options}</div>
+          ${helpHtml}`;
+      }
+      case 'toggle':
+        return `<label class="toggle-row">
+            <input type="checkbox" id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="toggle" ${field.required ? 'required' : ''}>
+            <span>${escapeHtml(field.label)}${field.required ? ' <span class="required">*</span>' : ''}</span>
+          </label>
+          ${helpHtml}`;
+      default:
+        return '';
+    }
+  }).join('\n');
 }
 
 function escapeHtml(str: string): string {
@@ -1582,6 +1795,7 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     totalAmount: data.totalAmount,
     source: 'edge-form',
     cartId: data.cartId,
+    customFields: data.customFields,
   };
 
   // 8. Forward to API: PAY_ONLINE → prepare Paystack (no order yet); else → orders.create

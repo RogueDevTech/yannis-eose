@@ -2,7 +2,7 @@ import { forwardRef } from 'react';
 
 type TextInputSize = 'sm' | 'md' | 'lg';
 
-interface TextInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'size'> {
   /** Label displayed above the input */
   label?: string;
   /** Helper text below the input */
@@ -17,7 +17,8 @@ interface TextInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   leftAddon?: React.ReactNode;
   /** Text/node rendered as a fixed right addon (e.g. ".com") */
   rightAddon?: React.ReactNode;
-  size?: TextInputSize;
+  /** Visual height — distinct from native HTML `input size` (width in chars) */
+  controlSize?: TextInputSize;
   /** Wrapper className */
   wrapperClassName?: string;
   /** Required asterisk next to label */
@@ -52,7 +53,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
       rightIcon,
       leftAddon,
       rightAddon,
-      size = 'md',
+      controlSize = 'md',
       wrapperClassName = '',
       className = '',
       required,
@@ -71,9 +72,9 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
       hasError ? 'border-danger-500 focus:border-danger-500 focus:ring-danger-500' : '',
       leftAddon ? 'rounded-l-none' : '',
       rightAddon ? 'rounded-r-none' : '',
-      leftIcon ? iconPaddingClasses[size].left : '',
-      rightIcon ? iconPaddingClasses[size].right : '',
-      sizeClasses[size],
+      leftIcon ? iconPaddingClasses[controlSize].left : '',
+      rightIcon ? iconPaddingClasses[controlSize].right : '',
+      sizeClasses[controlSize],
       className,
     ]
       .filter(Boolean)
@@ -100,7 +101,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
               <span
                 className={[
                   'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
-                  iconSizeClasses[size],
+                  iconSizeClasses[controlSize],
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -115,7 +116,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
               <span
                 className={[
                   'pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-app-fg-muted',
-                  size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4',
+                  controlSize === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4',
                 ]
                   .filter(Boolean)
                   .join(' ')}

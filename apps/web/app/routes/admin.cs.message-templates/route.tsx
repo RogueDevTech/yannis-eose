@@ -8,6 +8,9 @@ import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { Tabs } from '~/components/ui/tabs';
 import { useFetcherToast } from '~/components/ui/toast';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
+import { Textarea } from '~/components/ui/textarea';
 
 export const meta: MetaFunction = () => [{ title: 'Message Templates — Yannis EOSE' }];
 
@@ -143,6 +146,7 @@ function BodyEditor({
   placeholder: string;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [insertVarKey, setInsertVarKey] = useState(0);
 
   const segments: Array<{ type: 'text' | 'valid' | 'invalid'; value: string }> = [];
   const tokenRegex = /(@[a-zA-Z0-9_]+)|(\{\{\s*[a-zA-Z0-9_]+\s*\}\})/g;
@@ -189,27 +193,25 @@ function BodyEditor({
       <div className="flex items-center justify-between">
         <label className="block text-sm font-medium text-app-fg-muted">Message Body</label>
         <div className="flex items-center gap-2">
-          <select
-            className="input w-44 text-xs"
+          <FormSelect
+            key={insertVarKey}
+            id={`insert-variable-${insertVarKey}`}
             defaultValue=""
             onChange={(event) => {
               const token = event.target.value;
               if (!token) return;
               insertTokenAtCursor(token);
-              event.target.value = '';
+              setInsertVarKey((k) => k + 1);
             }}
+            placeholder="Insert variable..."
+            options={ALLOWED_UI_TOKENS.map((token) => ({ value: token, label: token }))}
+            controlSize="sm"
+            wrapperClassName="w-44"
             aria-label="Insert variable"
-          >
-            <option value="">Insert variable...</option>
-            {ALLOWED_UI_TOKENS.map((token) => (
-              <option key={token} value={token}>
-                {token}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       </div>
-      <textarea
+      <Textarea
         ref={textareaRef}
         name={inputName}
         required
@@ -218,7 +220,7 @@ function BodyEditor({
         rows={5}
         value={body}
         onChange={(event) => onBodyChange(event.target.value)}
-        className="input w-full resize-none font-mono text-sm"
+        className="w-full font-mono text-sm resize-none"
         placeholder={placeholder}
       />
       <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm leading-relaxed whitespace-pre-wrap break-words">
@@ -458,18 +460,26 @@ export default function MessageTemplatesRoute() {
           >
             <input type="hidden" name="intent" value="create" />
             <input type="hidden" name="body" value={toBackendBody(createBody)} />
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Template Name</label>
-              <input name="name" type="text" required minLength={2} maxLength={100} className="input w-full" placeholder="e.g. Order Confirmation" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Channel</label>
-              <select name="channel" required className="input w-full">
-                <option value="">Select channel…</option>
-                <option value="SMS">SMS</option>
-                <option value="WHATSAPP">WhatsApp</option>
-              </select>
-            </div>
+            <TextInput
+              name="name"
+              type="text"
+              label="Template Name"
+              required
+              minLength={2}
+              maxLength={100}
+              placeholder="e.g. Order Confirmation"
+            />
+            <FormSelect
+              name="channel"
+              label="Channel"
+              required
+              defaultValue=""
+              placeholder="Select channel…"
+              options={[
+                { value: 'SMS', label: 'SMS' },
+                { value: 'WHATSAPP', label: 'WhatsApp' },
+              ]}
+            />
             <BodyEditor
               body={createBody}
               onBodyChange={setCreateBody}
@@ -515,10 +525,13 @@ export default function MessageTemplatesRoute() {
             <input type="hidden" name="intent" value="update" />
             <input type="hidden" name="templateId" value={editTemplate.id} />
             <input type="hidden" name="body" value={toBackendBody(editBody)} />
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Template Name</label>
-              <input name="name" type="text" defaultValue={editTemplate.name} required className="input w-full" />
-            </div>
+            <TextInput
+              name="name"
+              type="text"
+              label="Template Name"
+              defaultValue={editTemplate.name}
+              required
+            />
             <BodyEditor
               body={editBody}
               onBodyChange={setEditBody}
@@ -530,13 +543,15 @@ export default function MessageTemplatesRoute() {
                 Only these variables are supported: {ALLOWED_UI_TOKENS.join(', ')}. Remove: {editUnsupported.join(', ')}.
               </p>
             )}
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Status</label>
-              <select name="status" defaultValue={editTemplate.status} className="input w-full">
-                <option value="ACTIVE">Active</option>
-                <option value="ARCHIVED">Archived</option>
-              </select>
-            </div>
+            <FormSelect
+              name="status"
+              label="Status"
+              defaultValue={editTemplate.status}
+              options={[
+                { value: 'ACTIVE', label: 'Active' },
+                { value: 'ARCHIVED', label: 'Archived' },
+              ]}
+            />
             {fetcherResult?.error && (
               <p className="text-sm text-danger-600">{fetcherResult.error}</p>
             )}

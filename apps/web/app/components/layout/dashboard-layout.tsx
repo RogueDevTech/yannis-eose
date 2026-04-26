@@ -285,6 +285,16 @@ const navStructure: NavGroupDef[] = [
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'],
       },
+      // Payouts: per-staff disbursement view. HR + admins via permission, Finance Officer via the
+      // explicit role allow-list. Heads of Department do NOT need raw payout visibility — they see
+      // their team's payouts inside the Monthly Payroll batch detail panel.
+      {
+        label: 'Payouts',
+        href: '/hr/payouts',
+        icon: SidebarIcons.disbursements,
+        permission: 'hr.read',
+        roles: ['FINANCE_OFFICER'],
+      },
       // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
       // Head of Marketing / Head of CS hold `users.read` for other features but must not see
       // this link — they manage their team from the Marketing / CS team pages instead.

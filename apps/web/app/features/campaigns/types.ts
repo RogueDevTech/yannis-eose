@@ -1,3 +1,34 @@
+/** Field types supported by the form builder. Mirrors `FORM_FIELD_TYPES` in the shared
+ *  validators; kept duplicated here to avoid pulling validator types into the UI bundle. */
+export type CustomFormFieldType =
+  | 'text'
+  | 'textarea'
+  | 'email'
+  | 'phone'
+  | 'number'
+  | 'date'
+  | 'dropdown'
+  | 'radio'
+  | 'checkbox_group'
+  | 'toggle';
+
+/** A single custom field on the campaign's public form. Built in the form builder. */
+export interface CustomFormField {
+  id: string;
+  type: CustomFormFieldType;
+  label: string;
+  placeholder?: string;
+  helpText?: string;
+  required: boolean;
+  /** Sort order — 0-indexed. Builder + renderer both honour ascending. */
+  order: number;
+  /** Options for dropdown / radio / checkbox_group. Ignored for other types. */
+  options?: string[];
+  /** Length / value bounds. text/textarea = char length, number = value, date = ISO yyyy-mm-dd. */
+  min?: number | string;
+  max?: number | string;
+}
+
 export interface CampaignFormConfig {
   heading?: string;
   subtitle?: string;
@@ -12,6 +43,8 @@ export interface CampaignFormConfig {
   showPaymentMethod?: boolean | string;
   deliveryStateOptions?: string[];
   preferredDeliveryDateOptions?: string[];
+  /** Form Builder output — arbitrary fields the Media Buyer adds to their public form. */
+  customFields?: CustomFormField[];
 }
 
 export interface Campaign {

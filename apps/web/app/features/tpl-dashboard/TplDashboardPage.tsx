@@ -3,6 +3,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
+import { StatCard } from '~/components/ui/card';
 import type { TplDashboardData } from './types';
 
 function getGreeting() {
@@ -54,25 +55,26 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
         <StatCard
           label="Allocated"
           value={allocated.toString()}
-          icon="allocated"
-          highlight={allocated > 10 ? 'warning' : undefined}
+          icon={<TplStatIcon type="allocated" />}
+          accent={allocated > 10 ? 'warning' : 'brand'}
         />
         <StatCard
           label="In Transit"
           value={inTransit.toString()}
-          icon="transit"
+          icon={<TplStatIcon type="transit" />}
+          accent="brand"
         />
         <StatCard
           label="Delivered"
           value={delivered.toString()}
-          icon="delivered"
-          highlight="success"
+          icon={<TplStatIcon type="delivered" />}
+          accent="success"
         />
         <StatCard
           label="Returns Queue"
           value={data.returnsQueue.toString()}
-          icon="returns"
-          highlight={data.returnsQueue > 0 ? 'danger' : undefined}
+          icon={<TplStatIcon type="returns" />}
+          accent={data.returnsQueue > 0 ? 'danger' : 'brand'}
         />
       </div>
 
@@ -81,18 +83,20 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
         <StatCard
           label="Dispatched"
           value={dispatched.toString()}
-          icon="dispatched"
+          icon={<TplStatIcon type="dispatched" />}
+          accent="brand"
         />
         <StatCard
           label="Stock Transfers"
           value={data.inTransitTransfers.toString()}
-          icon="transfers"
-          highlight={data.inTransitTransfers > 0 ? 'warning' : undefined}
+          icon={<TplStatIcon type="transfers" />}
+          accent={data.inTransitTransfers > 0 ? 'warning' : 'brand'}
         />
         <StatCard
           label="Total Orders"
           value={data.totalOrders.toString()}
-          icon="orders"
+          icon={<TplStatIcon type="orders" />}
+          accent="brand"
         />
       </div>
 
@@ -254,48 +258,23 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
   );
 }
 
-/* ── Stat Card ────────────────────────────────────────── */
+/* ── TPL dashboard stat icons (paired with shared StatCard) ───────────────── */
 
-function StatCard({
-  label,
-  value,
-  icon,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  icon: string;
-  highlight?: 'warning' | 'success' | 'danger';
-}) {
-  const valueColor = highlight
-    ? { warning: 'text-warning-600 dark:text-warning-400', success: 'text-success-600 dark:text-success-400', danger: 'text-danger-600 dark:text-danger-400' }[highlight]
-    : 'text-app-fg';
+const TPL_STAT_PATHS: Record<string, string> = {
+  allocated: 'M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z',
+  dispatched: 'M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5',
+  transit: 'M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12',
+  delivered: 'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  returns: 'M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3',
+  transfers: 'M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5',
+  orders: 'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z',
+};
 
-  const iconBg = highlight
-    ? { warning: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400', success: 'bg-success-50 dark:bg-success-700/20 text-success-600 dark:text-success-400', danger: 'bg-danger-50 dark:bg-danger-700/20 text-danger-600 dark:text-danger-400' }[highlight]
-    : 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400';
-
-  const icons: Record<string, string> = {
-    allocated: 'M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z',
-    dispatched: 'M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5',
-    transit: 'M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12',
-    delivered: 'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-    returns: 'M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3',
-    transfers: 'M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5',
-    orders: 'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z',
-  };
-
+function TplStatIcon({ type }: { type: string }) {
+  const d = TPL_STAT_PATHS[type] ?? TPL_STAT_PATHS.orders;
   return (
-    <div className="card">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">{label}</p>
-        <div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d={icons[icon] ?? icons['orders']} />
-          </svg>
-        </div>
-      </div>
-      <p className={`text-2xl font-bold mt-2 ${valueColor}`}>{value}</p>
-    </div>
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+    </svg>
   );
 }

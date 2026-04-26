@@ -10,6 +10,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
+import { Tabs } from '~/components/ui/tabs';
 
 // ── Remove confirmation modal ─────────────────────────────────────────────────
 
@@ -248,9 +249,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return Response.json({ error: 'Unknown intent' }, { status: 400 });
 }
 
-// ── Stat card ────────────────────────────────────────────────────────────────
+// ── Branch overview KPI tile (distinct from shared card StatCard — supports `sub` line)
 
-function StatCard({
+function BranchOverviewStat({
   label,
   value,
   sub,
@@ -463,38 +464,29 @@ export default function BranchOverviewRoute() {
 
       {/* ── KPI strip ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard label="Total Orders" value={counts.totalOrders} sub="All statuses" />
-        <StatCard label="Active" value={counts.activeOrders} sub="In pipeline" accent="blue" />
-        <StatCard label="Delivered" value={counts.deliveredOrders} sub="Completed" accent="green" />
-        <StatCard
+        <BranchOverviewStat label="Total Orders" value={counts.totalOrders} sub="All statuses" />
+        <BranchOverviewStat label="Active" value={counts.activeOrders} sub="In pipeline" accent="blue" />
+        <BranchOverviewStat label="Delivered" value={counts.deliveredOrders} sub="Completed" accent="green" />
+        <BranchOverviewStat
           label="Delivery Rate"
           value={deliveryRate !== null ? `${deliveryRate}%` : '—'}
           sub="Delivered / total"
           accent={deliveryRate !== null && deliveryRate >= 70 ? 'green' : deliveryRate !== null && deliveryRate >= 40 ? 'yellow' : undefined}
         />
-        <StatCard label="Campaigns" value={counts.campaigns} sub="Marketing" />
-        <StatCard label="CS Templates" value={counts.messageTemplates} sub="SMS / WhatsApp" />
+        <BranchOverviewStat label="Campaigns" value={counts.campaigns} sub="Marketing" />
+        <BranchOverviewStat label="CS Templates" value={counts.messageTemplates} sub="SMS / WhatsApp" />
       </div>
 
-      {/* ── Tab bar ── */}
-      <div className="border-b border-app-border">
-        <div className="flex items-center gap-1">
-          {(['overview', 'team'] as ActiveTab[]).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === tab
-                  ? 'border-primary-600 text-primary-700 dark:text-primary-400'
-                  : 'border-transparent text-app-fg-muted hover:text-app-fg'
-              }`}
-            >
-              {tab === 'overview' ? 'Overview' : `Team (${counts.totalMembers})`}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Shared global Tabs component — matches the look used elsewhere in the app
+          (HRPage, Settings, Order Detail). */}
+      <Tabs
+        value={activeTab}
+        onChange={(v) => setActiveTab(v as ActiveTab)}
+        tabs={[
+          { value: 'overview', label: 'Overview' },
+          { value: 'team', label: `Team (${counts.totalMembers})` },
+        ]}
+      />
 
       {/* ── Overview tab ── */}
       {activeTab === 'overview' && (

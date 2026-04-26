@@ -233,14 +233,14 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
   - `claim`: orders sit in an open pool; reps race to claim via `claimOrder()` with atomic Redis/Postgres lock.
   - Claim cap (`CS_CLAIM_CAP.cap`, default 2): rep blocked from claiming if they have ≥ cap unconfirmed orders — enforced server-side. Only applies in `claim` mode.
   - CEO directive: `manual` is the default so Head of CS retains full control over order distribution. Do NOT change the default without an explicit product decision.
-- The Confirm and No Answer buttons must be DISABLED in the UI until the system receives a VOIP webhook confirming call_duration > 15 seconds for that specific order
+- **Confirm gate (locked 2026-04-26 — keep backend + web in sync):** For the **assigned CS agent**, the Confirm button stays disabled until a qualifying call exists on the order (VOIP: `call_duration ≥ 15s` on a completed call; manual mode: at least one call log). **Overrides (3PL often off-platform):** `SuperAdmin` / `Admin` (`isAdminLevel` — `apps/api/src/common/authz.ts`, `apps/web/app/lib/rbac.ts`) and **Branch Admin** (`BRANCH_ADMIN` when `order.branchId === session.currentBranchId`) **bypass** the call-log requirement for confirm (server gate in `orders.service.ts::validateTransitionGates` + UI in `OrderDetailPage.tsx`). **Head of CS** on the **same branch as the order** may confirm using **any** rep's qualifying call on **that order** (not only `actor.id`). Do NOT strip these overrides without a CEO directive — they exist so ops can confirm when reps or 3PL are not in-app.
 - **Order reassignment is a management action only.** CS agents CANNOT transfer orders between themselves. Only HoCS and SuperAdmin can reassign via Hot Swap. The `order_transfer_requests` table and all agent-initiated transfer UI/procedures are REMOVED.
 - Head of CS can Hot Swap — select orders from one agent and mass-reassign to another
 - When CS updates an order (address change, quantity change, upsell), the system creates a VERSION SNAPSHOT, not an in-place edit. The original data is preserved in the temporal table. The order history timeline shows every change with the agent's name and timestamp
 
 **CS owns the order end-to-end (rider-proxy model):**
 Because the 3PL partners are not in-app yet, the assigned CS agent is the de facto operator through delivery. They:
-- Allocate to a 3PL (`CONFIRMED → ALLOCATED`) themselves — see "Share to 3PL" below. Authorized: assigned CS agent, HoCS, HoLogistics, LogisticsManager, SuperAdmin, Admin.
+- Allocate to a 3PL (`CONFIRMED → ALLOCATED`) themselves — see "Share to 3PL" below. Authorized: assigned CS agent, HoCS, HoLogistics, LogisticsManager, SuperAdmin, Admin. (CS-only **confirm/cancel** also allows **Branch Admin** same-branch — see confirm gate above.)
 - Confirm delivery via follow-up call (`ALLOCATED → DELIVERED`, or from DISPATCHED / IN_TRANSIT if the order passed through those). Authorized: assigned CS agent, HoLogistics, SuperAdmin, Admin (plus TPL_MANAGER with resolveReceiptUrl). Both `deliveryNote` and `deliveryProofUrl` are optional (CEO directive 2026-04-24 reversed the prior mandatory-note rule). When provided, they're stored on the order (`delivery_notes`, `delivery_proof_url`).
 - COMPLETED stays with the accountant — set only when remittance is received/reconciled. CS never marks COMPLETED. Do not shortcut this.
 
@@ -317,6 +317,16 @@ The admin temporarily renders the entire app *as* another user — their role, b
 - The Virtual Buffer means the Sales Module sees 10% less stock than actually exists, preventing overselling during high-traffic bursts
 - Ghost Stock prevention: if a 3PL physical count does not match the digital record, the Dispatch button for that location is LOCKED until a Stock Reconciliation form is submitted with mandatory reason codes (Damaged, Lost, Expired, Theft)
 
+**Order ↔ shelf integrity (locked 2026-04-26 — do not regress):** Shelf truth lives in `inventory_levels` (`stock_count`, `reserved_count` per `product_id × location_id`). FIFO COGS consumption lives in `stock_batches.remaining_quantity` (per product, global batches). Order transitions must stay aligned with `InventoryService` — do not reintroduce “movements only” without level updates.
+
+| Transition | Server enforcement | Implementation |
+|---|---|---|
+| `CONFIRMED` | Before status write: sum of `(stock_count − reserved_count)` across **all** locations plus sum of batch `remaining_quantity` must cover each product line (`assertGlobalAvailabilityForOrder`). | `apps/api/src/inventory/inventory.service.ts` from `orders.service.ts::validateTransitionGates` |
+| `ALLOCATED` | After dispatch-lock check: same coverage **at the chosen `logistics_location_id`** (`assertLocationCanFulfillOrder`). Side effect: **one transaction** — increment `reserved_count` at that location + insert `ALLOCATION` movements per product aggregate (`reserveForAllocateWithMovements`). | Same files; `executeTransitionSideEffects` must receive **post-update** order + metadata so `logisticsLocationId` is never read from a stale row |
+| `DELIVERED` | Requires `orders.logistics_location_id`. **One `withActor` transaction:** FIFO decrement `stock_batches`, insert `DELIVERY` movement, decrement `stock_count` and up to `min(reserved_count, qty)` at that location (`completeDeliveryInventory`). Then low-stock notify. | `inventory.service.ts` |
+
+**3PL off-platform — verify warehouse transfers:** `inventory.verifyTransfer` is granted to `TPL_MANAGER`, **`HEAD_OF_LOGISTICS`**, and **`STOCK_MANAGER`** in `packages/shared/scripts/seed-permissions.ts` so internal staff can post receipt when the partner never logs in. After changing role matrices, run `pnpm db:seed-permissions` so `role_permissions` stays synced.
+
 ### When Building the App Theme System
 - 6 theme IDs: `system`, `light`, `dark`, `dim`, `ink`, `soft`
 - `users.app_theme` is nullable — `null` means follow org default (`system_settings.client_ui_config.defaultTheme`)
@@ -382,6 +392,30 @@ The push system has four layers — all must be consistent:
 - CPA = Total Ad Spend / Total Orders Created (all statuses)
 - True ROAS = Total Revenue from DELIVERED orders only / Total Ad Spend
 - If a Media Buyer logged spend vs actual leads exceeds a configurable threshold, auto-alert the Head of Marketing (High CPA Warning)
+
+**Funding page layout — two-section model (CEO directive 2026-04-26):**
+The two-tier funding flow (Finance → HoM, HoM → MB) is reflected in the page layout itself, so HoMs (who are both *receiver* and *disburser*) don't have to mentally untangle two roles on one screen. `/admin/marketing/funding` renders:
+
+- **Section 1 — "Funds I've Received" / "Incoming Funding"** (always shown). HoM sees money from Finance; MB sees money from HoM. Tabs: **Transfers** (incoming, mark-received CTA on each `SENT` row) | **My Requests** (their outbound asks). The header has a **+ Request Funds** button when `canRequestFunding`. Title is dynamic — `Funds I've Received` for HoM/Admin, `Incoming Funding` for MB (since some of their funding is still `SENT` waiting).
+- **Section 2 — "Funds I Distribute"** (`canDistribute` — HoM/Admin only). Tabs: **Transfers** (sent ledger, read-only) | **MB Requests** (pending approval inbox). Header has a **+ Send Funding** button.
+
+URL state is `?section=received|distributing&tab=transfers|requests` plus per-(section,tab) `page` / `status` / `requestStatus` / `search`. Switching section drops those filter params (they're scoped to the slice you came from). Each section card has its own action button so the affordance is unambiguous: `+ Request Funds` always means "ask upstream", `+ Send Funding` always means "disburse downstream".
+
+**Funding-relevant top metrics** (replaced the old marketing-perf strip — CPA / ROAS / Delivery Rate / Confirmation Rate didn't speak to funding work):
+- `Total Received` (period sum, incoming)
+- `Total Distributed` (HoM/Admin only — period sum, outgoing)
+- `Pending Mark-Received` (count — incoming `SENT` awaiting confirmation; warning-coloured when > 0)
+- `Disputed` (count of `DISPUTED` you're party to as either sender or receiver; danger-coloured when > 0)
+
+Backed by `marketing.fundingByDirectionSummary` ([apps/api/src/marketing/marketing.service.ts](apps/api/src/marketing/marketing.service.ts)). Period filter applies to `sent_at`. No branch scoping — keyed entirely on the actor's id.
+
+**Disputed banner**: when `disputedAsReceiver + disputedAsSender > 0`, a danger-coloured banner appears above the sections with a `Review` CTA that deep-links to the section/tab where most disputes live (`?status=DISPUTED`). Don't remove this — disputes are easy to lose track of in a busy ledger and the CEO has flagged them as the #1 funding-trust signal.
+
+**Per-slice direction filters added 2026-04-26:**
+- `marketing.fundingStatusCounts` accepts `senderId` (for outgoing-only counts) in addition to the existing `receiverId`.
+- `marketing.fundingRequestStatusCounts` and `marketing.listFundingRequests` accept `excludeSelfAsRequester: boolean` so HoM's "MB Requests" inbox doesn't include their own outbound requests to Finance. Mutually exclusive with `requesterId` (explicit `requesterId` wins).
+
+Do NOT regress the page back to a single-tabbed feed. The split is the whole point — `/admin/marketing/funding/my-requests` was the dead tail end of the old single-feed model and has been removed.
 
 **Funding Request Notification Rules (never change these):**
 - **Media Buyer requests funding** → notify `HEAD_OF_MARKETING` only. HoM is the one who funds them — SuperAdmin and Finance do NOT get this notification.
@@ -564,6 +598,7 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | Pagination | `<Pagination />` |
 | Status badge (generic) | `<StatusBadge />` |
 | Order status badge | `<OrderStatusBadge />` |
+| User role chip | `<RoleBadge role={role} />` (consistent dept-color palette across the app — never hand-roll `badge-info` for roles) |
 | Order ID + copy button | `<OrderIdBadge />` (renders truncated ID + click-to-copy of the full UUID; pass `linkTo` to wrap as a link, `uppercase`/`ellipsis=""` to match existing variants) |
 | ₦ price display | `<NairaPrice />` |
 | Filter pills / toggle group | `<FilterPills />` |
@@ -632,7 +667,7 @@ NestJS services must pass `branchId` alongside `actorId` in every write context.
 ### Branch-Scoped Tables
 These tables carry `branch_id` and are filtered by RLS: `orders`, `campaigns`, `marketing_funding`, `ad_spend_logs`, `inventory_levels`, `commission_plans`, `payout_records`, `logistics_locations`, `message_templates`, `outbound_messages`, `order_timeline_events`.
 
-**Products and `stock_batches` are NOT branch-scoped** — global catalog. Stock is tracked per branch via `inventory_levels.branch_id`.
+**Products and `stock_batches` are NOT branch-scoped** — global catalog. Sellable units are tracked in `inventory_levels` per `location_id` (logistics location), not via a `branch_id` column on that table; branch visibility still flows from session + RLS on branch-scoped domain tables (e.g. `orders.branch_id`).
 
 ### SuperAdmin / Global Finance Bypass
 SuperAdmin and global Finance bypass branch RLS entirely. Their session `current_branch_id` is set to `NULL` and RLS policies treat NULL as "show all branches".
@@ -663,6 +698,9 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT alter a main table without syncing its `*_history` table in the same migration (ADD/DROP columns)
 - Do NOT create a new business-data table without a `branch_id` column (exception: products, stock_batches — global catalog)
 - Do NOT allow CS agents to initiate order transfers between themselves — only HoCS and SuperAdmin can reassign orders
+- Do NOT bypass or reorder the **order ↔ inventory** gates: `InventoryService.assertGlobalAvailabilityForOrder` on `CONFIRMED`, `assertLocationCanFulfillOrder` on `ALLOCATED`, then `reserveForAllocateWithMovements` and `completeDeliveryInventory` in side effects. Do NOT read `logistics_location_id` from a stale pre-update order row in `executeTransitionSideEffects` — pass the post-update order + metadata. Locked spec: `CLAUDE.md` → "When Building the Inventory Module" → "Order ↔ shelf integrity".
+- Do NOT shrink `inventory.verifyTransfer` in `packages/shared/scripts/seed-permissions.ts` to **only** `TPL_MANAGER` — `HEAD_OF_LOGISTICS` and `STOCK_MANAGER` must retain verify when partners are off-platform; re-run `pnpm db:seed-permissions` after edits.
+- Do NOT change the **confirm call-gate overrides** (admin-class via `isAdminLevel`, same-branch `BRANCH_ADMIN`, HoCS any-call-on-order) without updating **both** `apps/api/src/orders/orders.service.ts::validateTransitionGates` **and** `apps/web/app/features/orders/OrderDetailPage.tsx` in the same change — server and UI must stay aligned.
 - Do NOT send raw phone numbers via SMS or WhatsApp — always route through the platform bridge
 - Do NOT write `order_timeline_events` rows outside of the same database transaction as the triggering mutation — timeline events must be atomic with their state change
 - Do NOT render the Mirror View with any interactive action buttons — it is read-only, always
@@ -707,6 +745,12 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT skip the "edit-against-existing-role" check in `updateCommissionPlan`. Reading the existing plan's role and verifying it's in the actor's `manageable` set is what stops a Head from taking over a plan in another department by knowing its planId. The check looks redundant alongside `createCommissionPlan`'s gate but covers a different attack surface.
 - Do NOT close Generate Monthly Payroll Batch (or any submit-driven modal) before the fetcher round-trip completes. The pattern in [apps/web/app/features/hr/MonthlyPayrolls.tsx](apps/web/app/features/hr/MonthlyPayrolls.tsx) — a `generateInFlightRef` + `useEffect` that closes only when `fetcher.state === 'idle' && fetcher.data?.success` — is the canonical setup for any modal whose action talks to a server: it surfaces server errors inline (e.g. `CONFLICT` for an already-submitted batch) instead of silently dropping them, and the backdrop dismissal is blocked while the request is in flight. Replicate this for any new "submit + maybe-fail" modal; do NOT regress to `onSubmit={() => setOpen(false)}`.
 - Do NOT leave the Month picker on the Generate batch modal blank. Always default `<input type="month">` to the current `YYYY-MM` so HoDs in the common case (running this month's payroll) just hit Generate. The default is computed inside a `useMemo([showGenerate])` so the value refreshes if the modal is reopened in a long-lived tab that has crossed midnight on the 1st.
+- Do NOT use `LIKE … INCLUDING ALL` to clone a table that has UNIQUE indexes if the clone is meant to hold multiple rows per the unique tuple. INCLUDING ALL copies UNIQUE INDEXES too — and unique indexes are NOT constraints, so the constraint-stripping loop in audit migrations doesn't catch them. Either use `INCLUDING DEFAULTS` (skip indexes) and recreate the lookup indexes you actually want, OR follow up with `DROP INDEX IF EXISTS …_unique_idx` like migration 0068 had to. The `payroll_batches_history` UPDATE-blowup was caused by exactly this oversight.
+- Do NOT skip a payout row for a staff member when generating a batch — even if their commission plan is missing or computes to zero. CEO directive 2026-04-26: every active staff member in (branch × dept) MUST appear in the batch with a default-zero payout so HR has a complete roster to review and adjust manually. The previous "if (!computed) continue;" left people invisible in the batch; replace any future similar shortcut with the always-insert default-zero pattern in `payroll-batch.service.ts::generateBatch`.
+- Do NOT render a user role as `badge-info` (or any single-color badge). Use `<RoleBadge role={role} />` from [apps/web/app/components/ui/role-badge.tsx](apps/web/app/components/ui/role-badge.tsx) — it picks a consistent department color (red admin / blue CS / amber marketing / green logistics / indigo finance / purple HR) so role chips are scannable across pages. Hand-rolled `badge-info` makes every role look identical and was flagged 2026-04-26 on `/hr/plans`. The component lives in the table at "User role chip" → see "UI Component Reuse Rules".
+- Do NOT remove the `successCallbackUrl` field from `formConfigSchema` (or rename it) without updating both [apps/edge-worker/src/index.ts](apps/edge-worker/src/index.ts) (the form's `data-success-callback` attribute + the redirect block in `submitOrder().then()`) AND the form-builder UI in [apps/web/app/features/campaigns/CampaignsPage.tsx](apps/web/app/features/campaigns/CampaignsPage.tsx). The field is OPTIONAL — when missing/empty the form falls back to the inline success message; when set it redirects to the Media Buyer's funnel thank-you page. Paystack `authorizationUrl` always wins over the callback URL so payment flows aren't broken. The validator enforces a full http(s) URL — partial paths are rejected.
+- Do NOT render the `<DateFilterBar />` bare on a page. Always wrap it in the standard pill chrome: `<div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">` so the filter has visual presence. Bare it renders as a tiny text-xs button that disappears into toolbars (this was the bug on `/admin/cs/orders` flagged 2026-04-26).
+- Do NOT bypass the bulk-assign `intent` on the CS queue when an HoCS picks multiple unassigned cards. The `bulkAssignToCS` intent in [apps/web/app/routes/admin.cs.queue/route.tsx](apps/web/app/routes/admin.cs.queue/route.tsx) calls `orders.bulkAssignToCS` (the existing tRPC procedure). The card UI uses a Set-based selection state and a separate fetcher; do NOT collapse it into the legacy single-`assign` intent loop because the bulk procedure is atomic + emits one Socket.io event, while looping single-assign produces N events and N retry windows.
 - Do NOT close `<Modal>` on a bare `onClick` of the backdrop. iOS dismisses native pickers (`<input type="date">`, native `<select>`) by firing a phantom click that bubbles to the backdrop and would dismiss the modal mid-interaction — losing whatever the user was about to submit. The `Modal` component in [apps/web/app/components/ui/modal.tsx](apps/web/app/components/ui/modal.tsx) only closes when `mousedown` AND `mouseup` both land on the backdrop itself (`e.target === e.currentTarget`). Do not revert to `onClick={onClose}`, do not add a separate `onClick={onClose}` on the inner content, and do not stop-propagation on the inner pane — the press-start-and-end check covers all the cases. Modals must NEVER auto-close while the user is still working on the form inside them; the only paths to close are the explicit Done/Save/Cancel buttons, the X icon, the Escape key, or a clean tap on the backdrop.
 - Every filterable page must show a loading indicator while the loader re-runs after a filter / sort / search / pagination change. The `<NavProgressBar />` component in [apps/web/app/components/ui/nav-progress-bar.tsx](apps/web/app/components/ui/nav-progress-bar.tsx) is mounted once at the top of each layout (`DashboardLayout`, `TplLayout`, `rider/route.tsx`) and listens to Remix `useNavigation()` — it ramps a thin brand-coloured bar at the top of the viewport for ANY non-idle navigation (route change, search-param update, fetcher action) and fades out when the loader resolves. New pages do NOT need to wire `useNavigation` themselves to indicate loading — the global bar covers it. Do NOT remove `<NavProgressBar />` from the layouts; do NOT pass non-Promise values to `<DeferredSection>`/`<Await>` and rely on this bar instead — `<Await>` requires a Promise and will throw if given a sync value. Per-page inline spinners next to specific filter controls are still allowed but no longer required.
 
@@ -831,3 +875,4 @@ All 4 layers of the push system are fully operational:
 3. If the PRD does not cover it, ask — do not assume
 4. If you are choosing between fast but fragile and slower but auditable — always choose auditable
 5. Every feature you build should answer: "If the CEO asks who did this and when, can the system answer in under 3 seconds?"
+6. **After implementing** order lifecycle, inventory, CS gates, or RBAC/permission matrix changes that alter documented behavior, **update this `CLAUDE.md` in the same PR** (and run `pnpm db:seed-permissions` when `seed-permissions.ts` changes). The directive is the locked contract — drifting code without doc updates is how regressions ship.

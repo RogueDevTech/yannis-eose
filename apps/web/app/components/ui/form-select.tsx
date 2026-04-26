@@ -13,7 +13,7 @@ export interface SelectGroup {
   options: SelectOption[];
 }
 
-interface FormSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+interface FormSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'size'> {
   label?: string;
   hint?: string;
   error?: string;
@@ -23,7 +23,8 @@ interface FormSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> 
   groups?: SelectGroup[];
   /** Placeholder option shown when no value is selected */
   placeholder?: string;
-  size?: FormSelectSize;
+  /** Visual height — distinct from native HTML `select size` (row count) */
+  controlSize?: FormSelectSize;
   wrapperClassName?: string;
 }
 
@@ -63,7 +64,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
       options,
       groups,
       placeholder,
-      size = 'md',
+      controlSize = 'md',
       wrapperClassName = '',
       className = '',
       required,
@@ -80,7 +81,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
       'bg-app-canvas text-app-fg',
       'border-app-border focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none',
       hasError ? 'border-danger-500 focus:border-danger-500 focus:ring-danger-500' : '',
-      sizeClasses[size],
+      sizeClasses[controlSize],
       className,
     ]
       .filter(Boolean)
@@ -125,7 +126,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
           <span
             className={[
               'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
-              chevronSizeClasses[size],
+              chevronSizeClasses[controlSize],
             ].join(' ')}
           >
             <ChevronDownIcon className="w-full h-full" />

@@ -8,6 +8,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Pagination } from '~/components/ui/pagination';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import type { CSTeamMemberOverview } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 
@@ -17,6 +18,8 @@ export interface CSTeamPageProps {
   canReassign?: boolean;
   page?: number;
   totalPages?: number;
+  /** Date filter from URL — controls the leaderboard window for confirm/delivery rates. */
+  dateFilters?: { startDate: string; endDate: string; periodAllTime: boolean };
 }
 
 function formatLastActive(lastActionAt: string | null): string {
@@ -164,7 +167,7 @@ function activityCell(member: CSTeamMemberOverview): string {
   return '\u2014';
 }
 
-export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1, totalPages = 1 }: CSTeamPageProps) {
+export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1, totalPages = 1, dateFilters }: CSTeamPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string; redistributed?: number }>();
   const revalidator = useRevalidator();
   const { toast } = useToast();
@@ -190,7 +193,18 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
     <div className="space-y-6">
       <PageHeader
         title="Team"
-        description="Sales & CS team overview — workload, activity, and this month’s performance. View orders or profile per member."
+        description="Sales & CS team overview — workload, activity, and the selected period’s performance. View orders or profile per member."
+        actions={
+          dateFilters ? (
+            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+              <DateFilterBar
+                startDate={dateFilters.startDate}
+                endDate={dateFilters.endDate}
+                periodAllTime={dateFilters.periodAllTime}
+              />
+            </div>
+          ) : null
+        }
       />
 
       {summary.agentCount > 0 && (
@@ -257,12 +271,10 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
           {view === 'table' ? (
             <div className="card p-0 overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px]">
+                <table className="w-full min-w-[720px]">
                   <thead>
                     <tr>
                       <th className="table-header">Member</th>
-                      <th className="table-header">Role</th>
-                      <th className="table-header">Branches</th>
                       <th className="table-header">Workload</th>
                       <th className="table-header">Activity</th>
                       <th className="table-header">Performance</th>
@@ -288,12 +300,6 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
                               </div>
                               <span className="font-medium text-app-fg truncate">{member.name}</span>
                             </div>
-                          </td>
-                          <td className="table-cell text-sm text-app-fg whitespace-nowrap">
-                            {csRoleLabel(member.role)}
-                          </td>
-                          <td className="table-cell max-w-[10rem]">
-                            <UserBranchBadges branches={member.branchMemberships} compact />
                           </td>
                           <td className="table-cell text-sm text-app-fg-muted whitespace-nowrap">
                             {isAgent && workload

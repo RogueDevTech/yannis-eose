@@ -4,6 +4,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Tabs } from '~/components/ui/tabs';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { Textarea } from '~/components/ui/textarea';
 import { useOnlineStatus, usePendingCount } from '~/hooks/useOnlineStatus';
 import { queueDeliveryConfirmation } from '~/lib/offline-sync';
 import type { Order } from './types';
@@ -291,11 +292,10 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
                     <label className="block text-sm font-medium text-app-fg-muted">
                       Return Reason (min 10 characters)
                     </label>
-                    <textarea
+                    <Textarea
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       rows={3}
-                      className="w-full rounded-lg border border-app-border bg-white px-4 py-3 text-sm dark:border-surface-600 dark:bg-surface-800 dark:text-white"
                       placeholder="Customer refused, wrong address, etc."
                     />
                     <div className="flex gap-2">

@@ -7,6 +7,9 @@ import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useFetcherToast } from '~/components/ui/toast';
+import { FormSelect } from '~/components/ui/form-select';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { TextInput } from '~/components/ui/text-input';
 
 export interface RemittanceRecord {
   id: string;
@@ -295,49 +298,32 @@ export function RemitPage({
         <h2 className="text-lg font-semibold text-app-fg mb-4">Stock transfer to warehouse</h2>
         <fetcher.Form method="post" className="space-y-4">
           <input type="hidden" name="intent" value="createRemittance" />
-          <div>
-            <label className="block text-sm font-medium text-app-fg-muted mb-1">Product</label>
-            <select
-              name="productId"
-              required
-              className="input w-full"
-              disabled={isSubmitting}
-            >
-              <option value="">Select product</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-app-fg-muted mb-1">Send to location</label>
-            <select
-              name="toLocationId"
-              required
-              className="input w-full"
-              disabled={isSubmitting}
-            >
-              <option value="">Select warehouse / location</option>
-              {toLocationOptions.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-app-fg-muted mb-1">Quantity sent</label>
-            <input
-              type="number"
-              name="quantitySent"
-              min={1}
-              required
-              className="input w-full"
-              disabled={isSubmitting}
-            />
-          </div>
+          <FormSelect
+            name="productId"
+            label="Product"
+            required
+            disabled={isSubmitting}
+            defaultValue=""
+            placeholder="Select product"
+            options={products.map((p) => ({ value: p.id, label: p.name }))}
+          />
+          <FormSelect
+            name="toLocationId"
+            label="Send to location"
+            required
+            disabled={isSubmitting}
+            defaultValue=""
+            placeholder="Select warehouse / location"
+            options={toLocationOptions.map((l) => ({ value: l.id, label: l.name }))}
+          />
+          <TextInput
+            type="number"
+            name="quantitySent"
+            label="Quantity sent"
+            min={1}
+            required
+            disabled={isSubmitting}
+          />
           <FileUpload
             folder={S3_FOLDERS.RECEIPTS}
             name="receiptUrl"

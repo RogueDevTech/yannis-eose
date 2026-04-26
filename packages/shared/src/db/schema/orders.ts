@@ -59,6 +59,13 @@ export const orders = pgTable('orders', {
   lockedBy: text('locked_by').references(() => users.id),
   /** Order source for reporting: 'edge-form' (sales form) or 'offline' (CS manual entry) */
   orderSource: text('order_source'),
+  /**
+   * Custom field responses from the campaign form builder. Keyed by `formConfig.customFields[].id`.
+   * Values are strings, numbers, booleans, or string arrays depending on the field type.
+   * Null when the form has no custom fields. Never queried by value — only rendered alongside
+   * the order on CS / Logistics detail pages.
+   */
+  customFields: jsonb('custom_fields'),
   /** Branch this order belongs to. Set on creation, enforced by RLS. */
   branchId: uuid('branch_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

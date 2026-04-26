@@ -16,8 +16,12 @@ import { previewInvoicePdf } from '~/lib/invoice-pdf';
 import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
+import { Textarea } from '~/components/ui/textarea';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { shareOrderToLogistics } from '~/lib/trpc-browser';
+import { isAdminLevel } from '~/lib/rbac';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
 
 // ── Constants ────────────────────────────────────────────────────
@@ -524,6 +528,7 @@ export function OrderDetailPage({
   canEditOrder = true,
   userRole,
   userId,
+  currentBranchId = null,
   permissions,
   csAgentsForAssign = [],
   logisticsLocations = [],
@@ -622,8 +627,15 @@ export function OrderDetailPage({
   const showActionError = actionError && !dismissedError;
 
   const isAssignedToMe = order.assignedCsId === userId;
-  const isCSOrHoS = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(userRole);
-  const isElevated = userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
+  const branchAdminSameBranch =
+    userRole === 'BRANCH_ADMIN' &&
+    !!order.branchId &&
+    !!currentBranchId &&
+    order.branchId === currentBranchId;
+  const isCSOrHoS =
+    ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(userRole) || branchAdminSameBranch;
+  const isElevated =
+    userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch;
   // CS agent can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
@@ -636,7 +648,7 @@ export function OrderDetailPage({
     const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
     if (!csOnlyStatuses.includes(newStatus)) return true;
     if (!isCSOrHoS) return false;
-    if (userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN') return true;
+    if (userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch) return true;
     if (userRole === 'CS_AGENT') {
       if (newStatus === 'CS_ENGAGED') {
         return isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId);
@@ -653,9 +665,13 @@ export function OrderDetailPage({
   const hasAnyCallLog = order.callLogs.length > 0;
 
   // Whether the Confirm button should be enabled
-  // - VOIP enabled: require completed VOIP call of at least 15 seconds
-  // - VOIP disabled: require at least one call log (agent clicked Call)
-  const canConfirm = voipEnabled ? hasQualifyingVoipCall : hasAnyCallLog;
+  // - Admin-class or Branch Admin (same branch): backstop confirm without a logged call
+  // - Otherwise VOIP enabled: require completed VOIP call of at least 15 seconds
+  // - Otherwise manual mode: require at least one call log on the order
+  const canConfirm =
+    isAdminLevel({ role: userRole }) ||
+    branchAdminSameBranch ||
+    (voipEnabled ? hasQualifyingVoipCall : hasAnyCallLog);
 
   // Revalidate callback for VOIP call-status polling (used inside call panel wrapper).
   const revalidate = useCallback(() => {
@@ -1092,17 +1108,15 @@ export function OrderDetailPage({
                   {/* Assign to agent — CS_ENGAGED only */}
                   {order.status === 'CS_ENGAGED' && canAssignToCS && csAgentsForAssign && csAgentsForAssign.length > 0 && (
                     <div className="flex gap-2">
-                      <select
+                      <FormSelect
+                        id="order-assign-cs"
                         value={assignToId}
                         onChange={(e) => setAssignToId(e.target.value)}
-                        className="input flex-1 min-w-0"
+                        placeholder="Select agent..."
+                        options={csAgentsForAssign.map((a) => ({ value: a.id, label: a.name }))}
+                        wrapperClassName="flex-1 min-w-0"
                         aria-label="Assign to agent"
-                      >
-                        <option value="">Select agent...</option>
-                        {csAgentsForAssign.map((a) => (
-                          <option key={a.id} value={a.id}>{a.name}</option>
-                        ))}
-                      </select>
+                      />
                       <fetcher.Form method="post" className="flex-shrink-0">
                         <input type="hidden" name="intent" value="assignToCS" />
                         <input type="hidden" name="toCsAgentId" value={assignToId} />
@@ -1260,6 +1274,14 @@ export function OrderDetailPage({
                 })}
               </dl>
             </div>
+
+            {/* Form-builder custom fields — only rendered when the campaign has custom
+                fields defined AND the customer answered at least one. Uses the campaign's
+                field definitions to map response ids back to human-readable labels. */}
+            <CustomFieldsCard
+              defs={order.campaignCustomFieldDefs ?? []}
+              responses={order.customFields ?? null}
+            />
           </div>
         </div>
 
@@ -1279,15 +1301,12 @@ export function OrderDetailPage({
                 <input type="hidden" name="newStatus" value="CONFIRMED" />
                 <input type="hidden" name="preferredDeliveryDate" value={deliveryDate} />
                 <div className="space-y-2 mb-4">
-                  <label className="block text-xs font-medium text-app-fg-muted">
-                    Scheduled delivery date
-                  </label>
-                  <input
+                  <TextInput
                     type="date"
+                    label="Scheduled delivery date"
                     value={deliveryDate}
                     onChange={(e) => setDeliveryDate(e.target.value)}
                     min={new Date().toISOString().split('T')[0]}
-                    className="input w-full"
                     aria-label="Delivery date"
                   />
                   <p className="text-xs text-app-fg-muted">
@@ -1311,26 +1330,26 @@ export function OrderDetailPage({
                   Move order back to queue and set a time to call again (e.g. customer not picking).
                 </p>
                 <div className="space-y-2 mb-3">
-                  <label className="block text-xs font-medium text-app-fg-muted">Delay</label>
-                  <select
-                    value={scheduleDelayMinutes}
+                  <FormSelect
+                    id="schedule-callback-delay"
+                    label="Delay"
+                    value={String(scheduleDelayMinutes)}
                     onChange={(e) => setScheduleDelayMinutes(parseInt(e.target.value, 10))}
-                    className="input w-full"
                     aria-label="Callback delay"
-                  >
-                    <option value={30}>30 minutes</option>
-                    <option value={60}>1 hour</option>
-                    <option value={120}>2 hours</option>
-                    <option value={240}>4 hours</option>
-                    <option value={480}>8 hours</option>
-                    <option value={1440}>24 hours</option>
-                  </select>
-                  <label className="block text-xs font-medium text-app-fg-muted mt-2">Notes (optional)</label>
-                  <textarea
+                    options={[
+                      { value: '30', label: '30 minutes' },
+                      { value: '60', label: '1 hour' },
+                      { value: '120', label: '2 hours' },
+                      { value: '240', label: '4 hours' },
+                      { value: '480', label: '8 hours' },
+                      { value: '1440', label: '24 hours' },
+                    ]}
+                  />
+                  <Textarea
+                    label="Notes (optional)"
                     value={scheduleNotes}
                     onChange={(e) => setScheduleNotes(e.target.value)}
                     placeholder="e.g. Customer not picking"
-                    className="input w-full min-h-[60px]"
                     rows={2}
                   />
                 </div>
@@ -1397,11 +1416,10 @@ export function OrderDetailPage({
                 );
               })}
             </div>
-            <textarea
+            <Textarea
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
               placeholder="Customer not picking"
-              className="input w-full min-h-[80px]"
               rows={3}
             />
             <div className="flex gap-2 mt-4 justify-end">
@@ -1443,22 +1461,17 @@ export function OrderDetailPage({
           <p className="text-sm text-app-fg-muted mb-3">
             Select the 3PL location that will fulfil this order. Stock must be available at that location.
           </p>
-          <label htmlFor="allocate-location-id" className="block text-sm font-medium text-app-fg-muted mb-1.5">
-            Logistics location
-          </label>
-          <select
+          <FormSelect
             id="allocate-location-id"
+            label="Logistics location"
             value={allocateLocationId}
             onChange={(e) => setAllocateLocationId(e.target.value)}
-            className="input w-full"
-          >
-            <option value="">Select a location...</option>
-            {logisticsLocations.map((loc) => (
-              <option key={loc.id} value={loc.id}>
-                {loc.name}{loc.address ? ` — ${loc.address}` : ''}
-              </option>
-            ))}
-          </select>
+            placeholder="Select a location..."
+            options={logisticsLocations.map((loc) => ({
+              value: loc.id,
+              label: `${loc.name}${loc.address ? ` — ${loc.address}` : ''}`,
+            }))}
+          />
           <div className="flex gap-2 mt-4 justify-end">
             <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
               Back
@@ -1493,15 +1506,12 @@ export function OrderDetailPage({
           <p className="text-sm text-app-fg-muted mb-3">
             Confirm that the customer received the order. A note and screenshot are optional.
           </p>
-          <label htmlFor="delivery-note" className="block text-sm font-medium text-app-fg-muted mb-1.5">
-            Delivery note (optional)
-          </label>
-          <textarea
+          <Textarea
             id="delivery-note"
+            label="Delivery note (optional)"
             value={deliverNote}
             onChange={(e) => setDeliverNote(e.target.value)}
             placeholder="e.g. Customer confirmed receipt on follow-up call at 3:42pm."
-            className="input w-full min-h-[80px]"
             rows={3}
           />
           <div className="mt-4">
@@ -1569,22 +1579,14 @@ export function OrderDetailPage({
 
             <div className="space-y-3">
               <div>
-                <label htmlFor="share-location" className="block text-sm font-medium text-app-fg-muted mb-1.5">
-                  3PL location
-                </label>
-                <select
+                <FormSelect
                   id="share-location"
+                  label="3PL location"
                   value={shareLocationId}
                   onChange={(e) => setShareLocationId(e.target.value)}
-                  className="input w-full"
-                >
-                  <option value="">Select a location...</option>
-                  {locationsWithGroup.map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.name}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Select a location..."
+                  options={locationsWithGroup.map((loc) => ({ value: loc.id, label: loc.name }))}
+                />
                 {locationsWithGroup.length === 0 && (
                   <p className="text-xs text-warning-600 mt-1">
                     No 3PL locations have a WhatsApp group link configured. Ask Logistics to add one.
@@ -1593,22 +1595,14 @@ export function OrderDetailPage({
               </div>
 
               <div>
-                <label htmlFor="share-template" className="block text-sm font-medium text-app-fg-muted mb-1.5">
-                  Template
-                </label>
-                <select
+                <FormSelect
                   id="share-template"
+                  label="Template"
                   value={shareTemplateId}
                   onChange={(e) => setShareTemplateId(e.target.value)}
-                  className="input w-full"
-                >
-                  <option value="">Select a template...</option>
-                  {logisticsDispatchTemplates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Select a template..."
+                  options={logisticsDispatchTemplates.map((t) => ({ value: t.id, label: t.name }))}
+                />
               </div>
 
               {selectedTemplate && (
@@ -1980,4 +1974,65 @@ export function OrderDetailPage({
       )}
     </div>
   );
+}
+
+/**
+ * Renders form-builder custom-field responses on the order detail page.
+ *
+ * `defs` is the campaign's `formConfig.customFields` array — provides the label, type, and
+ * options for each field. `responses` is the order's `custom_fields` JSONB — `{ fieldId: value }`.
+ * The card walks `defs` (so order is preserved + we don't render orphaned response keys
+ * when a field was deleted post-submission) and looks up each value from `responses`.
+ *
+ * Hidden entirely when there are no defs OR no answered fields — empty cards add visual
+ * noise without information.
+ */
+function CustomFieldsCard({
+  defs,
+  responses,
+}: {
+  defs: NonNullable<OrderDetail['campaignCustomFieldDefs']>;
+  responses: NonNullable<OrderDetail['customFields']> | null;
+}) {
+  if (!defs || defs.length === 0) return null;
+  if (!responses || Object.keys(responses).length === 0) return null;
+
+  const rows = defs
+    .map((def) => {
+      const raw = responses[def.id];
+      if (raw === undefined || raw === null || raw === '') return null;
+      if (Array.isArray(raw) && raw.length === 0) return null;
+      return { def, value: raw };
+    })
+    .filter((r): r is { def: typeof defs[number]; value: string | number | boolean | string[] } => r !== null);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="card">
+      <h2 className="text-lg font-semibold text-app-fg mb-3">Form responses</h2>
+      <dl className="space-y-2.5 text-sm">
+        {rows.map(({ def, value }) => (
+          <div key={def.id} className="min-w-0 pl-3 py-1.5 rounded-r-md -ml-px">
+            <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wider">
+              {def.label}
+            </dt>
+            <dd className="mt-0.5 break-words text-app-fg">
+              {renderCustomFieldValue(def.type, value)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/** Per-type value formatter — toggle → Yes/No, checkbox_group → comma-joined, others stringified. */
+function renderCustomFieldValue(
+  type: string,
+  value: string | number | boolean | string[],
+): string {
+  if (type === 'toggle') return value ? 'Yes' : 'No';
+  if (Array.isArray(value)) return value.join(', ');
+  return String(value);
 }

@@ -3,6 +3,7 @@ import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { Textarea } from '~/components/ui/textarea';
+import { FormSelect } from '~/components/ui/form-select';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -739,6 +740,32 @@ export function CSDashboardPage({
   const [selectedActiveOrder, setSelectedActiveOrder] = useState<CSOrder | null>(null);
   /** Selected unassigned queue order for detail modal */
   const [selectedQueueOrder, setSelectedQueueOrder] = useState<CSOrder | null>(null);
+  /** Multi-select for bulk-assign on the Unassigned Queue tab. */
+  const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
+  const [bulkAssignAgentId, setBulkAssignAgentId] = useState<string>('');
+  const bulkAssignFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const isBulkAssigning = bulkAssignFetcher.state !== 'idle';
+
+  const toggleQueueSelection = (orderId: string) => {
+    setSelectedQueueIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  const clearQueueSelection = () => setSelectedQueueIds(new Set());
+
+  // Close bulk-assign modal + clear selection on success
+  useEffect(() => {
+    if (bulkAssignFetcher.state === 'idle' && bulkAssignFetcher.data?.success && bulkAssignOpen) {
+      setBulkAssignOpen(false);
+      setBulkAssignAgentId('');
+      clearQueueSelection();
+    }
+  }, [bulkAssignFetcher.state, bulkAssignFetcher.data, bulkAssignOpen]);
   const [selectedAgent, setSelectedAgent] = useState<AgentWorkload | null>(null);
   /** Agent Workloads: View all modal and pagination */
   const [viewAllAgentsOpen, setViewAllAgentsOpen] = useState(false);
@@ -1547,65 +1574,128 @@ export function CSDashboardPage({
 
       {/* Tab Content — fixed height so layout does not shift */}
       {activeTab === 'queue' && (
-        <div>
+        <div className="space-y-3">
+          {/* Bulk-assign toolbar — only renders when ≥ 1 card is selected. Clicking a card body
+              opens the detail modal; toggling the checkbox in the top-left selects without
+              opening the modal. Per CEO directive 2026-04-26: HoCS need a way to assign a
+              batch of unassigned orders to a closer in one go. */}
+          {unassignedOrders.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-app-border bg-app-elevated px-3 py-2">
+              <div className="flex items-center gap-2">
+                {selectedQueueIds.size === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedQueueIds(new Set(unassignedOrders.map((o) => o.id)))}
+                    className="text-xs text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
+                  >
+                    Select all ({unassignedOrders.length})
+                  </button>
+                ) : (
+                  <>
+                    <span className="text-xs font-medium text-app-fg">
+                      {selectedQueueIds.size} selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={clearQueueSelection}
+                      className="text-xs text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={selectedQueueIds.size === 0}
+                onClick={() => setBulkAssignOpen(true)}
+              >
+                Assign{selectedQueueIds.size > 0 ? ` (${selectedQueueIds.size})` : ''}
+              </Button>
+            </div>
+          )}
+
           {unassignedOrders.length === 0 ? (
             <div className="rounded-xl border border-app-border bg-app-elevated p-10 text-center text-app-fg-muted">
               No unassigned orders in queue
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {unassignedOrders.map((order: CSOrder) => (
-                <button
-                  key={order.id}
-                  type="button"
-                  onClick={() => setSelectedQueueOrder(order)}
-                  className="group relative w-full text-left rounded-xl border border-warning-200 dark:border-warning-800/60 bg-app-elevated hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                >
-                  {/* Pulsing dot */}
-                  <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning-400 opacity-60" />
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning-500" />
-                  </span>
+              {unassignedOrders.map((order: CSOrder) => {
+                const isSelected = selectedQueueIds.has(order.id);
+                return (
+                  <div
+                    key={order.id}
+                    onClick={() => setSelectedQueueOrder(order)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedQueueOrder(order);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    className={`group relative w-full text-left rounded-xl border bg-app-elevated transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                      isSelected
+                        ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
+                        : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
+                    }`}
+                  >
+                    {/* Selection checkbox — top-left, stops propagation so the card click stays open-detail */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleQueueSelection(order.id);
+                      }}
+                      aria-label={isSelected ? 'Deselect order' : 'Select order'}
+                      aria-pressed={isSelected}
+                      className={`absolute top-3 left-3 flex h-5 w-5 items-center justify-center rounded border transition-colors ${
+                        isSelected
+                          ? 'bg-brand-500 border-brand-500 text-white'
+                          : 'bg-app-elevated border-app-border hover:border-brand-400'
+                      }`}
+                    >
+                      {isSelected && (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
 
-                  <div className="p-3.5 pr-8">
-                    {/* Status badge */}
-                    <div className="mb-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
-                        Unassigned
-                      </span>
-                    </div>
+                    {/* Pulsing dot */}
+                    <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning-400 opacity-60" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning-500" />
+                    </span>
 
-                    {/* Customer name */}
-                    <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2">
-                      {order.customerName}
-                    </p>
-
-                    {/* Amount */}
-                    {order.totalAmount && (
+                    <div className="p-3.5 pl-10 pr-8">
                       <div className="mb-2">
-                        <span className="text-[11px] font-bold text-app-fg">
-                          &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
+                          Unassigned
                         </span>
                       </div>
-                    )}
-
-                    {/* Timestamp */}
-                    <div className="text-[11px] font-medium text-app-fg-muted">
-                      {new Date(order.createdAt).toLocaleString('en-NG', {
-                        month: 'short', day: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                      })}
+                      <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2">
+                        {order.customerName}
+                      </p>
+                      {order.totalAmount && (
+                        <div className="mb-2">
+                          <span className="text-[11px] font-bold text-app-fg">
+                            &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
+                          </span>
+                        </div>
+                      )}
+                      <div className="text-[11px] font-medium text-app-fg-muted">
+                        {new Date(order.createdAt).toLocaleString('en-NG', {
+                          month: 'short', day: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                        })}
+                      </div>
                     </div>
                   </div>
-
-                  {/* Hover arrow */}
-                  <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <svg className="w-3.5 h-3.5 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1682,20 +1772,21 @@ export function CSDashboardPage({
                     Assign to closer
                   </label>
                   <div className="flex gap-2">
-                    <select
+                    <FormSelect
+                      id={`assign-closer-${qOrder.id}`}
                       value={assignAgent[qOrder.id] ?? ''}
                       onChange={(e) => setAssignAgent((prev) => ({ ...prev, [qOrder.id]: e.target.value }))}
-                      className="input py-1.5 text-sm flex-1"
-                    >
-                      <option value="">Select closer...</option>
-                      {workloads
+                      placeholder="Select closer..."
+                      options={workloads
                         .filter((w: AgentWorkload) => w.pendingCount < w.capacity)
-                        .map((w: AgentWorkload) => (
-                          <option key={w.agentId} value={w.agentId}>
-                            {w.agentName} ({w.pendingCount}/{w.capacity})
-                          </option>
-                        ))}
-                    </select>
+                        .map((w: AgentWorkload) => ({
+                          value: w.agentId,
+                          label: `${w.agentName} (${w.pendingCount}/${w.capacity})`,
+                        }))}
+                      controlSize="sm"
+                      wrapperClassName="flex-1 min-w-0"
+                      className="py-1.5 text-sm"
+                    />
                     <Button
                       onClick={() => { handleAssign(qOrder.id); setSelectedQueueOrder(null); }}
                       disabled={!assignAgent[qOrder.id] || fetcher.state === 'submitting'}
@@ -1830,43 +1921,35 @@ export function CSDashboardPage({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
-                  From closer
-                </label>
-                <select
+                <FormSelect
+                  id="hotswap-from"
+                  label="From closer"
                   value={hotSwapFrom}
                   onChange={(e) => {
                     setHotSwapFrom(e.target.value);
                     setHotSwapOrderIds([]);
                   }}
-                  className="input"
-                >
-                  <option value="">Select source closer...</option>
-                  {workloads.map((w: AgentWorkload) => (
-                    <option key={w.agentId} value={w.agentId}>
-                      {w.agentName} ({w.pendingCount} orders)
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Select source closer..."
+                  options={workloads.map((w: AgentWorkload) => ({
+                    value: w.agentId,
+                    label: `${w.agentName} (${w.pendingCount} orders)`,
+                  }))}
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
-                  To closer
-                </label>
-                <select
+                <FormSelect
+                  id="hotswap-to"
+                  label="To closer"
                   value={hotSwapTo}
                   onChange={(e) => setHotSwapTo(e.target.value)}
-                  className="input"
-                >
-                  <option value="">Select target closer...</option>
-                  {workloads
+                  placeholder="Select target closer..."
+                  options={workloads
                     .filter((w: AgentWorkload) => w.agentId !== hotSwapFrom)
-                    .map((w: AgentWorkload) => (
-                      <option key={w.agentId} value={w.agentId}>
-                        {w.agentName} ({w.pendingCount}/{w.capacity})
-                      </option>
-                    ))}
-                </select>
+                    .map((w: AgentWorkload) => ({
+                      value: w.agentId,
+                      label: `${w.agentName} (${w.pendingCount}/${w.capacity})`,
+                    }))}
+                />
               </div>
             </div>
 
@@ -2416,6 +2499,79 @@ export function CSDashboardPage({
         </Modal>
       )}
 
+      {/* ── Bulk-assign modal (Unassigned Queue → Assign N) ── */}
+      {bulkAssignOpen && (
+        <Modal
+          open
+          onClose={() => {
+            if (isBulkAssigning) return;
+            setBulkAssignOpen(false);
+            setBulkAssignAgentId('');
+          }}
+          maxWidth="max-w-md"
+          backdropBlur
+          contentClassName="p-6 space-y-4"
+        >
+          <div>
+            <h3 className="text-lg font-semibold text-app-fg">Assign {selectedQueueIds.size} order{selectedQueueIds.size === 1 ? '' : 's'}</h3>
+            <p className="text-sm text-app-fg-muted mt-0.5">
+              Pick a closer — selected orders move out of the Unassigned Queue immediately.
+            </p>
+          </div>
+          <div>
+            <FormSelect
+              id="bulk-assign-closer"
+              label="Assign to closer"
+              value={bulkAssignAgentId}
+              onChange={(e) => setBulkAssignAgentId(e.target.value)}
+              placeholder="Select closer…"
+              options={workloads
+                .filter((w: AgentWorkload) => w.pendingCount < w.capacity)
+                .map((w: AgentWorkload) => ({
+                  value: w.agentId,
+                  label: `${w.agentName} (${w.pendingCount}/${w.capacity})`,
+                }))}
+            />
+            <p className="text-[11px] text-app-fg-muted mt-1">
+              Only closers with capacity are listed. If everyone is at limit, free up capacity first.
+            </p>
+          </div>
+          {bulkAssignFetcher.data?.error && (
+            <p className="text-xs text-danger-600 dark:text-danger-400">{bulkAssignFetcher.data.error}</p>
+          )}
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <Button
+              variant="secondary"
+              disabled={isBulkAssigning}
+              onClick={() => {
+                setBulkAssignOpen(false);
+                setBulkAssignAgentId('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!bulkAssignAgentId || selectedQueueIds.size === 0 || isBulkAssigning}
+              loading={isBulkAssigning}
+              loadingText="Assigning…"
+              onClick={() => {
+                bulkAssignFetcher.submit(
+                  {
+                    intent: 'bulkAssignToCS',
+                    orderIds: JSON.stringify(Array.from(selectedQueueIds)),
+                    csAgentId: bulkAssignAgentId,
+                  },
+                  { method: 'post' },
+                );
+              }}
+            >
+              Assign
+            </Button>
+          </div>
+        </Modal>
+      )}
+
       {/* ── Reassign order modal ───────────────── */}
       {reassignOrder && (
         <Modal open onClose={() => { setReassignOrder(null); setReassignToAgentId(''); }} maxWidth="max-w-md" contentClassName="p-6">
@@ -2427,23 +2583,19 @@ export function CSDashboardPage({
             </p>
 
             <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
-                Assign to closer
-              </label>
-              <select
+              <FormSelect
+                id="reassign-to-closer"
+                label="Assign to closer"
                 value={reassignToAgentId}
                 onChange={(e) => setReassignToAgentId(e.target.value)}
-                className="input"
-              >
-                <option value="">Select closer...</option>
-                {workloads
+                placeholder="Select closer..."
+                options={workloads
                   .filter((w: AgentWorkload) => w.agentId !== reassignOrder.assignedCsId && w.pendingCount < w.capacity)
-                  .map((w: AgentWorkload) => (
-                    <option key={w.agentId} value={w.agentId}>
-                      {w.agentName} ({w.pendingCount}/{w.capacity})
-                    </option>
-                  ))}
-              </select>
+                  .map((w: AgentWorkload) => ({
+                    value: w.agentId,
+                    label: `${w.agentName} (${w.pendingCount}/${w.capacity})`,
+                  }))}
+              />
             </div>
 
             <div className="flex items-center justify-end gap-3 mt-6">

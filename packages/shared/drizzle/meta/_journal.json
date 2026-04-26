@@ -71,6 +71,8 @@
     { "idx": 66, "version": "7", "when": 1777680100000, "tag": "0064_users_phone_unique", "breakpoints": true },
     { "idx": 67, "version": "7", "when": 1777767000000, "tag": "0065_mirror_sessions", "breakpoints": true },
     { "idx": 68, "version": "7", "when": 1777853400000, "tag": "0066_fix_stamp_actor_empty_uuid", "breakpoints": true },
-    { "idx": 69, "version": "7", "when": 1777939800000, "tag": "0067_payroll_batches", "breakpoints": true }
+    { "idx": 69, "version": "7", "when": 1777939800000, "tag": "0067_payroll_batches", "breakpoints": true },
+    { "idx": 70, "version": "7", "when": 1778026200000, "tag": "0068_fix_payroll_batches_history_indexes", "breakpoints": true },
+    { "idx": 71, "version": "7", "when": 1778112600000, "tag": "0069_add_orders_custom_fields", "breakpoints": true }
   ]
 }

@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, gte, lte, count, sum, inArray, or, ilike, getTableColumns, type SQL } from 'drizzle-orm';
+import { eq, ne, and, desc, gte, lte, count, sum, inArray, or, ilike, getTableColumns, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
@@ -262,6 +262,11 @@ export class MarketingService {
     if (input.receiverId) {
       conditions.push(eq(schema.marketingFunding.receiverId, input.receiverId));
     }
+    // Direction filter — used by the "Distributing" section to count outgoing-only transfers
+    // (HoM disbursing to MBs). Mutually compatible with `receiverId` (both can constrain).
+    if (input.senderId) {
+      conditions.push(eq(schema.marketingFunding.senderId, input.senderId));
+    }
     if (input.startDate) {
       conditions.push(gte(schema.marketingFunding.sentAt, new Date(input.startDate)));
     }
@@ -316,7 +321,16 @@ export class MarketingService {
     branchId?: string | null,
   ) {
     const conditions: SQL[] = [];
-    if (user.role === 'MEDIA_BUYER') {
+
+    // Direction filters — `requesterId` ("My Requests" view) and `excludeSelfAsRequester`
+    // ("MB Requests" inbox view, HoM-side) are mutually exclusive in practice; if both
+    // are set the explicit `requesterId` wins.
+    if (input.requesterId) {
+      conditions.push(eq(schema.marketingFundingRequests.requesterId, input.requesterId));
+    } else if (input.excludeSelfAsRequester) {
+      conditions.push(ne(schema.marketingFundingRequests.requesterId, user.id));
+    } else if (user.role === 'MEDIA_BUYER') {
+      // Default MB visibility: own requests only.
       conditions.push(eq(schema.marketingFundingRequests.requesterId, user.id));
     }
     if (input.startDate) {
@@ -388,6 +402,72 @@ export class MarketingService {
       totalSent: totalSent[0]?.total ?? '0',
       totalCompleted: totalCompleted[0]?.total ?? '0',
       totalDisputed: totalDisputed[0]?.total ?? '0',
+    };
+  }
+
+  /**
+   * Per-actor directional summary used by the Funding page top strip. Returns the totals
+   * the actor cares about most: how much they've received in the period and (for HoM) how
+   * much they've distributed. Pending mark-received and disputed counts are surfaced as
+   * action signals so the UI can highlight items needing attention without a separate fetch.
+   *
+   * Period filter applies to `sent_at` (when the transfer was initiated). Branch scoping
+   * does NOT apply — this is keyed entirely on the actor's own id (received TO them or
+   * sent BY them), so cross-branch admin behaviour is irrelevant.
+   */
+  async fundingByDirectionSummary(
+    actorId: string,
+    input: { startDate?: string; endDate?: string },
+  ) {
+    const dateConditions: SQL[] = [];
+    if (input.startDate) {
+      dateConditions.push(gte(schema.marketingFunding.sentAt, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      dateConditions.push(lte(schema.marketingFunding.sentAt, end));
+    }
+
+    // Total received (any status) — gives the headline number HoMs/MBs see.
+    const incomingWhere = and(
+      eq(schema.marketingFunding.receiverId, actorId),
+      ...dateConditions,
+    );
+    const outgoingWhere = and(
+      eq(schema.marketingFunding.senderId, actorId),
+      ...dateConditions,
+    );
+
+    const [received, distributed, pendingReceiveRow, disputedReceiveRow, disputedSendRow] = await Promise.all([
+      this.db
+        .select({ total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(incomingWhere),
+      this.db
+        .select({ total: sum(schema.marketingFunding.amount) })
+        .from(schema.marketingFunding)
+        .where(outgoingWhere),
+      this.db
+        .select({ c: count() })
+        .from(schema.marketingFunding)
+        .where(and(eq(schema.marketingFunding.receiverId, actorId), eq(schema.marketingFunding.status, 'SENT'))),
+      this.db
+        .select({ c: count() })
+        .from(schema.marketingFunding)
+        .where(and(eq(schema.marketingFunding.receiverId, actorId), eq(schema.marketingFunding.status, 'DISPUTED'))),
+      this.db
+        .select({ c: count() })
+        .from(schema.marketingFunding)
+        .where(and(eq(schema.marketingFunding.senderId, actorId), eq(schema.marketingFunding.status, 'DISPUTED'))),
+    ]);
+
+    return {
+      totalReceived: received[0]?.total ?? '0',
+      totalDistributed: distributed[0]?.total ?? '0',
+      pendingMarkReceived: Number(pendingReceiveRow[0]?.c ?? 0),
+      disputedAsReceiver: Number(disputedReceiveRow[0]?.c ?? 0),
+      disputedAsSender: Number(disputedSendRow[0]?.c ?? 0),
     };
   }
 
@@ -665,6 +745,9 @@ export class MarketingService {
   async listFundingRequests(
     input: {
       requesterId?: string;
+      /** Caller id used when `excludeSelfAsRequester` is set (HoM's "MB Requests" inbox). */
+      callerId?: string;
+      excludeSelfAsRequester?: boolean;
       startDate?: string;
       endDate?: string;
       status?: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -677,6 +760,8 @@ export class MarketingService {
     const conditions = [];
     if (input.requesterId) {
       conditions.push(eq(schema.marketingFundingRequests.requesterId, input.requesterId));
+    } else if (input.excludeSelfAsRequester && input.callerId) {
+      conditions.push(ne(schema.marketingFundingRequests.requesterId, input.callerId));
     }
     if (input.startDate) {
       conditions.push(gte(schema.marketingFundingRequests.createdAt, new Date(input.startDate)));

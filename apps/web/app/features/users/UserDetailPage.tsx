@@ -10,6 +10,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
+import { Pagination } from '~/components/ui/pagination';
 import { formatActivityDescription } from '~/lib/format-activity';
 import { formatNaira } from '~/lib/format-amount';
 import type {
@@ -29,7 +30,12 @@ import type {
   ActiveHeadUser,
   FinanceHatHolder,
 } from './types';
-import { ROLE_COLORS, USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
+import { USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
+import { RoleBadge } from '~/components/ui/role-badge';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
+import { Textarea } from '~/components/ui/textarea';
+import { RadioGroup } from '~/components/ui/radio-group';
 
 // Roles limited to one active holder per branch. HR_MANAGER was added 2026-04-23 (CEO directive)
 // to follow the same rule as the HEAD_OF_* roles. Naming kept for continuity with backend.
@@ -426,7 +432,7 @@ export function UserDetailPage({
 
           {/* Quick info pills */}
           <div className="flex flex-wrap items-center gap-2 mt-4">
-            <span className={ROLE_COLORS[user.role] ?? 'badge'}>{formatRole(user.role)}</span>
+            <RoleBadge role={user.role} label={formatRole(user.role)} />
             {user.isFinanceOfficer && user.role !== 'FINANCE_OFFICER' && (
               <span className="badge-success" title="Wears the Finance hat — carries Finance Officer powers on top of their primary role.">
                 + Finance hat
@@ -1078,33 +1084,7 @@ export function UserDetailPage({
       {/* ─── Activity / Audit Tab ────────────────────────── */}
       {activeTab === 'audit' && (
         <DeferredSection resolve={auditLog} skeleton="stat">
-          {(entries) => (
-            <div className="card space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-app-fg">Activity</h3>
-                <span className="text-xs text-app-fg-muted">{entries.length} entries</span>
-              </div>
-              {entries.length > 0 ? (
-                <div className="space-y-2">
-                  {entries.map((entry) => (
-                    <div key={entry.id} className="flex items-start gap-2 text-xs">
-                      <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-app-fg truncate">
-                          {formatActivityDescription(entry)}
-                        </p>
-                        <p className="text-app-fg-muted text-[11px] mt-0.5">
-                          {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-app-fg-muted">No activity recorded yet</p>
-              )}
-            </div>
-          )}
+          {(entries) => <ActivityTabContent entries={entries} />}
         </DeferredSection>
       )}
 
@@ -1142,12 +1122,14 @@ export function UserDetailPage({
             <h2 className="text-base font-semibold text-app-fg">Account Details</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <label htmlFor="role" className="block text-sm font-medium text-app-fg-muted mb-1.5">Role</label>
-                <select id="role" name="role" className="input" value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)}>
-                  {ROLES.map((role) => (
-                    <option key={role.value} value={role.value}>{role.label}</option>
-                  ))}
-                </select>
+                <FormSelect
+                  id="role"
+                  name="role"
+                  label="Role"
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value)}
+                  options={ROLES.map((role) => ({ value: role.value, label: role.label }))}
+                />
                 {HEAD_ROLES.includes(selectedRole) && selectedRole !== user.role && user.primaryBranchId && activeHeads && (
                   <DeferredSection resolve={activeHeads} skeleton="inline">
                     {(heads: ActiveHeadUser[]) => {
@@ -1179,32 +1161,40 @@ export function UserDetailPage({
                 )}
               </div>
               <div>
-                <label htmlFor="name" className="block text-sm font-medium text-app-fg-muted mb-1.5">Full Name</label>
-                <input id="name" name="name" type="text" defaultValue={user.name} className="input" />
+                <TextInput id="name" name="name" type="text" label="Full Name" defaultValue={user.name} />
               </div>
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-app-fg-muted mb-1.5">Email Address</label>
-                <input id="email" name="email" type="email" defaultValue={user.email} className="input" />
+                <TextInput id="email" name="email" type="email" label="Email Address" defaultValue={user.email} />
                 <p className="text-xs text-warning-600 dark:text-warning-400 mt-1">Email changes require SuperAdmin approval before taking effect.</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-app-fg-muted mb-1.5">Status</label>
                 {user.status === 'DEACTIVATED' ? (
-                  <p className="text-sm text-app-fg-muted">Deactivated accounts cannot be reactivated. Re-invite to create a new account.</p>
+                  <>
+                    <p className="text-sm font-medium text-app-fg-muted mb-1.5">Status</p>
+                    <p className="text-sm text-app-fg-muted">Deactivated accounts cannot be reactivated. Re-invite to create a new account.</p>
+                  </>
                 ) : (
-                  <div className="flex flex-wrap items-center gap-4 mt-2">
-                    {(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED'] as const).map((s) => (
-                      <label key={s} className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="status" value={s} defaultChecked={user.status === s} className="text-brand-500 focus:ring-brand-500" />
-                        <span className="text-sm text-app-fg-muted">{s.charAt(0) + s.slice(1).toLowerCase()}</span>
-                      </label>
-                    ))}
-                  </div>
+                  <RadioGroup
+                    name="status"
+                    label="Status"
+                    layout="horizontal"
+                    defaultValue={user.status}
+                    options={(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED'] as const).map((s) => ({
+                      value: s,
+                      label: s.charAt(0) + s.slice(1).toLowerCase(),
+                    }))}
+                  />
                 )}
               </div>
               <div>
-                <label htmlFor="phone" className="block text-sm font-medium text-app-fg-muted mb-1.5">Phone</label>
-                <input id="phone" name="phone" type="tel" defaultValue="" placeholder="Enter new phone" className="input" />
+                <TextInput
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  label="Phone"
+                  defaultValue=""
+                  placeholder="Enter new phone"
+                />
                 <p className="text-xs text-app-fg-muted mt-1">Current: {user.phone ?? 'Not set'}. Leave blank to keep unchanged.</p>
               </div>
             </div>
@@ -1255,8 +1245,16 @@ export function UserDetailPage({
 
               {showCapacity && (
                 <div>
-                  <label htmlFor="capacity" className="block text-sm font-medium text-app-fg-muted mb-1.5">Order Capacity</label>
-                  <input id="capacity" name="capacity" type="number" min={1} max={100} defaultValue={user.capacity} className="input w-full sm:w-32" />
+                  <TextInput
+                    id="capacity"
+                    name="capacity"
+                    type="number"
+                    label="Order Capacity"
+                    min={1}
+                    max={100}
+                    defaultValue={String(user.capacity)}
+                    wrapperClassName="w-full sm:w-32"
+                  />
                 </div>
               )}
 
@@ -1264,13 +1262,17 @@ export function UserDetailPage({
                 <DeferredSection resolve={locations} skeleton="inline">
                   {(locs) => (
                     <div>
-                      <label htmlFor="logisticsLocationId" className="block text-sm font-medium text-app-fg-muted mb-1.5">Logistics Location</label>
-                      <select id="logisticsLocationId" name="logisticsLocationId" className="input" defaultValue={user.logisticsLocationId ?? ''}>
-                        <option value="">Select location</option>
-                        {locs.map((loc: UserCreateLocation) => (
-                          <option key={loc.id} value={loc.id}>{loc.name} — {loc.address}</option>
-                        ))}
-                      </select>
+                      <FormSelect
+                        id="logisticsLocationId"
+                        name="logisticsLocationId"
+                        label="Logistics Location"
+                        defaultValue={user.logisticsLocationId ?? ''}
+                        placeholder="Select location"
+                        options={locs.map((loc: UserCreateLocation) => ({
+                          value: loc.id,
+                          label: `${loc.name} — ${loc.address}`,
+                        }))}
+                      />
                       {locs.length === 0 && (
                         <InlineNotification
                           variant="warning"
@@ -1348,8 +1350,15 @@ export function UserDetailPage({
               <input type="hidden" name="intent" value="resetPassword" />
               <div className="space-y-4">
                 <div>
-                  <label htmlFor="newPassword" className="block text-sm font-medium text-app-fg-muted mb-1.5">New Password</label>
-                  <input id="newPassword" name="newPassword" type="password" required minLength={8} className="input" placeholder="Minimum 8 characters" />
+                  <TextInput
+                    id="newPassword"
+                    name="newPassword"
+                    type="password"
+                    label="New Password"
+                    required
+                    minLength={8}
+                    placeholder="Minimum 8 characters"
+                  />
                 </div>
                 <div className="flex items-center justify-end gap-3">
                   <Button type="button" variant="secondary" onClick={() => setShowResetPassword(false)} disabled={isResetting}>Cancel</Button>
@@ -1379,15 +1388,15 @@ export function UserDetailPage({
               <input type="hidden" name="action" value={showEmailChangeModal.action} />
               <div className="space-y-4">
                 <div>
-                  <label htmlFor="emailChangeReason" className="block text-sm font-medium text-app-fg-muted mb-1.5">Reason (min 10 characters)</label>
-                  <textarea
+                  <Textarea
                     id="emailChangeReason"
                     name="reason"
+                    label="Reason (min 10 characters)"
                     required
                     minLength={10}
                     value={emailChangeReason}
                     onChange={(e) => setEmailChangeReason(e.target.value)}
-                    className="input min-h-[80px]"
+                    rows={4}
                     placeholder="e.g. Verified with HR, request approved"
                   />
                 </div>
@@ -1612,4 +1621,55 @@ function CalendarIcon() {
 }
 function ClockIcon() {
   return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+}
+
+
+/**
+ * Activity / audit log tab — paginated 10/page client-side. Loader returns up to 50 entries
+ * (UserAuditEntry[]); we slice in-memory because the volume is small and avoiding a server
+ * round-trip per page keeps the tab responsive.
+ */
+function ActivityTabContent({ entries }: { entries: UserAuditEntry[] }) {
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const startIdx = (safePage - 1) * PAGE_SIZE;
+  const paged = entries.slice(startIdx, startIdx + PAGE_SIZE);
+
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-app-fg">Activity</h3>
+        <span className="text-xs text-app-fg-muted">{entries.length} entries</span>
+      </div>
+      {entries.length > 0 ? (
+        <>
+          <div className="space-y-2">
+            {paged.map((entry) => (
+              <div key={entry.id} className="flex items-start gap-2 text-xs">
+                <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-app-fg truncate">{formatActivityDescription(entry)}</p>
+                  <p className="text-app-fg-muted text-[11px] mt-0.5">
+                    {new Date(entry.createdAt).toLocaleDateString("en-NG", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+          {totalPages > 1 && (
+            <div className="pt-2 border-t border-app-border flex items-center justify-between">
+              <p className="text-[11px] text-app-fg-muted">
+                Showing {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, entries.length)} of {entries.length}
+              </p>
+              <Pagination page={safePage} totalPages={totalPages} onPageChange={setPage} />
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-app-fg-muted">No activity recorded yet</p>
+      )}
+    </div>
+  );
 }

@@ -1,5 +1,7 @@
 import { useFetcher } from '@remix-run/react';
 import { useState, useCallback } from 'react';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
 
 export interface DeliveryLogEntry {
   id: string;
@@ -198,31 +200,30 @@ export function NotificationsDeliveryLogPanel({
 
         {/* Trigger + date row */}
         <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <select
+          <FormSelect
+            id="delivery-log-trigger"
             value={currentTrigger}
             onChange={(e) => updateParam('logTrigger', e.target.value)}
-            className="rounded-lg border border-app-border bg-app-elevated px-3 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            {TRIGGER_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            options={TRIGGER_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            controlSize="sm"
+            wrapperClassName="min-w-0 w-[160px] sm:w-auto"
+          />
 
           <div className="flex items-center gap-1.5 min-w-0">
-            <input
+            <TextInput
               type="date"
               value={currentFrom}
               onChange={(e) => updateParam('logFrom', e.target.value)}
-              className="min-w-0 w-[130px] rounded-lg border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              controlSize="sm"
+              wrapperClassName="min-w-0 w-[130px]"
             />
             <span className="text-xs text-app-fg-muted shrink-0">to</span>
-            <input
+            <TextInput
               type="date"
               value={currentTo}
               onChange={(e) => updateParam('logTo', e.target.value)}
-              className="min-w-0 w-[130px] rounded-lg border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              controlSize="sm"
+              wrapperClassName="min-w-0 w-[130px]"
             />
           </div>
         </div>

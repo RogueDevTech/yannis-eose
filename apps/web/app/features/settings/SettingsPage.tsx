@@ -1092,11 +1092,7 @@ function VoipProviderPicker({
                     ? 'Browser SDK — agent talks via the dashboard.'
                     : "Phone-to-phone — provider rings the agent's phone, then bridges to the customer."}
                 </p>
-                {!p.configured && (
-                  <p className="mt-1 text-xs text-warning-700 dark:text-warning-400">
-                    Set env vars on the API server: {p.requiredEnvVars.join(', ')}.
-                  </p>
-                )}
+                {/* env-var hint removed — credential setup is documented in the runbook. */}
               </div>
               <switchFetcher.Form method="post">
                 <input type="hidden" name="intent" value="setVoipProvider" />

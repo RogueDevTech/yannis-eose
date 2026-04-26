@@ -225,6 +225,38 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'bulkAssignToCS') {
+    // Multi-select bulk-assign from the Unassigned Queue tab. Posts the same backend
+    // mutation as `assign` but for an arbitrary list of order IDs.
+    const orderIdsRaw = formData.get('orderIds')?.toString() ?? '[]';
+    const csAgentId = formData.get('csAgentId')?.toString() ?? '';
+
+    let orderIds: string[];
+    try {
+      orderIds = JSON.parse(orderIdsRaw) as string[];
+    } catch {
+      return json({ error: 'Invalid order IDs' }, { status: 400 });
+    }
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return json({ error: 'Pick at least one order' }, { status: 400 });
+    }
+    if (!csAgentId) {
+      return json({ error: 'Pick a closer to assign to' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/orders.bulkAssignToCS', {
+      method: 'POST',
+      cookie,
+      body: { orderIds, csAgentId },
+    });
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Bulk assignment failed' }, { status: safeStatus(res.status) });
+    }
+    const data = res.data as { result?: { data?: { assigned?: number } } };
+    return json({ success: true, assigned: data?.result?.data?.assigned ?? orderIds.length });
+  }
+
   if (intent === 'bulkReassign') {
     const orderIdsRaw = formData.get('orderIds')?.toString() ?? '[]';
     const fromAgentId = formData.get('fromAgentId')?.toString() ?? '';

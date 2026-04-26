@@ -89,6 +89,31 @@ export function parseFundingSummary(res: { ok: boolean; data: unknown }) {
   return data ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
 }
 
+const emptyDirectionSummary = () => ({
+  totalReceived: '0',
+  totalDistributed: '0',
+  pendingMarkReceived: 0,
+  disputedAsReceiver: 0,
+  disputedAsSender: 0,
+});
+
+/** Parse the actor-keyed directional summary used by the Funding page top strip. */
+export function parseFundingDirectionSummary(res: { ok: boolean; data: unknown }) {
+  if (!res.ok) return emptyDirectionSummary();
+  const data = (res.data as {
+    result?: {
+      data?: {
+        totalReceived: string;
+        totalDistributed: string;
+        pendingMarkReceived: number;
+        disputedAsReceiver: number;
+        disputedAsSender: number;
+      };
+    };
+  })?.result?.data;
+  return data ?? emptyDirectionSummary();
+}
+
 export function parseUsers(res: { ok: boolean; data: unknown }): User[] {
   const data = res.ok ? (res.data as { result?: { data?: { users: User[] } } })?.result?.data : null;
   return data?.users ?? [];

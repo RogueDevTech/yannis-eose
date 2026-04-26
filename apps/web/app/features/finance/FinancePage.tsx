@@ -558,7 +558,6 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                         <AmountInput
                           value={item.unitPrice}
                           onChange={(v) => updateLineItem(idx, 'unitPrice', v)}
-                          className="input"
                           placeholder="0.00"
                         />
                       </div>

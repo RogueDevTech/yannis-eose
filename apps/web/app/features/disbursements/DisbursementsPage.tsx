@@ -21,6 +21,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
 
 const STATUS_OPTIONS = ['ALL', 'SENT', 'COMPLETED', 'DISPUTED'] as const;
 
@@ -74,6 +75,8 @@ export interface DisbursementsPageData {
     periodAllTime: boolean;
     status: string;
     receiver: string;
+    /** Free-text search — matches sender name, receiver name, or row ID server-side. */
+    search: string;
   };
   recipientBalances?: Array<{
     userId: string;
@@ -285,7 +288,7 @@ export function DisbursementsPage({
   users,
   canDisburseToHoM,
   preselectedReceiverId = null,
-  filters = { startDate: '', endDate: '', periodAllTime: false, status: '', receiver: '' },
+  filters = { startDate: '', endDate: '', periodAllTime: false, status: '', receiver: '', search: '' },
   recipientBalances = [],
   summary = { totalSent: '0', totalCompleted: '0', totalDisputed: '0' },
   fundingRequests = [],
@@ -323,10 +326,14 @@ export function DisbursementsPage({
   // Optimistic filter state: switch tab/filter immediately, then fetch in background
   const [optimisticStatus, setOptimisticStatus] = useState(filters.status || 'ALL');
   const [optimisticReceiver, setOptimisticReceiver] = useState(filters.receiver || 'ALL');
+  // Search input is intentionally NOT optimistic — we only fire on submit so the user gets a
+  // single, debounce-free query against the server. Prefilled from the URL on mount/back-nav.
+  const [searchQuery, setSearchQuery] = useState(filters.search || '');
   useEffect(() => {
     setOptimisticStatus(filters.status || 'ALL');
     setOptimisticReceiver(filters.receiver || 'ALL');
-  }, [filters.status, filters.receiver]);
+    setSearchQuery(filters.search || '');
+  }, [filters.status, filters.receiver, filters.search]);
 
   const canCreate = canDisburseToHoM;
   const recipients = canDisburseToHoM ? users : [];
@@ -366,6 +373,20 @@ export function DisbursementsPage({
       next.set('page', '1');
       if (receiverId === 'ALL') next.delete('receiver');
       else next.set('receiver', receiverId);
+      return next;
+    });
+  };
+
+  /** Submit handler — fires on form submit so we don't hit the server on every keystroke.
+   * Server-side search matches against sender name, receiver name, or row ID. */
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      const q = searchQuery.trim();
+      if (q) next.set('search', q);
+      else next.delete('search');
       return next;
     });
   };
@@ -474,7 +495,7 @@ export function DisbursementsPage({
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'disbursements'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg'
+              : 'border-transparent text-app-fg-muted hover:text-app-fg'
           }`}
         >
           Disbursements
@@ -486,7 +507,7 @@ export function DisbursementsPage({
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'balances'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg'
+              : 'border-transparent text-app-fg-muted hover:text-app-fg'
           }`}
         >
           Recipient balances
@@ -498,7 +519,7 @@ export function DisbursementsPage({
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'requests'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg'
+              : 'border-transparent text-app-fg-muted hover:text-app-fg'
           }`}
         >
           Requests
@@ -509,39 +530,50 @@ export function DisbursementsPage({
       {/* Disbursements tab */}
       {activeTab === 'disbursements' && (
         <>
-          {/* Filter bar */}
+          {/* Filter bar — search + dropdowns. Status moved from pills to a dropdown so the
+              filter row reads consistently (matches recipient + product filters elsewhere)
+              and frees horizontal space on smaller screens. */}
           <div className="card">
-            <div className="flex flex-col sm:flex-row gap-3">
-              {/* Status filter pills */}
-              <div className="flex flex-wrap items-center gap-1.5">
-                {STATUS_OPTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => handleStatusChange(s)}
-                    className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
-                      selectedStatus === s
-                        ? 'bg-brand-600 text-white border-brand-600'
-                        : 'bg-app-elevated text-app-fg-muted border-app-border hover:border-app-border-strong'
-                    }`}
-                  >
-                    {STATUS_LABELS[s]}
-                  </button>
-                ))}
-              </div>
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+              {/* Search — submits on form submit, not on every keystroke. */}
+              <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1 min-w-0">
+                <SearchInput
+                  type="search"
+                  value={searchQuery}
+                  onChange={(v) => setSearchQuery(v)}
+                  placeholder="Search by sender, receiver, or ID..."
+                  controlSize="sm"
+                  clearable
+                  wrapperClassName="flex-1 min-w-0"
+                  aria-label="Search disbursements"
+                />
+                <Button type="submit" variant="secondary" size="sm" className="shrink-0">
+                  Search
+                </Button>
+              </form>
 
-              {/* Recipient filter dropdown */}
-              <select
+              <FormSelect
+                id="disbursement-status-filter"
+                value={selectedStatus}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                options={STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABELS[s] ?? s }))}
+                controlSize="sm"
+                wrapperClassName="w-full sm:w-44"
+                aria-label="Filter by status"
+              />
+
+              <FormSelect
+                id="disbursement-recipient-filter"
                 value={selectedReceiver}
                 onChange={(e) => handleReceiverChange(e.target.value)}
-                className="input w-full sm:w-52 py-1.5"
+                options={[
+                  { value: 'ALL', label: 'All recipients' },
+                  ...recipients.map((u) => ({ value: u.id, label: u.name })),
+                ]}
+                controlSize="sm"
+                wrapperClassName="w-full sm:w-52"
                 aria-label="Filter by recipient"
-              >
-                <option value="ALL">All recipients</option>
-                {recipients.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
+              />
 
               {isFilterLoading && (
                 <span className="flex items-center text-app-fg-muted" aria-hidden>

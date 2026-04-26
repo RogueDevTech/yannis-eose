@@ -11,13 +11,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
+interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'size'> {
   onChange?: (value: string) => void;
   /** Debounce delay in ms — only fires onChange after the delay */
   debounceMs?: number;
   /** Show a clear (×) button when the input has a value */
   clearable?: boolean;
-  size?: 'sm' | 'md' | 'lg';
+  /** Visual height — distinct from native HTML `input size` */
+  controlSize?: 'sm' | 'md' | 'lg';
   wrapperClassName?: string;
 }
 
@@ -37,7 +38,7 @@ export function SearchInput({
   onChange,
   debounceMs,
   clearable = true,
-  size = 'md',
+  controlSize = 'md',
   wrapperClassName = '',
   className = '',
   value: controlledValue,
@@ -81,7 +82,7 @@ export function SearchInput({
       <span
         className={[
           'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
-          iconSizeClasses[size],
+          iconSizeClasses[controlSize],
         ].join(' ')}
         aria-hidden="true"
       >
@@ -102,7 +103,7 @@ export function SearchInput({
           'w-full rounded-lg border transition-colors',
           'bg-app-canvas text-app-fg placeholder:text-app-fg-muted',
           'border-app-border focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none',
-          sizeClasses[size],
+          sizeClasses[controlSize],
           clearable && hasValue ? 'pr-7' : '',
           className,
         ]

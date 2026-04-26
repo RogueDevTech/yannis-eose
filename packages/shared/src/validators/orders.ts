@@ -76,6 +76,14 @@ export const createOrderSchema = z.object({
   source: z.enum(['edge-form']).optional(),
   /** Cart ID from prior cart save — marks cart as CONVERTED when order created */
   cartId: z.string().uuid().optional(),
+  /**
+   * Form-builder responses, keyed by `customField.id`. Persisted as-is to
+   * `orders.custom_fields` (JSONB). Per-field types vary — text/email/number/dropdown
+   * are strings (or numbers), checkbox_group is string[], toggle is boolean.
+   */
+  customFields: z
+    .record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string()).max(50)]))
+    .optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
