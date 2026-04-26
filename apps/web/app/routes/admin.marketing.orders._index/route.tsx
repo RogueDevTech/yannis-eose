@@ -1,9 +1,11 @@
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { json } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { MarketingOrdersPage } from '~/features/marketing/MarketingOrdersPage';
 import type { Order } from '~/features/orders/types';
+import { handleExportReportAction } from '~/lib/export-report.server';
 
 export const meta: MetaFunction = () => [
   { title: 'Marketing Orders — Yannis EOSE' },
@@ -120,6 +122,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalAdSpend: metricsData?.totalSpend ?? null,
     dailyCounts,
   };
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const exportResponse = await handleExportReportAction(request);
+  if (exportResponse) return exportResponse;
+  return json({ error: 'Unknown action' }, { status: 400 });
 }
 
 export default function MarketingOrdersRoute() {

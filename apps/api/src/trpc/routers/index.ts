@@ -18,6 +18,7 @@ import { cartRouter } from './cart.router';
 import { permissionRequestsRouter } from './permission-requests.router';
 import { branchesRouter } from './branches.router';
 import { messagingRouter } from './messaging.router';
+import { reportsRouter } from './reports.router';
 
 /**
  * Root tRPC router — merges all module routers.
@@ -43,6 +44,7 @@ export const appRouter = router({
   permissionRequests: permissionRequestsRouter,
   branches: branchesRouter,
   messaging: messagingRouter,
+  reports: reportsRouter,
 });
 
 export type AppRouter = typeof appRouter;

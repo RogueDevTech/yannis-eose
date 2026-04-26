@@ -111,14 +111,26 @@ export function CSMessagingPanel({
   }, [textPanelOpen, textChannel]);
 
   useEffect(() => {
-    if (!textPanelOpen || textChannel !== 'sms' || preparedSmsPhone || smsPrepareFetcher.state !== 'idle') return;
+    if (
+      !textPanelOpen ||
+      textChannel !== 'sms' ||
+      preparedSmsPhone ||
+      smsPrepareFetcher.state !== 'idle' ||
+      smsPrepareFetcher.data
+    ) return;
     smsPrepareFetcher.submit({ intent: 'preparePhoneForSms' }, { method: 'post' });
-  }, [textPanelOpen, textChannel, preparedSmsPhone, smsPrepareFetcher]);
+  }, [textPanelOpen, textChannel, preparedSmsPhone, smsPrepareFetcher.state, smsPrepareFetcher.data]);
 
   useEffect(() => {
-    if (!textPanelOpen || textChannel !== 'whatsapp' || preparedWhatsappPhone || whatsappPrepareFetcher.state !== 'idle') return;
+    if (
+      !textPanelOpen ||
+      textChannel !== 'whatsapp' ||
+      preparedWhatsappPhone ||
+      whatsappPrepareFetcher.state !== 'idle' ||
+      whatsappPrepareFetcher.data
+    ) return;
     whatsappPrepareFetcher.submit({ intent: 'preparePhoneForWhatsApp' }, { method: 'post' });
-  }, [textPanelOpen, textChannel, preparedWhatsappPhone, whatsappPrepareFetcher]);
+  }, [textPanelOpen, textChannel, preparedWhatsappPhone, whatsappPrepareFetcher.state, whatsappPrepareFetcher.data]);
 
   // Load outbox only when SMS composer is active (same as before).
   useEffect(() => {
@@ -357,18 +369,12 @@ export function CSMessagingPanel({
           aria-expanded={textPanelOpen}
           className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm font-medium text-app-fg bg-app-hover/40 hover:bg-app-hover/70 transition-colors duration-150"
         >
-          <span className="flex items-center gap-2 min-w-0">
-            <span className="flex items-center gap-1 shrink-0 text-app-fg-muted">
-              <ChannelIcon channel="sms" />
-              <ChannelIcon channel="whatsapp" />
-            </span>
-            <span className="truncate">
-              {textPanelOpen && textChannel
-                ? textChannel === 'whatsapp'
-                  ? 'WhatsApp'
-                  : 'SMS'
-                : 'SMS & WhatsApp'}
-            </span>
+          <span className="truncate">
+            {textPanelOpen && textChannel
+              ? textChannel === 'whatsapp'
+                ? 'WhatsApp'
+                : 'SMS'
+              : 'SMS & WhatsApp'}
           </span>
           <svg
             className={`w-4 h-4 shrink-0 text-app-fg-muted transition-transform duration-200 ${textPanelOpen ? 'rotate-180' : ''}`}

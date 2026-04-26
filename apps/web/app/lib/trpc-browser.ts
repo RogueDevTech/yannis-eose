@@ -92,3 +92,38 @@ export async function shareOrderToLogistics(input: {
   if (!data) throw new Error('No data returned from share');
   return data;
 }
+
+export type AdSpendIntervalPreviewInput = {
+  campaignId: string;
+  productId: string;
+  spendDate: string;
+  spendAmount?: number;
+};
+
+export type AdSpendIntervalPreviewResult = {
+  orderCount: number;
+  priorSpendDate: string | null;
+  windowStartExclusive: string | null;
+  indicativeCpa: number | null;
+};
+
+/** GET `marketing.previewAdSpendInterval` — used by Log Ad Spend form (session cookie). */
+export async function fetchAdSpendIntervalPreview(
+  input: AdSpendIntervalPreviewInput
+): Promise<AdSpendIntervalPreviewResult | null> {
+  const base = getApiBaseUrl();
+  if (!base) return null;
+  const payload: Record<string, unknown> = {
+    campaignId: input.campaignId,
+    productId: input.productId,
+    spendDate: input.spendDate,
+  };
+  if (input.spendAmount !== undefined && input.spendAmount > 0) {
+    payload.spendAmount = input.spendAmount;
+  }
+  const url = `${base}/trpc/marketing.previewAdSpendInterval?input=${encodeURIComponent(JSON.stringify(payload))}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) return null;
+  const json = (await res.json()) as TrpcEnvelope<AdSpendIntervalPreviewResult>;
+  return json?.result?.data ?? null;
+}

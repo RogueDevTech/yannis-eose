@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { FinancePage } from '~/features/finance/FinancePage';
 import type { Invoice, ProfitReport, ApprovalRequest, BudgetWithUtilization, FinanceStreamData } from '~/features/finance/types';
+import { handleExportReportAction } from '~/lib/export-report.server';
 
 export const meta: MetaFunction = () => [
   { title: 'Finance — Yannis EOSE' },
@@ -107,6 +108,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const exportResponse = await handleExportReportAction(request);
+  if (exportResponse) return exportResponse;
+
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();

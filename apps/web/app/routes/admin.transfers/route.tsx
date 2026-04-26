@@ -78,27 +78,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
-  if (intent === 'verifyTransfer') {
-    const quantityReceived = parseInt(formData.get('quantityReceived')?.toString() ?? '0', 10);
-    const shrinkageReason = formData.get('shrinkageReason')?.toString() || undefined;
-
-    const res = await apiRequest<unknown>('/trpc/inventory.verifyTransfer', {
-      method: 'POST',
-      cookie,
-      body: {
-        transferId: formData.get('transferId')?.toString() ?? '',
-        quantityReceived,
-        shrinkageReason,
-      },
-    });
-
-    if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to verify transfer' }, { status: safeStatus(res.status) });
-    }
-    return json({ success: true });
-  }
-
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 

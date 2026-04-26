@@ -6,7 +6,7 @@ import { RemittancesAdminPage } from '~/features/remittances/RemittancesAdminPag
 import type { RemittanceAdminRecord } from '~/features/remittances/RemittancesAdminPage';
 
 export const meta: MetaFunction = () => [
-  { title: 'Remittances — Yannis EOSE' },
+  { title: 'Stock Transfer Confirmations — Yannis EOSE' },
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {

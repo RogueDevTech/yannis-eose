@@ -6,6 +6,7 @@ import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption } from '~/features/inventory/types';
+import { handleExportReportAction } from '~/lib/export-report.server';
 
 export const meta: MetaFunction = () => [
   { title: 'Inventory — Yannis EOSE' },
@@ -24,6 +25,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // `sort=lowestAvailable|highestAvailable` maps to backend sortBy/sortOrder pairs.
   const url = new URL(request.url);
   const rawProductFilter = url.searchParams.get('productId') ?? '';
+  const rawLocationFilter = url.searchParams.get('locationId') ?? '';
   const rawSort = url.searchParams.get('sort') ?? '';
   const rawSearch = (url.searchParams.get('search') ?? '').trim();
   const rawPage = Number(url.searchParams.get('page') ?? '1');
@@ -32,6 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const levelsInput: {
     productId?: string;
+    locationId?: string;
     search?: string;
     sortBy?: 'available' | 'updatedAt';
     sortOrder?: 'asc' | 'desc';
@@ -39,6 +42,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit: number;
   } = { page, limit: LEVELS_LIMIT };
   if (rawProductFilter) levelsInput.productId = rawProductFilter;
+  if (rawLocationFilter) levelsInput.locationId = rawLocationFilter;
   if (rawSearch) levelsInput.search = rawSearch;
   if (rawSort === 'lowestAvailable') {
     levelsInput.sortBy = 'available';
@@ -55,7 +59,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
   const movementsPromise = apiRequest<unknown>('/trpc/inventory.movements', { method: 'GET', cookie });
   const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 20, status: 'ACTIVE' }))}`, { method: 'GET', cookie });
-  const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 20 }))}`, { method: 'GET', cookie });
+  const locationsPromise = apiRequest<unknown>(
+    `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 100 }))}`,
+    { method: 'GET', cookie },
+  );
   const lowStockPromise = apiRequest<unknown>(
     '/trpc/settings.getSystemSettings',
     { method: 'GET', cookie },
@@ -118,6 +125,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     levelsTotalPages: levelsData?.pagination?.totalPages ?? 1,
     levelsLimit: LEVELS_LIMIT,
     levelsProductFilter: rawProductFilter,
+    levelsLocationFilter: rawLocationFilter,
     levelsSearch: rawSearch,
     levelsSort: rawSort === 'lowestAvailable' || rawSort === 'highestAvailable' ? rawSort : 'default',
     movements: movementsData.movements,
@@ -139,6 +147,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const exportResponse = await handleExportReportAction(request);
+  if (exportResponse) return exportResponse;
+
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();

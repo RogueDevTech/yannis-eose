@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Button } from '~/components/ui/button';
-import { TeamViewToggle } from '~/components/ui/team-view-toggle';
 import { useToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -172,7 +171,6 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
   const revalidator = useRevalidator();
   const { toast } = useToast();
   const [redistributeMember, setRedistributeMember] = useState<CSTeamMemberOverview | null>(null);
-  const [view, setView] = useState<'table' | 'grid'>('table');
   const prevFetcherData = useRef(fetcher.data);
 
   useEffect(() => {
@@ -245,12 +243,8 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
             <div>
               <h2 className="text-lg font-semibold text-app-fg">Team members</h2>
               <p className="text-sm text-app-fg-muted mt-0.5">
-                Workload, activity, and performance — switch to grid for card layout.
+                Workload, activity, and performance overview.
               </p>
-            </div>
-            {/* Toggle is desktop-only; mobile always uses the card grid */}
-            <div className="hidden md:block">
-              <TeamViewToggle value={view} onChange={setView} />
             </div>
           </div>
 
@@ -266,9 +260,8 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
             ))}
           </div>
 
-          {/* Desktop: respect the table/grid toggle */}
+          {/* Desktop: table view */}
           <div className="hidden md:block">
-          {view === 'table' ? (
             <div className="card p-0 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px]">
@@ -288,6 +281,9 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
                       const lb = member.leaderboardEntry;
                       const act = activityCell(member);
                       const isIdleText = act === 'Idle';
+                      const workloadPct = workload && workload.capacity > 0
+                        ? (workload.pendingCount / workload.capacity) * 100
+                        : 0;
 
                       return (
                         <tr key={member.id} className="table-row">
@@ -301,10 +297,20 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
                               <span className="font-medium text-app-fg truncate">{member.name}</span>
                             </div>
                           </td>
-                          <td className="table-cell text-sm text-app-fg-muted whitespace-nowrap">
-                            {isAgent && workload
-                              ? `${workload.pendingCount} / ${workload.capacity}`
-                              : '\u2014'}
+                          <td className="table-cell text-sm whitespace-nowrap">
+                            {isAgent && workload ? (
+                              <span
+                                className={`font-medium ${
+                                  workloadPct >= 80
+                                    ? 'text-danger-600 dark:text-danger-400'
+                                    : 'text-success-600 dark:text-success-400'
+                                }`}
+                              >
+                                {workload.pendingCount} / {workload.capacity}
+                              </span>
+                            ) : (
+                              <span className="text-app-fg-muted">{'\u2014'}</span>
+                            )}
                           </td>
                           <td className="table-cell text-sm whitespace-nowrap">
                             {isIdleText ? (
@@ -374,18 +380,6 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
                 </table>
               </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {teamMembers.map((m) => (
-                <CSTeamMemberCard
-                  key={m.id}
-                  member={m}
-                  canReassign={canReassign}
-                  onRedistribute={setRedistributeMember}
-                />
-              ))}
-            </div>
-          )}
           </div>
 
           {totalPages > 1 && (

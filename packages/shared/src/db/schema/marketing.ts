@@ -40,7 +40,24 @@ export const campaigns = pgTable('campaigns', {
   ...timestampColumns,
 });
 
-// Table 14: marketing_funding — HoM funding to Media Buyers
+// Table: marketing_funding_requests — declared before marketing_funding for FK from ledger → request
+export const marketingFundingRequests = pgTable('marketing_funding_requests', {
+  id: uuidv7Pk(),
+  requesterId: uuid('requester_id')
+    .notNull()
+    .references(() => users.id),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  reason: text('reason'),
+  status: fundingRequestStatusEnum('status').default('PENDING').notNull(),
+  receiptUrl: text('receipt_url'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedBy: text('resolved_by').references(() => users.id),
+  ...temporalColumns,
+});
+
+// Table 14: marketing_funding — HoM funding to Media Buyers (and Finance→HoM); optional link to approved request
+// Unique on source_funding_request_id (partial, WHERE NOT NULL) is enforced in SQL migration 0070 only.
 export const marketingFunding = pgTable('marketing_funding', {
   id: uuidv7Pk(),
   senderId: uuid('sender_id')
@@ -54,22 +71,8 @@ export const marketingFunding = pgTable('marketing_funding', {
   status: fundingStatusEnum('status').default('SENT').notNull(),
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
   verifiedAt: timestamp('verified_at', { withTimezone: true }),
-  ...temporalColumns,
-});
-
-// Table: marketing_funding_requests — Media Buyer requests for funds (HoM approves by sending actual funding)
-export const marketingFundingRequests = pgTable('marketing_funding_requests', {
-  id: uuidv7Pk(),
-  requesterId: uuid('requester_id')
-    .notNull()
-    .references(() => users.id),
-  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
-  reason: text('reason'),
-  status: fundingRequestStatusEnum('status').default('PENDING').notNull(),
-  receiptUrl: text('receipt_url'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
-  resolvedBy: text('resolved_by').references(() => users.id),
+  /** When set, this ledger row was created by approving the linked funding request. */
+  sourceFundingRequestId: uuid('source_funding_request_id').references(() => marketingFundingRequests.id),
   ...temporalColumns,
 });
 

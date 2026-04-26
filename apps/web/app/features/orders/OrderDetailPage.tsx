@@ -12,7 +12,7 @@ import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useAgentStateBroadcast } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
-import { previewInvoicePdf } from '~/lib/invoice-pdf';
+import { generateInvoicePdf, previewInvoicePdf } from '~/lib/invoice-pdf';
 import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
@@ -930,14 +930,24 @@ export function OrderDetailPage({
                             <span className="capitalize">{i.status.toLowerCase()}</span>
                           </p>
                         </div>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          size="sm"
-                          onClick={() => previewInvoicePdf(i)}
-                        >
-                          Preview PDF
-                        </Button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => generateInvoicePdf(i, 'download')}
+                          >
+                            Download PDF
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            onClick={() => previewInvoicePdf(i)}
+                          >
+                            Preview PDF
+                          </Button>
+                        </div>
                       </div>
                       <p className="text-xs text-app-fg-muted">
                         Auto-generated when this order was confirmed. Edit the recipient, line items, tax, or due date from the Finance page before sending.

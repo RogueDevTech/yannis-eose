@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import { handleExportReportAction } from '~/lib/export-report.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { OrdersListPage } from '~/features/orders/OrdersListPage';
 import type { Order } from '~/features/orders/types';
@@ -152,6 +153,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const exportResponse = await handleExportReportAction(request);
+  if (exportResponse) return exportResponse;
+
   const cookie = getSessionCookie(request);
   if (!cookie) {
     return json({ success: false, error: 'Not authenticated' }, { status: 401 });

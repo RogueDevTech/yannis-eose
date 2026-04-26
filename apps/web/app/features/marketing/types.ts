@@ -51,6 +51,14 @@ export interface AdSpendRecord {
   approvedBy: string | null;
 }
 
+/** `marketing.previewAdSpendInterval` — form helper, not the same window as dashboard CPA. */
+export interface AdSpendIntervalPreview {
+  orderCount: number;
+  priorSpendDate: string | null;
+  windowStartExclusive: string | null;
+  indicativeCpa: number | null;
+}
+
 /** Counts for ad spend log status filter (scoped by date + branch + search + optional product/campaign). */
 export interface AdSpendStatusCounts {
   PENDING: number;
@@ -187,7 +195,7 @@ export interface MarketingFundingLoaderData {
   currentUserRole: string;
   canSendFunding: boolean;
   canRequestFunding: boolean;
-  /** Whether to render Section 2 ("Funds I Distribute"). True for HoM/Admin; false for MB. */
+  /** HoM/Admin: primary tab "Funds I Distribute" + outgoing slices. False for MB. */
   canDistribute: boolean;
 
   /** URL state */
@@ -205,6 +213,8 @@ export interface MarketingFundingLoaderData {
 
   /** Top strip + supporting data */
   directionSummary: FundingDirectionSummary;
+  /** Media Buyer / HoM: running balance (COMPLETED transfers in minus APPROVED ad spend). */
+  fundingBalance?: { totalReceived: string; totalSpend: string; balance: string };
   /** Used by the HighCpaWarningBanner (HoM/Admin only). */
   leaderboard: LeaderboardEntry[];
   leaderboardPeriod: 'this_month' | 'all_time';

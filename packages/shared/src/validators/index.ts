@@ -168,6 +168,7 @@ export {
   listAdSpendSchema,
   adSpendStatusCountsSchema,
   approveAdSpendSchema,
+  previewAdSpendIntervalSchema,
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
   listOfferTemplatesSchema,
@@ -194,6 +195,7 @@ export type {
   ListAdSpendInput,
   AdSpendStatusCountsInput,
   ApproveAdSpendInput,
+  PreviewAdSpendIntervalInput,
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
   ListOfferTemplatesInput,
@@ -266,6 +268,22 @@ export {
 } from './ui';
 
 export type { AppThemeId, ClientUiConfig, UpdateMyAppThemeInput, FontScaleId, UpdateMyFontScaleInput } from './ui';
+
+// Reports / Export validators
+export {
+  exportReportKeySchema,
+  exportDatePresetSchema,
+  exportDateRangeSchema,
+  reportColumnsByKey,
+  exportReportSchema,
+} from './reports';
+
+export type {
+  ExportReportKey,
+  ExportDatePreset,
+  ExportDateRange,
+  ExportReportInput,
+} from './reports';
 
 // HR & Payroll validators
 export {

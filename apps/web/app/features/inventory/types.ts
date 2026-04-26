@@ -60,6 +60,8 @@ export interface InventoryStreamData {
   levelsLimit?: number;
   /** Product UUID filter (empty string = no filter). */
   levelsProductFilter?: string;
+  /** Logistics location UUID filter (empty string = no filter). */
+  levelsLocationFilter?: string;
   /** Substring search against product name (empty string = no search). */
   levelsSearch?: string;
   /** `default` | `lowestAvailable` | `highestAvailable`. */

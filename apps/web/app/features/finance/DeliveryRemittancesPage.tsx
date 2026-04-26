@@ -517,7 +517,7 @@ export function DeliveryRemittancesPage({
     <div className="space-y-4">
       {/* Header */}
       <PageHeader
-        title="Delivery remittances"
+        title="Delivery Cash Remittances"
         description="3PL submit batches of delivered orders with payment receipts. Review receipts and confirm or dispute payment."
         actions={
           <>

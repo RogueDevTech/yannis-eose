@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
@@ -10,6 +10,8 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Textarea } from '~/components/ui/textarea';
 import { Pagination } from '~/components/ui/pagination';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { Tabs } from '~/components/ui/tabs';
 import type { DeliveryConfirmationRequest } from './types';
 
 interface DeliveryConfirmationsPageProps {
@@ -39,12 +41,14 @@ export function DeliveryConfirmationsPage({
   orderCounts = {},
 }: DeliveryConfirmationsPageProps) {
   const fetcher = useFetcher();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [rejectModal, setRejectModal] = useState<{ requestId: string } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
   useFetcherToast(fetcher.data, { successMessage: 'Action completed' });
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
+  const activeTab = statusFilter === '' ? 'ALL' : 'PENDING';
 
   return (
     <div className="space-y-4">
@@ -54,35 +58,33 @@ export function DeliveryConfirmationsPage({
         actions={
           <>
             <PageRefreshButton />
-            <Link to="/admin/logistics/delivery-confirmations?status=PENDING">
-              <Button variant={statusFilter === 'PENDING' ? 'primary' : 'secondary'} size="sm">
-                Pending {statusFilter === 'PENDING' ? `(${total})` : ''}
-              </Button>
-            </Link>
-            <Link to="/admin/logistics/delivery-confirmations?status=">
-              <Button variant={statusFilter === '' ? 'primary' : 'secondary'} size="sm">
-                All
-              </Button>
-            </Link>
           </>
         }
       />
 
-      {/* Order Pipeline — same card style as dashboard bottom */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-app-fg mb-4">Order Pipeline</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {PIPELINE_STAGES.map(({ key, label, color }) => {
-            const value = orderCounts[key] ?? 0;
-            return (
-              <div key={key} className="text-center p-3 rounded-lg bg-app-hover">
-                <p className={`text-2xl font-bold ${color}`}>{value}</p>
-                <p className="text-sm text-app-fg-muted mt-0.5">{label}</p>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <Tabs
+        value={activeTab}
+        onChange={(value) => {
+          const next = new URLSearchParams(searchParams);
+          if (value === 'PENDING') next.set('status', 'PENDING');
+          else next.set('status', '');
+          next.set('page', '1');
+          setSearchParams(next);
+        }}
+        tabs={[
+          { value: 'PENDING', label: `Pending (${total})` },
+          { value: 'ALL', label: 'All' },
+        ]}
+      />
+
+      <OverviewStatStrip
+        items={PIPELINE_STAGES.map(({ key, label, color }) => ({
+          label,
+          value: (orderCounts[key] ?? 0).toLocaleString(),
+          valueClassName: color,
+          title: `${label} orders`,
+        }))}
+      />
 
       <div className="card p-0 overflow-hidden">
         {requests.length > 0 ? (

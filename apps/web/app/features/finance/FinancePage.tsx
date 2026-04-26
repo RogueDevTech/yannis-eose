@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useFetcher, useSearchParams, useNavigation } from '@remix-run/react';
-import { exportToCsv } from '~/lib/csv-export';
+import { ExportModal } from '~/components/ui/export-modal';
+import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
-import { previewInvoicePdf } from '~/lib/invoice-pdf';
+import { generateInvoicePdf, previewInvoicePdf } from '~/lib/invoice-pdf';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -22,7 +23,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { formatNaira } from '~/lib/format-amount';
-import type { FinanceStreamData, Invoice, ApprovalRequest, BudgetWithUtilization } from './types';
+import type { FinanceStreamData, Invoice, ApprovalRequest } from './types';
 
 const ITEMS_PER_PAGE = 15;
 
@@ -52,13 +53,14 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
       );
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const [activeTab, setActiveTab] = useState<'overview' | 'invoices' | 'approvals'>('overview');
+  const [activeTab, setActiveTab] = useState<'invoices' | 'approvals'>('invoices');
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   const [lineItems, setLineItems] = useState<{ description: string; quantity: number; unitPrice: string }[]>([
     { description: '', quantity: 1, unitPrice: '' },
   ]);
   const [approvalModal, setApprovalModal] = useState<{ requestId: string; action: string } | null>(null);
   const [approvalReason, setApprovalReason] = useState('');
+  const [showExportModal, setShowExportModal] = useState(false);
   const [invoicePage, setInvoicePage] = useState(1);
 
   useFetcherToast(fetcher.data, { successMessage: 'Invoice updated' });
@@ -74,22 +76,10 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
 
   if (actionSuccess && showInvoiceForm) setShowInvoiceForm(false);
 
-  // Memoize cost calculations
-  const costWaterfall = useMemo(() => [
-    { label: 'Revenue', value: profit.revenue, type: 'revenue' as const },
-    { label: 'Landed COGS', value: profit.landedCost, type: 'cost' as const },
-    { label: 'Delivery Fees', value: profit.deliveryFee, type: 'cost' as const },
-    { label: 'Ad Spend', value: profit.adSpend, type: 'cost' as const },
-    { label: 'Commission', value: profit.commission, type: 'cost' as const },
-    { label: 'Fulfillment', value: profit.fulfillmentCost, type: 'cost' as const },
-    { label: 'Operational Loss', value: profit.operationalLoss, type: 'cost' as const },
-  ], [profit]);
-
   const totalCosts = useMemo(() =>
     profit.landedCost + profit.deliveryFee + profit.adSpend + profit.commission + profit.fulfillmentCost + profit.operationalLoss,
     [profit],
   );
-  const getBarWidth = (value: number) => profit.revenue > 0 ? Math.max((value / profit.revenue) * 100, 2) : 0;
 
   const perOrder = useMemo(() => {
     const n = profit.orderCount;
@@ -132,7 +122,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
     <div className="space-y-4">
       <PageHeader
         title="Finance"
-        description="True profit tracking, invoicing, and financial overview"
+        description="Invoicing, approvals, and period KPIs — use Export for deeper reports when needed."
         actions={
           <>
             <PageRefreshButton />
@@ -149,23 +139,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => exportToCsv(
-                invoices.map((inv: Invoice) => ({
-                  reference: inv.referenceFormatted ?? `INV-${inv.referenceNumber}`,
-                  orderId: inv.orderId ?? '',
-                  amount: inv.totalAmount,
-                  status: inv.status,
-                  dueDate: inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '',
-                })),
-                [
-                  { key: 'reference', label: 'Reference' },
-                  { key: 'orderId', label: 'Order ID' },
-                  { key: 'amount', label: 'Amount' },
-                  { key: 'status', label: 'Status' },
-                  { key: 'dueDate', label: 'Due Date' },
-                ],
-                `invoices-${new Date().toISOString().split('T')[0]}.csv`,
-              )}
+              onClick={() => setShowExportModal(true)}
             >
               Export CSV
             </Button>
@@ -174,6 +148,14 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
             </Button>
           </>
         }
+      />
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={EXPORT_CONFIGS.finance_invoices}
+        initialFilters={{
+          status: filters.invoiceStatus || undefined,
+        }}
       />
 
       {actionError && !dismissedError && (
@@ -253,7 +235,6 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         value={activeTab}
         onChange={(v) => setActiveTab(v as typeof activeTab)}
         tabs={[
-          { value: 'overview', label: 'Profit Breakdown' },
           { value: 'invoices', label: `Invoices (${totalInvoices})` },
           {
             value: 'approvals',
@@ -272,234 +253,6 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
           },
         ]}
       />
-
-      {activeTab === 'overview' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Cost Waterfall */}
-          <div className="card">
-            <h3 className="text-lg font-semibold text-app-fg mb-4">Cost Waterfall</h3>
-            <p className="text-xs text-app-fg-muted mb-4">
-              Revenue - (COGS + Delivery + Ads + Commission + Fulfillment + Loss) = True Profit
-            </p>
-            <div className="space-y-3">
-              {costWaterfall.map((item) => (
-                <div key={item.label}>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm text-app-fg-muted">{item.label}</span>
-                    <span className={`text-sm font-medium ${item.type === 'revenue' ? 'text-app-fg' : 'text-danger-600 dark:text-danger-400'}`}>
-                      {item.type === 'cost' ? formatNaira(-Math.round(item.value)) : formatNaira(Math.round(item.value))}
-                    </span>
-                  </div>
-                  <div className="w-full bg-app-hover rounded-full h-2.5">
-                    <div
-                      className={`h-2.5 rounded-full transition-all ${item.type === 'revenue' ? 'bg-brand-500' : 'bg-danger-400 dark:bg-danger-500'}`}
-                      style={{ width: `${getBarWidth(item.value)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-              <div className="pt-3 border-t-2 border-app-border">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-sm font-semibold text-app-fg">True Profit</span>
-                  <span className={`text-lg font-bold ${profit.trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
-                    {formatNaira(Math.round(profit.trueProfit))}
-                  </span>
-                </div>
-                <div className="w-full bg-app-hover rounded-full h-2.5">
-                  <div
-                    className={`h-2.5 rounded-full transition-all ${profit.trueProfit >= 0 ? 'bg-success-500' : 'bg-danger-500'}`}
-                    style={{ width: `${Math.abs(getBarWidth(profit.trueProfit))}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Cost Distribution + Invoice Summary */}
-          <div className="space-y-4">
-            {/* Cost Distribution */}
-            <div className="card">
-              <h3 className="text-lg font-semibold text-app-fg mb-4">Cost Distribution</h3>
-              <div className="space-y-3">
-                {totalCosts > 0 ? (
-                  <>
-                    {[
-                      { label: 'Landed COGS', value: profit.landedCost, pct: (profit.landedCost / totalCosts) * 100, color: 'bg-danger-400' },
-                      { label: 'Delivery Fees', value: profit.deliveryFee, pct: (profit.deliveryFee / totalCosts) * 100, color: 'bg-warning-400' },
-                      { label: 'Ad Spend', value: profit.adSpend, pct: (profit.adSpend / totalCosts) * 100, color: 'bg-brand-400' },
-                      { label: 'Commission', value: profit.commission, pct: (profit.commission / totalCosts) * 100, color: 'bg-info-400' },
-                      { label: 'Fulfillment', value: profit.fulfillmentCost, pct: (profit.fulfillmentCost / totalCosts) * 100, color: 'bg-surface-400' },
-                      { label: 'Operational Loss', value: profit.operationalLoss, pct: (profit.operationalLoss / totalCosts) * 100, color: 'bg-danger-600' },
-                    ].filter((item) => item.value > 0).map((item) => (
-                      <div key={item.label} className="flex items-center justify-between py-1.5">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-3 h-3 rounded-sm ${item.color}`} />
-                          <span className="text-sm text-app-fg-muted">{item.label}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-sm font-medium text-app-fg">{formatNaira(Math.round(item.value))}</span>
-                          <span className="text-xs text-app-fg-muted ml-2">({item.pct.toFixed(1)}%)</span>
-                        </div>
-                      </div>
-                    ))}
-                    {/* Stacked bar */}
-                    <div className="w-full flex rounded-full h-3 overflow-hidden mt-2">
-                      <div className="bg-danger-400" style={{ width: `${(profit.landedCost / totalCosts) * 100}%` }} />
-                      <div className="bg-warning-400" style={{ width: `${(profit.deliveryFee / totalCosts) * 100}%` }} />
-                      <div className="bg-brand-400" style={{ width: `${(profit.adSpend / totalCosts) * 100}%` }} />
-                      <div className="bg-info-400" style={{ width: `${(profit.commission / totalCosts) * 100}%` }} />
-                      <div className="bg-surface-400" style={{ width: `${(profit.fulfillmentCost / totalCosts) * 100}%` }} />
-                      <div className="bg-danger-600" style={{ width: `${(profit.operationalLoss / totalCosts) * 100}%` }} />
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-app-fg-muted">No cost data available</p>
-                )}
-              </div>
-            </div>
-
-            {/* Receivables — Deferred (replaces simple invoice summary) */}
-            <DeferredSection resolve={data.invoiceSummary} skeleton="card">
-              {(invoiceSummary) => {
-                const summary = invoiceSummary as Record<string, { count: number; total: string }>;
-                const paidTotal = Number(summary['PAID']?.total ?? 0);
-                const outstandingTotal = Number(summary['SENT']?.total ?? 0);
-                const overdueTotal = Number(summary['OVERDUE']?.total ?? 0);
-                const draftTotal = Number(summary['DRAFT']?.total ?? 0);
-                const billed = paidTotal + outstandingTotal + overdueTotal;
-                const collectionRate = billed > 0 ? (paidTotal / billed) * 100 : 0;
-                const buckets = [
-                  { key: 'PAID', label: 'Paid', total: paidTotal, count: summary['PAID']?.count ?? 0, color: 'bg-success-500', text: 'text-success-600 dark:text-success-400' },
-                  { key: 'SENT', label: 'Outstanding', total: outstandingTotal, count: summary['SENT']?.count ?? 0, color: 'bg-warning-500', text: 'text-warning-600 dark:text-warning-400' },
-                  { key: 'OVERDUE', label: 'Overdue', total: overdueTotal, count: summary['OVERDUE']?.count ?? 0, color: 'bg-danger-500', text: 'text-danger-600 dark:text-danger-400' },
-                  { key: 'DRAFT', label: 'Draft', total: draftTotal, count: summary['DRAFT']?.count ?? 0, color: 'bg-surface-400', text: 'text-app-fg-muted' },
-                ];
-
-                return (
-                  <div className="card">
-                    <div className="flex items-baseline justify-between mb-3">
-                      <h3 className="text-lg font-semibold text-app-fg">Receivables</h3>
-                      <span
-                        className={`text-xs font-medium tabular-nums ${
-                          collectionRate >= 80
-                            ? 'text-success-600 dark:text-success-400'
-                            : collectionRate >= 50
-                              ? 'text-warning-600 dark:text-warning-400'
-                              : 'text-danger-600 dark:text-danger-400'
-                        }`}
-                        title="Paid / (Paid + Outstanding + Overdue)"
-                      >
-                        {collectionRate.toFixed(1)}% collected
-                      </span>
-                    </div>
-
-                    {/* Collection progress bar */}
-                    {billed > 0 && (
-                      <div className="w-full flex rounded-full h-2 overflow-hidden mb-4">
-                        <div className="bg-success-500" style={{ width: `${(paidTotal / billed) * 100}%` }} />
-                        <div className="bg-warning-500" style={{ width: `${(outstandingTotal / billed) * 100}%` }} />
-                        <div className="bg-danger-500" style={{ width: `${(overdueTotal / billed) * 100}%` }} />
-                      </div>
-                    )}
-
-                    <div className="space-y-2.5">
-                      {buckets.map((b) => (
-                        <div key={b.key} className="flex justify-between items-center">
-                          <span className="flex items-center gap-2 text-sm text-app-fg-muted">
-                            <span className={`w-2 h-2 rounded-full ${b.color}`} />
-                            {b.label}
-                          </span>
-                          <span className={`text-sm font-medium tabular-nums ${b.text}`}>
-                            {formatNaira(b.total)}
-                            <span className="text-xs text-app-fg-muted ml-1">({b.count})</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              }}
-            </DeferredSection>
-
-            {/* Budget Utilization — NEW (surfaces previously orphaned data) */}
-            <DeferredSection resolve={data.budgets} skeleton="card">
-              {(budgets) => {
-                const list = budgets as BudgetWithUtilization[];
-                const active = list.filter((b) => b.isActive);
-                const display = active.length > 0 ? active : list.slice(0, 3);
-
-                return (
-                  <div className="card">
-                    <div className="flex items-baseline justify-between mb-3">
-                      <h3 className="text-lg font-semibold text-app-fg">Budgets</h3>
-                      <span className="text-xs text-app-fg-muted">
-                        {active.length} active{list.length > active.length ? ` · ${list.length - active.length} ended` : ''}
-                      </span>
-                    </div>
-
-                    {display.length === 0 ? (
-                      <p className="text-sm text-app-fg-muted">No budgets configured.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {display.slice(0, 4).map((b) => {
-                          const pct = Math.min(b.utilizationPct, 100);
-                          const overBudget = b.remaining < 0;
-                          const barColor = overBudget
-                            ? 'bg-danger-500'
-                            : pct >= 90
-                              ? 'bg-warning-500'
-                              : pct >= 70
-                                ? 'bg-warning-400'
-                                : 'bg-brand-500';
-                          return (
-                            <div key={b.id}>
-                              <div className="flex justify-between items-baseline mb-1">
-                                <span className="text-sm font-medium text-app-fg truncate mr-2" title={b.name}>
-                                  {b.name}
-                                </span>
-                                <span
-                                  className={`text-xs font-medium tabular-nums whitespace-nowrap ${
-                                    overBudget
-                                      ? 'text-danger-600 dark:text-danger-400'
-                                      : pct >= 90
-                                        ? 'text-warning-600 dark:text-warning-400'
-                                        : 'text-app-fg-muted'
-                                  }`}
-                                >
-                                  {formatNaira(Math.round(b.approved + b.committed))} / {formatNaira(Math.round(b.total))}
-                                </span>
-                              </div>
-                              <div className="w-full bg-app-hover rounded-full h-1.5 overflow-hidden">
-                                <div
-                                  className={`h-full ${barColor} transition-all`}
-                                  style={{ width: `${Math.max(pct, 2)}%` }}
-                                />
-                              </div>
-                              <div className="flex justify-between mt-1 text-[11px] text-app-fg-muted tabular-nums">
-                                <span>
-                                  Approved {formatNaira(Math.round(b.approved))} · Pending {formatNaira(Math.round(b.committed))}
-                                </span>
-                                <span className={overBudget ? 'text-danger-600 dark:text-danger-400 font-medium' : ''}>
-                                  {overBudget ? `Over by ${formatNaira(Math.round(-b.remaining))}` : `${formatNaira(Math.round(b.remaining))} left`}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {display.length > 4 && (
-                          <p className="text-xs text-app-fg-muted text-center pt-1">
-                            +{display.length - 4} more
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              }}
-            </DeferredSection>
-          </div>
-        </div>
-      )}
 
       {activeTab === 'invoices' && (
         <>
@@ -635,6 +388,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                       <td className="table-cell">
                         <div className="flex items-center gap-1.5">
                           <button
+                            type="button"
                             onClick={() => previewInvoicePdf(inv)}
                             className="p-1 rounded text-app-fg-muted hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
                             title="Preview PDF"
@@ -642,6 +396,16 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => generateInvoicePdf(inv, 'download')}
+                            className="p-1 rounded text-app-fg-muted hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
+                            title="Download PDF"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
                             </svg>
                           </button>
                           {inv.status === 'DRAFT' && (
@@ -703,6 +467,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                     <span className="font-mono font-medium text-app-fg text-sm">{inv.referenceFormatted}</span>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => previewInvoicePdf(inv)}
                         className="p-1 rounded text-app-fg-muted hover:text-brand-500 transition-colors"
                         title="Preview PDF"
@@ -710,6 +475,16 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                           <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => generateInvoicePdf(inv, 'download')}
+                        className="p-1 rounded text-app-fg-muted hover:text-brand-500 transition-colors"
+                        title="Download PDF"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
                         </svg>
                       </button>
                       <StatusBadge status={inv.status} />

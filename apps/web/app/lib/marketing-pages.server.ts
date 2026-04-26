@@ -114,6 +114,17 @@ export function parseFundingDirectionSummary(res: { ok: boolean; data: unknown }
   return data ?? emptyDirectionSummary();
 }
 
+/** COMPLETED funding received minus APPROVED ad spend (same as `marketing.getFundingBalance`). */
+export function parseFundingBalance(res: { ok: boolean; data: unknown }):
+  | { totalReceived: string; totalSpend: string; balance: string }
+  | undefined {
+  if (!res.ok) return undefined;
+  const data = (res.data as {
+    result?: { data?: { totalReceived: string; totalSpend: string; balance: string } };
+  })?.result?.data;
+  return data ?? undefined;
+}
+
 export function parseUsers(res: { ok: boolean; data: unknown }): User[] {
   const data = res.ok ? (res.data as { result?: { data?: { users: User[] } } })?.result?.data : null;
   return data?.users ?? [];

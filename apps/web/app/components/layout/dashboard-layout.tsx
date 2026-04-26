@@ -190,7 +190,7 @@ const navStructure: NavGroupDef[] = [
         permission: 'logistics.read',
       },
       {
-        label: 'Remittances',
+        label: 'Stock Transfer Confirmations',
         href: '/admin/logistics/remittances',
         icon: SidebarIcons.logistics,
         permission: 'logistics.write',
@@ -207,7 +207,7 @@ const navStructure: NavGroupDef[] = [
         permission: 'finance.read',
       },
       {
-        label: 'Delivery remittances',
+        label: 'Delivery Cash Remittances',
         href: '/admin/finance/delivery-remittances',
         icon: SidebarIcons.remittances,
         permission: 'finance.read',

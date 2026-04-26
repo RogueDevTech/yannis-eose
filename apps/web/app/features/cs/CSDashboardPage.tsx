@@ -742,7 +742,6 @@ export function CSDashboardPage({
   const [selectedQueueOrder, setSelectedQueueOrder] = useState<CSOrder | null>(null);
   /** Multi-select for bulk-assign on the Unassigned Queue tab. */
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
-  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
   const [bulkAssignAgentId, setBulkAssignAgentId] = useState<string>('');
   const bulkAssignFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const isBulkAssigning = bulkAssignFetcher.state !== 'idle';
@@ -758,14 +757,13 @@ export function CSDashboardPage({
 
   const clearQueueSelection = () => setSelectedQueueIds(new Set());
 
-  // Close bulk-assign modal + clear selection on success
+  // Clear selection after successful bulk assign.
   useEffect(() => {
-    if (bulkAssignFetcher.state === 'idle' && bulkAssignFetcher.data?.success && bulkAssignOpen) {
-      setBulkAssignOpen(false);
+    if (bulkAssignFetcher.state === 'idle' && bulkAssignFetcher.data?.success) {
       setBulkAssignAgentId('');
       clearQueueSelection();
     }
-  }, [bulkAssignFetcher.state, bulkAssignFetcher.data, bulkAssignOpen]);
+  }, [bulkAssignFetcher.state, bulkAssignFetcher.data]);
   const [selectedAgent, setSelectedAgent] = useState<AgentWorkload | null>(null);
   /** Agent Workloads: View all modal and pagination */
   const [viewAllAgentsOpen, setViewAllAgentsOpen] = useState(false);
@@ -972,6 +970,20 @@ export function CSDashboardPage({
   const totalCapacity = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
   const confirmedCount = (statusCounts as Record<string, number>)['CONFIRMED'] ?? 0;
   const cancelledCount = (statusCounts as Record<string, number>)['CANCELLED'] ?? 0;
+  const assignableCloserOptions = useMemo(
+    () =>
+      workloads
+        .filter((w: AgentWorkload) => w.pendingCount < w.capacity)
+        .map((w: AgentWorkload) => ({
+          value: w.agentId,
+          label: `${w.agentName} (${w.pendingCount}/${w.capacity})`,
+        })),
+    [workloads],
+  );
+  const assigningOrderId =
+    fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'assign'
+      ? fetcher.formData?.get('orderId')?.toString() ?? null
+      : null;
 
   // Get orders assigned to the hotswap source agent
   const hotSwapSourceOrders = activeOrders.filter(
@@ -1580,39 +1592,69 @@ export function CSDashboardPage({
               opening the modal. Per CEO directive 2026-04-26: HoCS need a way to assign a
               batch of unassigned orders to a closer in one go. */}
           {unassignedOrders.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-app-border bg-app-elevated px-3 py-2">
-              <div className="flex items-center gap-2">
-                {selectedQueueIds.size === 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedQueueIds(new Set(unassignedOrders.map((o) => o.id)))}
-                    className="text-xs text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
-                  >
-                    Select all ({unassignedOrders.length})
-                  </button>
-                ) : (
-                  <>
-                    <span className="text-xs font-medium text-app-fg">
-                      {selectedQueueIds.size} selected
-                    </span>
+            <div className="rounded-lg border border-app-border bg-app-elevated px-3 py-2 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {selectedQueueIds.size === 0 ? (
                     <button
                       type="button"
-                      onClick={clearQueueSelection}
+                      onClick={() => setSelectedQueueIds(new Set(unassignedOrders.map((o) => o.id)))}
                       className="text-xs text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
                     >
-                      Clear
+                      Select all ({unassignedOrders.length})
                     </button>
-                  </>
-                )}
+                  ) : (
+                    <>
+                      <span className="text-xs font-medium text-app-fg">
+                        {selectedQueueIds.size} selected
+                      </span>
+                      <button
+                        type="button"
+                        onClick={clearQueueSelection}
+                        className="text-xs text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
+                      >
+                        Clear
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <FormSelect
+                    id="bulk-assign-closer-inline"
+                    value={bulkAssignAgentId}
+                    onChange={(e) => setBulkAssignAgentId(e.target.value)}
+                    placeholder="Select closer..."
+                    options={assignableCloserOptions}
+                    controlSize="sm"
+                    wrapperClassName="min-w-[13rem]"
+                  />
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={selectedQueueIds.size === 0 || !bulkAssignAgentId || isBulkAssigning}
+                    loading={isBulkAssigning}
+                    loadingText="Assigning…"
+                    onClick={() => {
+                      bulkAssignFetcher.submit(
+                        {
+                          intent: 'bulkAssignToCS',
+                          orderIds: JSON.stringify(Array.from(selectedQueueIds)),
+                          csAgentId: bulkAssignAgentId,
+                        },
+                        { method: 'post' },
+                      );
+                    }}
+                  >
+                    Assign selected{selectedQueueIds.size > 0 ? ` (${selectedQueueIds.size})` : ''}
+                  </Button>
+                </div>
               </div>
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={selectedQueueIds.size === 0}
-                onClick={() => setBulkAssignOpen(true)}
-              >
-                Assign{selectedQueueIds.size > 0 ? ` (${selectedQueueIds.size})` : ''}
-              </Button>
+              <div className="text-[11px] text-app-fg-muted">
+                Only closers with capacity are listed. If everyone is at limit, free up capacity first.
+              </div>
+              {bulkAssignFetcher.data?.error && (
+                <p className="text-xs text-danger-600 dark:text-danger-400">{bulkAssignFetcher.data.error}</p>
+              )}
             </div>
           )}
 
@@ -1692,6 +1734,30 @@ export function CSDashboardPage({
                           hour: '2-digit', minute: '2-digit',
                         })}
                       </div>
+
+                      <div className="mt-3 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                        <FormSelect
+                          id={`assign-inline-${order.id}`}
+                          value={assignAgent[order.id] ?? ''}
+                          onChange={(e) => setAssignAgent((prev) => ({ ...prev, [order.id]: e.target.value }))}
+                          placeholder="Select closer..."
+                          options={assignableCloserOptions}
+                          controlSize="sm"
+                          wrapperClassName="flex-1 min-w-0"
+                          className="py-1.5 text-xs"
+                        />
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleAssign(order.id)}
+                          disabled={!assignAgent[order.id] || assigningOrderId !== null}
+                          loading={assigningOrderId === order.id}
+                          loadingText="..."
+                        >
+                          Assign
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1764,40 +1830,6 @@ export function CSDashboardPage({
                       </svg>
                     }
                   />
-                </div>
-
-                {/* Assign to closer */}
-                <div className="mb-3">
-                  <label className="block text-xs font-semibold text-app-fg-muted uppercase tracking-wide mb-1.5">
-                    Assign to closer
-                  </label>
-                  <div className="flex gap-2">
-                    <FormSelect
-                      id={`assign-closer-${qOrder.id}`}
-                      value={assignAgent[qOrder.id] ?? ''}
-                      onChange={(e) => setAssignAgent((prev) => ({ ...prev, [qOrder.id]: e.target.value }))}
-                      placeholder="Select closer..."
-                      options={workloads
-                        .filter((w: AgentWorkload) => w.pendingCount < w.capacity)
-                        .map((w: AgentWorkload) => ({
-                          value: w.agentId,
-                          label: `${w.agentName} (${w.pendingCount}/${w.capacity})`,
-                        }))}
-                      controlSize="sm"
-                      wrapperClassName="flex-1 min-w-0"
-                      className="py-1.5 text-sm"
-                    />
-                    <Button
-                      onClick={() => { handleAssign(qOrder.id); setSelectedQueueOrder(null); }}
-                      disabled={!assignAgent[qOrder.id] || fetcher.state === 'submitting'}
-                      variant="primary"
-                      size="sm"
-                      loading={fetcher.state === 'submitting'}
-                      loadingText="..."
-                    >
-                      Assign
-                    </Button>
-                  </div>
                 </div>
 
                 {/* Actions */}
@@ -2499,78 +2531,6 @@ export function CSDashboardPage({
         </Modal>
       )}
 
-      {/* ── Bulk-assign modal (Unassigned Queue → Assign N) ── */}
-      {bulkAssignOpen && (
-        <Modal
-          open
-          onClose={() => {
-            if (isBulkAssigning) return;
-            setBulkAssignOpen(false);
-            setBulkAssignAgentId('');
-          }}
-          maxWidth="max-w-md"
-          backdropBlur
-          contentClassName="p-6 space-y-4"
-        >
-          <div>
-            <h3 className="text-lg font-semibold text-app-fg">Assign {selectedQueueIds.size} order{selectedQueueIds.size === 1 ? '' : 's'}</h3>
-            <p className="text-sm text-app-fg-muted mt-0.5">
-              Pick a closer — selected orders move out of the Unassigned Queue immediately.
-            </p>
-          </div>
-          <div>
-            <FormSelect
-              id="bulk-assign-closer"
-              label="Assign to closer"
-              value={bulkAssignAgentId}
-              onChange={(e) => setBulkAssignAgentId(e.target.value)}
-              placeholder="Select closer…"
-              options={workloads
-                .filter((w: AgentWorkload) => w.pendingCount < w.capacity)
-                .map((w: AgentWorkload) => ({
-                  value: w.agentId,
-                  label: `${w.agentName} (${w.pendingCount}/${w.capacity})`,
-                }))}
-            />
-            <p className="text-[11px] text-app-fg-muted mt-1">
-              Only closers with capacity are listed. If everyone is at limit, free up capacity first.
-            </p>
-          </div>
-          {bulkAssignFetcher.data?.error && (
-            <p className="text-xs text-danger-600 dark:text-danger-400">{bulkAssignFetcher.data.error}</p>
-          )}
-          <div className="flex items-center justify-end gap-3 pt-1">
-            <Button
-              variant="secondary"
-              disabled={isBulkAssigning}
-              onClick={() => {
-                setBulkAssignOpen(false);
-                setBulkAssignAgentId('');
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!bulkAssignAgentId || selectedQueueIds.size === 0 || isBulkAssigning}
-              loading={isBulkAssigning}
-              loadingText="Assigning…"
-              onClick={() => {
-                bulkAssignFetcher.submit(
-                  {
-                    intent: 'bulkAssignToCS',
-                    orderIds: JSON.stringify(Array.from(selectedQueueIds)),
-                    csAgentId: bulkAssignAgentId,
-                  },
-                  { method: 'post' },
-                );
-              }}
-            >
-              Assign
-            </Button>
-          </div>
-        </Modal>
-      )}
 
       {/* ── Reassign order modal ───────────────── */}
       {reassignOrder && (

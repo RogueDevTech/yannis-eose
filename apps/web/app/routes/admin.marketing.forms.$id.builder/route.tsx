@@ -1,23 +1,11 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json, redirect } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
-import { FormBuilderPage } from '~/features/campaigns/FormBuilderPage';
-import type { Campaign, CampaignFormConfig } from '~/features/campaigns/types';
-
-export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: data?.campaign?.name ? `${data.campaign.name} — Form Builder` : 'Form Builder — Yannis EOSE' },
-];
+import { redirect } from '@remix-run/node';
+import type { LoaderFunctionArgs } from '@remix-run/node';
+import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import type { Campaign } from '~/features/campaigns/types';
 
 /**
- * Dedicated form-builder page — `/admin/marketing/forms/:id/builder`.
- *
- * New forms are created at `/admin/marketing/forms/new` (basic config + custom fields in one
- * submit). The forms list still supports editing basic settings on existing campaigns. This
- * route is for managing the `customFields` array on an existing form — the field-builder UI.
- *
- * Auth: marketing.campaigns. Media Buyers see only their own campaigns; the loader cross-
- * checks ownership so MB-A can't edit MB-B's form by URL guessing.
+ * Legacy URL `/admin/marketing/forms/:id/builder` — custom fields now live on the edit page.
+ * Permission + ownership match the old builder so bookmarked URLs still 403/404 correctly.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.campaigns');
@@ -34,70 +22,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
   const campaign = res.data.result.data;
 
-  // Ownership check — MB can only edit their own campaigns.
   if (user.role === 'MEDIA_BUYER' && campaign.mediaBuyerId !== user.id) {
     throw new Response('Forbidden', { status: 403 });
   }
 
-  return { campaign };
+  return redirect(`/admin/marketing/forms/${id}/edit`);
 }
 
-export async function action({ request, params }: ActionFunctionArgs) {
-  await requirePermission(request, 'marketing.campaigns');
-  const cookie = getSessionCookie(request);
-  const id = params.id;
-  if (!id) return json({ error: 'Missing form id' }, { status: 400 });
-
-  const formData = await request.formData();
-  const intent = formData.get('intent')?.toString();
-
-  if (intent === 'saveCustomFields') {
-    // Field array is JSON-serialised on the client to keep the action body tidy.
-    const customFieldsJson = formData.get('customFields')?.toString() ?? '[]';
-    let customFields: unknown;
-    try {
-      customFields = JSON.parse(customFieldsJson);
-    } catch {
-      return json({ error: 'Invalid customFields payload' }, { status: 400 });
-    }
-
-    // Pull the existing formConfig and merge — never blow away unrelated keys (heading,
-    // accentColor, showDelivery* etc.) that the basic-settings page owns.
-    const existingRes = await apiRequest<{ result?: { data?: Campaign } }>(
-      `/trpc/marketing.getCampaign?input=${encodeURIComponent(JSON.stringify({ id }))}`,
-      { method: 'GET', cookie },
-    );
-    const existing = existingRes.ok ? existingRes.data?.result?.data : null;
-    const existingFormConfig: CampaignFormConfig = (existing?.formConfig as CampaignFormConfig) ?? {};
-
-    const merged: CampaignFormConfig = {
-      ...existingFormConfig,
-      customFields: customFields as CampaignFormConfig['customFields'],
-    };
-
-    const res = await apiRequest<unknown>('/trpc/marketing.updateCampaign', {
-      method: 'POST',
-      cookie,
-      body: { id, formConfig: merged },
-    });
-    if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json(
-        { error: errorData?.error?.message ?? 'Failed to save form' },
-        { status: safeStatus(res.status) },
-      );
-    }
-    return json({ success: true });
-  }
-
-  if (intent === 'exit') {
-    return redirect('/admin/marketing/forms');
-  }
-
-  return json({ error: 'Unknown action' }, { status: 400 });
-}
-
-export default function FormBuilderRoute() {
-  const { campaign } = useLoaderData<typeof loader>();
-  return <FormBuilderPage campaign={campaign} />;
+export default function LegacyFormBuilderRedirect() {
+  return null;
 }

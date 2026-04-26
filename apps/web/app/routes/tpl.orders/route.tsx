@@ -11,6 +11,18 @@ export const meta: MetaFunction = () => [
 ];
 
 const ORDERS_PER_PAGE = 40;
+const LOGISTICS_STATUS_SCOPE = [
+  'CONFIRMED',
+  'ALLOCATED',
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'PARTIALLY_DELIVERED',
+  'RETURNED',
+  'RESTOCKED',
+  'WRITTEN_OFF',
+  'COMPLETED',
+] as const;
 
 const defaultThisMonth = defaultThisMonthRange;
 
@@ -26,6 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const status = url.searchParams.get('status') || 'CONFIRMED';
   const search = url.searchParams.get('search') || undefined;
+  const scopedStatuses = status === 'ALL' ? [...LOGISTICS_STATUS_SCOPE] : undefined;
 
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
@@ -48,6 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     page,
     limit: ORDERS_PER_PAGE,
     status: status === 'ALL' ? undefined : status,
+    ...(scopedStatuses ? { statuses: scopedStatuses } : {}),
     search: search || undefined,
     sortBy: 'preferredDeliveryDate' as const,
     sortOrder: 'asc' as const,
@@ -55,10 +69,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
     ...(useLocationFilter && { logisticsLocationId: effectiveLogisticsLocationId }),
   };
-  const countsInput: { startDate?: string; endDate?: string; logisticsLocationId?: string } = {};
+  const countsInput: {
+    startDate?: string;
+    endDate?: string;
+    logisticsLocationId?: string;
+    statuses?: readonly string[];
+  } = {};
   if (startDate) countsInput.startDate = startDate;
   if (endDate) countsInput.endDate = endDate;
   if (useLocationFilter) countsInput.logisticsLocationId = effectiveLogisticsLocationId;
+  if (scopedStatuses) countsInput.statuses = scopedStatuses;
 
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));

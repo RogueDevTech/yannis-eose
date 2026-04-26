@@ -1,4 +1,4 @@
-/** Field types supported by the form builder. Mirrors `FORM_FIELD_TYPES` in the shared
+/** Field types supported by the campaign form editor. Mirrors `FORM_FIELD_TYPES` in the shared
  *  validators; kept duplicated here to avoid pulling validator types into the UI bundle. */
 export type CustomFormFieldType =
   | 'text'
@@ -12,7 +12,7 @@ export type CustomFormFieldType =
   | 'checkbox_group'
   | 'toggle';
 
-/** A single custom field on the campaign's public form. Built in the form builder. */
+/** A single custom field on the campaign's public form. Configured in create / edit form UI. */
 export interface CustomFormField {
   id: string;
   type: CustomFormFieldType;
@@ -43,7 +43,7 @@ export interface CampaignFormConfig {
   showPaymentMethod?: boolean | string;
   deliveryStateOptions?: string[];
   preferredDeliveryDateOptions?: string[];
-  /** Form Builder output — arbitrary fields the Media Buyer adds to their public form. */
+  /** Custom fields the Media Buyer adds to their public form (create / edit). */
   customFields?: CustomFormField[];
   /** Post-submit redirect for the buyer (funnel thank-you page). */
   successCallbackUrl?: string;

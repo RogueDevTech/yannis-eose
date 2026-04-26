@@ -22,6 +22,7 @@ import {
   parseLeaderboard,
   parseUsers,
   parseBalancesList,
+  parseFundingBalance,
   resolveMarketingDateFilters,
   runMarketingFundingAction,
 } from '~/lib/marketing-pages.server';
@@ -33,24 +34,13 @@ const REQUEST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 export const meta: MetaFunction = () => [{ title: 'Funding — Marketing — Yannis EOSE' }];
 
 /**
- * Funding page loader — fetches data for a two-section model that mirrors the funding tier:
+ * Funding page loader — primary (`section`) + sub (`tab`) slices; same queries as before.
  *
- *   Section 1 — "Funds I've Received" (always shown)
- *     • Transfers tab: incoming `marketing_funding` rows where receiverId = me
- *     • Requests tab:  `marketing_funding_requests` where requesterId = me
+ *   received + transfers | received + requests | distributing + transfers | distributing + requests
  *
- *   Section 2 — "Funds I Distribute" (HoM/Admin only — `canDistribute`)
- *     • Transfers tab: outgoing `marketing_funding` rows where senderId = me
- *     • Requests tab:  MB requests pending my approval (excludeSelfAsRequester)
- *
- * URL state:
- *   ?section=received|distributing  (defaults to 'received')
- *   ?tab=transfers|requests          (defaults to 'transfers')
- *   ?page, ?status, ?requestStatus, ?search apply only to the active section/tab
- *
- * Counts for ALL FOUR slices are fetched on every load so the tab badges stay accurate
- * regardless of which section/tab the user is viewing. Records are fetched only for the
- * active slice — switching tabs/sections re-runs the loader and pulls the new slice.
+ * URL: `?section=received|distributing`, `?tab=transfers|requests`, plus `page` / `status` /
+ * `requestStatus` / `search` for the active slice only. Counts for all four slices every load;
+ * records for the active slice only.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.read');
@@ -170,6 +160,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => undefined)
     : Promise.resolve(undefined);
 
+  const showFundingBalance = user.role === 'MEDIA_BUYER' || user.role === 'HEAD_OF_MARKETING';
+  const fundingBalanceP = showFundingBalance
+    ? apiRequest<unknown>(
+        `/trpc/marketing.getFundingBalance?input=${encodeURIComponent(JSON.stringify({ userId: user.id }))}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: false as const, data: {} });
+
   const incomingCountsP = apiRequest<unknown>(
     `/trpc/marketing.fundingStatusCounts?input=${encodeURIComponent(incomingCountsInput)}`,
     { method: 'GET', cookie },
@@ -203,6 +201,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboardRes,
     usersRes,
     balancesList,
+    fundingBalanceRes,
   ] = await Promise.all([
     recordsP,
     incomingCountsP,
@@ -213,6 +212,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboardP,
     usersP,
     balancesListP,
+    fundingBalanceP,
   ]);
 
   // ── Parse counts ────────────────────────────────────────
@@ -278,6 +278,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const directionSummary = parseFundingDirectionSummary(directionSummaryRes);
+  const fundingBalance = showFundingBalance ? parseFundingBalance(fundingBalanceRes) : undefined;
   const leaderboard = parseLeaderboard(leaderboardRes);
   const usersList = parseUsers(usersRes);
 
@@ -296,6 +297,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     outgoingTransfers,
     mbRequests,
     directionSummary,
+    fundingBalance,
     leaderboard,
     leaderboardPeriod,
     users: usersList,

@@ -139,6 +139,15 @@ export const approveAdSpendSchema = z.object({
 });
 export type ApproveAdSpendInput = z.infer<typeof approveAdSpendSchema>;
 
+/** Preview: orders since last APPROVED spend (calendar day before spendDate) + indicative CPA. */
+export const previewAdSpendIntervalSchema = z.object({
+  campaignId: z.string().uuid(),
+  productId: z.string().uuid(),
+  spendDate: z.string().date(),
+  spendAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+});
+export type PreviewAdSpendIntervalInput = z.infer<typeof previewAdSpendIntervalSchema>;
+
 // ============================================
 // Offer Template Validators
 // ============================================
@@ -173,8 +182,8 @@ export type ListOfferTemplatesInput = z.infer<typeof listOfferTemplatesSchema>;
 // ============================================
 
 /**
- * Custom field on a campaign's public form. Built by Media Buyers via the form builder
- * at `/admin/marketing/forms/:id/builder`. Customer responses land in `orders.custom_fields`
+ * Custom field on a campaign's public form. Configured when creating a form (`/admin/marketing/forms/new`)
+ * or editing one (`/admin/marketing/forms/:id/edit`). Customer responses land in `orders.custom_fields`
  * keyed by `id`.
  *
  * Standard fields (Name, Phone, Address, etc.) remain protected and are NOT in this list —

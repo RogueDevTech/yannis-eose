@@ -13,6 +13,7 @@ import {
   listAdSpendSchema,
   adSpendStatusCountsSchema,
   approveAdSpendSchema,
+  previewAdSpendIntervalSchema,
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
   listOfferTemplatesSchema,
@@ -196,6 +197,13 @@ export const marketingRouter = router({
       const effectiveInput =
         ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
       return getMarketingService().adSpendStatusCounts(effectiveInput, ctx.currentBranchId);
+    }),
+
+  /** Orders since last APPROVED spend (same funnel) + indicative CPA — Log Ad Spend form preview. */
+  previewAdSpendInterval: permissionProcedure('marketing.adSpend')
+    .input(previewAdSpendIntervalSchema)
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().previewAdSpendInterval(input, ctx.user.id, ctx.currentBranchId);
     }),
 
   approveAdSpend: authedProcedure

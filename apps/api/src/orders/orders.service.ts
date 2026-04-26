@@ -706,6 +706,9 @@ export class OrdersService {
     if (input.status) {
       conditions.push(eq(schema.orders.status, input.status));
     }
+    if (input.statuses?.length) {
+      conditions.push(inArray(schema.orders.status, input.statuses));
+    }
     if (input.assignedCsId) {
       conditions.push(eq(schema.orders.assignedCsId, input.assignedCsId));
     }
@@ -1885,11 +1888,13 @@ export class OrdersService {
     assignedCsId?: string,
     logisticsLocationId?: string,
     branchId?: string | null,
+    statuses?: Array<(typeof schema.orders.$inferSelect)['status']>,
   ) {
     const conditions: Parameters<typeof and>[0][] = [];
     if (mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
     if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
+    if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
     if (branchId && !mediaBuyerId) conditions.push(eq(schema.orders.branchId, branchId));
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
@@ -2091,6 +2096,7 @@ export class OrdersService {
       csAgentId?: string;
       logisticsLocationId?: string;
       status?: string;
+      statuses?: Array<(typeof schema.orders.$inferSelect)['status']>;
     },
   ): Promise<{ date: string; orderCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [];
@@ -2106,6 +2112,9 @@ export class OrdersService {
     if (extra?.logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, extra.logisticsLocationId));
     if (extra?.status) {
       conditions.push(eq(schema.orders.status, extra.status as (typeof schema.orders.$inferSelect)['status']));
+    }
+    if (extra?.statuses?.length) {
+      conditions.push(inArray(schema.orders.status, extra.statuses));
     }
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.createdAt})::date`;
 
