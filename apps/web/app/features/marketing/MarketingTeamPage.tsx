@@ -53,20 +53,16 @@ export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters, pa
       <PageHeader
         title="Team"
         description="Media buyers and funding balance — same cards as Live Activities"
+        actions={
+          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+            <DateFilterBar
+              startDate={dateFilters.startDate}
+              endDate={dateFilters.endDate}
+              periodAllTime={dateFilters.periodAllTime}
+            />
+          </div>
+        }
       />
-
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-          <DateFilterBar
-            startDate={dateFilters.startDate}
-            endDate={dateFilters.endDate}
-            periodAllTime={dateFilters.periodAllTime}
-          />
-        </div>
-        <p className="text-xs text-app-fg-muted">
-          Confirmation and delivery rates use this range. Funding totals are lifetime.
-        </p>
-      </div>
 
       {/* Funding Summary */}
       <div className="card">

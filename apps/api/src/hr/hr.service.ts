@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, desc, gte, lte, isNull, count, sum } from 'drizzle-orm';
+import { eq, and, or, desc, gte, lte, isNull, count, sum, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -18,6 +18,8 @@ import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
+import { getManageableRolesForViewer } from './payroll-batch.service';
+import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 @Injectable()
 export class HrService {
@@ -31,8 +33,21 @@ export class HrService {
   // Commission Plans
   // ============================================
 
-  async createCommissionPlan(input: CreateCommissionPlanInput, actorId: string) {
-    return withActor(this.db, { id: actorId }, async (tx) => {
+  async createCommissionPlan(input: CreateCommissionPlanInput, actor: SessionUser) {
+    // Dept-scoped: each Head can only create plans for the roles in their own department.
+    // HR Manager and admins can create plans for any role.
+    const manageable = getManageableRolesForViewer(actor);
+    if (!manageable) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You are not allowed to manage commission plans.' });
+    }
+    if (!manageable.includes(input.role)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `You can only create plans for roles in your department: ${manageable.join(', ')}.`,
+      });
+    }
+
+    return withActor(this.db, { id: actor.id }, async (tx) => {
       const rows = await tx
         .insert(schema.commissionPlans)
         .values({
@@ -41,7 +56,7 @@ export class HrService {
           rules: input.rules,
           effectiveFrom: new Date(input.effectiveFrom),
           effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
-          createdBy: actorId,
+          createdBy: actor.id,
         })
         .returning();
 
@@ -53,8 +68,31 @@ export class HrService {
     });
   }
 
-  async updateCommissionPlan(input: UpdateCommissionPlanInput, actorId: string) {
-    return withActor(this.db, { id: actorId }, async (tx) => {
+  async updateCommissionPlan(input: UpdateCommissionPlanInput, actor: SessionUser) {
+    const manageable = getManageableRolesForViewer(actor);
+    if (!manageable) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You are not allowed to manage commission plans.' });
+    }
+
+    return withActor(this.db, { id: actor.id }, async (tx) => {
+      // Authorize the edit against the EXISTING plan's role — Heads can't take over a plan that's
+      // outside their dept just because they know the planId.
+      const existingRows = await tx
+        .select({ role: schema.commissionPlans.role })
+        .from(schema.commissionPlans)
+        .where(eq(schema.commissionPlans.id, input.planId))
+        .limit(1);
+      const existing = existingRows[0];
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Commission plan not found' });
+      }
+      if (!manageable.includes(existing.role)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `You can only edit plans for roles in your department: ${manageable.join(', ')}.`,
+        });
+      }
+
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };
       if (input.planName !== undefined) updateFields['planName'] = input.planName;
       if (input.rules !== undefined) updateFields['rules'] = input.rules;
@@ -73,9 +111,27 @@ export class HrService {
     });
   }
 
-  async listCommissionPlans(input: ListCommissionPlansInput) {
+  async listCommissionPlans(input: ListCommissionPlansInput, viewer: SessionUser) {
     const conditions = [];
+
+    // Auto-scope by viewer: Heads only see plans for their dept; admins/HR see everything.
+    const manageable = getManageableRolesForViewer(viewer);
+    if (!manageable) {
+      // Non-manager roles get an empty list rather than an error — keeps the page safe to render.
+      return { plans: [], pagination: { page: input.page, limit: input.limit, total: 0 }, manageableRoles: [] as string[] };
+    }
+    // Admin / SuperAdmin / HR Manager get full scope (manageable returns the union of all dept roles).
+    // Heads get only their dept's roles, so we filter by them.
+    const isFullScope = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN' || viewer.role === 'HR_MANAGER';
+    if (!isFullScope) {
+      conditions.push(inArray(schema.commissionPlans.role, manageable as typeof schema.commissionPlans.$inferSelect['role'][]));
+    }
+
     if (input.role) {
+      // Caller filter — must intersect the viewer's manageable set
+      if (!isFullScope && !manageable.includes(input.role)) {
+        return { plans: [], pagination: { page: input.page, limit: input.limit, total: 0 }, manageableRoles: manageable };
+      }
       conditions.push(eq(schema.commissionPlans.role, input.role as typeof schema.commissionPlans.$inferSelect['role']));
     }
     if (input.activeOnly) {
@@ -99,6 +155,7 @@ export class HrService {
     return {
       plans,
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
+      manageableRoles: manageable,
     };
   }
 

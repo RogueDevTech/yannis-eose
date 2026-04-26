@@ -22,6 +22,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { Pagination } from '~/components/ui/pagination';
 import { Spinner } from '~/components/ui/spinner';
 import type { CommissionPlan, Payout, Adjustment, HRUser, HRStreamData, PayoutSummary, SettlementConfig, SettlementPeriod } from './types';
+import { MonthlyPayrolls } from './MonthlyPayrolls';
 
 // ── Constants ────────────────────────────────────────────────────
 
@@ -48,25 +49,27 @@ export function HRPage({
   users,
   settlementConfig,
   currentPeriod,
+  monthlyPayrolls,
+  branches,
+  viewer,
+  initialBatchId,
 }: HRStreamData) {
   const fetcher = useFetcher();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
-  const [activeTab, setActiveTab] = useState<'payouts' | 'plans' | 'adjustments' | 'settlement'>('payouts');
-  const [showAddPlan, setShowAddPlan] = useState(false);
+  // Default tab is Monthly Payrolls. Plans now live on their own page (/hr/plans).
+  const [activeTab, setActiveTab] = useState<'monthly' | 'payouts' | 'adjustments' | 'settlement'>('monthly');
 
-  // Deep-link: ?open=plan opens Plans tab and the New Commission Plan form
+  // Deep-link: ?open=plan now redirects to /hr/plans (legacy callers)
   useEffect(() => {
     if (searchParams.get('open') === 'plan') {
-      setActiveTab('plans');
-      setShowAddPlan(true);
+      window.location.href = '/hr/plans';
     }
   }, [searchParams]);
   const [showGenerate, setShowGenerate] = useState(false);
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
-  const [viewPlan, setViewPlan] = useState<CommissionPlan | null>(null);
   const [markPaidConfirm, setMarkPaidConfirm] = useState<{ payoutId: string; staffName: string; amount: number } | null>(null);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
@@ -78,7 +81,6 @@ export function HRPage({
     if (actionError) setDismissedError(false);
   }, [actionError]);
 
-  if (actionSuccess && showAddPlan) setShowAddPlan(false);
   if (actionSuccess && showGenerate) setShowGenerate(false);
   if (actionSuccess && showAddAdjustment) setShowAddAdjustment(false);
 
@@ -147,9 +149,12 @@ export function HRPage({
           <Button variant="secondary" size="sm" onClick={() => { setShowAddAdjustment(!showAddAdjustment); setActiveTab('adjustments'); }}>
             {showAddAdjustment ? 'Close' : '+ Add-on'}
           </Button>
-          <Button variant="primary" size="sm" onClick={() => { setShowAddPlan(!showAddPlan); setActiveTab('plans'); }}>
-            {showAddPlan ? 'Close' : '+ Commission Plan'}
-          </Button>
+          <a
+            href="/hr/plans"
+            className="btn-primary btn-sm inline-flex items-center"
+          >
+            Manage Commission Plans →
+          </a>
         </div>
       </div>
 
@@ -269,79 +274,7 @@ export function HRPage({
         </fetcher.Form>
       </ResponsiveFormPanel>
 
-      {/* Add Plan Form */}
-      <ResponsiveFormPanel open={showAddPlan} onClose={() => setShowAddPlan(false)}>
-        <fetcher.Form method="post" className="card space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-app-fg">New Commission Plan</h3>
-            <button type="button" onClick={() => setShowAddPlan(false)} className="text-app-fg-muted hover:text-app-fg">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </div>
-          <input type="hidden" name="intent" value="createPlan" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Plan Name</label>
-              <input name="planName" type="text" required placeholder="e.g. CS Standard Plan" className="input" />
-            </div>
-            <div>
-              <FormSelect
-                label="Role"
-                name="role"
-                required
-                placeholder="Select role..."
-                options={ROLE_OPTIONS.map((r) => ({ value: r, label: r.replace(/_/g, ' ') }))}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Base Salary (&#8358;)</label>
-              <AmountInput name="baseSalary" placeholder="0" className="input" />
-              <p className="text-xs text-app-fg-muted mt-0.5">Earned when orders &ge; threshold</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Base Threshold (orders)</label>
-              <input name="baseThreshold" type="number" min="0" placeholder="20" className="input" />
-              <p className="text-xs text-app-fg-muted mt-0.5">Min delivered to earn base salary</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Per Order Rate (&#8358;)</label>
-              <AmountInput name="perOrderRate" placeholder="0" className="input" />
-              <p className="text-xs text-app-fg-muted mt-0.5">Commission per delivered order</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Bonus Per Extra Order (&#8358;)</label>
-              <AmountInput name="bonusPerExtraOrder" placeholder="0" className="input" />
-              <p className="text-xs text-app-fg-muted mt-0.5">Extra bonus above threshold</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Penalty Per Return (&#8358;)</label>
-              <AmountInput name="penaltyPerReturn" placeholder="0" className="input" />
-              <p className="text-xs text-app-fg-muted mt-0.5">Deducted per returned order</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Delivery Rate Threshold (%)</label>
-              <input name="deliveryRateThreshold" type="number" min="0" max="100" step="0.1" placeholder="80" className="input" />
-              <p className="text-xs text-app-fg-muted mt-0.5">Above this = 50% extra bonus</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Effective From</label>
-              <input name="effectiveFrom" type="date" required className="input" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1">Effective To (optional)</label>
-              <input name="effectiveTo" type="date" className="input" />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
-              Create Plan
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddPlan(false)}>
-              Cancel
-            </Button>
-          </div>
-        </fetcher.Form>
-      </ResponsiveFormPanel>
+      {/* Plans live on /hr/plans now — link in the page header. */}
 
       {/* Add Adjustment Form — user dropdown is deferred */}
       <ResponsiveFormPanel open={showAddAdjustment} onClose={() => setShowAddAdjustment(false)}>
@@ -402,16 +335,45 @@ export function HRPage({
         </fetcher.Form>
       </ResponsiveFormPanel>
 
-      <Tabs
-        value={activeTab}
-        onChange={(v) => setActiveTab(v as typeof activeTab)}
-        tabs={[
-          { value: 'payouts', label: `Payouts (${totalPayouts})` },
-          { value: 'plans', label: `Plans (${totalPlans})` },
-          { value: 'adjustments', label: 'Adjustments' },
-          { value: 'settlement', label: 'Settlement Config' },
-        ]}
-      />
+      {/* Legacy tabs (Payouts / Plans / Adjustments / Settlement) are HR-Manager + admin scope only.
+          Heads of Department land on Monthly Payrolls and don't see commission plans or settlement config. */}
+      {(() => {
+        const isAdmin = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN';
+        const isHrOrFinance = isAdmin || viewer.role === 'HR_MANAGER' || viewer.role === 'FINANCE_OFFICER' || viewer.isFinanceOfficer;
+        const tabs: Array<{ value: typeof activeTab; label: string }> = [
+          { value: 'monthly', label: `Monthly Payrolls (${monthlyPayrolls.length})` },
+        ];
+        if (isHrOrFinance) {
+          tabs.push(
+            { value: 'payouts', label: `Payouts (${totalPayouts})` },
+            { value: 'adjustments', label: 'Adjustments' },
+          );
+        }
+        if (isAdmin || viewer.role === 'HR_MANAGER') {
+          tabs.push({ value: 'settlement', label: 'Settlement Config' });
+        }
+        return (
+          <Tabs
+            value={activeTab}
+            onChange={(v) => setActiveTab(v as typeof activeTab)}
+            tabs={tabs}
+          />
+        );
+      })()}
+
+      {activeTab === 'monthly' && (
+        <MonthlyPayrolls
+          monthlyPayrolls={monthlyPayrolls}
+          branches={branches}
+          viewer={viewer}
+          initialBatchId={initialBatchId}
+          fetchBatchDetail={async (id) => {
+            const res = await fetch(`/hr/payroll-batch/${id}`);
+            if (!res.ok) return null;
+            return res.json();
+          }}
+        />
+      )}
 
       {/* Payouts filter bar — mirrors the Users / Orders list pattern. URL params drive the
           loader so navigating here restores the filter state; state changes trigger a nav
@@ -671,234 +633,6 @@ export function HRPage({
         </div>
       )}
 
-      {/* Plans Tab — critical data, renders immediately */}
-      {activeTab === 'plans' && (
-        <div className="card p-0 overflow-hidden">
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Plan Name</th>
-                  <th className="table-header">Role</th>
-                  <th className="table-header">Effective</th>
-                  <th className="table-header">Rules</th>
-                </tr>
-              </thead>
-              <tbody>
-                {plans.map((plan: CommissionPlan) => (
-                  <tr key={plan.id} className="table-row cursor-pointer hover:bg-app-hover/50" onClick={() => setViewPlan(plan)}>
-                    <td className="table-cell font-medium text-app-fg">{plan.planName}</td>
-                    <td className="table-cell">
-                      <span className="badge-info">{plan.role.replace(/_/g, ' ')}</span>
-                    </td>
-                    <td className="table-cell text-sm text-app-fg-muted">
-                      {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      {plan.effectiveTo ? ` — ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}` : ' — Ongoing'}
-                    </td>
-                    <td className="table-cell text-xs text-app-fg-muted max-w-[300px]">
-                      {formatRules(plan.rules)}
-                    </td>
-                  </tr>
-                ))}
-                {plans.length === 0 && (
-                  <tr><td colSpan={4}><EmptyState title="No commission plans yet" description="Create a commission plan to get started." /></td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile plans */}
-          <div className="md:hidden space-y-3 px-1">
-            {plans.map((plan: CommissionPlan) => (
-              <div key={plan.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 cursor-pointer active:bg-surface-50 dark:active:bg-surface-800/50" onClick={() => setViewPlan(plan)}>
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-app-fg text-sm">{plan.planName}</span>
-                  <span className="badge-info text-xs">{plan.role.replace(/_/g, ' ')}</span>
-                </div>
-                <p className="text-sm text-app-fg-muted">{formatRules(plan.rules)}</p>
-                <p className="text-xs text-app-fg-muted">
-                  From {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  {plan.effectiveTo ? ` to ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}` : ' — Ongoing'}
-                </p>
-              </div>
-            ))}
-            {plans.length === 0 && (
-              <EmptyState title="No commission plans yet" description="Create a commission plan to get started." />
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Plan Detail Modal */}
-      {viewPlan && (
-        <Modal open onClose={() => setViewPlan(null)} maxWidth="max-w-lg" backdropBlur contentClassName="flex flex-col gap-5 p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-semibold text-app-fg">{viewPlan.planName}</h3>
-                  <span className="badge-info text-xs mt-1 inline-block">{viewPlan.role.replace(/_/g, ' ')}</span>
-                </div>
-                <button type="button" onClick={() => setViewPlan(null)} className="text-app-fg-muted hover:text-app-fg p-1">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Status & Dates */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Status</p>
-                  {(() => {
-                    const now = new Date();
-                    const from = new Date(viewPlan.effectiveFrom);
-                    const to = viewPlan.effectiveTo ? new Date(viewPlan.effectiveTo) : null;
-                    if (from > now) return <span className="badge-warning text-xs mt-1 inline-block">Upcoming</span>;
-                    if (to && to < now) return <span className="badge-danger text-xs mt-1 inline-block">Expired</span>;
-                    return <span className="badge-success text-xs mt-1 inline-block">Active</span>;
-                  })()}
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Effective Period</p>
-                  <p className="text-sm text-app-fg mt-1">
-                    {new Date(viewPlan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    {viewPlan.effectiveTo
-                      ? ` — ${new Date(viewPlan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                      : ' — Ongoing'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Rules Breakdown */}
-              <div>
-                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide mb-3">Commission Rules</p>
-                <div className="space-y-2">
-                  {viewPlan.rules.baseSalary != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
-                      <div>
-                        <p className="text-sm font-medium text-app-fg">Base Salary</p>
-                        <p className="text-xs text-app-fg-muted">
-                          Fixed pay when delivered orders {'\u2265'} {viewPlan.rules.baseThreshold ?? 0}
-                        </p>
-                      </div>
-                      <span className="text-sm font-semibold text-app-fg"><NairaPrice amount={Number(viewPlan.rules.baseSalary)} /></span>
-                    </div>
-                  )}
-                  {viewPlan.rules.baseThreshold != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
-                      <div>
-                        <p className="text-sm font-medium text-app-fg">Base Threshold</p>
-                        <p className="text-xs text-app-fg-muted">Minimum delivered orders to earn base salary</p>
-                      </div>
-                      <span className="text-sm font-semibold text-app-fg">{Number(viewPlan.rules.baseThreshold)} orders</span>
-                    </div>
-                  )}
-                  {viewPlan.rules.perOrderRate != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
-                      <div>
-                        <p className="text-sm font-medium text-app-fg">Per Order Commission</p>
-                        <p className="text-xs text-app-fg-muted">Earned for every delivered order</p>
-                      </div>
-                      <span className="text-sm font-semibold text-success-600 dark:text-success-400"><NairaPrice amount={Number(viewPlan.rules.perOrderRate)} /></span>
-                    </div>
-                  )}
-                  {viewPlan.rules.bonusPerExtraOrder != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
-                      <div>
-                        <p className="text-sm font-medium text-app-fg">Extra Order Bonus</p>
-                        <p className="text-xs text-app-fg-muted">
-                          Additional bonus per order above {viewPlan.rules.baseThreshold ?? 0} threshold
-                        </p>
-                      </div>
-                      <span className="text-sm font-semibold text-success-600 dark:text-success-400"><NairaPrice amount={Number(viewPlan.rules.bonusPerExtraOrder)} /></span>
-                    </div>
-                  )}
-                  {viewPlan.rules.deliveryRateThreshold != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
-                      <div>
-                        <p className="text-sm font-medium text-app-fg">Delivery Rate Bonus</p>
-                        <p className="text-xs text-app-fg-muted">
-                          50% extra on bonus when delivery rate exceeds threshold
-                        </p>
-                      </div>
-                      <span className="text-sm font-semibold text-brand-600 dark:text-brand-400">&gt;{Number(viewPlan.rules.deliveryRateThreshold)}%</span>
-                    </div>
-                  )}
-                  {viewPlan.rules.penaltyPerReturn != null && (
-                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
-                      <div>
-                        <p className="text-sm font-medium text-app-fg">Return Penalty</p>
-                        <p className="text-xs text-app-fg-muted">Clawback deducted per returned order</p>
-                      </div>
-                      <span className="text-sm font-semibold text-danger-600 dark:text-danger-400">-<NairaPrice amount={Number(viewPlan.rules.penaltyPerReturn)} /></span>
-                    </div>
-                  )}
-                  {Object.keys(viewPlan.rules).length === 0 && (
-                    <p className="text-sm text-app-fg-muted text-center py-4">No rules configured for this plan</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Example Calculation */}
-              {(viewPlan.rules.baseSalary != null || viewPlan.rules.perOrderRate != null) && (() => {
-                const base = Number(viewPlan.rules.baseSalary ?? 0);
-                const threshold = Number(viewPlan.rules.baseThreshold ?? 0);
-                const perOrder = Number(viewPlan.rules.perOrderRate ?? 0);
-                const extraBonus = Number(viewPlan.rules.bonusPerExtraOrder ?? 0);
-                const penalty = Number(viewPlan.rules.penaltyPerReturn ?? 0);
-                const exampleOrders = Math.max(threshold + 5, 25);
-                const exampleReturns = 2;
-                const earnedBase = exampleOrders >= threshold ? base : 0;
-                const earnedPerOrder = perOrder * exampleOrders;
-                const extraOrders = Math.max(exampleOrders - threshold, 0);
-                const earnedExtraBonus = extraBonus * extraOrders;
-                const earnedPenalty = penalty * exampleReturns;
-                const total = earnedBase + earnedPerOrder + earnedExtraBonus - earnedPenalty;
-
-                return (
-                  <div>
-                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide mb-2">Example Calculation</p>
-                    <div className="rounded-lg border border-app-border p-3 space-y-1.5 text-sm">
-                      <p className="text-xs text-app-fg-muted mb-2">
-                        If a staff member delivers {exampleOrders} orders with {exampleReturns} returns:
-                      </p>
-                      {earnedBase > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-app-fg-muted">Base Salary</span>
-                          <span className="font-medium text-app-fg"><NairaPrice amount={earnedBase} /></span>
-                        </div>
-                      )}
-                      {earnedPerOrder > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-app-fg-muted">Per Order ({exampleOrders} x <NairaPrice amount={perOrder} />)</span>
-                          <span className="font-medium text-app-fg"><NairaPrice amount={earnedPerOrder} /></span>
-                        </div>
-                      )}
-                      {earnedExtraBonus > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-app-fg-muted">Extra Bonus ({extraOrders} x <NairaPrice amount={extraBonus} />)</span>
-                          <span className="font-medium text-app-fg"><NairaPrice amount={earnedExtraBonus} /></span>
-                        </div>
-                      )}
-                      {earnedPenalty > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-app-fg-muted">Return Penalty ({exampleReturns} x <NairaPrice amount={penalty} />)</span>
-                          <span className="font-medium text-danger-600 dark:text-danger-400">-<NairaPrice amount={earnedPenalty} /></span>
-                        </div>
-                      )}
-                      <div className="border-t border-app-border pt-1.5 flex justify-between font-semibold">
-                        <span className="text-app-fg">Estimated Total</span>
-                        <span className="text-success-600 dark:text-success-400"><NairaPrice amount={total} /></span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <Button variant="secondary" size="sm" className="w-full" onClick={() => setViewPlan(null)}>
-                Close
-              </Button>
-        </Modal>
-      )}
 
       {/* Adjustments Tab — deferred data */}
       {activeTab === 'adjustments' && (
@@ -1070,28 +804,27 @@ export function HRPage({
                 <h3 className="text-base font-semibold text-app-fg mb-3">Update Settlement Window</h3>
                 <fetcher.Form method="post" className="space-y-4">
                   <input type="hidden" name="intent" value="setSettlementConfig" />
+                  {/* Monthly cadence only — Weekly / Bi-Weekly options were removed per CEO directive
+                      2026-04-26 (multi-stage payroll batches are month-keyed by design). The enum
+                      values stay in the DB for legacy rows; the UI just no longer offers them. */}
+                  <input type="hidden" name="windowType" value="MONTHLY" />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <FormSelect
-                        label="Window Type"
-                        name="windowType"
-                        defaultValue={resolvedConfig?.windowType ?? 'MONTHLY'}
-                        options={[
-                          { value: 'WEEKLY', label: 'Weekly' },
-                          { value: 'BIWEEKLY', label: 'Bi-Weekly' },
-                          { value: 'MONTHLY', label: 'Monthly' },
-                        ]}
-                      />
+                      <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Window Type</p>
+                      <p className="text-sm font-semibold text-app-fg mt-1">Monthly</p>
+                      <p className="text-xs text-app-fg-muted mt-1">
+                        Payroll runs on a monthly cadence. Weekly / Bi-Weekly cadences are no longer supported.
+                      </p>
                     </div>
                     <div>
                       <TextInput
-                        label="Start Day"
+                        label="Start Day of Month"
                         name="startDay"
                         type="number"
                         min={1}
                         max={31}
                         defaultValue={String(resolvedConfig?.startDay ?? 1)}
-                        hint="For Weekly/Bi-Weekly: 1=Mon, 7=Sun. For Monthly: day of month (1-31)."
+                        hint="Day of month (1-31) the settlement period begins."
                       />
                     </div>
                   </div>

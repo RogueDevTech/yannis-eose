@@ -17,30 +17,60 @@ function getVoipService(): VoipService {
 
 export const voipRouter = router({
   /**
-   * Check if VOIP feature is enabled.
-   * Any authenticated user can check (CS agents need to know the mode).
+   * Check if VOIP is enabled and what the active provider is. Any authenticated user can read
+   * this — agents need to know whether VOIP is on so the UI can show the Call panel.
+   * `provider` and `providerDisplayName` survive for forward-compat with future providers.
    */
   isEnabled: authedProcedure.query(async () => {
-    const enabled = await getVoipService().isVoipEnabled();
-    return { enabled };
+    const service = getVoipService();
+    const [enabled, provider] = await Promise.all([
+      service.isVoipEnabled(),
+      service.getActiveProviderName(),
+    ]);
+    const active = (await service.getActiveProvider());
+    return {
+      enabled,
+      provider,
+      providerDisplayName: active.displayName,
+      supportsBrowserClient: active.supportsBrowserClient,
+    };
   }),
 
   /**
-   * Toggle VOIP feature flag. SuperAdmin only.
+   * SuperAdmin: list all registered providers with whether each is configured. Drives the
+   * provider dropdown in Settings — unconfigured providers are shown but disabled with a
+   * tooltip listing the env vars the admin needs to set.
+   */
+  listProviders: permissionProcedure('settings.write').query(async () => {
+    return getVoipService()
+      .listProviders()
+      .map((p) => ({
+        name: p.name,
+        displayName: p.displayName,
+        configured: p.isConfigured(),
+        requiredEnvVars: p.requiredEnvVars(),
+        supportsBrowserClient: p.supportsBrowserClient,
+      }));
+  }),
+
+  /**
+   * SuperAdmin: switch the active VOIP provider. Refuses if the target's env vars aren't set.
+   * The enum is narrow today (only AT) — extend as new providers land.
+   */
+  setProvider: permissionProcedure('settings.write')
+    .input(z.object({ provider: z.enum(['africas_talking']) }))
+    .mutation(async ({ input, ctx }) => {
+      return getVoipService().setActiveProvider(input.provider, ctx.user.id);
+    }),
+
+  /**
+   * Toggle VOIP feature flag. SuperAdmin only. Validates the active provider's creds first.
    */
   setEnabled: permissionProcedure('settings.write')
     .input(z.object({ enabled: z.boolean() }))
     .mutation(async ({ input, ctx }) => {
       return getVoipService().setVoipEnabled(input.enabled, ctx.user.id);
     }),
-
-  /**
-   * Generate a Twilio access token for WebRTC browser client.
-   * CS agents call this to register their browser as a VOIP endpoint.
-   */
-  generateToken: authedProcedure.mutation(async ({ ctx }) => {
-    return getVoipService().generateAccessToken(ctx.user.id);
-  }),
 
   /**
    * Get call status by call log ID (for frontend polling).

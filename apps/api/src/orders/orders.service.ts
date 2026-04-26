@@ -2056,10 +2056,26 @@ export class OrdersService {
   }
 
   /**
-   * Get order volume by creation date — for CEO overview time-series chart.
-   * Returns { date: YYYY-MM-DD, orderCount }[] for the given date range (created_at).
+   * Get order volume by creation date — used by the CEO overview time-series chart and the
+   * "View data in chart" toggle on the per-role order list pages.
+   *
+   * Optional `mediaBuyerId` / `csAgentId` / `status` filters mirror the matching filters on
+   * `listOrders` so each list page (Marketing / CS / Logistics) can request a daily count
+   * scoped to exactly what the table is showing.
+   *
+   * Returns { date: YYYY-MM-DD, orderCount }[] for the date range (by created_at).
    */
-  async getOrdersTimeSeriesByCreated(startDate?: string, endDate?: string, branchId?: string | null): Promise<{ date: string; orderCount: number }[]> {
+  async getOrdersTimeSeriesByCreated(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+    extra?: {
+      mediaBuyerId?: string;
+      csAgentId?: string;
+      logisticsLocationId?: string;
+      status?: string;
+    },
+  ): Promise<{ date: string; orderCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [];
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
@@ -2068,6 +2084,12 @@ export class OrdersService {
       conditions.push(lte(schema.orders.createdAt, end));
     }
     if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (extra?.mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, extra.mediaBuyerId));
+    if (extra?.csAgentId) conditions.push(eq(schema.orders.assignedCsId, extra.csAgentId));
+    if (extra?.logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, extra.logisticsLocationId));
+    if (extra?.status) {
+      conditions.push(eq(schema.orders.status, extra.status as (typeof schema.orders.$inferSelect)['status']));
+    }
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.createdAt})::date`;
 
     let query = this.db

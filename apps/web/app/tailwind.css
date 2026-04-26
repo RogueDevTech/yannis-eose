@@ -416,6 +416,19 @@
     100% { opacity: 0; }
   }
 
+  /* Indeterminate progress bar — used by the CEO dashboard "Regenerating report"
+     banner and any other long-running background work where we don't know the % left.
+     A coloured slug travels left-to-right repeatedly inside its track. */
+  .animate-indeterminate-progress {
+    animation: indeterminateProgress 1.4s ease-in-out infinite;
+  }
+
+  @keyframes indeterminateProgress {
+    0%   { transform: translateX(-100%); }
+    50%  { transform: translateX(150%); }
+    100% { transform: translateX(350%); }
+  }
+
   /* Route loader variants: orbit and arc */
   @keyframes orbit {
     from { transform: rotate(0deg); }

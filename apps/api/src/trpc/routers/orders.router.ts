@@ -255,6 +255,39 @@ export const ordersRouter = router({
     }),
 
   /**
+   * Daily order volume for the "View data in chart" trend line on the role-specific
+   * order list pages (Marketing / CS / Logistics). Mirrors the same scoping filters as
+   * `statusCounts` so the chart series matches what the page table is showing.
+   * Returns: [{ date: 'YYYY-MM-DD', orderCount }] sorted ascending by date.
+   */
+  timeSeriesByCreated: authedProcedure
+    .input(
+      z
+        .object({
+          mediaBuyerId: z.string().uuid().optional(),
+          assignedCsId: z.string().uuid().optional(),
+          logisticsLocationId: z.string().uuid().optional(),
+          status: z.string().optional(),
+          startDate: z.string().date().optional(),
+          endDate: z.string().date().optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      return getOrdersService().getOrdersTimeSeriesByCreated(
+        input?.startDate,
+        input?.endDate,
+        ctx.currentBranchId,
+        {
+          mediaBuyerId: input?.mediaBuyerId,
+          csAgentId: input?.assignedCsId,
+          logisticsLocationId: input?.logisticsLocationId,
+          status: input?.status,
+        },
+      );
+    }),
+
+  /**
    * Get CS agent workloads — for dispatch dashboard.
    * Restricted to Head of CS and SuperAdmin.
    */

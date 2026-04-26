@@ -259,7 +259,10 @@ export function Header({
         {/* Mirror Mode pill — only shown when the session is mirroring another user.
             POSTs to the same /admin action that exits mirror; returns to /admin when done. */}
         {mirroredBy && (
-          <Form method="post" action="/admin?index" className="inline-flex">
+          // POSTs to the LAYOUT route (no `?index`) — the action handler that calls
+          // `/auth/mirror/stop` lives in routes/admin/route.tsx. Adding `?index` would
+          // route it to admin._index which has no action and 500s.
+          <Form method="post" action="/admin" className="inline-flex" data-mirror-allow="">
             <input type="hidden" name="intent" value="exitMirror" />
             <button
               type="submit"

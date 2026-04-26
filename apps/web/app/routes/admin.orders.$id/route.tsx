@@ -38,8 +38,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     if (!order) return { notFound: true };
 
-    const voipData = voipRes.data as { result?: { data?: { enabled: boolean } } };
-    const voipEnabled = voipData?.result?.data?.enabled ?? false;
+    // `voip.isEnabled` returns the on/off flag plus the active provider's display name. We
+    // pass the display name through to the OrderDetailPage so the call panel can read
+    // "Africa's Talking will ring your phone" instead of hardcoding the brand name.
+    const voipData = voipRes.data as {
+      result?: { data?: { enabled: boolean; providerDisplayName?: string } };
+    };
+    const voipPayload = voipData?.result?.data;
+    const voipEnabled = voipPayload?.enabled ?? false;
+    const voipProviderDisplayName = voipPayload?.providerDisplayName ?? "Africa's Talking";
 
     const latestCall: Promise<CallLogEntry | null> = apiRequest<unknown>(
       `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
@@ -63,7 +70,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       })
       .catch(() => [] as TimelineEvent[]);
 
-    return { order, latestCall, timeline, voipEnabled };
+    return {
+      order,
+      latestCall,
+      timeline,
+      voipEnabled,
+      voipProviderDisplayName,
+    };
   })();
 
   let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
@@ -172,13 +185,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: errorData?.error?.message ?? 'Failed to initiate call' }, { status: safeStatus(res.status) });
     }
 
-    const data = res.data as { result?: { data?: { callLog: unknown; twilioError?: string } } };
+    const data = res.data as { result?: { data?: { callLog: unknown; providerError?: string } } };
     const payload = data?.result?.data;
     return json({
       success: true,
       callInitiated: true,
       callLog: payload?.callLog ?? null,
-      twilioError: payload?.twilioError,
+      providerError: payload?.providerError,
     });
   }
 
@@ -473,6 +486,7 @@ export default function OrderDetailRoute() {
             latestCall={(data as OrderDetailStreamData).latestCall}
             timeline={(data as OrderDetailStreamData).timeline}
             voipEnabled={(data as OrderDetailStreamData).voipEnabled}
+            voipProviderDisplayName={(data as OrderDetailStreamData).voipProviderDisplayName}
             canEditOrder={canEditOrder}
             userRole={userRole}
             userId={userId}

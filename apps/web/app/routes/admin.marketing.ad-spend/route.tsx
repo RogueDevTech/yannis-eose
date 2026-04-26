@@ -101,12 +101,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
       )
     : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
 
-  const [metrics, leaderboard, usersData, productsData] = await Promise.all([
+  const [metrics, leaderboard, usersData, productsDataRaw] = await Promise.all([
     metricsP.then(parseMetrics).catch(() => emptyMetrics()),
     leaderboardP.then((r) => parseLeaderboard(r)).catch(() => []),
     usersP.then(parseUsers).catch(() => []),
     productsP.then(parseProducts).catch(() => []),
   ]);
+
+  // Media buyers only see products that are assigned to them — i.e. referenced by any of
+  // their own campaigns' `productIds`. Admins / HoM still see the full product catalog.
+  // The campaign list was already filtered by `mediaBuyerId = user.id` at fetch time, so
+  // collecting `productIds` from those campaigns yields the right scoping for free.
+  let productsData = productsDataRaw;
+  if (isMediaBuyer) {
+    const allowedProductIds = new Set<string>();
+    const campaignsRaw = (campaignsRes.ok
+      ? (campaignsRes.data as { result?: { data?: { campaigns?: Array<{ productIds?: string[] | null }> } } })?.result?.data?.campaigns
+      : []) ?? [];
+    for (const c of campaignsRaw) {
+      if (Array.isArray(c.productIds)) {
+        for (const id of c.productIds) {
+          if (id) allowedProductIds.add(id);
+        }
+      }
+    }
+    productsData = productsDataRaw.filter((p) => allowedProductIds.has(p.id));
+  }
 
   const data: MarketingAdSpendLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',

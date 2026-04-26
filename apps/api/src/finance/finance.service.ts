@@ -1,5 +1,4 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { eq, and, desc, gte, lte, count, sum, sql, inArray, isNotNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -24,8 +23,8 @@ export class FinanceService {
   private readonly logger = new Logger(FinanceService.name);
   /**
    * Whether the materialized-view init has succeeded in THIS process. False on boot and after
-   * any refresh failure that looks like a missing view, so the next cron tick re-runs init
-   * and self-heals fresh deployments without anyone touching the admin endpoint.
+   * any refresh failure that looks like a missing view, so the next refresh attempt re-runs
+   * init and self-heals fresh deployments without anyone touching the admin endpoint.
    */
   private mvInitVerified = false;
 
@@ -36,38 +35,41 @@ export class FinanceService {
   ) {}
 
   /**
-   * Refresh the finance materialized views every 15 minutes so the CEO Executive dashboard
-   * (which reads from them via `getFastProfitReport`) doesn't drift out of sync with live
-   * orders / payouts / ad spend. CEO requested live numbers — 15 min is a good balance between
-   * freshness and CPU: REFRESH CONCURRENTLY is cheap on small datasets and scales linearly.
+   * Ensure init has run, then await a synchronous REFRESH MATERIALIZED VIEW across all 4
+   * finance views. Used by the user-triggered `dashboard.refreshExecutiveData` mutation.
+   *
+   * No automatic / cron-based refresh exists — the user clicks Refresh on the page when
+   * they want fresher numbers, this method runs to completion, and the page revalidator
+   * picks up the new snapshot on its next read.
    */
-  @Cron('0 */15 * * * *')
-  async refreshMaterializedViewsCron() {
-    try {
-      // Self-heal a fresh DB: if init hasn't been verified this process, run it before the
-      // first refresh. CREATE MATERIALIZED VIEW IF NOT EXISTS is idempotent, so re-running on
-      // an already-initialized DB is a no-op. Without this step, a fresh production DB sits
-      // emitting "relation does not exist" warnings every 15 min until an admin manually hits
-      // the init endpoint — which nobody ever does.
-      if (!this.mvInitVerified) {
+  async refreshMaterializedViewsForUser() {
+    if (!this.mvInitVerified) {
+      try {
         await this.initMaterializedViews();
         this.mvInitVerified = true;
+      } catch (err) {
+        this.logger.error(`mv_init failed: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
       }
-
-      const results = await this.refreshMaterializedViews();
-      const failures = Object.entries(results).filter(([, ok]) => ok !== true);
-      if (failures.length > 0) {
-        // Reset the init flag so next tick retries init — covers the case where init partially
-        // succeeded or a view was dropped manually.
-        this.mvInitVerified = false;
-        this.logger.warn(`mv_refresh_cron partial_failure count=${failures.length} views=${failures.map(([n]) => n).join(',')}`);
-      } else {
-        this.logger.log(`mv_refresh_cron success count=${Object.keys(results).length}`);
-      }
-    } catch (err) {
-      this.mvInitVerified = false;
-      this.logger.error(`mv_refresh_cron error: ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    const startedAt = Date.now();
+    const results = await this.refreshMaterializedViews();
+    const failures = Object.entries(results).filter(([, ok]) => ok !== true);
+
+    if (failures.length > 0) {
+      // A failure usually means a view was dropped manually — retry init next time.
+      this.mvInitVerified = false;
+      this.logger.warn(
+        `mv_refresh_user partial_failure count=${failures.length} views=${failures.map(([n]) => n).join(',')}`,
+      );
+    } else {
+      this.logger.log(
+        `mv_refresh_user success count=${Object.keys(results).length} took=${Date.now() - startedAt}ms`,
+      );
+    }
+
+    return results;
   }
 
   // ============================================

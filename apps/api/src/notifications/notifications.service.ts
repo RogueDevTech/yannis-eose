@@ -323,6 +323,7 @@ export class NotificationsService {
     if (data['requestId'] && (type === 'funding:approved' || type === 'funding:rejected')) return '/admin/marketing/funding';
     if (data['transferId']) return '/admin/inventory';
     if (data['payoutId']) return '/admin/hr';
+    if (data['batchId'] && type.startsWith('hr:batch_')) return `/hr/payroll?batchId=${data['batchId']}`;
     return '/admin';
   }
 

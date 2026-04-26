@@ -53,6 +53,57 @@ export interface PayoutSummary {
   [status: string]: { count: number; total: string };
 }
 
+// ── Payroll Batches (multi-stage monthly workflow) ─────────────
+
+export type PayrollBatchStatus = 'DRAFT' | 'PENDING_HR' | 'PENDING_FINANCE' | 'PAID';
+export type PayrollDepartment = 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR';
+
+export interface PayrollBatch {
+  id: string;
+  branchId: string;
+  periodMonth: string;
+  department: PayrollDepartment;
+  status: PayrollBatchStatus;
+  preparedBy: string | null;
+  preparedAt: string | null;
+  submittedAt: string | null;
+  submittedBy: string | null;
+  hrReviewedAt: string | null;
+  hrReviewedBy: string | null;
+  hrNotes: string | null;
+  financeProcessedAt: string | null;
+  financeProcessedBy: string | null;
+  financeReference: string | null;
+  rejectionReason: string | null;
+  rejectedAt: string | null;
+  rejectedBy: string | null;
+  staffCount: number;
+  totalAmount: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MonthlyPayrollGroup {
+  month: string;
+  totalAmount: number;
+  staffCount: number;
+  items: PayrollBatch[];
+}
+
+export interface BranchOption {
+  id: string;
+  name: string;
+  code?: string;
+}
+
+/** Lightweight session info passed from loader → page. */
+export interface ViewerInfo {
+  id: string;
+  role: string;
+  currentBranchId: string | null;
+  isFinanceOfficer: boolean;
+}
+
 export interface HRPageProps {
   plans: CommissionPlan[];
   totalPlans: number;
@@ -83,4 +134,10 @@ export interface HRStreamData {
   users: HRUser[];
   settlementConfig: SettlementConfig | null;
   currentPeriod: SettlementPeriod | null;
+  // Multi-stage payroll batches
+  monthlyPayrolls: MonthlyPayrollGroup[];
+  branches: BranchOption[];
+  viewer: ViewerInfo;
+  /** When set, batch detail panel opens for this batch on mount. */
+  initialBatchId: string | null;
 }

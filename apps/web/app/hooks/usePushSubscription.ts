@@ -40,6 +40,17 @@ function getApiBase(): string {
   return raw.replace(/\/+$/, '');
 }
 
+/**
+ * Mirror Mode is strictly view-only — every tRPC mutation rejects with FORBIDDEN while
+ * `mirroredBy` is set on the session, including this push install-mode heartbeat. Skip the
+ * fetch entirely when the global mirror flag is on (DashboardLayout sets `data-mirror="1"`
+ * on `<html>`). Same convention as `useAgentStateBroadcast`. See CLAUDE.md → Mirror Mode.
+ */
+function isMirroring(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.documentElement.dataset.mirror === '1';
+}
+
 export type PermissionState = 'default' | 'granted' | 'denied' | 'unsupported';
 
 export interface UsePushSubscriptionResult {
@@ -89,7 +100,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
         if (sub) {
           setIsSubscribed(true);
           const mode = detectInstallMode();
-          if (mode !== 'UNKNOWN') {
+          if (mode !== 'UNKNOWN' && !isMirroring()) {
             fetch(`${getApiBase()}/trpc/notifications.updatePushInstallMode`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -113,6 +124,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
     if (typeof window === 'undefined') return;
     async function pushMode(mode: InstallMode) {
       if (mode === 'UNKNOWN') return;
+      if (isMirroring()) return; // Read-only while mirroring; the next mount will retry.
       try {
         const registration = await navigator.serviceWorker.ready;
         const sub = await registration.pushManager.getSubscription();

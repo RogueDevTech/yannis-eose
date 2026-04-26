@@ -9,6 +9,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
+import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { Pagination } from '~/components/ui/pagination';
@@ -66,6 +67,8 @@ interface OrdersListPageProps {
   canCreateOffline?: boolean;
   /** Products list for offline order form (when canCreateOffline). */
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+  /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
+  dailyCounts?: Array<{ date: string; orderCount: number }>;
 }
 
 export function OrdersListPage({
@@ -88,9 +91,11 @@ export function OrdersListPage({
   liveEvents,
   canCreateOffline = false,
   productsForOfflineOrder = [],
+  dailyCounts,
 }: OrdersListPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
+  const [showChartView, setShowChartView] = useState(false);
   const liveState = useLiveIndicator(liveEvents ?? []);
   const navigate = useNavigate();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
@@ -321,6 +326,14 @@ export function OrdersListPage({
               <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
             )}
             <PageRefreshButton />
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowChartView((v) => !v)}
+            >
+              {showChartView ? 'View as data' : 'View data in chart'}
+            </Button>
             {canCreateOffline && (
               <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
                 <span className="hidden sm:inline">Create offline order</span>
@@ -573,7 +586,15 @@ export function OrdersListPage({
         </div>
       </div>
 
-      {/* Orders table */}
+      {/* Orders table — replaced with chart view when the user toggles "View data in chart" */}
+      {showChartView ? (
+        <OrdersChartView
+          statusCounts={statusCounts}
+          total={total}
+          scopeLabel="CS orders"
+          dailyCounts={dailyCounts}
+        />
+      ) : (
       <div className="card p-0 overflow-hidden">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
@@ -753,16 +774,19 @@ export function OrdersListPage({
           )}
         </div>
       </div>
+      )}
 
-      {/* Pagination */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-app-fg-muted">
-          {total > 0
-            ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
-            : 'No orders'}
-        </p>
-        <Pagination page={page} totalPages={totalPages} pageParam="page" />
-      </div>
+      {/* Pagination — table view only; the chart view doesn't paginate. */}
+      {!showChartView && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            {total > 0
+              ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
+              : 'No orders'}
+          </p>
+          <Pagination page={page} totalPages={totalPages} pageParam="page" />
+        </div>
+      )}
 
       {/* Bulk cancel confirmation modal */}
       {cancelModalOpen && (

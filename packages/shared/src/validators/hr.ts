@@ -94,3 +94,82 @@ export const setSettlementConfigSchema = z.object({
   startDay: z.number().int().min(1).max(31), // day of week (1-7) for WEEKLY/BIWEEKLY, day of month (1-31) for MONTHLY
 });
 export type SetSettlementConfigInput = z.infer<typeof setSettlementConfigSchema>;
+
+// ============================================
+// Payroll Batch Validators (multi-stage monthly workflow)
+// ============================================
+
+export const payrollDepartmentSchema = z.enum(['CS', 'MARKETING', 'LOGISTICS', 'HR']);
+export type PayrollDepartment = z.infer<typeof payrollDepartmentSchema>;
+
+export const payrollBatchStatusSchema = z.enum([
+  'DRAFT',
+  'PENDING_HR',
+  'PENDING_FINANCE',
+  'PAID',
+]);
+export type PayrollBatchStatus = z.infer<typeof payrollBatchStatusSchema>;
+
+/** First day of the month, e.g. "2026-04-01". */
+const periodMonthSchema = z.string().regex(/^\d{4}-\d{2}-01$/, 'periodMonth must be YYYY-MM-01');
+
+export const generateBatchSchema = z.object({
+  branchId: z.string().uuid(),
+  department: payrollDepartmentSchema,
+  periodMonth: periodMonthSchema,
+});
+export type GenerateBatchInput = z.infer<typeof generateBatchSchema>;
+
+export const submitBatchSchema = z.object({
+  batchId: z.string().uuid(),
+});
+export type SubmitBatchInput = z.infer<typeof submitBatchSchema>;
+
+export const approveBatchSchema = z.object({
+  batchId: z.string().uuid(),
+  hrNotes: z.string().max(1000).optional(),
+});
+export type ApproveBatchInput = z.infer<typeof approveBatchSchema>;
+
+export const rejectBatchSchema = z.object({
+  batchId: z.string().uuid(),
+  reason: z.string().min(10, 'Reject reason must be at least 10 characters').max(1000),
+});
+export type RejectBatchInput = z.infer<typeof rejectBatchSchema>;
+
+export const markBatchPaidSchema = z.object({
+  batchId: z.string().uuid(),
+  financeReference: z.string().min(2).max(200),
+});
+export type MarkBatchPaidInput = z.infer<typeof markBatchPaidSchema>;
+
+/**
+ * List monthly payrolls. Scope filters are optional — the service narrows further
+ * based on the viewer's role (HoDs see only their dept; Finance sees PENDING_FINANCE+).
+ */
+export const listMonthlyPayrollsSchema = z.object({
+  fromMonth: periodMonthSchema.optional(),
+  toMonth: periodMonthSchema.optional(),
+  branchId: z.string().uuid().optional(),
+  department: payrollDepartmentSchema.optional(),
+  status: payrollBatchStatusSchema.optional(),
+});
+export type ListMonthlyPayrollsInput = z.infer<typeof listMonthlyPayrollsSchema>;
+
+export const getBatchSchema = z.object({
+  batchId: z.string().uuid(),
+});
+export type GetBatchInput = z.infer<typeof getBatchSchema>;
+
+/**
+ * HR-added per-staff adjustment during PENDING_HR review. Routes through the
+ * existing earnings_adjustments table so the per-staff trail stays canonical.
+ */
+export const addBatchAdjustmentSchema = z.object({
+  batchId: z.string().uuid(),
+  payoutId: z.string().uuid(),
+  amount: z.coerce.number().multipleOf(0.01),
+  category: z.enum(['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'DEDUCTION', 'OTHER']),
+  reason: z.string().min(5).max(500),
+});
+export type AddBatchAdjustmentInput = z.infer<typeof addBatchAdjustmentSchema>;
