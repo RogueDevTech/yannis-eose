@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, ne, and, desc, gte, lte, count, sum, inArray, or, ilike, getTableColumns, type SQL } from 'drizzle-orm';
+import { eq, ne, and, desc, gte, lte, gt, count, sum, inArray, or, ilike, getTableColumns, sql, exists, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
@@ -13,6 +13,7 @@ import type {
   CreateAdSpendInput,
   ListAdSpendInput,
   AdSpendStatusCountsInput,
+  PreviewAdSpendIntervalInput,
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
   ListOfferTemplatesInput,
@@ -51,13 +52,49 @@ export class MarketingService {
     return rows.map((row) => row.id);
   }
 
+  /**
+   * Validates who may appear as sender/receiver on marketing_funding.
+   * `viaFundingRequest`: when true, Finance/SuperAdmin/Admin may fund a Media Buyer
+   * (approve-with-receipt path); `createFunding` uses false and keeps HoM-only → MB.
+   */
+  private assertLedgerTransferAllowed(
+    senderRole: string,
+    receiverRole: string,
+    opts?: { viaFundingRequest?: boolean },
+  ): void {
+    const adminFinance = ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'];
+    if (receiverRole === 'HEAD_OF_MARKETING') {
+      if (!adminFinance.includes(senderRole)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only Super Admin, Admin, or Finance Officer can disburse to Head of Marketing',
+        });
+      }
+      return;
+    }
+    if (receiverRole === 'MEDIA_BUYER') {
+      if (senderRole === 'HEAD_OF_MARKETING') {
+        return;
+      }
+      if (opts?.viaFundingRequest && adminFinance.includes(senderRole)) {
+        return;
+      }
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: opts?.viaFundingRequest
+          ? 'Only Head of Marketing, Super Admin, Admin, or Finance Officer can approve funding to a Media Buyer'
+          : 'Only Head of Marketing can disburse to Media Buyers',
+      });
+    }
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Receiver must be Head of Marketing or Media Buyer' });
+  }
+
   // ============================================
   // Marketing Funding
   // ============================================
 
   async createFunding(input: CreateFundingInput, senderId: string) {
     const funding = await withActor(this.db, { id: senderId }, async (tx) => {
-      // Validate sender → receiver flow: SA/FO → HoM (tier 1), HoM → Media Buyer (tier 2)
       const [sender, receiver] = await Promise.all([
         tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, senderId)).limit(1),
         tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, input.receiverId)).limit(1),
@@ -67,17 +104,7 @@ export class MarketingService {
       if (!receiverRole || !senderRole) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Sender or receiver not found' });
       }
-      if (receiverRole === 'HEAD_OF_MARKETING') {
-        if (senderRole !== 'SUPER_ADMIN' && senderRole !== 'ADMIN' && senderRole !== 'FINANCE_OFFICER') {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Super Admin or Finance Officer can disburse to Head of Marketing' });
-        }
-      } else if (receiverRole === 'MEDIA_BUYER') {
-        if (senderRole !== 'HEAD_OF_MARKETING') {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing can disburse to Media Buyers' });
-        }
-      } else {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Receiver must be Head of Marketing or Media Buyer' });
-      }
+      this.assertLedgerTransferAllowed(senderRole, receiverRole, { viaFundingRequest: false });
 
       const rows = await tx
         .insert(schema.marketingFunding)
@@ -826,8 +853,10 @@ export class MarketingService {
   }
 
   /**
-   * Head of Marketing (or SuperAdmin) approves a funding request: money sent manually, then receipt attached.
-   * Notifies the Media Buyer so they can preview the receipt.
+   * Head of Marketing (or SuperAdmin / Finance) approves a funding request: money sent manually, receipt attached.
+   * Updates the request and inserts a matching `marketing_funding` ledger row (SENT) so totals / Transfers / balance
+   * stay aligned with My Requests. Notifies the requester; emits `funding:received` for live lists (no duplicate
+   * `funding:sent` push — `funding:approved` remains the primary in-app notification).
    */
   async approveFundingRequest(
     requestId: string,
@@ -847,7 +876,34 @@ export class MarketingService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
     }
 
-    const updated = await withActor(this.db, { id: approverId }, async (tx) => {
+    const [ledgerDup] = await this.db
+      .select({ id: schema.marketingFunding.id })
+      .from(schema.marketingFunding)
+      .where(eq(schema.marketingFunding.sourceFundingRequestId, requestId))
+      .limit(1);
+    if (ledgerDup) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'This funding request already has a ledger transfer',
+      });
+    }
+
+    const { updated, ledger } = await withActor(this.db, { id: approverId }, async (tx) => {
+      const [sender, receiver] = await Promise.all([
+        tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, approverId)).limit(1),
+        tx
+          .select({ role: schema.users.role })
+          .from(schema.users)
+          .where(eq(schema.users.id, existing.requesterId))
+          .limit(1),
+      ]);
+      const receiverRole = receiver[0]?.role;
+      const senderRole = sender[0]?.role;
+      if (!receiverRole || !senderRole) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Sender or receiver not found' });
+      }
+      this.assertLedgerTransferAllowed(senderRole, receiverRole, { viaFundingRequest: true });
+
       const [row] = await tx
         .update(schema.marketingFundingRequests)
         .set({
@@ -862,7 +918,29 @@ export class MarketingService {
       if (!row) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
       }
-      return row;
+
+      const [inserted] = await tx
+        .insert(schema.marketingFunding)
+        .values({
+          senderId: approverId,
+          receiverId: existing.requesterId,
+          amount: String(existing.amount),
+          receiptUrl,
+          status: 'SENT',
+          sourceFundingRequestId: requestId,
+        })
+        .returning();
+
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create funding ledger row' });
+      }
+
+      return { updated: row, ledger: inserted };
+    });
+
+    this.events.emitToUser(existing.requesterId, 'funding:received', {
+      fundingId: ledger.id,
+      amount: Number(existing.amount),
     });
 
     const amount = Number(existing.amount);
@@ -1010,6 +1088,114 @@ export class MarketingService {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to approve ad spend' });
     }
     return updated;
+  }
+
+  /**
+   * Read-only preview for the Log Ad Spend form: orders (all statuses) for this buyer +
+   * campaign + product with created_at after the UTC calendar day of the latest APPROVED
+   * prior spend (strictly before spendDate), through now. Indicative CPA = spendAmount / count.
+   */
+  async previewAdSpendInterval(
+    input: PreviewAdSpendIntervalInput,
+    mediaBuyerId: string,
+    branchId?: string | null,
+  ) {
+    if (branchId) {
+      const [campaign] = await this.db
+        .select({ id: schema.campaigns.id })
+        .from(schema.campaigns)
+        .where(and(eq(schema.campaigns.id, input.campaignId), eq(schema.campaigns.branchId, branchId)))
+        .limit(1);
+      if (!campaign) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+      }
+    }
+
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      return {
+        orderCount: 0,
+        priorSpendDate: null as string | null,
+        windowStartExclusive: null as string | null,
+        indicativeCpa: null as number | null,
+      };
+    }
+    if (branchCampaignIds && !branchCampaignIds.includes(input.campaignId)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+    }
+
+    const priorDateLt = sql`${schema.adSpendLogs.spendDate}::date < ${input.spendDate}::date`;
+
+    const [prior] = await this.db
+      .select({
+        spendDate: schema.adSpendLogs.spendDate,
+      })
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId),
+          eq(schema.adSpendLogs.campaignId, input.campaignId),
+          eq(schema.adSpendLogs.productId, input.productId),
+          eq(schema.adSpendLogs.status, 'APPROVED'),
+          priorDateLt,
+        ),
+      )
+      .orderBy(desc(schema.adSpendLogs.spendDate), desc(schema.adSpendLogs.createdAt))
+      .limit(1);
+
+    const priorSpend = prior?.spendDate;
+    let windowStartExclusive: Date | null = null;
+    if (priorSpend) {
+      const y = priorSpend.getUTCFullYear();
+      const m = priorSpend.getUTCMonth();
+      const d = priorSpend.getUTCDate();
+      windowStartExclusive = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0));
+    }
+
+    const now = new Date();
+    const hasProductLine = exists(
+      this.db
+        .select({ id: schema.orderItems.id })
+        .from(schema.orderItems)
+        .where(
+          and(eq(schema.orderItems.orderId, schema.orders.id), eq(schema.orderItems.productId, input.productId)),
+        ),
+    );
+
+    const orderConditions: SQL[] = [
+      eq(schema.orders.mediaBuyerId, mediaBuyerId),
+      eq(schema.orders.campaignId, input.campaignId),
+      hasProductLine,
+      lte(schema.orders.createdAt, now),
+    ];
+    if (windowStartExclusive) {
+      orderConditions.push(gt(schema.orders.createdAt, windowStartExclusive));
+    }
+    if (branchId) {
+      orderConditions.push(eq(schema.orders.branchId, branchId));
+    }
+
+    const [countRow] = await this.db
+      .select({ c: count() })
+      .from(schema.orders)
+      .where(and(...orderConditions));
+
+    const orderCount = Number(countRow?.c ?? 0);
+    const spendAmt = input.spendAmount;
+    const indicativeCpa =
+      spendAmt !== undefined && spendAmt > 0 && orderCount > 0 ? spendAmt / orderCount : null;
+
+    const priorSpendDate =
+      priorSpend != null
+        ? `${priorSpend.getUTCFullYear()}-${String(priorSpend.getUTCMonth() + 1).padStart(2, '0')}-${String(priorSpend.getUTCDate()).padStart(2, '0')}`
+        : null;
+
+    return {
+      orderCount,
+      priorSpendDate,
+      windowStartExclusive: windowStartExclusive ? windowStartExclusive.toISOString() : null,
+      indicativeCpa,
+    };
   }
 
   async listAdSpend(input: ListAdSpendInput, branchId?: string | null) {

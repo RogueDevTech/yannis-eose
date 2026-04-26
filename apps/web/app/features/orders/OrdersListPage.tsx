@@ -17,10 +17,12 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { Textarea } from '~/components/ui/textarea';
+import { ExportModal } from '~/components/ui/export-modal';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { STATUS_OPTIONS, STATUS_LABELS, STATUS_TEXT_CLASS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
+import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { Order } from './types';
 
 // Status transitions that make sense for bulk operations
@@ -100,6 +102,7 @@ export function OrdersListPage({
   const navigate = useNavigate();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // Sync URL params to local state when loader data changes (e.g. back/forward)
   useEffect(() => {
@@ -350,27 +353,7 @@ export function OrdersListPage({
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => exportToCsv(
-              filteredOrders.map((o) => ({
-                id: o.id,
-                customer: o.customerName,
-                ...(showCSAgentColumn && { assignedCs: o.assignedCsName ?? '—' }),
-                phone: o.customerPhoneDisplay,
-                status: o.status,
-                amount: o.totalAmount ?? '',
-                created: new Date(o.createdAt).toLocaleDateString(),
-              })),
-              [
-                { key: 'id', label: 'Order ID' },
-                { key: 'customer', label: 'Customer' },
-                ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
-                { key: 'phone', label: 'Phone' },
-                { key: 'status', label: 'Status' },
-                { key: 'amount', label: 'Amount' },
-                { key: 'created', label: 'Created' },
-              ],
-              `orders-${new Date().toISOString().split('T')[0]}.csv`,
-            )}
+              onClick={() => setShowExportModal(true)}
           >
             Export CSV
           </Button>
@@ -856,6 +839,17 @@ export function OrdersListPage({
             </div>
         </Modal>
       )}
+
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={EXPORT_CONFIGS.cs_orders}
+        initialFilters={{
+          status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
+          search: searchQuery || undefined,
+          assignedCsId: searchParams.get('csAgentId') || undefined,
+        }}
+      />
 
     </div>
   );

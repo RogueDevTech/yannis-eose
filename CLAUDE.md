@@ -388,6 +388,7 @@ The push system has four layers — all must be consistent:
 
 ### When Building the Marketing Module
 - Funding Ledger: HoM creates a funding record with amount + receipt image upload. Status starts as SENT. Media Buyer receives a PWA push notification and must click Mark Received (status becomes COMPLETED) or Not Received (status becomes DISPUTED, triggers alert to CEO)
+- **Approve funding request = ledger row:** When HoM/Finance/SuperAdmin/Admin approves a `marketing_funding_requests` row (`approveFundingRequest`), the API **must** insert a matching `marketing_funding` row in the **same transaction** (status `SENT`, optional `source_funding_request_id` FK) so **Total Received**, the **Transfers** tab, and **getFundingBalance** stay aligned with **My Requests**. `createFunding` (Send Funding) remains the other path into the same ledger.
 - Ad Spend Logging: Media Buyers log daily spend per product with a MANDATORY Ads Manager screenshot. No screenshot = no log entry accepted
 - CPA = Total Ad Spend / Total Orders Created (all statuses)
 - True ROAS = Total Revenue from DELIVERED orders only / Total Ad Spend
@@ -402,7 +403,8 @@ The two-tier funding flow (Finance → HoM, HoM → MB) is reflected in the page
 URL state is `?section=received|distributing&tab=transfers|requests` plus per-(section,tab) `page` / `status` / `requestStatus` / `search`. Switching section drops those filter params (they're scoped to the slice you came from). Each section card has its own action button so the affordance is unambiguous: `+ Request Funds` always means "ask upstream", `+ Send Funding` always means "disburse downstream".
 
 **Funding-relevant top metrics** (replaced the old marketing-perf strip — CPA / ROAS / Delivery Rate / Confirmation Rate didn't speak to funding work):
-- `Total Received` (period sum, incoming)
+- `Total Received` (period sum, incoming ledger `marketing_funding` — any status, `sent_at` in range)
+- `Current balance` (Media Buyer + Head of Marketing on `/admin/marketing/funding` via `marketing.getFundingBalance`): **COMPLETED** incoming ledger total minus **APPROVED** ad spend on their campaigns (can trail Total Received while `SENT` transfers await mark-received)
 - `Total Distributed` (HoM/Admin only — period sum, outgoing)
 - `Pending Mark-Received` (count — incoming `SENT` awaiting confirmation; warning-coloured when > 0)
 - `Disputed` (count of `DISPUTED` you're party to as either sender or receiver; danger-coloured when > 0)

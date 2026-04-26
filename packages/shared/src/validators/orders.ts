@@ -197,6 +197,7 @@ export type BulkReassignInput = z.infer<typeof bulkReassignSchema>;
  */
 export const listOrdersSchema = z.object({
   status: orderStatusSchema.optional(),
+  statuses: z.array(orderStatusSchema).min(1).optional(),
   assignedCsId: z.string().uuid().optional(),
   mediaBuyerId: z.string().uuid().optional(),
   riderId: z.string().uuid().optional(),

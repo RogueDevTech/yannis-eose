@@ -233,6 +233,20 @@ describe('listOrdersSchema', () => {
     expect(() => listOrdersSchema.parse({ status: 'FAKE_STATUS' })).toThrow();
   });
 
+  it('accepts multiple valid statuses', () => {
+    expect(() =>
+      listOrdersSchema.parse({ statuses: ['CONFIRMED', 'ALLOCATED', 'IN_TRANSIT'] }),
+    ).not.toThrow();
+  });
+
+  it('rejects empty statuses array', () => {
+    expect(() => listOrdersSchema.parse({ statuses: [] })).toThrow();
+  });
+
+  it('rejects invalid value in statuses array', () => {
+    expect(() => listOrdersSchema.parse({ statuses: ['CONFIRMED', 'FAKE_STATUS'] })).toThrow();
+  });
+
   it('accepts valid date filter', () => {
     expect(() => listOrdersSchema.parse({ startDate: '2026-01-01', endDate: '2026-01-31' })).not.toThrow();
   });

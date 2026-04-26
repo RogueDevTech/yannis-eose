@@ -7,7 +7,7 @@ import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesP
 import type { DeliveryRemittanceListItem, DeliveryRemittanceDetail } from '~/features/finance/DeliveryRemittancesPage';
 
 export const meta: MetaFunction = () => [
-  { title: 'Delivery remittances — Finance — Yannis EOSE' },
+  { title: 'Delivery Cash Remittances — Finance — Yannis EOSE' },
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {

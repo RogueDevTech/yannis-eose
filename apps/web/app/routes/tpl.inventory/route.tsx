@@ -128,27 +128,6 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
 
-  // ── Transfer actions ──
-  if (intent === 'verifyTransfer') {
-    const quantityReceived = parseInt(formData.get('quantityReceived')?.toString() ?? '0', 10);
-    const shrinkageReason = formData.get('shrinkageReason')?.toString() || undefined;
-
-    const res = await apiRequest<unknown>('/trpc/inventory.verifyTransfer', {
-      method: 'POST',
-      cookie,
-      body: {
-        transferId: formData.get('transferId')?.toString() ?? '',
-        quantityReceived,
-        shrinkageReason,
-      },
-    });
-    if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to verify transfer';
-      return json({ error: err }, { status: safeStatus(res.status) });
-    }
-    return json({ success: true });
-  }
-
   // ── Returns actions ──
   if (intent === 'restock') {
     const orderId = formData.get('orderId')?.toString() ?? '';

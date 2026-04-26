@@ -12,6 +12,18 @@ export const meta: MetaFunction = () => [
 ];
 
 const ORDERS_PER_PAGE = 40;
+const LOGISTICS_STATUS_SCOPE = [
+  'CONFIRMED',
+  'ALLOCATED',
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'PARTIALLY_DELIVERED',
+  'RETURNED',
+  'RESTOCKED',
+  'WRITTEN_OFF',
+  'COMPLETED',
+] as const;
 
 const defaultThisMonth = defaultThisMonthRange;
 
@@ -31,8 +43,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const status = url.searchParams.get('status') || 'ALL';
+  const status = url.searchParams.get('status') || 'CONFIRMED';
   const search = url.searchParams.get('search') || undefined;
+  const scopedStatuses = status === 'ALL' ? [...LOGISTICS_STATUS_SCOPE] : undefined;
 
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
@@ -52,6 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     page,
     limit: ORDERS_PER_PAGE,
     status: status === 'ALL' ? undefined : status,
+    ...(scopedStatuses ? { statuses: scopedStatuses } : {}),
     search: search || undefined,
     sortBy: 'preferredDeliveryDate' as const,
     sortOrder: 'asc' as const,
@@ -59,19 +73,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
     ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
   };
-  const countsInput: { startDate?: string; endDate?: string; logisticsLocationId?: string } = {};
+  const countsInput: {
+    startDate?: string;
+    endDate?: string;
+    logisticsLocationId?: string;
+    statuses?: readonly string[];
+  } = {};
   if (startDate) countsInput.startDate = startDate;
   if (endDate) countsInput.endDate = endDate;
   if (effectiveLogisticsLocationId) countsInput.logisticsLocationId = effectiveLogisticsLocationId;
+  if (scopedStatuses) countsInput.statuses = scopedStatuses;
 
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
 
   // Daily-counts series for the chart-view trend line. Mirrors the same scope filters the
   // table uses (date range + 3PL location) so the trend matches what the user is reading.
-  const trendInput: { logisticsLocationId?: string; status?: string; startDate?: string; endDate?: string } = {};
+  const trendInput: {
+    logisticsLocationId?: string;
+    status?: string;
+    statuses?: readonly string[];
+    startDate?: string;
+    endDate?: string;
+  } = {};
   if (effectiveLogisticsLocationId) trendInput.logisticsLocationId = effectiveLogisticsLocationId;
-  if (status) trendInput.status = status;
+  if (status !== 'ALL') trendInput.status = status;
+  if (scopedStatuses) trendInput.statuses = scopedStatuses;
   if (startDate) trendInput.startDate = startDate;
   if (endDate) trendInput.endDate = endDate;
   const trendInputEnc = encodeURIComponent(JSON.stringify(trendInput));

@@ -198,6 +198,8 @@ export async function requirePermissionOrRoles(
 ): Promise<{ id: string; email: string; name: string; role: string; permissions?: string[] }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
+  // Keep admin-class behavior aligned with requirePermission().
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return user;
   if (options.roles.includes(user.role)) return user;
   const codes = Array.isArray(options.permission) ? options.permission : [options.permission];
   const perms = user.permissions ?? [];

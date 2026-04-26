@@ -14,8 +14,9 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
+import { ExportModal } from '~/components/ui/export-modal';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
-import { exportToCsv } from '~/lib/csv-export';
+import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { Order } from '~/features/orders/types';
 
 interface MarketingOrdersPageProps {
@@ -65,6 +66,7 @@ export function MarketingOrdersPage({
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showChartView, setShowChartView] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
     setSelectedStatus(statusFilter || 'ALL');
@@ -141,27 +143,7 @@ export function MarketingOrdersPage({
               {showChartView ? 'View as data' : 'View data in chart'}
             </Button>
             <Button
-              onClick={() =>
-                exportToCsv(
-                  orders.map((o) => ({
-                    id: o.id,
-                    customer: o.customerName,
-                    ...(showMediaBuyerColumn && { mediaBuyer: o.mediaBuyerName ?? '—' }),
-                    status: o.status,
-                    amount: o.totalAmount ?? '',
-                    created: new Date(o.createdAt).toLocaleDateString(),
-                  })),
-                  [
-                    { key: 'id', label: 'Order ID' },
-                    { key: 'customer', label: 'Customer' },
-                    ...(showMediaBuyerColumn ? [{ key: 'mediaBuyer', label: 'Media Buyer' }] : []),
-                    { key: 'status', label: 'Status' },
-                    { key: 'amount', label: 'Amount' },
-                    { key: 'created', label: 'Created' },
-                  ],
-                  `marketing-orders-${new Date().toISOString().split('T')[0]}.csv`,
-                )
-              }
+              onClick={() => setShowExportModal(true)}
               variant="secondary"
               size="sm"
             >
@@ -358,6 +340,17 @@ export function MarketingOrdersPage({
         )}
       </div>
       )}
+
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={EXPORT_CONFIGS.marketing_orders}
+        initialFilters={{
+          status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
+          search: searchQuery || undefined,
+          mediaBuyerId: searchParams.get('mediaBuyerId') || undefined,
+        }}
+      />
     </div>
   );
 }

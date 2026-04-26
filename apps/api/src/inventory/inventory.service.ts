@@ -209,10 +209,12 @@ export class InventoryService {
   // ============================================
 
   /**
-   * Initiate a stock transfer between locations.
-   * Dual-Entry: stock is IN_TRANSIT until 3PL confirms receipt.
+   * Record a stock transfer between locations in one step (no 3PL receipt gate).
+   * Deducts from source, creates the ledger row as RECEIVED, and credits the destination
+   * in the same transaction as the historical verify step did.
    */
   async initiateTransfer(input: StockTransferInput, actor: SessionUser) {
+    const now = new Date();
     const transfer = await withActor(this.db, actor, async (tx) => {
       // Check source has enough stock
       const sourceLevel = await tx
@@ -240,7 +242,7 @@ export class InventoryService {
           .update(schema.inventoryLevels)
           .set({
             stockCount: sql`${schema.inventoryLevels.stockCount} - ${input.quantity}`,
-            updatedAt: new Date(),
+            updatedAt: now,
           })
           .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
       }
@@ -265,16 +267,17 @@ export class InventoryService {
         costRemaining -= units;
       }
 
-      // Create transfer record with computed transfer cost
       const transferRows = await tx
         .insert(schema.stockTransfers)
         .values({
           productId: input.productId,
           quantitySent: input.quantity,
+          quantityReceived: input.quantity,
           fromLocationId: input.fromLocationId,
           toLocationId: input.toLocationId,
-          transferStatus: 'IN_TRANSIT',
+          transferStatus: 'RECEIVED',
           transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
+          verifiedAt: now,
         })
         .returning();
 
@@ -283,10 +286,48 @@ export class InventoryService {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create transfer' });
       }
 
-      // Log movement: OUT from source
       await tx.insert(schema.stockMovements).values({
         productId: input.productId,
         movementType: 'TRANSFER_OUT',
+        quantity: input.quantity,
+        fromLocationId: input.fromLocationId,
+        toLocationId: input.toLocationId,
+        referenceId: newTransfer.id,
+        actorId: actor.id,
+      });
+
+      const destLevel = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, input.productId),
+            eq(schema.inventoryLevels.locationId, input.toLocationId),
+          ),
+        )
+        .limit(1);
+
+      if (destLevel[0]) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantity}`,
+            updatedAt: now,
+          })
+          .where(eq(schema.inventoryLevels.id, destLevel[0].id));
+      } else {
+        await tx.insert(schema.inventoryLevels).values({
+          productId: input.productId,
+          locationId: input.toLocationId,
+          stockCount: input.quantity,
+          reservedCount: 0,
+          status: 'AVAILABLE',
+        });
+      }
+
+      await tx.insert(schema.stockMovements).values({
+        productId: input.productId,
+        movementType: 'TRANSFER_IN',
         quantity: input.quantity,
         fromLocationId: input.fromLocationId,
         toLocationId: input.toLocationId,
@@ -300,19 +341,9 @@ export class InventoryService {
     this.events.emitToRoom('inventory', 'transfer:created', {
       transferId: transfer.id,
       productId: input.productId,
+      completed: true,
     });
 
-    // Notify TPL at receiving location
-    this.notifications
-      .createForLocation(input.toLocationId, {
-        type: 'transfer:sent',
-        title: 'Stock transfer incoming',
-        body: `A stock transfer is on the way to your location. Please verify and receive when it arrives.`,
-        data: { transferId: transfer.id, productId: input.productId, quantity: input.quantity },
-      })
-      .catch(() => {});
-
-    // Stock left the source — check if that location is now below threshold.
     await this.checkLowStockAndNotify(input.productId, input.fromLocationId);
 
     return transfer;

@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { handleExportReportAction } from '~/lib/export-report.server';
 import { DisbursementsPage } from '~/features/disbursements/DisbursementsPage';
 import type { DisbursementRecord, DisbursementsPageData } from '~/features/disbursements/DisbursementsPage';
 import type { FundingRequestRecord } from '~/features/marketing/types';
@@ -27,10 +28,20 @@ function parseSummary(res: { ok: boolean; data: unknown }) {
   return data ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
 }
 
-function parseFundingRequests(res: { ok: boolean; data: unknown }): FundingRequestRecord[] {
-  if (!res.ok) return [];
-  const data = (res.data as { result?: { data?: { records: FundingRequestRecord[] } } })?.result?.data;
-  return data?.records ?? [];
+function parseFundingRequests(res: { ok: boolean; data: unknown }): {
+  records: FundingRequestRecord[];
+  pagination: { page: number; limit: number; total: number };
+} {
+  if (!res.ok) {
+    return { records: [], pagination: { page: 1, limit: 20, total: 0 } };
+  }
+  const data = (res.data as {
+    result?: { data?: { records: FundingRequestRecord[]; pagination: { page: number; limit: number; total: number } } };
+  })?.result?.data;
+  return {
+    records: data?.records ?? [],
+    pagination: data?.pagination ?? { page: 1, limit: 20, total: 0 },
+  };
 }
 
 function parseUsersList(res: { ok: boolean; data: unknown }): Array<{ id: string; name: string; email: string; role: string }> {
@@ -65,6 +76,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const searchFilter = url.searchParams.get('search')?.trim() || undefined;
   const pageParam = parseInt(url.searchParams.get('page') || '1', 10);
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
+
+  const balancesPageParam = parseInt(url.searchParams.get('balancesPage') || '1', 10);
+  let balancesPage = isNaN(balancesPageParam) || balancesPageParam < 1 ? 1 : balancesPageParam;
+
+  const requestsPageParam = parseInt(url.searchParams.get('requestsPage') || '1', 10);
+  let requestsPage = isNaN(requestsPageParam) || requestsPageParam < 1 ? 1 : requestsPageParam;
+
+  const TAB_PAGE_LIMIT = 20;
 
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
@@ -102,20 +121,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
     apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie }),
     apiRequest<unknown>(
-      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
+      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(
+        JSON.stringify({ page: requestsPage, limit: TAB_PAGE_LIMIT }),
+      )}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(`/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 200 }))}`, { method: 'GET', cookie }),
   ]);
 
-  const recipientBalances = parseBalancesList(balancesRes);
+  const recipientBalancesAll = parseBalancesList(balancesRes);
+  const recipientBalancesTotal = recipientBalancesAll.length;
+  const balancesTotalPages = Math.max(1, Math.ceil(recipientBalancesTotal / TAB_PAGE_LIMIT));
+  balancesPage = Math.min(balancesPage, balancesTotalPages);
+  const recipientBalances = recipientBalancesAll.slice(
+    (balancesPage - 1) * TAB_PAGE_LIMIT,
+    balancesPage * TAB_PAGE_LIMIT,
+  );
+
   const fundingData = parseFunding(fundingRes);
   const summary = parseSummary(summaryRes);
-  const fundingRequests = parseFundingRequests(fundingRequestsRes);
+  let fundingRequestsResult = parseFundingRequests(fundingRequestsRes);
+  const requestsTotal = Number(fundingRequestsResult.pagination.total);
+  let requestsTotalPages = Math.max(1, Math.ceil(requestsTotal / TAB_PAGE_LIMIT));
+  if (requestsPageParam > requestsTotalPages && requestsTotal > 0) {
+    requestsPage = requestsTotalPages;
+    const retryRes = await apiRequest<unknown>(
+      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(
+        JSON.stringify({ page: requestsPage, limit: TAB_PAGE_LIMIT }),
+      )}`,
+      { method: 'GET', cookie },
+    );
+    fundingRequestsResult = parseFundingRequests(retryRes);
+  }
+  const fundingRequests = fundingRequestsResult.records;
   const requestersList = parseUsersList(usersListRes);
 
   // Finance can only disburse to Head of Marketing. HoM distributes to Media Buyers via Marketing → Funding.
-  const users = recipientBalances
+  const users = recipientBalancesAll
     .filter((b) => b.role === 'HEAD_OF_MARKETING')
     .map((b) => ({
       id: b.userId,
@@ -138,13 +180,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
     preselectedReceiverId,
     filters,
     recipientBalances,
+    recipientBalancesTotal,
+    balancesPage,
+    balancesTotalPages,
     summary,
     fundingRequests,
+    fundingRequestsTotal: requestsTotal,
+    requestsPage,
+    requestsTotalPages,
     requestersList,
   } satisfies DisbursementsPageData;
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const exportResponse = await handleExportReportAction(request);
+  if (exportResponse) return exportResponse;
+
   await requirePermission(request, 'finance.disburse');
   const user = await getCurrentUser(request);
   if (user?.role === 'HEAD_OF_MARKETING') {

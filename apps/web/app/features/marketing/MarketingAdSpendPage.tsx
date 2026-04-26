@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useFetcher, useRevalidator, useNavigation, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -21,7 +21,17 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
-import type { AdSpendRecord, Campaign, LeaderboardEntry, MarketingAdSpendLoaderData, Product, User } from './types';
+import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
+import { fetchAdSpendIntervalPreview } from '~/lib/trpc-browser';
+import type {
+  AdSpendIntervalPreview,
+  AdSpendRecord,
+  Campaign,
+  LeaderboardEntry,
+  MarketingAdSpendLoaderData,
+  Product,
+  User,
+} from './types';
 
 const AD_SPEND_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'ALL', label: 'All entries' },
@@ -61,11 +71,79 @@ export function MarketingAdSpendPage({
   const [adSpendDetailModal, setAdSpendDetailModal] = useState<AdSpendRecord | null>(null);
   const [dismissedError, setDismissedError] = useState(false);
 
+  const [formCampaignId, setFormCampaignId] = useState('');
+  const [formProductId, setFormProductId] = useState('');
+  const [formSpendDate, setFormSpendDate] = useState('');
+  const [formSpendAmount, setFormSpendAmount] = useState('');
+  const [adSpendPreview, setAdSpendPreview] = useState<AdSpendIntervalPreview | null>(null);
+  const [adSpendPreviewLoading, setAdSpendPreviewLoading] = useState(false);
+  const adSpendPreviewGen = useRef(0);
+
   useEffect(() => {
     setSelectedStatus(statusFilter || 'ALL');
     setSearchQuery(searchFilter || '');
     setSelectedProductId(productIdFilter || 'ALL');
   }, [statusFilter, searchFilter, productIdFilter]);
+
+  useEffect(() => {
+    if (!showAdSpendForm) {
+      setFormCampaignId('');
+      setFormProductId('');
+      setFormSpendDate('');
+      setFormSpendAmount('');
+      setAdSpendPreview(null);
+      setAdSpendPreviewLoading(false);
+      return;
+    }
+    setFormSpendDate((prev) => {
+      if (prev) return prev;
+      const t = new Date();
+      const y = t.getFullYear();
+      const m = String(t.getMonth() + 1).padStart(2, '0');
+      const d = String(t.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    });
+  }, [showAdSpendForm]);
+
+  useEffect(() => {
+    if (!showAdSpendForm || !formCampaignId || !formProductId || !formSpendDate) {
+      setAdSpendPreview(null);
+      setAdSpendPreviewLoading(false);
+      return;
+    }
+    const rawAmt = formSpendAmount.replace(/,/g, '').trim();
+    const spendNum = rawAmt === '' ? undefined : Number(rawAmt);
+    const spendAmount =
+      spendNum !== undefined && !Number.isNaN(spendNum) && spendNum > 0 ? spendNum : undefined;
+
+    const gen = ++adSpendPreviewGen.current;
+    const handle = window.setTimeout(() => {
+      setAdSpendPreviewLoading(true);
+      void fetchAdSpendIntervalPreview({
+        campaignId: formCampaignId,
+        productId: formProductId,
+        spendDate: formSpendDate,
+        spendAmount,
+      })
+        .then((res) => {
+          if (adSpendPreviewGen.current !== gen) return;
+          setAdSpendPreview(res);
+        })
+        .catch(() => {
+          if (adSpendPreviewGen.current !== gen) return;
+          setAdSpendPreview(null);
+        })
+        .finally(() => {
+          if (adSpendPreviewGen.current !== gen) return;
+          setAdSpendPreviewLoading(false);
+        });
+    }, 350);
+
+    return () => {
+      window.clearTimeout(handle);
+      setAdSpendPreviewLoading(false);
+    };
+  }, [showAdSpendForm, formCampaignId, formProductId, formSpendDate, formSpendAmount]);
 
   const getListParams = (overrides: { page?: number; status?: string; search?: string; productId?: string }) => {
     const params = new URLSearchParams(searchParams);
@@ -225,6 +303,9 @@ export function MarketingAdSpendPage({
                 label="Campaign"
                 name="campaignId"
                 placeholder="Select campaign..."
+                required
+                value={formCampaignId}
+                onChange={(e) => setFormCampaignId(e.target.value)}
                 options={campaigns
                   .filter((c: Campaign) => c.status === 'ACTIVE')
                   .map((c: Campaign) => ({ value: c.id, label: c.name }))}
@@ -237,6 +318,9 @@ export function MarketingAdSpendPage({
                     label="Product"
                     name="productId"
                     placeholder="Select product..."
+                    required
+                    value={formProductId}
+                    onChange={(e) => setFormProductId(e.target.value)}
                     options={resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name }))}
                   />
                 )}
@@ -244,10 +328,24 @@ export function MarketingAdSpendPage({
             </div>
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">Spend Amount ({'\u20A6'})</label>
-              <AmountInput name="spendAmount" required placeholder="e.g. 15,000.00" className="input" />
+              <AmountInput
+                name="spendAmount"
+                required
+                placeholder="e.g. 15,000.00"
+                className="input"
+                value={formSpendAmount}
+                onChange={(raw) => setFormSpendAmount(raw)}
+              />
             </div>
             <div>
-              <TextInput label="Spend Date" name="spendDate" type="date" required />
+              <TextInput
+                label="Spend Date"
+                name="spendDate"
+                type="date"
+                required
+                value={formSpendDate}
+                onChange={(e) => setFormSpendDate(e.target.value)}
+              />
             </div>
             <div className="sm:col-span-2">
               <FileUpload
@@ -260,6 +358,65 @@ export function MarketingAdSpendPage({
               <p className="text-xs text-app-fg-muted mt-1">Mandatory — no screenshot, no log entry accepted</p>
             </div>
           </div>
+
+          {formCampaignId && formProductId && formSpendDate && (
+            <div className="rounded-lg border border-app-border bg-app-hover/50 p-3 space-y-2">
+              <p className="text-xs text-app-fg-muted leading-relaxed">
+                Orders since your last <span className="font-medium text-app-fg">approved</span> ad spend for this
+                campaign and product (all order statuses). This is not the same window as the period strip CPA above.
+              </p>
+              {adSpendPreviewLoading ? (
+                <div className="flex items-center gap-2 text-sm text-app-fg-muted py-1">
+                  <Spinner size="sm" className="shrink-0" />
+                  <span>Calculating…</span>
+                </div>
+              ) : adSpendPreview ? (
+                <>
+                  <StatRowGroup divided>
+                    <StatRow label="Orders in window" value={adSpendPreview.orderCount.toLocaleString()} />
+                    {adSpendPreview.indicativeCpa != null ? (
+                      <StatRow label="Indicative CPA" value="" amount={adSpendPreview.indicativeCpa} />
+                    ) : (
+                      <StatRow
+                        label="Indicative CPA"
+                        value={
+                          adSpendPreview.orderCount === 0 ? '— (no orders yet)' : '— (enter spend amount)'
+                        }
+                      />
+                    )}
+                  </StatRowGroup>
+                  <p className="text-2xs text-app-fg-muted pt-0.5">
+                    {adSpendPreview.priorSpendDate ? (
+                      <>
+                        Last approved spend date:{' '}
+                        {new Date(adSpendPreview.priorSpendDate + 'T12:00:00.000Z').toLocaleDateString('en-NG', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                        {adSpendPreview.windowStartExclusive
+                          ? ` · Counting orders after ${new Date(adSpendPreview.windowStartExclusive).toLocaleString('en-NG', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}`
+                          : null}
+                        .
+                      </>
+                    ) : (
+                      <>
+                        No approved spend on an earlier calendar day for this funnel — counting all of your orders for
+                        this campaign and product through now.
+                      </>
+                    )}
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-app-fg-muted">Preview unavailable. Check campaign and try again.</p>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2">
             <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Logging...">
               Log Ad Spend

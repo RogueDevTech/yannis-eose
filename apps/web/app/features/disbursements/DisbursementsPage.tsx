@@ -11,7 +11,8 @@ import { FileUpload } from '~/components/ui/file-upload';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Spinner } from '~/components/ui/spinner';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { exportToCsv } from '~/lib/csv-export';
+import { ExportModal } from '~/components/ui/export-modal';
+import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { formatRole } from '~/features/users/types';
 import { PageHeader } from '~/components/ui/page-header';
@@ -31,6 +32,14 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: 'Received',
   DISPUTED: 'Disputed',
 };
+
+type DisbursementsSubTab = 'requests' | 'disbursements' | 'balances';
+
+function disbursementsTabFromSearchParams(sp: URLSearchParams): DisbursementsSubTab {
+  const t = sp.get('tab');
+  if (t === 'disbursements' || t === 'balances') return t;
+  return 'requests';
+}
 
 
 export interface DisbursementRecord {
@@ -86,12 +95,18 @@ export interface DisbursementsPageData {
     totalSpend: string;
     balance: string;
   }>;
+  recipientBalancesTotal?: number;
+  balancesPage?: number;
+  balancesTotalPages?: number;
   summary?: {
     totalSent: string;
     totalCompleted: string;
     totalDisputed: string;
   };
   fundingRequests?: FundingRequestRecord[];
+  fundingRequestsTotal?: number;
+  requestsPage?: number;
+  requestsTotalPages?: number;
   requestersList?: Array<{ id: string; name: string; email: string; role: string }>;
 }
 
@@ -290,15 +305,21 @@ export function DisbursementsPage({
   preselectedReceiverId = null,
   filters = { startDate: '', endDate: '', periodAllTime: false, status: '', receiver: '', search: '' },
   recipientBalances = [],
+  recipientBalancesTotal = 0,
+  balancesPage = 1,
+  balancesTotalPages = 1,
   summary = { totalSent: '0', totalCompleted: '0', totalDisputed: '0' },
   fundingRequests = [],
+  fundingRequestsTotal = 0,
+  requestsPage = 1,
+  requestsTotalPages = 1,
   requestersList = [],
 }: DisbursementsPageData) {
   const navigation = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = navigation.state === 'loading';
   const [showForm, setShowForm] = useState(!!preselectedReceiverId);
-  const [activeTab, setActiveTab] = useState<'disbursements' | 'balances' | 'requests'>('disbursements');
+  const activeTab = disbursementsTabFromSearchParams(searchParams);
   const [receiptModal, setReceiptModal] = useState<DisbursementRecord | null>(null);
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
@@ -329,6 +350,7 @@ export function DisbursementsPage({
   // Search input is intentionally NOT optimistic — we only fire on submit so the user gets a
   // single, debounce-free query against the server. Prefilled from the URL on mount/back-nav.
   const [searchQuery, setSearchQuery] = useState(filters.search || '');
+  const [showExportModal, setShowExportModal] = useState(false);
   useEffect(() => {
     setOptimisticStatus(filters.status || 'ALL');
     setOptimisticReceiver(filters.receiver || 'ALL');
@@ -391,32 +413,6 @@ export function DisbursementsPage({
     });
   };
 
-  const handleExportCsv = () => {
-    exportToCsv(
-      funding.map((f) => ({
-        id: f.id,
-        sender: getName(f.senderId),
-        receiver: getName(f.receiverId),
-        amount: f.amount,
-        status: f.status,
-        receipt: f.receiptUrl ?? '',
-        date: new Date(f.sentAt).toLocaleDateString(),
-        verifiedAt: f.verifiedAt ? new Date(f.verifiedAt).toLocaleDateString() : '',
-      })),
-      [
-        { key: 'id', label: 'ID' },
-        { key: 'sender', label: 'Sender' },
-        { key: 'receiver', label: 'Receiver' },
-        { key: 'amount', label: 'Amount' },
-        { key: 'status', label: 'Status' },
-        { key: 'receipt', label: 'Receipt URL' },
-        { key: 'date', label: 'Sent Date' },
-        { key: 'verifiedAt', label: 'Verified Date' },
-      ],
-      `disbursements-${new Date().toISOString().split('T')[0]}.csv`,
-    );
-  };
-
   const totalSentAmt = Number(summary.totalSent) || 0;
   const totalReceivedAmt = Number(summary.totalCompleted) || 0;
   const totalDisputedAmt = Number(summary.totalDisputed) || 0;
@@ -438,7 +434,7 @@ export function DisbursementsPage({
               endDate={filters.endDate}
               periodAllTime={filters.periodAllTime}
             />
-            <Button variant="secondary" size="sm" onClick={handleExportCsv}>
+            <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
               Export CSV
             </Button>
             {canCreate && (
@@ -453,6 +449,17 @@ export function DisbursementsPage({
             )}
           </div>
         }
+      />
+
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={EXPORT_CONFIGS.disbursements}
+        initialFilters={{
+          status: optimisticStatus !== 'ALL' ? optimisticStatus : undefined,
+          receiverId: optimisticReceiver !== 'ALL' ? optimisticReceiver : undefined,
+          search: searchQuery || undefined,
+        }}
       />
 
       {/* Create disbursement modal */}
@@ -487,11 +494,35 @@ export function DisbursementsPage({
         ]}
       />
 
-      {/* Tabs */}
+      {/* Tabs — default tab is Requests (`tab` omitted or unknown). */}
       <div className="flex gap-1 border-b border-app-border">
         <button
           type="button"
-          onClick={() => setActiveTab('disbursements')}
+          onClick={() => {
+            setSearchParams((p) => {
+              const next = new URLSearchParams(p);
+              next.set('tab', 'requests');
+              return next;
+            });
+          }}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'requests'
+              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+              : 'border-transparent text-app-fg-muted hover:text-app-fg'
+          }`}
+        >
+          Requests
+          <span className="ml-1.5 text-xs text-surface-400">({fundingRequestsTotal})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setSearchParams((p) => {
+              const next = new URLSearchParams(p);
+              next.set('tab', 'disbursements');
+              return next;
+            });
+          }}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'disbursements'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
@@ -503,7 +534,13 @@ export function DisbursementsPage({
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab('balances')}
+          onClick={() => {
+            setSearchParams((p) => {
+              const next = new URLSearchParams(p);
+              next.set('tab', 'balances');
+              return next;
+            });
+          }}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'balances'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
@@ -511,19 +548,7 @@ export function DisbursementsPage({
           }`}
         >
           Recipient balances
-          <span className="ml-1.5 text-xs text-surface-400">({recipientBalances.length})</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('requests')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'requests'
-              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-app-fg-muted hover:text-app-fg'
-          }`}
-        >
-          Requests
-          <span className="ml-1.5 text-xs text-surface-400">({fundingRequests.length})</span>
+          <span className="ml-1.5 text-xs text-surface-400">({recipientBalancesTotal})</span>
         </button>
       </div>
 
@@ -711,6 +736,7 @@ export function DisbursementsPage({
 
       {/* Balances tab */}
       {activeTab === 'balances' && (
+        <>
         <div className="card p-0 overflow-hidden">
           <div className="px-4 py-3 border-b border-app-border">
             <h2 className="text-sm font-semibold text-app-fg">Recipient balances</h2>
@@ -766,10 +792,10 @@ export function DisbursementsPage({
                                   setSearchParams((p) => {
                                     const next = new URLSearchParams(p);
                                     next.set('receiverId', b.userId);
+                                    next.set('tab', 'disbursements');
                                     return next;
                                   });
                                   setShowForm(true);
-                                  setActiveTab('disbursements');
                                 }}
                                 className="text-xs"
                               >
@@ -814,10 +840,10 @@ export function DisbursementsPage({
                             setSearchParams((p) => {
                               const next = new URLSearchParams(p);
                               next.set('receiverId', b.userId);
+                              next.set('tab', 'disbursements');
                               return next;
                             });
                             setShowForm(true);
-                            setActiveTab('disbursements');
                           }}
                           className="text-xs"
                         >
@@ -833,10 +859,15 @@ export function DisbursementsPage({
             <EmptyState title="No recipient balances available" />
           )}
         </div>
+        {balancesTotalPages > 1 && (
+          <Pagination page={balancesPage} totalPages={balancesTotalPages} pageParam="balancesPage" />
+        )}
+        </>
       )}
 
       {/* Requests tab — funding requests from Media Buyers / HoM */}
       {activeTab === 'requests' && (
+        <>
         <div className="card p-0 overflow-hidden">
           <div className="px-4 py-3 border-b border-app-border">
             <h2 className="text-sm font-semibold text-app-fg">Funding requests</h2>
@@ -970,6 +1001,10 @@ export function DisbursementsPage({
             <EmptyState title="No funding requests" />
           )}
         </div>
+        {requestsTotalPages > 1 && (
+          <Pagination page={requestsPage} totalPages={requestsTotalPages} pageParam="requestsPage" />
+        )}
+        </>
       )}
 
       {/* Funding request receipt modal */}

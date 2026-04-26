@@ -1,10 +1,10 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { customFormFieldSchema } from '@yannis/shared/validators';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { MarketingFormCreatePage } from '~/features/campaigns/MarketingFormCreatePage';
-import type { CustomFormField, Product } from '~/features/campaigns/types';
+import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
+import type { Product } from '~/features/campaigns/types';
 
 export const meta: MetaFunction = () => [{ title: 'New form — Yannis EOSE' }];
 
@@ -70,29 +70,11 @@ export async function action({ request }: ActionFunctionArgs) {
     showPreferredDeliveryDate ||
     showPaymentMethod;
 
-  const customFieldsJson = formData.get('customFields')?.toString() ?? '[]';
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(customFieldsJson);
-  } catch {
-    return json({ error: 'Invalid customFields JSON' }, { status: 400 });
+  const parsedFields = parseCustomFieldsPayload(formData.get('customFields')?.toString());
+  if (!parsedFields.ok) {
+    return json({ error: parsedFields.error }, { status: 400 });
   }
-
-  if (!Array.isArray(parsedJson)) {
-    return json({ error: 'customFields must be a JSON array' }, { status: 400 });
-  }
-  if (parsedJson.length > 50) {
-    return json({ error: 'At most 50 custom fields allowed' }, { status: 400 });
-  }
-  const customFields: CustomFormField[] = [];
-  for (let i = 0; i < parsedJson.length; i++) {
-    const row = customFormFieldSchema.safeParse(parsedJson[i]);
-    if (!row.success) {
-      const msg = row.error.issues.map((e) => e.message).join('; ') || 'Invalid custom field';
-      return json({ error: `Field ${i + 1}: ${msg}` }, { status: 400 });
-    }
-    customFields.push(row.data);
-  }
+  const customFields = parsedFields.fields;
   const hasCustomFields = customFields.length > 0;
 
   const formConfig =

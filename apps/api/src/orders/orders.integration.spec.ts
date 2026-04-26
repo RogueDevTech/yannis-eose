@@ -15,6 +15,7 @@ import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
 import { createTestUser, createTestOrder } from '../test/factories/order.factory';
 import { isTransitionAllowed } from './order-state-machine';
+import { OrdersService } from './orders.service';
 
 // Skip all if no DB URL configured (unit-only environments)
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
@@ -64,6 +65,55 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
 
     expect(order).toBeDefined();
     expect(order!.status).toBe('UNPROCESSED');
+  });
+
+  it('list + statusCounts respect statuses[] filters for logistics-scoped queries', async () => {
+    const actor = await createTestUser(db as any, { role: 'SUPER_ADMIN' });
+    await setSessionActor(pgClient, actor.id);
+    const branchId = randomUUID();
+
+    await createTestOrder(db as any, { status: 'CS_ENGAGED', branchId });
+    await createTestOrder(db as any, { status: 'CONFIRMED', branchId });
+    await createTestOrder(db as any, { status: 'ALLOCATED', branchId });
+    await createTestOrder(db as any, { status: 'DELIVERED', branchId });
+
+    const ordersService = new OrdersService(
+      db as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const logisticsStatuses = ['CONFIRMED', 'ALLOCATED', 'DELIVERED'] as const;
+
+    const listResult = await ordersService.list(
+      {
+        page: 1,
+        limit: 50,
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
+        statuses: [...logisticsStatuses],
+      },
+      branchId,
+    );
+    expect(listResult.orders.every((o) => logisticsStatuses.includes(o.status as (typeof logisticsStatuses)[number]))).toBe(true);
+    expect(listResult.orders.some((o) => o.status === 'CS_ENGAGED')).toBe(false);
+
+    const counts = await ordersService.getStatusCounts(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      branchId,
+      [...logisticsStatuses],
+    );
+    expect(counts['CS_ENGAGED'] ?? 0).toBe(0);
+    expect((counts['CONFIRMED'] ?? 0) + (counts['ALLOCATED'] ?? 0) + (counts['DELIVERED'] ?? 0)).toBeGreaterThan(0);
   });
 
   // ---------------------------------------------------------------------------

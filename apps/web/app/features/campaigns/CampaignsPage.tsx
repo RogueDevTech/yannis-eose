@@ -1,19 +1,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useFetcher, useSearchParams, useRevalidator, Link } from '@remix-run/react';
-import { useFetcherToast, useToast } from '~/components/ui/toast';
+import { useSearchParams, Link } from '@remix-run/react';
+import { useToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Button } from '~/components/ui/button';
-import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
-import { Checkbox } from '~/components/ui/checkbox';
 import { PageHeader } from '~/components/ui/page-header';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
 import { EmptyState } from '~/components/ui/empty-state';
-import { TextInput } from '~/components/ui/text-input';
-import { FormSelect } from '~/components/ui/form-select';
 import type { Campaign, CampaignFormConfig, FormsPageProps } from './types';
 
 function isOptionOn(value: boolean | string | undefined): boolean {
@@ -98,24 +94,6 @@ const EditIcon = (
   </svg>
 );
 
-const ActivateIcon = (
-  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
-
-const DeactivateIcon = (
-  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
-
-const ArchiveIcon = (
-  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-  </svg>
-);
-
 type DeploymentCopySection = 'hosted' | 'iframe' | 'shadow';
 
 const CheckIconSm = (
@@ -135,16 +113,10 @@ export function FormsPage({
   currentUserName: _currentUserName,
   currentUserId,
 }: FormsPageProps) {
-  const fetcher = useFetcher();
-  const statusFetcher = useFetcher();
-  const { revalidate } = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
   const [deploymentModal, setDeploymentModal] = useState<Campaign | null>(null);
   const [deploymentCopiedSection, setDeploymentCopiedSection] = useState<DeploymentCopySection | null>(null);
   const deploymentCopyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [editingForm, setEditingForm] = useState<Campaign | null>(null);
-  /** Pending confirm for Deactivate or Archive (opens ConfirmActionModal) */
-  const [confirmAction, setConfirmAction] = useState<{ type: 'deactivate' | 'archive'; id: string; name: string } | null>(null);
 
   /** Client-side tab: 'all' | 'mine'. Only relevant when !isMediaBuyer (HoM/SuperAdmin). */
   const [viewMode, setViewMode] = useState<'all' | 'mine'>('all');
@@ -158,38 +130,11 @@ export function FormsPage({
 
   const showMyFormsOnly = isMediaBuyer || viewMode === 'mine';
 
-  const actionError = (fetcher.data as { error?: string })?.error;
-  const actionSuccess = (fetcher.data as { success?: boolean })?.success;
-  const [dismissedError, setDismissedError] = useState(false);
   const [dismissedProductsError, setDismissedProductsError] = useState(false);
-  useFetcherToast(fetcher.data, { successMessage: 'Saved successfully' });
-  useFetcherToast(statusFetcher.data, { successMessage: 'Status updated' });
-
-  useEffect(() => {
-    if (actionError) setDismissedError(false);
-  }, [actionError]);
 
   useEffect(() => {
     if (productsLoadError) setDismissedProductsError(false);
   }, [productsLoadError]);
-
-  // Close confirm modal (deactivate/archive) when statusFetcher returns success
-  useEffect(() => {
-    if (statusFetcher.state === 'idle' && statusFetcher.data) {
-      const result = statusFetcher.data as { success?: boolean };
-      if (result.success && confirmAction) {
-        setConfirmAction(null);
-      }
-    }
-  }, [statusFetcher.state, statusFetcher.data]);
-
-  // Close Edit Form modal when fetcher returns success
-  useEffect(() => {
-    if (actionSuccess && fetcher.state === 'idle') {
-      setEditingForm(null);
-      revalidate();
-    }
-  }, [actionSuccess, fetcher.state, revalidate]);
 
   const { toast } = useToast();
   const SAVED_TOAST_KEY = 'yannis-forms-saved-toast';
@@ -237,14 +182,6 @@ export function FormsPage({
     });
   }, []);
 
-  const handleStatusChange = useCallback((id: string, status: string) => {
-    const formData = new FormData();
-    formData.set('intent', 'updateForm');
-    formData.set('id', id);
-    formData.set('status', status);
-    statusFetcher.submit(formData, { method: 'post' });
-  }, [statusFetcher]);
-
   return (
     <div className="space-y-4">
       <PageHeader
@@ -260,15 +197,6 @@ export function FormsPage({
           </Link>
         }
       />
-
-      {actionError && !dismissedError && (
-        <PageNotification
-          variant="error"
-          message={actionError}
-          durationMs={5000}
-          onDismiss={() => setDismissedError(true)}
-        />
-      )}
 
       {productsLoadError && !dismissedProductsError && (
         <PageNotification
@@ -383,57 +311,14 @@ export function FormsPage({
                 {ViewIcon}
                 <span>View</span>
               </Button>
-              <button
-                type="button"
-                onClick={() => setEditingForm(c)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-app-fg-muted hover:text-app-fg hover:bg-surface-100 dark:hover:bg-surface-800 rounded-lg transition-colors duration-150 cursor-pointer"
+              <Link
+                to={`/admin/marketing/forms/${c.id}/edit`}
+                prefetch="intent"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-app-fg-muted hover:text-app-fg hover:bg-surface-100 dark:hover:bg-surface-800 rounded-lg transition-colors duration-150"
               >
                 {EditIcon}
                 <span>Edit</span>
-              </button>
-              {/* Form Builder — dedicated page for managing custom fields (dropdowns,
-                  checkbox groups, etc.) the MB wants on top of the standard fields. */}
-              <Link
-                to={`/admin/marketing/forms/${c.id}/builder`}
-                prefetch="intent"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded-lg transition-colors duration-150"
-                title="Add custom fields (dropdowns, checkboxes, etc.) to this form"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6M5 8h14a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2zm6-3v3M9 5h6" />
-                </svg>
-                <span>Form Builder</span>
               </Link>
-              {c.status === 'ACTIVE' && (
-                <button
-                  type="button"
-                  onClick={() => setConfirmAction({ type: 'deactivate', id: c.id, name: c.name })}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-warning-600 dark:text-warning-400 hover:bg-warning-50 dark:hover:bg-warning-900/20 rounded-lg transition-colors duration-150 cursor-pointer"
-                >
-                  {DeactivateIcon}
-                  <span>Deactivate</span>
-                </button>
-              )}
-              {c.status === 'INACTIVE' && (
-                <button
-                  type="button"
-                  onClick={() => handleStatusChange(c.id, 'ACTIVE')}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-success-600 dark:text-success-400 hover:bg-success-50 dark:hover:bg-success-900/20 rounded-lg transition-colors duration-150 cursor-pointer"
-                >
-                  {ActivateIcon}
-                  <span>Activate</span>
-                </button>
-              )}
-              {c.status !== 'ARCHIVED' && (
-                <button
-                  type="button"
-                  onClick={() => setConfirmAction({ type: 'archive', id: c.id, name: c.name })}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-danger-600 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20 rounded-lg transition-colors duration-150 cursor-pointer"
-                >
-                  {ArchiveIcon}
-                  <span>Archive</span>
-                </button>
-              )}
             </div>
           </article>
         ))}
@@ -441,119 +326,11 @@ export function FormsPage({
           <div className="col-span-full">
             <EmptyState
               title="No forms yet"
-              description="Use + New Form in the header to open the full-page builder and create your first form."
+              description="Use + New Form in the header to create your first form."
             />
           </div>
         )}
       </div>
-
-      {/* ── Edit Form Modal ───────────────────────── */}
-      {editingForm && (
-        <Modal open onClose={() => setEditingForm(null)} maxWidth="max-w-lg" contentClassName="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-app-fg">Edit Form</h3>
-              <button onClick={() => setEditingForm(null)} className="text-app-fg-muted hover:text-app-fg">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <fetcher.Form method="post" className="space-y-4">
-              <input type="hidden" name="intent" value="updateForm" />
-              <input type="hidden" name="id" value={editingForm.id} />
-              <TextInput
-                label="Form Name"
-                name="name"
-                defaultValue={editingForm.name}
-              />
-              <FormSelect
-                label="Status"
-                name="status"
-                defaultValue={editingForm.status}
-                options={[
-                  { value: 'ACTIVE', label: 'Active' },
-                  { value: 'INACTIVE', label: 'Inactive' },
-                  { value: 'ARCHIVED', label: 'Archived' },
-                ]}
-              />
-              <div className="border-t border-app-border pt-3">
-                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-2">
-                  Form Customization
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <TextInput name="formHeading" placeholder="Form heading" defaultValue={editingForm.formConfig?.heading ?? ''} />
-                  <TextInput name="formSubtitle" placeholder="Form subtitle" defaultValue={editingForm.formConfig?.subtitle ?? ''} />
-                  <TextInput name="formButtonText" placeholder="Button text" defaultValue={editingForm.formConfig?.buttonText ?? ''} />
-                  <div className="flex items-center gap-2">
-                    <input name="formAccentColor" type="color" defaultValue={editingForm.formConfig?.accentColor ?? '#6366f1'} className="w-10 h-9 rounded border border-app-border cursor-pointer" />
-                    <span className="text-sm text-app-fg-muted">Accent color</span>
-                  </div>
-                  <TextInput
-                    name="successCallbackUrl"
-                    type="url"
-                    placeholder="Success URL (e.g. https://funnel.example.com/thank-you)"
-                    hint="Optional — full URL of your funnel's thank-you page. Skips the inline success message."
-                    defaultValue={editingForm.formConfig?.successCallbackUrl ?? ''}
-                    className="sm:col-span-2"
-                  />
-                </div>
-                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">
-                  Optional Form Fields
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      name="showDeliveryAddress"
-                      defaultChecked={editingForm.formConfig?.showDeliveryAddress === true || editingForm.formConfig?.showDeliveryAddress === 'true'}
-                    />
-                    <span className="text-sm text-app-fg-muted">Delivery Address</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      name="showDeliveryNotes"
-                      defaultChecked={editingForm.formConfig?.showDeliveryNotes === true || editingForm.formConfig?.showDeliveryNotes === 'true'}
-                    />
-                    <span className="text-sm text-app-fg-muted">Delivery Notes</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      name="showDeliveryState"
-                      defaultChecked={editingForm.formConfig?.showDeliveryState === true || editingForm.formConfig?.showDeliveryState === 'true'}
-                    />
-                    <span className="text-sm text-app-fg-muted">Delivery State</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      name="showGender"
-                      defaultChecked={editingForm.formConfig?.showGender === true || editingForm.formConfig?.showGender === 'true'}
-                    />
-                    <span className="text-sm text-app-fg-muted">Gender</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      name="showPreferredDeliveryDate"
-                      defaultChecked={editingForm.formConfig?.showPreferredDeliveryDate === true || editingForm.formConfig?.showPreferredDeliveryDate === 'true'}
-                    />
-                    <span className="text-sm text-app-fg-muted">Preferred Delivery Date</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      name="showPaymentMethod"
-                      defaultChecked={editingForm.formConfig?.showPaymentMethod === true || editingForm.formConfig?.showPaymentMethod === 'true'}
-                    />
-                    <span className="text-sm text-app-fg-muted">Payment method (Pay on delivery / Pay online)</span>
-                  </label>
-                </div>
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button type="button" variant="secondary" size="sm" onClick={() => setEditingForm(null)}>Cancel</Button>
-                <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
-                  Save Changes
-                </Button>
-              </div>
-            </fetcher.Form>
-        </Modal>
-      )}
 
       {/* ── Deployment Modal ──────────────────────────── */}
       {deploymentModal && (
@@ -711,44 +488,6 @@ export function FormsPage({
         </Modal>
       )}
 
-      {/* Deactivate / Archive confirmation */}
-      {confirmAction && (
-        <ConfirmActionModal
-          open={!!confirmAction}
-          onClose={() => setConfirmAction(null)}
-          title={confirmAction.type === 'deactivate' ? 'Deactivate form?' : `Archive "${confirmAction.name}"?`}
-          description={
-            confirmAction.type === 'deactivate' ? (
-              <>
-                <strong>{confirmAction.name}</strong> will no longer be active. You can activate it again later.
-              </>
-            ) : (
-              <>
-                <strong>{confirmAction.name}</strong> will be hidden from default lists.
-              </>
-            )
-          }
-          details={
-            confirmAction.type === 'archive' ? (
-              <ul className="list-disc list-inside text-sm text-app-fg-muted space-y-1">
-                <li>Hidden from default campaign lists</li>
-                <li>You can change status back anytime</li>
-              </ul>
-            ) : undefined
-          }
-          confirmLabel={confirmAction.type === 'deactivate' ? 'Deactivate' : 'Archive'}
-          variant={confirmAction.type === 'deactivate' ? 'warning' : 'archive'}
-          loading={statusFetcher.state === 'submitting'}
-          onConfirm={() => {
-            if (confirmAction) {
-              handleStatusChange(
-                confirmAction.id,
-                confirmAction.type === 'deactivate' ? 'INACTIVE' : 'ARCHIVED',
-              );
-            }
-          }}
-        />
-      )}
     </div>
   );
 }

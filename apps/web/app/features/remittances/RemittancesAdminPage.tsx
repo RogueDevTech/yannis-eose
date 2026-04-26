@@ -59,7 +59,7 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Remittances"
+        title="Stock Transfer Confirmations"
         description="Incoming remittances from 3PL locations. Mark as received when stock arrives at the warehouse."
       />
 

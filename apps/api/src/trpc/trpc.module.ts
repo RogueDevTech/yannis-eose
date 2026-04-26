@@ -63,6 +63,9 @@ import { AuthModule } from '../auth/auth.module';
 import { CacheModule } from '../common/cache/cache.module';
 import { CacheService } from '../common/cache/cache.service';
 import { setCacheService } from './routers/dashboard.router';
+import { ReportsModule } from '../reports/reports.module';
+import { ReportsService } from '../reports/reports.service';
+import { setReportsService } from './routers/reports.router';
 
 @Module({
   imports: [
@@ -73,6 +76,7 @@ import { setCacheService } from './routers/dashboard.router';
     PermissionsModule, PermissionRequestsModule,
     AuthModule,
     CacheModule,
+    ReportsModule,
   ],
   providers: [TrpcMiddleware],
 })
@@ -97,6 +101,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly cartService: CartService,
     private readonly sessionStore: SessionStoreService,
     private readonly cacheService: CacheService,
+    private readonly reportsService: ReportsService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -134,6 +139,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
       inventory: this.inventoryService,
     });
     setCacheService(this.cacheService);
+    setReportsService(this.reportsService);
   }
 
   configure(consumer: MiddlewareConsumer) {

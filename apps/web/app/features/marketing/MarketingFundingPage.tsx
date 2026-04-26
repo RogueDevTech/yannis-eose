@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { Link, useFetcher, useRevalidator, useNavigation, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -12,6 +12,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Spinner } from '~/components/ui/spinner';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
+import { Tabs } from '~/components/ui/tabs';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -52,18 +53,13 @@ const HIGH_CPA_THRESHOLD = 5000;
 const truncId = (id: string) => id.slice(0, 8) + '...';
 
 /**
- * `/admin/marketing/funding` — split into two sections that mirror the two-tier funding model:
+ * `/admin/marketing/funding` — two-tier funding model as **primary tabs** + **sub-tabs**:
  *
- *   Section 1 — "Funds I've Received" / "Incoming Funding"
- *     Always shown. HoM sees money from Finance; MB sees money from HoM.
- *     Tabs: Transfers (incoming, with mark-received CTA) | My Requests (outbound asks)
+ *   Primary — "Funds I've Received" / "Incoming Funding" | "Funds I Distribute" (HoM/Admin)
+ *   Sub — Transfers | My Requests (received) or MB Requests (distribute)
  *
- *   Section 2 — "Funds I Distribute"
- *     HoM/Admin only (`canDistribute`). Money/requests they own from the disburser side.
- *     Tabs: Transfers (sent ledger) | MB Requests (pending approval inbox)
- *
- * Section + tab live in URL params (`?section=...&tab=...`) so deep-links work and the
- * other section's state survives switches.
+ * URL: `?section=received|distributing&tab=transfers|requests` — loader revalidates on change;
+ * content area shows a loading overlay while `navigation.state === 'loading'` for this route.
  */
 export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const {
@@ -81,6 +77,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     outgoingTransfers,
     mbRequests,
     directionSummary,
+    fundingBalance,
     leaderboard,
     users,
   } = props;
@@ -90,7 +87,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const revalidator = useRevalidator();
   const navigation = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isFilterLoading = navigation.state === 'loading';
+  /** Loader revalidation for this route (date range, section/tab, filters, pagination). */
+  const isFundingRouteLoading =
+    navigation.state === 'loading' &&
+    (navigation.location?.pathname ?? '').includes('/admin/marketing/funding');
 
   // ── Modal state ─────────────────────────────────────────
   const [showSendForm, setShowSendForm] = useState(false);
@@ -182,6 +182,25 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     updateSliceParam('search', searchQuery.trim() || undefined);
   };
 
+  const transfersSlice: FundingSliceData =
+    activeSection === 'distributing' && outgoingTransfers ? outgoingTransfers : receivedTransfers;
+  const requestsSlice: FundingRequestsSliceData =
+    activeSection === 'distributing' && mbRequests ? mbRequests : myRequests;
+  const sectionDescription = activeSection === 'received' ? receivedDescription : distributingDescription;
+  const requestsSubLabel = activeSection === 'received' ? 'My Requests' : 'MB Requests';
+  const transferEmptyMessage =
+    activeSection === 'received'
+      ? isMediaBuyer
+        ? 'Head of Marketing has not sent funding to you yet.'
+        : 'Finance has not sent funding to you in this period — tap "+ Request Funds" to ask.'
+      : 'You have not disbursed funding to any Media Buyer in this period — tap "+ Send Funding" to start.';
+  const requestsEmptyMessage =
+    activeSection === 'received'
+      ? canRequestFunding
+        ? 'No outbound funding requests yet — tap "+ Request Funds" to start one.'
+        : 'No outbound funding requests.'
+      : 'No pending requests from your Media Buyers.';
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -203,7 +222,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 periodAllTime={filters.periodAllTime}
               />
             </div>
-            {isFilterLoading && (
+            {isFundingRouteLoading && (
               <span className="flex items-center text-app-fg-muted" aria-hidden>
                 <Spinner size="sm" className="shrink-0" />
               </span>
@@ -223,7 +242,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
       {/* Top metric strip — funding-relevant numbers (replaces the old marketing-perf strip
           of CPA / ROAS / Delivery Rate / Confirmation Rate which didn't speak to funding). */}
-      <FundingMetricsStrip summary={directionSummary} canDistribute={canDistribute} />
+      <FundingMetricsStrip summary={directionSummary} canDistribute={canDistribute} fundingBalance={fundingBalance} />
 
       {/* Disputed surfacing — visible whenever the user has anything in DISPUTED status. */}
       {totalDisputed > 0 && (
@@ -283,129 +302,119 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         />
       )}
 
-      {/* ─── Section 1 — "Funds I've Received" / "Incoming Funding" ──────────────── */}
-      <FundingSectionCard
-        sectionId="received"
-        title={receivedTitle}
-        description={receivedDescription}
-        actionButton={
-          canRequestFunding ? (
-            <Button variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
-              + Request Funds
-            </Button>
-          ) : null
-        }
-        activeIfSelf={activeSection === 'received' ? activeTab : null}
-        transfersTabLabel="Transfers"
-        requestsTabLabel="My Requests"
-        transfers={receivedTransfers}
-        requests={myRequests}
-        onTabClick={(tab) => navigateToSlice('received', tab)}
-      >
-        {activeSection === 'received' && (
+      {/* ─── Ledger: primary tabs (received | distribute) + sub-tabs (transfers | requests) ─ */}
+      <div className="card p-0 overflow-hidden" id="funding-ledger">
+        {canDistribute && (
+          <div className="px-4 pt-4 pb-2 border-b border-app-border">
+            <Tabs
+              variant="pill"
+              value={activeSection}
+              onChange={(v) => navigateToSlice(v as FundingSection, 'transfers')}
+              tabs={[
+                { value: 'received', label: receivedTitle },
+                { value: 'distributing', label: 'Funds I Distribute' },
+              ]}
+            />
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 px-4 py-4 border-b border-app-border">
+          <div className="min-w-0">
+            {!canDistribute && <h2 className="text-base font-semibold text-app-fg">{receivedTitle}</h2>}
+            <p className={`text-xs text-app-fg-muted leading-relaxed ${!canDistribute ? 'mt-0.5' : ''}`}>
+              {sectionDescription}
+            </p>
+          </div>
+          <div className="shrink-0 flex flex-wrap gap-2 justify-end">
+            {activeSection === 'received' && canRequestFunding && (
+              <Button variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
+                + Request Funds
+              </Button>
+            )}
+            {activeSection === 'distributing' && canSendFunding && (
+              <Button variant="primary" size="sm" onClick={() => setShowSendForm(true)}>
+                + Send Funding
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="px-4">
+          <Tabs
+            value={activeTab}
+            onChange={(v) => navigateToSlice(activeSection, v as FundingTab)}
+            tabs={[
+              {
+                value: 'transfers',
+                label: 'Transfers',
+                badge:
+                  transfersSlice.statusCounts.ALL > 0 ? (
+                    <CountPill active={activeTab === 'transfers'}>{transfersSlice.statusCounts.ALL}</CountPill>
+                  ) : undefined,
+              },
+              {
+                value: 'requests',
+                label: requestsSubLabel,
+                badge:
+                  requestsSlice.statusCounts.ALL > 0 ? (
+                    <CountPill active={activeTab === 'requests'}>{requestsSlice.statusCounts.ALL}</CountPill>
+                  ) : undefined,
+              },
+            ]}
+          />
+        </div>
+
+        <div className="relative min-h-[14rem]" aria-busy={isFundingRouteLoading} aria-live="polite">
+          {isFundingRouteLoading && (
+            <div
+              className="pointer-events-auto absolute inset-0 z-10 flex items-start justify-center pt-14 sm:pt-20 bg-app-bg/65 dark:bg-app-bg/75 backdrop-blur-[1px]"
+              role="status"
+              aria-label="Loading funding data"
+            >
+              <div className="flex items-center gap-2.5 rounded-lg border border-app-border bg-app-elevated px-4 py-3 shadow-sm">
+                <Spinner size="md" className="shrink-0 text-brand-500" />
+                <span className="text-sm font-medium text-app-fg-muted">Loading…</span>
+              </div>
+            </div>
+          )}
+
           <SliceFilterBar
             tab={activeTab}
-            transfers={receivedTransfers}
-            requests={myRequests}
+            transfers={transfersSlice}
+            requests={requestsSlice}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             onSearchSubmit={submitSearch}
             onStatusChange={(v) => updateSliceParam('status', v)}
             onRequestStatusChange={(v) => updateSliceParam('requestStatus', v)}
           />
-        )}
-        {activeSection === 'received' && activeTab === 'transfers' && (
-          <TransfersTable
-            slice={receivedTransfers}
-            users={users}
-            currentUserId={currentUserId}
-            direction="incoming"
-            fetcher={fetcher}
-            onViewReceipt={setFundingReceiptModal}
-            onDispute={setDisputingFundingId}
-            emptyMessage={
-              isMediaBuyer
-                ? 'Head of Marketing has not sent funding to you yet.'
-                : 'Finance has not sent funding to you in this period — tap "+ Request Funds" to ask.'
-            }
-          />
-        )}
-        {activeSection === 'received' && activeTab === 'requests' && (
-          <RequestsTable
-            slice={myRequests}
-            users={users}
-            currentUserId={currentUserId}
-            mode="my-requests"
-            fetcher={fetcher}
-            onApprove={() => {}}
-            onReject={() => {}}
-            emptyMessage={
-              canRequestFunding
-                ? 'No outbound funding requests yet — tap "+ Request Funds" to start one.'
-                : 'No outbound funding requests.'
-            }
-          />
-        )}
-      </FundingSectionCard>
 
-      {/* ─── Section 2 — "Funds I Distribute" (HoM/Admin only) ────────────────────── */}
-      {canDistribute && outgoingTransfers && mbRequests && (
-        <FundingSectionCard
-          sectionId="distributing"
-          title="Funds I Distribute"
-          description={distributingDescription}
-          actionButton={
-            canSendFunding ? (
-              <Button variant="primary" size="sm" onClick={() => setShowSendForm(true)}>
-                + Send Funding
-              </Button>
-            ) : null
-          }
-          activeIfSelf={activeSection === 'distributing' ? activeTab : null}
-          transfersTabLabel="Transfers"
-          requestsTabLabel="MB Requests"
-          transfers={outgoingTransfers}
-          requests={mbRequests}
-          onTabClick={(tab) => navigateToSlice('distributing', tab)}
-        >
-          {activeSection === 'distributing' && (
-            <SliceFilterBar
-              tab={activeTab}
-              transfers={outgoingTransfers}
-              requests={mbRequests}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              onSearchSubmit={submitSearch}
-              onStatusChange={(v) => updateSliceParam('status', v)}
-              onRequestStatusChange={(v) => updateSliceParam('requestStatus', v)}
-            />
-          )}
-          {activeSection === 'distributing' && activeTab === 'transfers' && (
+          {activeTab === 'transfers' && (
             <TransfersTable
-              slice={outgoingTransfers}
+              slice={transfersSlice}
               users={users}
               currentUserId={currentUserId}
-              direction="outgoing"
+              direction={activeSection === 'received' ? 'incoming' : 'outgoing'}
               fetcher={fetcher}
               onViewReceipt={setFundingReceiptModal}
               onDispute={setDisputingFundingId}
-              emptyMessage='You have not disbursed funding to any Media Buyer in this period — tap "+ Send Funding" to start.'
+              emptyMessage={transferEmptyMessage}
             />
           )}
-          {activeSection === 'distributing' && activeTab === 'requests' && (
+          {activeTab === 'requests' && (
             <RequestsTable
-              slice={mbRequests}
+              slice={requestsSlice}
               users={users}
               currentUserId={currentUserId}
-              mode="mb-requests"
+              mode={activeSection === 'received' ? 'my-requests' : 'mb-requests'}
               fetcher={fetcher}
-              onApprove={setApprovingRequestId}
-              onReject={setRejectingRequestId}
-              emptyMessage="No pending requests from your Media Buyers."
+              onApprove={activeSection === 'distributing' ? setApprovingRequestId : () => {}}
+              onReject={activeSection === 'distributing' ? setRejectingRequestId : () => {}}
+              emptyMessage={requestsEmptyMessage}
             />
           )}
-        </FundingSectionCard>
-      )}
+        </div>
+      </div>
 
       {/* ─── Modals ───────────────────────────────────────────────────────────────── */}
 
@@ -628,6 +637,19 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
 // ─── Reusable internals ───────────────────────────────────────────────────────────────
 
+function CountPill({ active, children }: { active: boolean; children: ReactNode }) {
+  return (
+    <span
+      className={[
+        'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+        active ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'bg-app-hover text-app-fg-muted',
+      ].join(' ')}
+    >
+      {children}
+    </span>
+  );
+}
+
 /**
  * Top metric strip — funding-relevant numbers. Replaces the old marketing-perf strip
  * (CPA / ROAS / Delivery Rate / Confirmation Rate) which didn't speak to funding.
@@ -636,17 +658,30 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 function FundingMetricsStrip({
   summary,
   canDistribute,
+  fundingBalance,
 }: {
   summary: MarketingFundingLoaderData['directionSummary'];
   canDistribute: boolean;
+  fundingBalance?: MarketingFundingLoaderData['fundingBalance'];
 }) {
   const items = [
     {
       label: 'Total Received',
       value: <NairaPrice amount={Number(summary.totalReceived)} />,
       valueClassName: 'text-success-600 dark:text-success-400',
-      title: 'Sum of incoming transfers in the selected period',
+      title: 'Sum of incoming ledger transfers (any status) in the selected period — same data as the Transfers tab',
     },
+    ...(fundingBalance
+      ? [
+          {
+            label: 'Current balance',
+            value: <NairaPrice amount={Number(fundingBalance.balance)} />,
+            valueClassName: 'text-app-fg',
+            title:
+              'COMPLETED funding received (all time) minus APPROVED ad spend on your campaigns. Can be lower than Total Received until you mark incoming transfers as Received.',
+          },
+        ]
+      : []),
     ...(canDistribute
       ? [
           {
@@ -677,88 +712,6 @@ function FundingMetricsStrip({
     },
   ];
   return <OverviewStatStrip items={items} />;
-}
-
-/**
- * Section card — title, description, action button, sub-tabs, and content slot. Both
- * Section 1 ("Received") and Section 2 ("Distributing") share this shell so the layout
- * stays visually parallel.
- */
-function FundingSectionCard({
-  sectionId,
-  title,
-  description,
-  actionButton,
-  activeIfSelf,
-  transfersTabLabel,
-  requestsTabLabel,
-  transfers,
-  requests,
-  onTabClick,
-  children,
-}: {
-  sectionId: FundingSection;
-  title: string;
-  description: string;
-  actionButton: React.ReactNode;
-  /** When this section is the active one, its current tab; otherwise null. */
-  activeIfSelf: FundingTab | null;
-  transfersTabLabel: string;
-  requestsTabLabel: string;
-  transfers: FundingSliceData;
-  requests: FundingRequestsSliceData;
-  onTabClick: (tab: FundingTab) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="card p-0 overflow-hidden" id={`funding-section-${sectionId}`}>
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 px-4 py-4 border-b border-app-border">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold text-app-fg">{title}</h2>
-          <p className="text-xs text-app-fg-muted mt-0.5 leading-relaxed">{description}</p>
-        </div>
-        {actionButton && <div className="shrink-0">{actionButton}</div>}
-      </div>
-
-      {/* Sub-tabs */}
-      <div className="flex items-center gap-0 border-b border-app-border px-4">
-        {(['transfers', 'requests'] as const).map((tab) => {
-          const label = tab === 'transfers' ? transfersTabLabel : requestsTabLabel;
-          const count = tab === 'transfers' ? transfers.statusCounts.ALL : requests.statusCounts.ALL;
-          const isActive = activeIfSelf === tab;
-          return (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => onTabClick(tab)}
-              className={[
-                'relative -mb-px inline-flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors focus:outline-none',
-                isActive
-                  ? 'text-brand-600 dark:text-brand-400 border-b-2 border-brand-600 dark:border-brand-400'
-                  : 'text-app-fg-muted hover:text-app-fg border-b-2 border-transparent',
-              ].join(' ')}
-            >
-              {label}
-              {count > 0 && (
-                <span
-                  className={[
-                    'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
-                    isActive
-                      ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300'
-                      : 'bg-app-hover text-app-fg-muted',
-                  ].join(' ')}
-                >
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {children}
-    </div>
-  );
 }
 
 /**
