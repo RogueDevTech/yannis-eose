@@ -1,7 +1,6 @@
 import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
-import { StatCard } from '~/components/ui/card';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -152,31 +151,6 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
           />
         )}
       </DeferredSection>
-
-      {/* Secondary KPIs — all deferred */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <DeferredSection resolve={data.profit} skeleton="stat">
-          {(profit) => (
-            <StatCard
-              label="Margin"
-              value={`${profit.margin.toFixed(1)}%`}
-              accent={profit.margin >= 20 ? 'success' : profit.margin > 0 ? 'warning' : 'danger'}
-              icon={<StatIcon type="margin" />}
-            />
-          )}
-        </DeferredSection>
-        <DeferredSection resolve={data.metrics} skeleton="stat">
-          {(metrics) => (
-            <StatCard label="True ROAS" value={`${metrics.trueRoas.toFixed(2)}x`} accent="brand" icon={<StatIcon type="roas" />} />
-          )}
-        </DeferredSection>
-        <DeferredSection resolve={data.totalProducts} skeleton="stat">
-          {(total) => <StatCard label="Products" value={total.toString()} accent="brand" icon={<StatIcon type="products" />} />}
-        </DeferredSection>
-        <DeferredSection resolve={data.totalUsers} skeleton="stat">
-          {(total) => <StatCard label="Staff" value={total.toString()} accent="brand" icon={<StatIcon type="users" />} />}
-        </DeferredSection>
-      </div>
 
       {/* Awaiting Allocation alert */}
       {confirmed > 0 && (

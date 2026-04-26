@@ -1,4 +1,4 @@
-import { json, redirect } from '@remix-run/node';
+import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
@@ -73,56 +73,6 @@ export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
-
-  if (intent === 'createForm') {
-    const productId = formData.get('productId')?.toString() ?? '';
-
-    // Build formConfig from optional fields
-    const heading = formData.get('formHeading')?.toString();
-    const subtitle = formData.get('formSubtitle')?.toString();
-    const buttonText = formData.get('formButtonText')?.toString();
-    const accentColor = formData.get('formAccentColor')?.toString();
-    // Optional success callback URL — full redirect URL the Edge Worker sends the buyer to
-    // after a successful submission (their funnel's thank-you page). Empty/missing => use the
-    // default inline success message instead.
-    const successCallbackUrl = formData.get('successCallbackUrl')?.toString()?.trim() || undefined;
-    const showDeliveryAddress = formData.get('showDeliveryAddress') === 'on';
-    const showDeliveryNotes = formData.get('showDeliveryNotes') === 'on';
-    const showDeliveryState = formData.get('showDeliveryState') === 'on';
-    const showGender = formData.get('showGender') === 'on';
-    const showPreferredDeliveryDate = formData.get('showPreferredDeliveryDate') === 'on';
-    const showPaymentMethod = formData.get('showPaymentMethod') === 'on';
-    const hasToggles = showDeliveryAddress || showDeliveryNotes || showDeliveryState || showGender || showPreferredDeliveryDate || showPaymentMethod;
-    const formConfig = (heading || subtitle || buttonText || accentColor || successCallbackUrl || hasToggles) ? {
-      ...(heading ? { heading } : {}),
-      ...(subtitle ? { subtitle } : {}),
-      ...(buttonText ? { buttonText } : {}),
-      ...(accentColor ? { accentColor } : {}),
-      ...(successCallbackUrl ? { successCallbackUrl } : {}),
-      showDeliveryAddress,
-      showDeliveryNotes,
-      showDeliveryState,
-      showGender,
-      showPreferredDeliveryDate,
-      showPaymentMethod,
-    } : undefined;
-
-    const res = await apiRequest<unknown>('/trpc/marketing.createCampaign', {
-      method: 'POST',
-      cookie,
-      body: {
-        name: formData.get('name')?.toString() ?? '',
-        productIds: [productId],
-        deploymentType: formData.get('deploymentType')?.toString() ?? 'HOSTED',
-        ...(formConfig ? { formConfig } : {}),
-      },
-    });
-    if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create form' }, { status: safeStatus(res.status) });
-    }
-    return redirect(new URL(request.url).pathname + '?saved=1');
-  }
 
   if (intent === 'updateForm') {
     const id = formData.get('id')?.toString() ?? '';

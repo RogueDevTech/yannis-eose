@@ -45,6 +45,8 @@ export interface CampaignFormConfig {
   preferredDeliveryDateOptions?: string[];
   /** Form Builder output — arbitrary fields the Media Buyer adds to their public form. */
   customFields?: CustomFormField[];
+  /** Post-submit redirect for the buyer (funnel thank-you page). */
+  successCallbackUrl?: string;
 }
 
 export interface Campaign {

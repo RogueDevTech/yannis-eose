@@ -12,9 +12,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 /**
  * Dedicated form-builder page — `/admin/marketing/forms/:id/builder`.
  *
- * The list page (`/admin/marketing/forms`) handles basic config (name, deployment, copy,
- * accent colour, standard-field toggles). This route is exclusively for managing the
- * dynamic `customFields` array — the field-builder UI Sniper has at /form_builder.
+ * New forms are created at `/admin/marketing/forms/new` (basic config + custom fields in one
+ * submit). The forms list still supports editing basic settings on existing campaigns. This
+ * route is for managing the `customFields` array on an existing form — the field-builder UI.
  *
  * Auth: marketing.campaigns. Media Buyers see only their own campaigns; the loader cross-
  * checks ownership so MB-A can't edit MB-B's form by URL guessing.
