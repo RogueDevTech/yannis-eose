@@ -10,6 +10,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -40,6 +41,7 @@ export function HRPage({
   const fetcher = useFetcher();
   const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments'>('monthly');
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
+  const [adjustmentStaffId, setAdjustmentStaffId] = useState('');
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const [dismissedError, setDismissedError] = useState(false);
@@ -146,15 +148,19 @@ export function HRPage({
           </div>
           <fetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="createAdjustment" />
+            <input type="hidden" name="staffId" value={adjustmentStaffId} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <DeferredSection resolve={users} skeleton="inline">
                   {(resolvedUsers) => (
-                    <FormSelect
+                    <SearchableSelect
+                      id="hr-adjustment-staffId"
                       label="Staff Member"
-                      name="staffId"
                       required
+                      value={adjustmentStaffId}
+                      onChange={setAdjustmentStaffId}
                       placeholder="Select staff..."
+                      searchPlaceholder="Search staff..."
                       options={resolvedUsers.map((u: HRUser) => ({ value: u.id, label: `${u.name} (${u.role?.replace(/_/g, ' ')})` }))}
                     />
                   )}

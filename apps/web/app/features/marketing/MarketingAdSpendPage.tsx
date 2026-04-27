@@ -17,6 +17,7 @@ import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -421,15 +422,18 @@ export function MarketingAdSpendPage({
             </button>
           </div>
           <input type="hidden" name="intent" value="createAdSpend" />
+          <input type="hidden" name="campaignId" value={formCampaignId} />
+          <input type="hidden" name="productId" value={formProductId} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <FormSelect
+              <SearchableSelect
+                id="marketing-adspend-create-campaign"
                 label="Campaign"
-                name="campaignId"
                 placeholder="Select campaign..."
                 required
                 value={formCampaignId}
-                onChange={(e) => setFormCampaignId(e.target.value)}
+                onChange={setFormCampaignId}
+                searchPlaceholder="Search campaigns..."
                 options={campaigns
                   .filter((c: Campaign) => c.status === 'ACTIVE')
                   .map((c: Campaign) => ({ value: c.id, label: c.name }))}
@@ -438,13 +442,14 @@ export function MarketingAdSpendPage({
             <div>
               <DeferredSection resolve={products} skeleton="inline">
                 {(resolvedProducts: Product[]) => (
-                  <FormSelect
+                  <SearchableSelect
+                    id="marketing-adspend-create-product"
                     label="Product"
-                    name="productId"
                     placeholder="Select product..."
                     required
                     value={formProductId}
-                    onChange={(e) => setFormProductId(e.target.value)}
+                    onChange={setFormProductId}
+                    searchPlaceholder="Search products..."
                     options={resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name }))}
                   />
                 )}
@@ -580,15 +585,18 @@ export function MarketingAdSpendPage({
             <input type="hidden" name="intent" value="updateAdSpend" />
             <input type="hidden" name="adSpendId" value={editTarget.id} />
             <input type="hidden" name="screenshotUrl" value={editScreenshotUrl} />
+            <input type="hidden" name="campaignId" value={editFormCampaignId} />
+            <input type="hidden" name="productId" value={editFormProductId} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <FormSelect
+                <SearchableSelect
+                  id="marketing-adspend-edit-campaign"
                   label="Campaign"
-                  name="campaignId"
                   placeholder="Select campaign..."
                   required
                   value={editFormCampaignId}
-                  onChange={(e) => setEditFormCampaignId(e.target.value)}
+                  onChange={setEditFormCampaignId}
+                  searchPlaceholder="Search campaigns..."
                   options={campaigns
                     .filter((c: Campaign) => c.status === 'ACTIVE')
                     .map((c: Campaign) => ({ value: c.id, label: c.name }))}
@@ -597,13 +605,14 @@ export function MarketingAdSpendPage({
               <div>
                 <DeferredSection resolve={products} skeleton="inline">
                   {(resolvedProducts: Product[]) => (
-                    <FormSelect
+                    <SearchableSelect
+                      id="marketing-adspend-edit-product"
                       label="Product"
-                      name="productId"
                       placeholder="Select product..."
                       required
                       value={editFormProductId}
-                      onChange={(e) => setEditFormProductId(e.target.value)}
+                      onChange={setEditFormProductId}
+                      searchPlaceholder="Search products..."
                       options={resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name }))}
                     />
                   )}
@@ -705,14 +714,16 @@ export function MarketingAdSpendPage({
               auditing per-product CPA / ROAS, or for an MB scoping their own log down to one
               campaign's product. Loaded from the same `products` array used by the create form,
               so for media buyers it's already pre-scoped to their assigned products. */}
-          <FormSelect
+          <SearchableSelect
+            id="marketing-adspend-product-filter"
             value={selectedProductId}
-            onChange={(e) => handleAdSpendProductChange(e.target.value)}
+            onChange={handleAdSpendProductChange}
             options={[
               { value: 'ALL', label: 'All products' },
               ...products.map((p: Product) => ({ value: p.id, label: p.name })),
             ]}
             wrapperClassName="w-auto min-w-[12rem]"
+            searchPlaceholder="Search products..."
           />
           {isFilterLoading && (
             <span className="flex items-center text-app-fg-muted" aria-hidden>

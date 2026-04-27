@@ -73,6 +73,9 @@ export class SessionStoreService {
 
   async touchSession(token: string, ttlSeconds: number): Promise<void> {
     await this.tryRedisExpire(token, ttlSeconds);
+    // When Redis is healthy, keep DB as fallback source only and avoid per-request write churn.
+    // This significantly reduces Postgres connection pressure under traffic spikes.
+    if (this.redisHealth.isHealthy()) return;
     try {
       await this.db
         .update(schema.authSessions)

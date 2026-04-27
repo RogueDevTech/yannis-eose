@@ -161,24 +161,21 @@ export function CreateOfflineOrderModal({
     if (validItems.length === 0) {
       return;
     }
-    fetcher.submit(
-      {
-        intent: 'createOffline',
-        customerName: customerName.trim(),
-        customerPhone: customerPhone.trim(),
-        customerAddress: customerAddress.trim() || undefined,
-        deliveryAddress: deliveryAddress.trim() || undefined,
-        deliveryNotes: deliveryNotes.trim() || undefined,
-        deliveryState: deliveryState.trim() || undefined,
-        customerGender: customerGender || undefined,
-        preferredDeliveryDate: preferredDeliveryDate.trim() || undefined,
-        paymentMethod,
-        customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail.trim() : undefined,
-        items: JSON.stringify(validItems),
-        totalAmount: String(totalAmount.toFixed(2)),
-      },
-      { method: 'post' },
-    );
+    const formData = new FormData();
+    formData.set('intent', 'createOffline');
+    formData.set('customerName', customerName.trim());
+    formData.set('customerPhone', customerPhone.trim());
+    formData.set('paymentMethod', paymentMethod);
+    formData.set('items', JSON.stringify(validItems));
+    formData.set('totalAmount', String(totalAmount.toFixed(2)));
+    if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
+    if (deliveryAddress.trim()) formData.set('deliveryAddress', deliveryAddress.trim());
+    if (deliveryNotes.trim()) formData.set('deliveryNotes', deliveryNotes.trim());
+    if (deliveryState.trim()) formData.set('deliveryState', deliveryState.trim());
+    if (customerGender) formData.set('customerGender', customerGender);
+    if (preferredDeliveryDate.trim()) formData.set('preferredDeliveryDate', preferredDeliveryDate.trim());
+    if (paymentMethod === 'PAY_ONLINE' && customerEmail.trim()) formData.set('customerEmail', customerEmail.trim());
+    fetcher.submit(formData, { method: 'post' });
   }
 
   if (!open) return null;
@@ -357,11 +354,11 @@ export function CreateOfflineOrderModal({
                         "Custom" lets the rep type a non-standard price (rare, but allowed). */}
                     {hasOffers && (
                       <div className="flex-1 min-w-[180px]">
-                        <FormSelect
+                        <SearchableSelect
                           id={`offline-item-offer-${index}`}
                           label="Offer / tier"
                           value={item.offerLabel ?? ''}
-                          onChange={(e) => onOfferSelect(index, e.target.value)}
+                          onChange={(value) => onOfferSelect(index, value)}
                           options={[
                             ...offers.map((o) => ({
                               value: o.label,
@@ -369,6 +366,7 @@ export function CreateOfflineOrderModal({
                             })),
                             { value: '', label: 'Custom' },
                           ]}
+                          searchPlaceholder="Search offers..."
                           controlSize="sm"
                           wrapperClassName="w-full"
                         />

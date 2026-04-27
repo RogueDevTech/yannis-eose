@@ -8,7 +8,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { createRemittanceSchema, createDeliveryRemittanceSchema } from '@yannis/shared/validators';
-import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { TextInput } from '~/components/ui/text-input';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
@@ -84,6 +84,8 @@ export function RemitPage({
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [deliveryReceiptUrls, setDeliveryReceiptUrls] = useState<string[]>([]);
   const [remittanceReceiptModal, setRemittanceReceiptModal] = useState<RemittanceRecord | null>(null);
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [selectedToLocationId, setSelectedToLocationId] = useState('');
 
   useFetcherToast(fetcher.data, {
     successMessage:
@@ -365,22 +367,28 @@ export function RemitPage({
         <h2 className="text-lg font-semibold text-app-fg mb-4">Stock transfer to warehouse</h2>
         <fetcher.Form method="post" className="space-y-4" onSubmit={handleCreateRemittanceSubmit} noValidate>
           <input type="hidden" name="intent" value="createRemittance" />
-          <FormSelect
-            name="productId"
+          <input type="hidden" name="productId" value={selectedProductId} />
+          <input type="hidden" name="toLocationId" value={selectedToLocationId} />
+          <SearchableSelect
+            id="remit-productId"
             label="Product"
             required
+            value={selectedProductId}
+            onChange={setSelectedProductId}
             disabled={isSubmitting}
-            defaultValue=""
             placeholder="Select product"
+            searchPlaceholder="Search products..."
             options={products.map((p) => ({ value: p.id, label: p.name }))}
           />
-          <FormSelect
-            name="toLocationId"
+          <SearchableSelect
+            id="remit-toLocationId"
             label="Send to location"
             required
+            value={selectedToLocationId}
+            onChange={setSelectedToLocationId}
             disabled={isSubmitting}
-            defaultValue=""
             placeholder="Select warehouse / location"
+            searchPlaceholder="Search locations..."
             options={toLocationOptions.map((l) => ({ value: l.id, label: l.name }))}
           />
           <TextInput

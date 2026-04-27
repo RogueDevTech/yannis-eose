@@ -17,6 +17,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
@@ -103,6 +104,8 @@ export function LogisticsOrdersPage({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [allocateLocationId, setAllocateLocationId] = useState('');
   const [dispatchRiderId, setDispatchRiderId] = useState('');
+  const [rowAllocateLocationByOrder, setRowAllocateLocationByOrder] = useState<Record<string, string>>({});
+  const [rowDispatchRiderByOrder, setRowDispatchRiderByOrder] = useState<Record<string, string>>({});
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; errors: string[] } | null>(null);
 
   const [deliverConfirm, setDeliverConfirm] = useState<{ orderId: string; customerName: string } | null>(null);
@@ -295,13 +298,14 @@ export function LogisticsOrdersPage({
             <div className="flex flex-wrap items-center gap-2">
               {canBulkAllocate && !allocationOnDetailOnly && (
                 <>
-                  <FormSelect
+                  <SearchableSelect
+                    id="logistics-bulk-allocate-location"
                     value={allocateLocationId}
-                    onChange={(e) => setAllocateLocationId(e.target.value)}
-                    aria-label="3PL location"
+                    onChange={setAllocateLocationId}
+                    wrapperClassName="w-48"
                     placeholder="Select location"
+                    searchPlaceholder="Search locations..."
                     options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
-                    className="w-48"
                   />
                   <Button
                     variant="primary"
@@ -328,13 +332,14 @@ export function LogisticsOrdersPage({
               )}
               {canBulkDispatch && ridersForBulkDispatch.length > 0 && (
                 <>
-                  <FormSelect
+                  <SearchableSelect
+                    id="logistics-bulk-dispatch-rider"
                     value={dispatchRiderId}
-                    onChange={(e) => setDispatchRiderId(e.target.value)}
-                    aria-label="Rider"
+                    onChange={setDispatchRiderId}
+                    wrapperClassName="w-48"
                     placeholder="Select rider"
+                    searchPlaceholder="Search riders..."
                     options={ridersForBulkDispatch.map((r) => ({ value: r.id, label: r.name }))}
-                    className="w-48"
                   />
                   <Button
                     variant="primary"
@@ -541,14 +546,19 @@ export function LogisticsOrdersPage({
                           <fetcher.Form method="post" className="inline-flex items-center gap-1">
                             <input type="hidden" name="intent" value="allocate" />
                             <input type="hidden" name="orderId" value={order.id} />
-                            <FormSelect
-                              name="logisticsLocationId"
+                            <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
+                            <SearchableSelect
+                              id={`logistics-row-allocate-${order.id}`}
                               required
+                              value={rowAllocateLocationByOrder[order.id] ?? ''}
+                              onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
                               placeholder="Location"
+                              searchPlaceholder="Search locations..."
                               options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
-                              className="w-36"
+                              wrapperClassName="w-36"
+                              controlSize="sm"
                             />
-                            <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting}>
+                            <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')} loading={isSubmitting}>
                               Allocate
                             </Button>
                           </fetcher.Form>
@@ -557,13 +567,18 @@ export function LogisticsOrdersPage({
                           <fetcher.Form method="post" className="inline-flex items-center gap-1">
                             <input type="hidden" name="intent" value="dispatch" />
                             <input type="hidden" name="orderId" value={order.id} />
-                            <FormSelect
-                              name="riderId"
+                            <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
+                            <SearchableSelect
+                              id={`logistics-row-dispatch-${order.id}`}
                               required
+                              value={rowDispatchRiderByOrder[order.id] ?? ''}
+                              onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
                               disabled={ridersForOrder.length === 0}
                               placeholder={ridersForOrder.length === 0 ? 'No riders' : 'Rider'}
+                              searchPlaceholder="Search riders..."
                               options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
-                              className="w-36"
+                              wrapperClassName="w-36"
+                              controlSize="sm"
                             />
                             <Button
                               type="submit"
@@ -661,14 +676,19 @@ export function LogisticsOrdersPage({
                     <fetcher.Form method="post" className="flex gap-1 flex-wrap">
                       <input type="hidden" name="intent" value="allocate" />
                       <input type="hidden" name="orderId" value={order.id} />
-                      <FormSelect
-                        name="logisticsLocationId"
+                      <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
+                      <SearchableSelect
+                        id={`logistics-mobile-allocate-${order.id}`}
                         required
+                        value={rowAllocateLocationByOrder[order.id] ?? ''}
+                        onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
                         placeholder="Location"
+                        searchPlaceholder="Search locations..."
                         options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
-                        className="flex-1 min-w-0"
+                        wrapperClassName="flex-1 min-w-0"
+                        controlSize="sm"
                       />
-                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
+                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')}>
                         Allocate
                       </Button>
                     </fetcher.Form>
@@ -677,13 +697,18 @@ export function LogisticsOrdersPage({
                     <fetcher.Form method="post" className="flex gap-1">
                       <input type="hidden" name="intent" value="dispatch" />
                       <input type="hidden" name="orderId" value={order.id} />
-                      <FormSelect
-                        name="riderId"
+                      <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
+                      <SearchableSelect
+                        id={`logistics-mobile-dispatch-${order.id}`}
                         required
+                        value={rowDispatchRiderByOrder[order.id] ?? ''}
+                        onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
                         placeholder="Rider"
+                        searchPlaceholder="Search riders..."
                         options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
+                        controlSize="sm"
                       />
-                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
+                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowDispatchRiderByOrder[order.id] ?? '')}>
                         Dispatch
                       </Button>
                     </fetcher.Form>

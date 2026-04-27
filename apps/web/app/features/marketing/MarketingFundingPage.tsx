@@ -15,6 +15,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { Tabs } from '~/components/ui/tabs';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -145,6 +146,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
   const [createFundingReceiptUrl, setCreateFundingReceiptUrl] = useState('');
   const [createFundingUploadState, setCreateFundingUploadState] = useState<FileUploadUploadState>('idle');
+  const [createFundingReceiverId, setCreateFundingReceiverId] = useState('');
   const [approveFundingReceiptUrl, setApproveFundingReceiptUrl] = useState('');
   const [approveFundingUploadState, setApproveFundingUploadState] = useState<FileUploadUploadState>('idle');
 
@@ -589,16 +591,19 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           </p>
           <fetcher.Form method="post" className="space-y-4" onSubmit={handleCreateFundingSubmit} noValidate>
             <input type="hidden" name="intent" value="createFunding" />
+            <input type="hidden" name="receiverId" value={createFundingReceiverId} />
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">Media Buyer</label>
-              <FormSelect
-                name="receiverId"
+              <SearchableSelect
+                id="marketing-funding-receiver"
                 required
+                value={createFundingReceiverId}
+                onChange={setCreateFundingReceiverId}
                 placeholder="Select recipient..."
+                searchPlaceholder="Search media buyers..."
                 options={users
                   .filter((u: User) => u.role === 'MEDIA_BUYER')
                   .map((u: User) => ({ value: u.id, label: `${u.name} (${u.email})` }))}
-                wrapperClassName="w-full"
               />
               {activeBranchName && (
                 <p className="mt-1 text-xs text-app-fg-muted">

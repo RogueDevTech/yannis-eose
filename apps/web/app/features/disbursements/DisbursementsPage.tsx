@@ -23,6 +23,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 
@@ -231,6 +232,7 @@ function CreateDisbursementModal({
   const { toast } = useToast();
   const [receiptUrl, setReceiptUrl] = useState('');
   const [uploadState, setUploadState] = useState<FileUploadUploadState>('idle');
+  const [receiverId, setReceiverId] = useState(preselectedReceiverId ?? '');
 
   useFetcherToast(fetcher.data, { successMessage: 'Disbursement sent successfully' });
 
@@ -242,8 +244,9 @@ function CreateDisbursementModal({
     if (!open) {
       setReceiptUrl('');
       setUploadState('idle');
+      setReceiverId(preselectedReceiverId ?? '');
     }
-  }, [open]);
+  }, [open, preselectedReceiverId]);
 
   const handleCreateDisbursementSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -292,13 +295,16 @@ function CreateDisbursementModal({
           noValidate
         >
           <input type="hidden" name="intent" value="createFunding" />
+          <input type="hidden" name="receiverId" value={receiverId} />
 
-          <FormSelect
+          <SearchableSelect
+            id="disbursement-create-receiver"
             label="Recipient"
-            name="receiverId"
             required
-            defaultValue={preselectedReceiverId ?? ''}
+            value={receiverId}
+            onChange={setReceiverId}
             placeholder="Select recipient..."
+            searchPlaceholder="Search recipients..."
             options={recipients.map((u) => {
               const bal = recipientBalances.find((b) => b.userId === u.id);
               const balanceLabel = bal != null ? ` — Balance: ${formatNaira(Number(bal.balance))}` : '';
@@ -681,17 +687,17 @@ export function DisbursementsPage({
                 aria-label="Filter by status"
               />
 
-              <FormSelect
+              <SearchableSelect
                 id="disbursement-recipient-filter"
                 value={selectedReceiver}
-                onChange={(e) => handleReceiverChange(e.target.value)}
+                onChange={handleReceiverChange}
                 options={[
                   { value: 'ALL', label: 'All recipients' },
                   ...recipients.map((u) => ({ value: u.id, label: u.name })),
                 ]}
                 controlSize="sm"
                 wrapperClassName="w-full sm:w-52"
-                aria-label="Filter by recipient"
+                searchPlaceholder="Search recipients..."
               />
                 </>
               )}

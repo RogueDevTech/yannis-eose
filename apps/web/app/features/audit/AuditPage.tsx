@@ -12,6 +12,7 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
@@ -1515,12 +1516,18 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                   role: info.roleNow,
                 }));
                 return uniqueActors.length > 0 ? (
-                  <FormSelect
+                  <SearchableSelect
+                    id="audit-actor-filter"
                     label="Actor"
                     value={filters.actorId}
-                    onChange={(e) => updateFilter('actorId', e.target.value)}
+                    onChange={(v) => updateFilter('actorId', v)}
                     placeholder="All Users"
-                    options={uniqueActors.map((a) => ({ value: a.id, label: `${a.name} (${ROLE_LABELS[a.role] ?? a.role})` }))}
+                    searchPlaceholder="Search users..."
+                    options={uniqueActors.map((a) => ({
+                      value: a.id,
+                      label: a.name,
+                      description: ROLE_LABELS[a.role] ?? a.role,
+                    }))}
                   />
                 ) : (
                   <TextInput

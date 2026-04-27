@@ -8,7 +8,7 @@ import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
-import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { FormField } from '~/components/ui/form-field';
 
 interface CategoryOption {
@@ -47,6 +47,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
   const [offers, setOffers] = useState<OfferRow[]>([
     { label: '', qty: '1', price: '' },
   ]);
+  const [categoryId, setCategoryId] = useState('');
 
   function addOffer() {
     setOffers((prev) => [...prev, { label: '', qty: '1', price: '' }]);
@@ -83,6 +84,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
       )}
 
       <Form method="post" className="space-y-6">
+        {categories.length > 0 ? <input type="hidden" name="categoryId" value={categoryId} /> : null}
         {/* Hidden offers JSON */}
         <input type="hidden" name="offers" value={JSON.stringify(
           offers.map((o) => ({
@@ -107,14 +109,17 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
 
           <div>
             {categories.length > 0 ? (
-              <FormSelect
+              <SearchableSelect
                 id="categoryId"
-                name="categoryId"
                 label="Category"
+                value={categoryId}
+                onChange={setCategoryId}
                 placeholder="— Select category —"
+                searchPlaceholder="Search categories..."
                 options={categories.map((cat) => ({
                   value: cat.id,
-                  label: `${cat.name} (${cat.brandName})`,
+                  label: cat.name,
+                  description: cat.brandName,
                 }))}
               />
             ) : (

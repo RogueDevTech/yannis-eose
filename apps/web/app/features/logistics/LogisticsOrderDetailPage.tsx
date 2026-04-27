@@ -14,6 +14,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { STATUS_DOT_CLASS, STATUS_LABELS } from '~/features/shared/order-status';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { buildOrderSummaryClipboardText } from '~/features/orders/build-order-summary-clipboard';
@@ -463,6 +464,8 @@ export function LogisticsOrderDetailPage({
   }, [order, toast]);
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [allocateLocationId, setAllocateLocationId] = useState('');
+  const [dispatchRiderId, setDispatchRiderId] = useState('');
   const [deliveryProofUrl, setDeliveryProofUrl] = useState('');
   const [deliveryCost, setDeliveryCost] = useState('');
   const [deliveryDiscount, setDeliveryDiscount] = useState('');
@@ -471,6 +474,8 @@ export function LogisticsOrderDetailPage({
   const [partialDeliveryDiscount, setPartialDeliveryDiscount] = useState('');
 
   useEffect(() => {
+    setAllocateLocationId('');
+    setDispatchRiderId('');
     setDeliveryProofUrl('');
     setDeliveryCost('');
     setDeliveryDiscount('');
@@ -481,6 +486,8 @@ export function LogisticsOrderDetailPage({
 
   useEffect(() => {
     if (fetcher.data && (fetcher.data as { success?: boolean }).success) {
+      setAllocateLocationId('');
+      setDispatchRiderId('');
       setDeliveryProofUrl('');
       setDeliveryCost('');
       setDeliveryDiscount('');
@@ -912,14 +919,23 @@ export function LogisticsOrderDetailPage({
               </div>
               <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
                 <input type="hidden" name="intent" value="allocate" />
+                <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
                 <div className="flex-1 min-w-[200px]">
-                  <FormSelect
+                  <SearchableSelect
+                    id="logistics-allocate-location"
                     label="Location"
-                    name="logisticsLocationId"
                     required
+                    value={allocateLocationId}
+                    onChange={setAllocateLocationId}
                     disabled={isSubmitting}
                     placeholder="Select location..."
-                    options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
+                    searchPlaceholder="Search locations..."
+                    options={allocatableLocations.map((loc) => ({
+                      value: loc.id,
+                      label: loc.name,
+                      disabled: Boolean(loc.dispatchLocked),
+                      description: loc.dispatchLocked ? 'Dispatch locked for reconciliation' : undefined,
+                    }))}
                   />
                 </div>
                 <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={isSubmitting}>
@@ -943,13 +959,17 @@ export function LogisticsOrderDetailPage({
               </div>
               <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
                 <input type="hidden" name="intent" value="dispatch" />
+                <input type="hidden" name="riderId" value={dispatchRiderId} />
                 <div className="flex-1 min-w-[200px]">
-                  <FormSelect
+                  <SearchableSelect
+                    id="logistics-dispatch-rider"
                     label="Rider"
-                    name="riderId"
                     required
+                    value={dispatchRiderId}
+                    onChange={setDispatchRiderId}
                     disabled={isSubmitting}
                     placeholder={ridersForOrder.length === 0 ? 'No riders at this location' : 'Select rider...'}
+                    searchPlaceholder="Search riders..."
                     options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
                   />
                 </div>

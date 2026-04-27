@@ -3,7 +3,7 @@ import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { Textarea } from '~/components/ui/textarea';
-import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -2020,15 +2020,16 @@ export function CSDashboardPage({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <FormSelect
+                <SearchableSelect
                   id="hotswap-from"
                   label="From closer"
                   value={hotSwapFrom}
-                  onChange={(e) => {
-                    setHotSwapFrom(e.target.value);
+                  onChange={(v) => {
+                    setHotSwapFrom(v);
                     setHotSwapOrderIds([]);
                   }}
                   placeholder="Select source closer..."
+                  searchPlaceholder="Search closers..."
                   options={workloads.map((w: AgentWorkload) => ({
                     value: w.agentId,
                     label: `${w.agentName} (${w.pendingCount} orders)`,
@@ -2036,12 +2037,13 @@ export function CSDashboardPage({
                 />
               </div>
               <div>
-                <FormSelect
+                <SearchableSelect
                   id="hotswap-to"
                   label="To closer"
                   value={hotSwapTo}
-                  onChange={(e) => setHotSwapTo(e.target.value)}
+                  onChange={setHotSwapTo}
                   placeholder="Select target closer..."
+                  searchPlaceholder="Search closers..."
                   options={workloads
                     .filter((w: AgentWorkload) => w.agentId !== hotSwapFrom)
                     .map((w: AgentWorkload) => ({
@@ -2610,12 +2612,13 @@ export function CSDashboardPage({
             </p>
 
             <div>
-              <FormSelect
+              <SearchableSelect
                 id="reassign-to-closer"
                 label="Assign to closer"
                 value={reassignToAgentId}
-                onChange={(e) => setReassignToAgentId(e.target.value)}
+                onChange={setReassignToAgentId}
                 placeholder="Select closer..."
+                searchPlaceholder="Search closers..."
                 options={workloads
                   .filter((w: AgentWorkload) => w.agentId !== reassignOrder.assignedCsId && w.pendingCount < w.capacity)
                   .map((w: AgentWorkload) => ({

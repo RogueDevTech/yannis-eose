@@ -33,6 +33,7 @@ import type {
 import { USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { RadioGroup } from '~/components/ui/radio-group';
@@ -254,12 +255,14 @@ export function UserDetailPage({
     setAssignFinanceHat(user.isFinanceOfficer === true);
   }, [user.id, user.updatedAt, user.isFinanceOfficer]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>(user.assignedProductIds ?? []);
+  const [logisticsLocationEdit, setLogisticsLocationEdit] = useState(user.logisticsLocationId ?? '');
 
   const assignedProductIdsKey = [...(user.assignedProductIds ?? [])].sort().join(',');
   useEffect(() => {
     setSelectedRole(user.role);
     setSelectedProductIds(user.assignedProductIds ? [...user.assignedProductIds] : []);
-  }, [user.id, user.updatedAt, user.role, assignedProductIdsKey]);
+    setLogisticsLocationEdit(user.logisticsLocationId ?? '');
+  }, [user.id, user.updatedAt, user.role, assignedProductIdsKey, user.logisticsLocationId]);
 
   // Capacity is only meaningful for roles that work an individual workload — CS agents
   // (max concurrent orders) and Media Buyers (max concurrent campaigns). Managers / heads
@@ -1133,6 +1136,9 @@ export function UserDetailPage({
           {showProductAssignment && selectedProductIds.length > 0 && (
             <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
           )}
+          {showLogisticsLocation && !canEditLimited ? (
+            <input type="hidden" name="logisticsLocationId" value={logisticsLocationEdit} />
+          ) : null}
 
           {canEditLimited && (
             <InlineNotification
@@ -1291,15 +1297,17 @@ export function UserDetailPage({
                 <DeferredSection resolve={locations} skeleton="inline">
                   {(locs) => (
                     <div>
-                      <FormSelect
+                      <SearchableSelect
                         id="logisticsLocationId"
-                        name="logisticsLocationId"
                         label="Logistics Location"
-                        defaultValue={user.logisticsLocationId ?? ''}
+                        value={logisticsLocationEdit}
+                        onChange={setLogisticsLocationEdit}
                         placeholder="Select location"
+                        searchPlaceholder="Search locations..."
                         options={locs.map((loc: UserCreateLocation) => ({
                           value: loc.id,
-                          label: `${loc.name} — ${loc.address}`,
+                          label: loc.name,
+                          description: loc.address,
                         }))}
                       />
                       {locs.length === 0 && (
