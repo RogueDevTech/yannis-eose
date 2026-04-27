@@ -129,15 +129,15 @@ export function AdSpendDayAccordion({
                   <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="text-xs text-app-fg-muted uppercase tracking-wider">
-                          <th className="px-4 py-2 text-left font-medium">Campaign</th>
-                          <th className="px-4 py-2 text-left font-medium">Product</th>
-                          <th className="px-4 py-2 text-left font-medium">Platform</th>
-                          <th className="px-4 py-2 text-right font-medium">Amount</th>
-                          <th className="px-4 py-2 text-left font-medium">Ad</th>
-                          <th className="px-4 py-2 text-left font-medium">Screenshot</th>
-                          <th className="px-4 py-2 text-left font-medium">Status</th>
-                          {canModerate && <th className="px-4 py-2 text-left font-medium">Actions</th>}
+                        <tr>
+                          <th className="table-header !py-2">Campaign</th>
+                          <th className="table-header !py-2">Product</th>
+                          <th className="table-header !py-2">Platform</th>
+                          <th className="table-header !py-2 text-right">Amount</th>
+                          <th className="table-header !py-2">Ad</th>
+                          <th className="table-header !py-2">Screenshot</th>
+                          <th className="table-header !py-2">Status</th>
+                          {canModerate && <th className="table-header !py-2">Actions</th>}
                         </tr>
                       </thead>
                       <tbody>

@@ -366,13 +366,50 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       `/trpc/branches.canMirrorToUser?input=${encodeURIComponent(JSON.stringify({ targetUserId: profileUser.id }))}`,
       { method: 'GET', cookie },
     );
-    const mirrorPayload = mirrorRes.data as { result?: { data?: { allowed: boolean } } } | undefined;
-    const viewerCanMirror =
-      profileUser.status === 'ACTIVE' &&
-      mirrorRes.ok &&
-      mirrorPayload?.result?.data?.allowed === true;
+    const mirrorData = mirrorRes.data as
+      | {
+          result?: {
+            data?: {
+              allowed: boolean;
+              previewEligible: boolean;
+              nestedMirrorSession: boolean;
+            };
+          };
+        }
+      | undefined;
+    const m = mirrorData?.result?.data;
+    const viewerShowsMirror =
+      profileUser.status === 'ACTIVE' && mirrorRes.ok && !!m && (m.allowed === true || m.previewEligible === true);
+    const mirrorSubmitDisabled =
+      profileUser.status === 'ACTIVE' && mirrorRes.ok && !!m && m.allowed !== true && m.previewEligible === true;
 
-    return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, currentFinanceOfficer, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS, canEditLimited, viewerCanMirror, isSelfView };
+    return {
+      user,
+      products,
+      locations,
+      plans,
+      recentOrders,
+      payouts,
+      adjustments,
+      auditLog,
+      marketingMetrics,
+      fundingBalance,
+      pendingEmailChange,
+      stockMovements,
+      financeActivity,
+      pushStatus,
+      activeHeads,
+      currentFinanceOfficer,
+      branchesList,
+      canDisburseToThisUser,
+      isSuperAdmin,
+      isViewerHeadOfMarketing,
+      isViewerHeadOfCS,
+      canEditLimited,
+      viewerShowsMirror,
+      mirrorSubmitDisabled,
+      isSelfView,
+    };
   })();
 
   return defer({ userDetail: userDetailPromise });

@@ -576,7 +576,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
 
       {/* Content */}
       {activeTab === 'providers' && (
-        <div className="card p-0 overflow-hidden">
+        <div className="card p-0">
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -669,7 +669,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       )}
 
       {activeTab === 'locations' && (
-        <div className="card p-0 overflow-hidden">
+        <div className="card p-0">
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
               <thead>

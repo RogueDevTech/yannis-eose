@@ -9,9 +9,15 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
+import { ExportModal } from '~/components/ui/export-modal';
+import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { formatNaira } from '~/lib/format-amount';
 import { MediaBuyerBalanceCard } from './MediaBuyerBalanceCard';
 import type { FundingBalanceRow } from './types';
+import {
+  confirmationRateColorClass,
+  deliveryRateColorClass,
+} from '~/lib/rate-color';
 
 export interface MarketingTeamPageProps {
   teamMembers: FundingBalanceRow[];
@@ -77,6 +83,7 @@ export function MarketingTeamPage({
 }: MarketingTeamPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
     setSearchQuery(q);
@@ -116,13 +123,36 @@ export function MarketingTeamPage({
         title="Team Analysis"
         description="Media buyer funding, CPA, and profitability (True ROAS vs target) for the selected period."
         actions={
-          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-            <DateFilterBar
-              startDate={dateFilters.startDate}
-              endDate={dateFilters.endDate}
-              periodAllTime={dateFilters.periodAllTime}
-            />
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+              <DateFilterBar
+                startDate={dateFilters.startDate}
+                endDate={dateFilters.endDate}
+                periodAllTime={dateFilters.periodAllTime}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowExportModal(true)}
+            >
+              Export CSV
+            </Button>
           </div>
+        }
+      />
+
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={EXPORT_CONFIGS.marketing_team}
+        initialFilters={
+          dateFilters.periodAllTime
+            ? { periodAllTime: true as const }
+            : dateFilters.startDate && dateFilters.endDate
+              ? { startDate: dateFilters.startDate, endDate: dateFilters.endDate }
+              : {}
         }
       />
 
@@ -236,7 +266,7 @@ export function MarketingTeamPage({
             {/* Desktop: table view (Grid toggle removed per CEO directive 2026-04-26 — the
                 grid duplicated the mobile card layout for desktop with no extra info). */}
             <div className="hidden md:block">
-              <div className="card p-0 overflow-hidden">
+              <div className="card p-0">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[960px]">
                 <thead>
@@ -286,10 +316,10 @@ export function MarketingTeamPage({
                       <td className="table-cell text-right text-app-fg whitespace-nowrap tabular-nums">
                         {m.profitabilityScore != null ? m.profitabilityScore.toFixed(1) : '\u2014'}
                       </td>
-                      <td className="table-cell text-right text-app-fg whitespace-nowrap">
+                      <td className={`table-cell text-right whitespace-nowrap tabular-nums ${confirmationRateColorClass(m.confirmationRate)}`}>
                         {m.confirmationRate != null ? `${Math.round(m.confirmationRate)}%` : '\u2014'}
                       </td>
-                      <td className="table-cell text-right text-app-fg whitespace-nowrap">
+                      <td className={`table-cell text-right whitespace-nowrap tabular-nums ${deliveryRateColorClass(m.deliveryRate)}`}>
                         {m.deliveryRate != null ? `${Math.round(m.deliveryRate)}%` : '\u2014'}
                       </td>
                       <td className="table-cell">

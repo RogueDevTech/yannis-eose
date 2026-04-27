@@ -69,6 +69,9 @@ export function MarketingAdSpendPage({
   statusFilter,
   searchFilter,
   productIdFilter,
+  campaignIdFilter,
+  mediaBuyerIdFilter,
+  mediaBuyersForFilter,
   statusCounts,
   metrics,
   leaderboard,
@@ -92,6 +95,8 @@ export function MarketingAdSpendPage({
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [selectedProductId, setSelectedProductId] = useState(productIdFilter || 'ALL');
+  const [selectedCampaignId, setSelectedCampaignId] = useState(campaignIdFilter || 'ALL');
+  const [selectedMediaBuyerId, setSelectedMediaBuyerId] = useState(mediaBuyerIdFilter || 'ALL');
   const [showAdSpendForm, setShowAdSpendForm] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showLegacyTable, setShowLegacyTable] = useState(false);
@@ -120,7 +125,9 @@ export function MarketingAdSpendPage({
     setSelectedStatus(statusFilter || 'ALL');
     setSearchQuery(searchFilter || '');
     setSelectedProductId(productIdFilter || 'ALL');
-  }, [statusFilter, searchFilter, productIdFilter]);
+    setSelectedCampaignId(campaignIdFilter || 'ALL');
+    setSelectedMediaBuyerId(mediaBuyerIdFilter || 'ALL');
+  }, [statusFilter, searchFilter, productIdFilter, campaignIdFilter, mediaBuyerIdFilter]);
 
   useEffect(() => {
     if (!showAdSpendForm) {
@@ -184,9 +191,18 @@ export function MarketingAdSpendPage({
     };
   }, [showAdSpendForm, formCampaignId, formProductId, formSpendDate, formSpendAmount]);
 
-  const getListParams = (overrides: { page?: number; status?: string; search?: string; productId?: string }) => {
+  const getListParams = (overrides: {
+    page?: number;
+    gpage?: number;
+    status?: string;
+    search?: string;
+    productId?: string;
+    campaignId?: string;
+    mediaBuyerId?: string;
+  }) => {
     const params = new URLSearchParams(searchParams);
     if (overrides.page !== undefined) params.set('page', String(overrides.page));
+    if (overrides.gpage !== undefined) params.set('gpage', String(overrides.gpage));
     if (overrides.status !== undefined) {
       if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
       else params.set('status', overrides.status);
@@ -199,6 +215,21 @@ export function MarketingAdSpendPage({
       if (overrides.productId === 'ALL' || !overrides.productId) params.delete('productId');
       else params.set('productId', overrides.productId);
     }
+    if (overrides.campaignId !== undefined) {
+      if (overrides.campaignId === 'ALL' || !overrides.campaignId) params.delete('campaignId');
+      else params.set('campaignId', overrides.campaignId);
+    }
+    if (overrides.mediaBuyerId !== undefined) {
+      if (overrides.mediaBuyerId === 'ALL' || !overrides.mediaBuyerId) params.delete('mediaBuyerId');
+      else params.set('mediaBuyerId', overrides.mediaBuyerId);
+    }
+    const narrowsGroups =
+      overrides.status !== undefined ||
+      overrides.search !== undefined ||
+      overrides.productId !== undefined ||
+      overrides.campaignId !== undefined ||
+      overrides.mediaBuyerId !== undefined;
+    if (narrowsGroups) params.set('gpage', '1');
     return params;
   };
 
@@ -216,6 +247,16 @@ export function MarketingAdSpendPage({
   const handleAdSpendProductChange = (productId: string) => {
     setSelectedProductId(productId);
     setSearchParams(getListParams({ productId, page: 1 }));
+  };
+
+  const handleAdSpendCampaignChange = (campaignId: string) => {
+    setSelectedCampaignId(campaignId);
+    setSearchParams(getListParams({ campaignId, page: 1 }));
+  };
+
+  const handleAdSpendMediaBuyerChange = (mediaBuyerId: string) => {
+    setSelectedMediaBuyerId(mediaBuyerId);
+    setSearchParams(getListParams({ mediaBuyerId, page: 1 }));
   };
 
   const handleAdSpendSearchSubmit = (e: React.FormEvent) => {
@@ -697,7 +738,7 @@ export function MarketingAdSpendPage({
       </ResponsiveFormPanel>
 
       {/* Phase 17: Daily groups accordion — primary view. */}
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0">
         <div className="px-4 py-3 border-b border-app-border flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-app-fg">Daily expenses</h2>
           <Button
@@ -709,29 +750,12 @@ export function MarketingAdSpendPage({
             {showLegacyTable ? 'Hide detailed view' : 'Detailed view'}
           </Button>
         </div>
-        <div className="p-4">
-          <AdSpendDayAccordion
-            groups={groups}
-            showMediaBuyerColumn={viewMode !== 'media_buyer'}
-            canModerate={viewMode !== 'media_buyer'}
-            page={groupsPage}
-            totalPages={groupsTotalPages}
-            actionUrl="/admin/marketing/ad-spend"
-          />
-        </div>
-      </div>
-
-      {showLegacyTable && (
-      <div className="card p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-app-border">
-          <h2 className="text-lg font-semibold text-app-fg">Detailed view (per-line)</h2>
-        </div>
         <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center px-4 py-3 border-b border-app-border">
           <form onSubmit={handleAdSpendSearchSubmit} className="flex gap-2 flex-1 min-w-0">
             <SearchInput
               value={searchQuery}
               onChange={(val) => setSearchQuery(val)}
-              placeholder="Search by media buyer, product, campaign, or entry ID..."
+              placeholder="Search buyer, product, campaign, or entry ID..."
               wrapperClassName="flex-1 min-w-0"
             />
             <Button type="submit" variant="secondary" size="sm">
@@ -757,12 +781,8 @@ export function MarketingAdSpendPage({
             }))}
             wrapperClassName="w-auto min-w-[11rem]"
           />
-          {/* Product filter — narrows the list to spend on a single product. Useful for HoM
-              auditing per-product CPA / ROAS, or for an MB scoping their own log down to one
-              campaign's product. Loaded from the same `products` array used by the create form,
-              so for media buyers it's already pre-scoped to their assigned products. */}
           <SearchableSelect
-            id="marketing-adspend-product-filter"
+            id="marketing-adspend-product-filter-main"
             value={selectedProductId}
             onChange={handleAdSpendProductChange}
             options={[
@@ -772,11 +792,55 @@ export function MarketingAdSpendPage({
             wrapperClassName="w-auto min-w-[12rem]"
             searchPlaceholder="Search products..."
           />
+          <SearchableSelect
+            id="marketing-adspend-campaign-filter"
+            value={selectedCampaignId}
+            onChange={handleAdSpendCampaignChange}
+            options={[
+              { value: 'ALL', label: 'All campaigns' },
+              ...campaigns
+                .filter((c: Campaign) => c.status === 'ACTIVE')
+                .map((c: Campaign) => ({ value: c.id, label: c.name })),
+            ]}
+            wrapperClassName="w-auto min-w-[12rem]"
+            searchPlaceholder="Search campaigns..."
+          />
+          {viewMode !== 'media_buyer' && mediaBuyersForFilter.length > 0 && (
+            <SearchableSelect
+              id="marketing-adspend-media-buyer-filter"
+              value={selectedMediaBuyerId}
+              onChange={handleAdSpendMediaBuyerChange}
+              options={[
+                { value: 'ALL', label: 'All media buyers' },
+                ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+              ]}
+              wrapperClassName="w-auto min-w-[12rem]"
+              searchPlaceholder="Search media buyers..."
+            />
+          )}
           {isFilterLoading && (
             <span className="flex items-center text-app-fg-muted" aria-hidden>
               <Spinner size="sm" className="shrink-0" />
             </span>
           )}
+        </div>
+        <div className="p-4">
+          <AdSpendDayAccordion
+            groups={groups}
+            showMediaBuyerColumn={viewMode !== 'media_buyer'}
+            canModerate={viewMode !== 'media_buyer'}
+            page={groupsPage}
+            totalPages={groupsTotalPages}
+            actionUrl="/admin/marketing/ad-spend"
+          />
+        </div>
+      </div>
+
+      {showLegacyTable && (
+      <div className="card p-0">
+        <div className="px-4 py-3 border-b border-app-border">
+          <h2 className="text-lg font-semibold text-app-fg">Detailed view (per-line)</h2>
+          <p className="text-sm text-app-fg-muted mt-1">Uses the same filters as Daily expenses above.</p>
         </div>
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">

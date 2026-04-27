@@ -33,6 +33,8 @@ export interface InactiveAgent {
 
 export interface CSOrder {
   id: string;
+  /** Set on API list rows — needed for branch-scoped mutations when session has no `currentBranchId`. */
+  branchId?: string | null;
   customerName: string;
   customerPhoneDisplay: string;
   status: string;
@@ -201,6 +203,4 @@ export interface CSDashboardStreamData {
   canDeleteCart?: boolean;
   /** Products list for offline order form (when canCreateOffline). */
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
-  /** Deep-link: open this tab on load (from `?tab=`). */
-  initialTab?: CSQueueTab;
 }

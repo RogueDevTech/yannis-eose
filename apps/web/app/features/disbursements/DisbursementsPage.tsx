@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useFetcher, useRevalidator, useNavigation, useSearchParams, Link } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { createFundingSchema, approveFundingRequestSchema } from '@yannis/shared/validators';
-import { PageNotification } from '~/components/ui/page-notification';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { AmountInput } from '~/components/ui/amount-input';
 import { formatNaira } from '~/lib/format-amount';
@@ -36,22 +35,38 @@ const STATUS_LABELS: Record<string, string> = {
   DISPUTED: 'Disputed',
 };
 
-type DisbursementsSubTab = 'activity' | 'balances';
-type ActivityType = 'ALL' | 'REQUESTS' | 'DISBURSEMENTS';
+/** Top-level route tabs — all data is loaded in one shot; tab switches skip loader (see route shouldRevalidate). */
+type MainTab = 'disbursements' | 'requests' | 'balances';
 
-function disbursementsTabFromSearchParams(sp: URLSearchParams): DisbursementsSubTab {
+function mainTabFromSearchParams(sp: URLSearchParams): MainTab {
   const t = sp.get('tab');
   if (t === 'balances') return 'balances';
-  return 'activity';
+  if (t === 'requests') return 'requests';
+  // Legacy: ?tab=activity&type=REQUESTS|DISBURSEMENTS
+  if (t === 'activity') {
+    const type = sp.get('type');
+    if (type === 'REQUESTS') return 'requests';
+    return 'disbursements';
+  }
+  return 'disbursements';
 }
 
-function activityTypeFromSearchParams(sp: URLSearchParams): ActivityType {
-  const type = sp.get('type');
-  if (type === 'REQUESTS' || type === 'DISBURSEMENTS') return type;
-  const legacyTab = sp.get('tab');
-  if (legacyTab === 'requests') return 'REQUESTS';
-  if (legacyTab === 'disbursements') return 'DISBURSEMENTS';
-  return 'ALL';
+/** Wraps scrollable table cards so filter/pagination refetches show a centered spinner without shifting layout. */
+function TableLoadingOverlay({ show, children }: { show: boolean; children: React.ReactNode }) {
+  return (
+    <div className="relative min-h-[12rem]">
+      {children}
+      {show ? (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-app-elevated/70 backdrop-blur-[1px]"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <Spinner size="lg" />
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 
@@ -382,8 +397,7 @@ export function DisbursementsPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = navigation.state === 'loading';
   const [showForm, setShowForm] = useState(!!preselectedReceiverId);
-  const activeTab = disbursementsTabFromSearchParams(searchParams);
-  const activityType = activityTypeFromSearchParams(searchParams);
+  const mainTab = mainTabFromSearchParams(searchParams);
   const [receiptModal, setReceiptModal] = useState<DisbursementRecord | null>(null);
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
@@ -442,14 +456,21 @@ export function DisbursementsPage({
   // Search input is intentionally NOT optimistic — we only fire on submit so the user gets a
   // single, debounce-free query against the server. Prefilled from the URL on mount/back-nav.
   const [searchQuery, setSearchQuery] = useState(filters.search || '');
-  const [selectedActivityType, setSelectedActivityType] = useState<ActivityType>(activityType);
   const [showExportModal, setShowExportModal] = useState(false);
   useEffect(() => {
     setOptimisticStatus(filters.status || 'ALL');
     setOptimisticReceiver(filters.receiver || 'ALL');
     setSearchQuery(filters.search || '');
-    setSelectedActivityType(activityType);
-  }, [filters.status, filters.receiver, filters.search, activityType]);
+  }, [filters.status, filters.receiver, filters.search]);
+
+  const setMainTab = useCallback((tab: MainTab) => {
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('tab', tab);
+      next.delete('type');
+      return next;
+    });
+  }, [setSearchParams]);
 
   const canCreate = canDisburseToHoM;
   const recipients = canDisburseToHoM ? users : [];
@@ -536,11 +557,6 @@ export function DisbursementsPage({
                 + New disbursement
               </Button>
             )}
-            {isFilterLoading && (
-              <span className="flex items-center text-app-fg-muted" aria-hidden>
-                <Spinner size="sm" className="shrink-0" />
-              </span>
-            )}
           </div>
         }
       />
@@ -588,37 +604,37 @@ export function DisbursementsPage({
         ]}
       />
 
-      {/* Tabs — default tab is Activity (`tab` omitted or unknown). */}
-      <div className="flex gap-1 border-b border-app-border">
+      {/* Primary tabs — loader skips refetch when only `tab` changes (route shouldRevalidate). */}
+      <div className="flex flex-wrap gap-1 border-b border-app-border">
         <button
           type="button"
-          onClick={() => {
-            setSearchParams((p) => {
-              const next = new URLSearchParams(p);
-              next.set('tab', 'activity');
-              return next;
-            });
-          }}
+          onClick={() => setMainTab('disbursements')}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'activity'
+            mainTab === 'disbursements'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
               : 'border-transparent text-app-fg-muted hover:text-app-fg'
           }`}
         >
-          Activity
-          <span className="ml-1.5 text-xs text-surface-400">({fundingRequestsTotal + totalFunding})</span>
+          Disbursements
+          <span className="ml-1.5 text-xs text-surface-400">({totalFunding})</span>
         </button>
         <button
           type="button"
-          onClick={() => {
-            setSearchParams((p) => {
-              const next = new URLSearchParams(p);
-              next.set('tab', 'balances');
-              return next;
-            });
-          }}
+          onClick={() => setMainTab('requests')}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'balances'
+            mainTab === 'requests'
+              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+              : 'border-transparent text-app-fg-muted hover:text-app-fg'
+          }`}
+        >
+          Funding requests
+          <span className="ml-1.5 text-xs text-surface-400">({fundingRequestsTotal})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMainTab('balances')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            mainTab === 'balances'
               ? 'border-brand-500 text-brand-600 dark:text-brand-400'
               : 'border-transparent text-app-fg-muted hover:text-app-fg'
           }`}
@@ -628,39 +644,11 @@ export function DisbursementsPage({
         </button>
       </div>
 
-      {/* Activity tab */}
-      {activeTab === 'activity' && (
+      {/* Disbursements ledger */}
+      {mainTab === 'disbursements' && (
         <>
-          {/* Filter bar */}
           <div className="card">
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
-              <FormSelect
-                id="activity-type-filter"
-                value={selectedActivityType}
-                onChange={(e) => {
-                  const nextType = e.target.value as ActivityType;
-                  setSelectedActivityType(nextType);
-                  setSearchParams((p) => {
-                    const next = new URLSearchParams(p);
-                    next.set('tab', 'activity');
-                    if (nextType === 'ALL') next.delete('type');
-                    else next.set('type', nextType);
-                    return next;
-                  });
-                }}
-                options={[
-                  { value: 'ALL', label: 'All activity' },
-                  { value: 'REQUESTS', label: 'Requests' },
-                  { value: 'DISBURSEMENTS', label: 'Disbursements' },
-                ]}
-                controlSize="sm"
-                wrapperClassName="w-full sm:w-44"
-                aria-label="Filter activity type"
-              />
-
-              {selectedActivityType !== 'REQUESTS' && (
-                <>
-              {/* Search — submits on form submit, not on every keystroke. */}
               <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1 min-w-0">
                 <SearchInput
                   type="search"
@@ -699,21 +687,11 @@ export function DisbursementsPage({
                 wrapperClassName="w-full sm:w-52"
                 searchPlaceholder="Search recipients..."
               />
-                </>
-              )}
-
-              {isFilterLoading && (
-                <span className="flex items-center text-app-fg-muted" aria-hidden>
-                  <Spinner size="sm" className="shrink-0" />
-                </span>
-              )}
             </div>
           </div>
 
-          {(selectedActivityType === 'ALL' || selectedActivityType === 'DISBURSEMENTS') && (
-            <>
-          {/* Table */}
-          <div className="card p-0 overflow-hidden">
+          <TableLoadingOverlay show={isFilterLoading}>
+          <div className="card p-0 overflow-hidden rounded-xl">
             {/* Desktop table */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
@@ -830,18 +808,18 @@ export function DisbursementsPage({
               />
             )}
           </div>
+          </TableLoadingOverlay>
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <Pagination page={page} totalPages={totalPages} pageParam="page" />
           )}
-            </>
-          )}
+        </>
+      )}
 
-          {(selectedActivityType === 'ALL' || selectedActivityType === 'REQUESTS') && (
-            <>
-              {/* Requests tab — funding requests from Media Buyers / HoM */}
-              <div className="card p-0 overflow-hidden">
+      {mainTab === 'requests' && (
+        <>
+              <TableLoadingOverlay show={isFilterLoading}>
+              <div className="card p-0 overflow-hidden rounded-xl">
                 <div className="px-4 py-3 border-b border-app-border">
                   <h2 className="text-sm font-semibold text-app-fg">Funding requests</h2>
                   <p className="text-xs text-app-fg-muted mt-0.5">
@@ -974,18 +952,18 @@ export function DisbursementsPage({
                   <EmptyState title="No funding requests" />
                 )}
               </div>
+              </TableLoadingOverlay>
               {requestsTotalPages > 1 && (
                 <Pagination page={requestsPage} totalPages={requestsTotalPages} pageParam="requestsPage" />
               )}
-            </>
-          )}
         </>
       )}
 
       {/* Balances tab */}
-      {activeTab === 'balances' && (
+      {mainTab === 'balances' && (
         <>
-          <div className="card p-0 overflow-hidden">
+          <TableLoadingOverlay show={isFilterLoading}>
+          <div className="card p-0 overflow-hidden rounded-xl">
           <div className="px-4 py-3 border-b border-app-border">
             <h2 className="text-sm font-semibold text-app-fg">Recipient balances</h2>
             <p className="text-xs text-app-fg-muted mt-0.5">
@@ -1041,8 +1019,8 @@ export function DisbursementsPage({
                                   setSearchParams((p) => {
                                     const next = new URLSearchParams(p);
                                     next.set('receiverId', b.userId);
-                                    next.set('tab', 'activity');
-                                    next.set('type', 'DISBURSEMENTS');
+                                    next.set('tab', 'disbursements');
+                                    next.delete('type');
                                     return next;
                                   });
                                   setShowForm(true);
@@ -1091,8 +1069,8 @@ export function DisbursementsPage({
                             setSearchParams((p) => {
                               const next = new URLSearchParams(p);
                               next.set('receiverId', b.userId);
-                              next.set('tab', 'activity');
-                              next.set('type', 'DISBURSEMENTS');
+                              next.set('tab', 'disbursements');
+                              next.delete('type');
                               return next;
                             });
                             setShowForm(true);
@@ -1111,6 +1089,7 @@ export function DisbursementsPage({
             <EmptyState title="No recipient balances available" />
           )}
         </div>
+        </TableLoadingOverlay>
         {balancesTotalPages > 1 && (
           <Pagination page={balancesPage} totalPages={balancesTotalPages} pageParam="balancesPage" />
         )}

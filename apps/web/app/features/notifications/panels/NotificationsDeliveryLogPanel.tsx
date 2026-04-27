@@ -256,7 +256,7 @@ export function NotificationsDeliveryLogPanel({
         </p>
       )}
 
-      <div className="card overflow-hidden p-0">
+      <div className="card p-0">
         {logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-app-fg-muted">
             <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1.2} stroke="currentColor">
@@ -272,9 +272,9 @@ export function NotificationsDeliveryLogPanel({
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-app-border">
-              <thead className="bg-app-hover/80">
+              <thead>
                 <tr>
-                  <th className="px-4 py-3">
+                  <th className="table-header w-12 text-center">
                     <input
                       type="checkbox"
                       checked={selected.size === logs.length && logs.length > 0}
@@ -285,7 +285,7 @@ export function NotificationsDeliveryLogPanel({
                   {['User', 'Message', 'Trigger', 'Sent', 'Status', 'Shown at', 'Clicked at', ''].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-app-fg-muted"
+                      className="table-header"
                     >
                       {h}
                     </th>

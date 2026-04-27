@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, and, or, asc, desc, count, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -18,13 +18,15 @@ import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { withActor } from '../common/db/with-actor';
+import { withActor, withActorAndBranch } from '../common/db/with-actor';
 
 /** Virtual buffer: show 10% less stock to prevent overselling during bursts */
 const VIRTUAL_BUFFER_RATIO = 0.10;
 
 @Injectable()
 export class InventoryService {
+  private readonly logger = new Logger(InventoryService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
@@ -125,7 +127,11 @@ export class InventoryService {
     const reasonUnitCost = totalLandedCost.toFixed(2);
 
     try {
-      const batch = await withActor(this.db, actor, async (tx) => {
+      // Branch context is set alongside the actor because `inventory_levels` is
+      // branch-scoped (RLS in migration 0042). Without `yannis.current_branch_id`,
+      // the existing-row UPDATE branch can fail policy checks when the user has
+      // a branch selected but the row's `branch_id` doesn't match.
+      const batch = await withActorAndBranch(this.db, actor, async (tx) => {
         // Create the FIFO batch. Numeric fields are explicitly cast to avoid trigger/history
         // failures where numeric values can degrade to text through dynamic SQL paths.
         const batchRows = await tx
@@ -203,7 +209,14 @@ export class InventoryService {
         throw error;
       }
 
-      const dbError = error as { code?: string };
+      // Always log the underlying error with full context — without this, we get
+      // "Unexpected Server Error" on the client and zero clue server-side.
+      const dbError = error as { code?: string; message?: string; detail?: string };
+      this.logger.error(
+        `intake failed actor=${actor.id} branch=${actor.currentBranchId ?? 'none'} product=${input.productId} location=${input.locationId} pgcode=${dbError.code ?? 'none'} msg=${dbError.message ?? '(no message)'} detail=${dbError.detail ?? ''}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
       if (dbError.code === '23503') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -218,9 +231,25 @@ export class InventoryService {
         });
       }
 
+      // RLS policy violation — almost always means the row's branch_id doesn't
+      // match the actor's current branch. Surface a helpful message instead of
+      // the generic "Unexpected Server Error".
+      if (dbError.code === '42501') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Stock intake blocked by branch isolation. Switch to the location\'s branch (or All branches) and retry.',
+        });
+      }
+
+      // Bubble the actual underlying message up so the user can act on it. The
+      // catch-all used to swallow this and return "Failed to complete stock
+      // intake." which was indistinguishable from any other failure.
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to complete stock intake.',
+        message: dbError.message
+          ? `Stock intake failed: ${dbError.message}`
+          : 'Stock intake failed. Check API logs for details.',
       });
     }
   }

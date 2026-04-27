@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, useTransition } from 'react';
-import { Link, useFetcher, useNavigation, useRevalidator, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useNavigation, useRevalidator, useRouteLoaderData, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { Textarea } from '~/components/ui/textarea';
@@ -18,17 +18,18 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
-import type {
-  CSDashboardStreamData,
-  AgentWorkload,
-  InactiveAgent,
-  CSOrder,
-  DuplicatePair,
-  CSLeaderboardEntry,
-  PendingCart,
-  LiveActivityItem,
-  CSQueueTab,
-  CloserWorkloadOrder,
+import {
+  parseCSQueueTabFromSearchParam,
+  type CSDashboardStreamData,
+  type AgentWorkload,
+  type InactiveAgent,
+  type CSOrder,
+  type DuplicatePair,
+  type CSLeaderboardEntry,
+  type PendingCart,
+  type LiveActivityItem,
+  type CSQueueTab,
+  type CloserWorkloadOrder,
 } from './types';
 
 /** Most recently active closers first; stable tie-break for strip + View all. */
@@ -39,15 +40,6 @@ function compareCloserWorkloadsByRecency(a: AgentWorkload, b: AgentWorkload): nu
   const byName = a.agentName.localeCompare(b.agentName, undefined, { sensitivity: 'base' });
   if (byName !== 0) return byName;
   return a.agentId.localeCompare(b.agentId);
-}
-
-function resolveInitialActiveTab(
-  initialTab: CSQueueTab | undefined,
-  isClaimMode: boolean,
-): CSQueueTab {
-  if (initialTab === 'claim' && !isClaimMode) return 'queue';
-  if (initialTab) return initialTab;
-  return 'queue';
 }
 
 // ─── Agent Workload Card (reusable for strip + modal) ───
@@ -792,10 +784,10 @@ function ActiveOrderDetailModal({
   );
 }
 
-function DetailRow({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) {
+function DetailRow({ label, value, icon }: { label: string; value: React.ReactNode; icon?: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <span className="shrink-0 text-app-fg-muted">{icon}</span>
+      {icon ? <span className="shrink-0 text-app-fg-muted">{icon}</span> : <span className="shrink-0 w-4" aria-hidden />}
       <div className="min-w-0 flex-1">
         <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted">{label}</p>
         <div className="text-sm font-medium text-app-fg truncate mt-0.5">{value}</div>
@@ -828,8 +820,27 @@ export function CSDashboardPage({
   canDeleteCart = false,
   productsForOfflineOrder = [],
   initialCartActivity,
-  initialTab,
 }: CSDashboardStreamData) {
+  const adminRouteData = useRouteLoaderData('routes/admin') as
+    | { user?: { currentBranchId?: string | null }; branches?: Array<{ id: string }> }
+    | undefined;
+
+  /** SuperAdmin / org-wide HoCS have no session branch — tRPC requires explicit `branchId` on scoped mutations. */
+  function csMutationBranchPayload(ordersForBranch: Array<{ branchId?: string | null }>): Record<string, string> {
+    const sessionBranch = adminRouteData?.user?.currentBranchId;
+    if (sessionBranch) return { branchId: sessionBranch };
+    const fromOrders = [
+      ...new Set(
+        ordersForBranch
+          .map((o) => o.branchId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    ];
+    if (fromOrders.length >= 1) return { branchId: fromOrders[0] as string };
+    const fb = adminRouteData?.branches?.[0]?.id;
+    return fb ? { branchId: fb } : {};
+  }
+
   const fetcher = useFetcher();
   const fetcherStateRef = useRef(fetcher.state);
   const revalidator = useRevalidator();
@@ -840,8 +851,26 @@ export function CSDashboardPage({
   const cartsFetcher = useFetcher<{ activityItems?: LiveActivityItem[]; pendingCarts?: PendingCart[]; abandonedCarts?: PendingCart[] }>();
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<CSQueueTab>(() =>
-    resolveInitialActiveTab(initialTab, isClaimMode ?? false),
+  /** Tab follows `?tab=` so deep links and client <Link> navigations (e.g. Hot Swap from a closer card) switch the panel — local useState did not update when the URL changed. */
+  const activeTab = useMemo((): CSQueueTab => {
+    return parseCSQueueTabFromSearchParam(searchParams.get('tab'), isClaimMode) ?? 'queue';
+  }, [searchParams, isClaimMode]);
+  const setActiveTab = useCallback(
+    (v: CSQueueTab) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (v === 'queue') {
+            next.delete('tab');
+          } else {
+            next.set('tab', v);
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
   );
   // Track which order is being claimed (to show per-row loading state)
   const [claimingOrderId, setClaimingOrderId] = useState<string | null>(null);
@@ -851,10 +880,19 @@ export function CSDashboardPage({
   const [hotSwapTo, setHotSwapTo] = useState('');
   const [hotSwapOrderIds, setHotSwapOrderIds] = useState<string[]>([]);
   /** Reassign order modal: order + current assignee so we can pick new agent */
-  const [reassignOrder, setReassignOrder] = useState<{ orderId: string; customerName: string; assignedCsId: string } | null>(null);
+  const [reassignOrder, setReassignOrder] = useState<{
+    orderId: string;
+    customerName: string;
+    assignedCsId: string;
+    branchId?: string | null;
+  } | null>(null);
   const [reassignToAgentId, setReassignToAgentId] = useState('');
   /** Pending confirm for Cancel order (replaces window.confirm) */
-  const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ orderId: string; customerName: string } | null>(null);
+  const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{
+    orderId: string;
+    customerName: string;
+    branchId?: string | null;
+  } | null>(null);
   /** Reason typed/picked in the cancel modal — required, min 10 chars before Submit enables. */
   const [cancelReason, setCancelReason] = useState('Customer not picking');
   /** Selected live activity item for detail modal */
@@ -863,6 +901,103 @@ export function CSDashboardPage({
   const [selectedActiveOrder, setSelectedActiveOrder] = useState<CSOrder | null>(null);
   /** Selected unassigned queue order for detail modal */
   const [selectedQueueOrder, setSelectedQueueOrder] = useState<CSOrder | null>(null);
+  // Lazy-fetched full order details for the queue preview modal. Populated when
+  // the user clicks "View details" on an unassigned card; cleared when modal closes.
+  const [queueOrderDetails, setQueueOrderDetails] = useState<{
+    loading: boolean;
+    error: string | null;
+    items: Array<{ id: string; productId: string; quantity: number; unitPrice: string; productName: string | null }>;
+    deliveryAddress: string | null;
+    deliveryNotes: string | null;
+    deliveryState: string | null;
+    customerEmail: string | null;
+    customerGender: string | null;
+    preferredDeliveryDate: string | null;
+    paymentMethod: string | null;
+    campaignName: string | null;
+    mediaBuyerName: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!selectedQueueOrder) {
+      setQueueOrderDetails(null);
+      return;
+    }
+    const orderId = selectedQueueOrder.id;
+    const controller = new AbortController();
+    setQueueOrderDetails({
+      loading: true,
+      error: null,
+      items: [],
+      deliveryAddress: null,
+      deliveryNotes: null,
+      deliveryState: null,
+      customerEmail: null,
+      customerGender: null,
+      preferredDeliveryDate: null,
+      paymentMethod: null,
+      campaignName: null,
+      mediaBuyerName: null,
+    });
+    const apiUrl = typeof window !== 'undefined' ? window.__ENV?.API_URL || 'http://localhost:4000' : '';
+    const input = encodeURIComponent(JSON.stringify({ orderId }));
+    void (async () => {
+      try {
+        const res = await fetch(`${apiUrl}/trpc/orders.getById?input=${input}`, {
+          credentials: 'include',
+          signal: controller.signal,
+        });
+        const json = (await res.json()) as {
+          result?: {
+            data?: {
+              order?: {
+                deliveryAddress?: string | null;
+                deliveryNotes?: string | null;
+                deliveryState?: string | null;
+                customerEmail?: string | null;
+                customerGender?: string | null;
+                preferredDeliveryDate?: string | null;
+                paymentMethod?: string | null;
+                campaignName?: string | null;
+                mediaBuyerName?: string | null;
+              };
+              items?: Array<{ id: string; productId: string; quantity: number; unitPrice: string; productName: string | null }>;
+            };
+          };
+          error?: { message?: string };
+        };
+        if (controller.signal.aborted) return;
+        if (!res.ok) {
+          setQueueOrderDetails((prev) => prev && { ...prev, loading: false, error: json?.error?.message ?? 'Could not load order details' });
+          return;
+        }
+        const data = json?.result?.data;
+        const order = data?.order ?? {};
+        setQueueOrderDetails({
+          loading: false,
+          error: null,
+          items: data?.items ?? [],
+          deliveryAddress: order.deliveryAddress ?? null,
+          deliveryNotes: order.deliveryNotes ?? null,
+          deliveryState: order.deliveryState ?? null,
+          customerEmail: order.customerEmail ?? null,
+          customerGender: order.customerGender ?? null,
+          preferredDeliveryDate: order.preferredDeliveryDate ?? null,
+          paymentMethod: order.paymentMethod ?? null,
+          campaignName: order.campaignName ?? null,
+          mediaBuyerName: order.mediaBuyerName ?? null,
+        });
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        setQueueOrderDetails((prev) => prev && {
+          ...prev,
+          loading: false,
+          error: e instanceof Error ? e.message : 'Could not load order details',
+        });
+      }
+    })();
+    return () => controller.abort();
+  }, [selectedQueueOrder]);
   /** Multi-select for bulk-assign on the Unassigned Queue tab. */
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
   /** Chosen closer inside the Unassigned "Assign" modal (assignable only). */
@@ -1101,10 +1236,11 @@ export function CSDashboardPage({
 
     if (wasSubmitting && fetcher.state === 'idle' && fetcher.data) {
       const result = fetcher.data as { success?: boolean };
-        if (result.success && fetcher.formData?.get('intent') === 'bulkReassign') {
-          setHotSwapOrderIds([]);
-          revalidator.revalidate();
-        }
+      const lastIntent = (fetcher as { formData?: FormData | null }).formData?.get('intent');
+      if (result.success && lastIntent === 'bulkReassign') {
+        setHotSwapOrderIds([]);
+        revalidator.revalidate();
+      }
     }
   }, [fetcher.state, fetcher.data, reassignOrder, cancelConfirmOrder]);
 
@@ -1142,6 +1278,7 @@ export function CSDashboardPage({
         orderIds: JSON.stringify(hotSwapOrderIds),
         fromAgentId: hotSwapFrom,
         toAgentId: hotSwapTo,
+        ...csMutationBranchPayload(hotSwapSourceOrders.filter((o) => hotSwapOrderIds.includes(o.id))),
       },
       { method: 'post' },
     );
@@ -1155,6 +1292,11 @@ export function CSDashboardPage({
         orderIds: JSON.stringify([reassignOrder.orderId]),
         fromAgentId: reassignOrder.assignedCsId,
         toAgentId: reassignToAgentId,
+        ...csMutationBranchPayload(
+          reassignOrder.branchId
+            ? [{ branchId: reassignOrder.branchId }]
+            : activeOrders.filter((o) => o.id === reassignOrder.orderId),
+        ),
       },
       { method: 'post' },
     );
@@ -1213,6 +1355,7 @@ export function CSDashboardPage({
           onSuccess={() => { setCreateOfflineOpen(false); setCreateOfflinePrefill(null); }}
           initialCustomerName={createOfflinePrefill?.customerName}
           products={productsForOfflineOrder}
+          branchId={csMutationBranchPayload(unassignedOrders).branchId}
         />
       )}
 
@@ -1553,8 +1696,16 @@ export function CSDashboardPage({
         order={selectedActiveOrder}
         agent={selectedActiveOrder ? workloads.find((w: AgentWorkload) => w.agentId === selectedActiveOrder.assignedCsId) : undefined}
         onClose={() => setSelectedActiveOrder(null)}
-        onReassign={(order) => order.assignedCsId && setReassignOrder({ orderId: order.id, customerName: order.customerName, assignedCsId: order.assignedCsId })}
-        onCancel={(order) => setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName })}
+        onReassign={(order) =>
+          order.assignedCsId &&
+          setReassignOrder({
+            orderId: order.id,
+            customerName: order.customerName,
+            assignedCsId: order.assignedCsId,
+            branchId: order.branchId,
+          })}
+        onCancel={(order) =>
+          setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName, branchId: order.branchId })}
       />
 
       {/* Closer workload detail modal */}
@@ -1695,7 +1846,11 @@ export function CSDashboardPage({
             size="sm"
             className="shrink-0 -mb-px"
             disabled={fetcher.state !== 'idle'}
-            onClick={() => fetcher.submit({ intent: 'redistribute' }, { method: 'post' })}
+            onClick={() =>
+              fetcher.submit(
+                { intent: 'redistribute', ...csMutationBranchPayload(unassignedOrders) },
+                { method: 'post' },
+              )}
           >
             {fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'redistribute'
               ? 'Distributing…'
@@ -1957,6 +2112,7 @@ export function CSDashboardPage({
                   intent: 'bulkAssignToCS',
                   orderIds: JSON.stringify(Array.from(selectedQueueIds)),
                   csAgentId: bulkAssignAgentId,
+                  ...csMutationBranchPayload(unassignedOrders.filter((o) => selectedQueueIds.has(o.id))),
                 },
                 { method: 'post' },
               );
@@ -1971,7 +2127,7 @@ export function CSDashboardPage({
       {selectedQueueOrder && (() => {
         const qOrder = selectedQueueOrder;
         return (
-          <Modal open onClose={() => setSelectedQueueOrder(null)} maxWidth="max-w-sm" backdropBlur>
+          <Modal open onClose={() => setSelectedQueueOrder(null)} maxWidth="max-w-md" backdropBlur>
             <div>
               {/* Header */}
               <div className="relative bg-gradient-to-br from-warning-500 to-warning-700 dark:from-warning-600 dark:to-warning-900 px-5 pt-5 pb-8 rounded-t-2xl md:rounded-t-xl">
@@ -2030,7 +2186,118 @@ export function CSDashboardPage({
                       </svg>
                     }
                   />
+                  {queueOrderDetails?.campaignName && (
+                    <DetailRow
+                      label="Campaign"
+                      value={queueOrderDetails.campaignName}
+                      icon={
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      }
+                    />
+                  )}
+                  {queueOrderDetails?.mediaBuyerName && (
+                    <DetailRow
+                      label="Media Buyer"
+                      value={queueOrderDetails.mediaBuyerName}
+                      icon={
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      }
+                    />
+                  )}
                 </div>
+
+                {/* Items — lazy-fetched from `orders.getById`. Skeleton while loading,
+                    line items table once they arrive. */}
+                <div className="mb-4">
+                  <p className="text-[11px] uppercase tracking-wider font-semibold text-app-fg-muted mb-1.5">Items</p>
+                  {queueOrderDetails?.loading ? (
+                    <div className="rounded-xl border border-app-border p-3 text-xs text-app-fg-muted animate-pulse">
+                      Loading items…
+                    </div>
+                  ) : queueOrderDetails?.error ? (
+                    <div className="rounded-xl border border-danger-200 dark:border-danger-800 bg-danger-50 dark:bg-danger-900/20 p-3 text-xs text-danger-700 dark:text-danger-300">
+                      {queueOrderDetails.error}
+                    </div>
+                  ) : queueOrderDetails && queueOrderDetails.items.length === 0 ? (
+                    <div className="rounded-xl border border-app-border p-3 text-xs text-app-fg-muted">
+                      No items on this order.
+                    </div>
+                  ) : queueOrderDetails ? (
+                    <ul className="rounded-xl border border-app-border bg-app-elevated divide-y divide-app-border overflow-hidden">
+                      {queueOrderDetails.items.map((item) => {
+                        const subtotal = item.quantity * Number(item.unitPrice);
+                        return (
+                          <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-app-fg truncate">
+                                {item.productName ?? 'Unknown product'}
+                              </p>
+                              <p className="text-[11px] text-app-fg-muted">
+                                {item.quantity} × ₦{Number(item.unitPrice).toLocaleString('en-NG')}
+                              </p>
+                            </div>
+                            <span className="text-sm font-semibold text-app-fg shrink-0">
+                              ₦{subtotal.toLocaleString('en-NG')}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </div>
+
+                {/* Delivery + customer details */}
+                {(queueOrderDetails?.deliveryAddress
+                  || queueOrderDetails?.deliveryNotes
+                  || queueOrderDetails?.deliveryState
+                  || queueOrderDetails?.preferredDeliveryDate
+                  || queueOrderDetails?.paymentMethod
+                  || queueOrderDetails?.customerEmail
+                  || queueOrderDetails?.customerGender) && (
+                  <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
+                    {queueOrderDetails.deliveryAddress && (
+                      <DetailRow
+                        label="Address"
+                        value={queueOrderDetails.deliveryAddress}
+                        icon={
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                        }
+                      />
+                    )}
+                    {queueOrderDetails.deliveryState && (
+                      <DetailRow label="State" value={queueOrderDetails.deliveryState} />
+                    )}
+                    {queueOrderDetails.deliveryNotes && (
+                      <DetailRow label="Notes" value={queueOrderDetails.deliveryNotes} />
+                    )}
+                    {queueOrderDetails.preferredDeliveryDate && (
+                      <DetailRow
+                        label="Preferred date"
+                        value={new Date(queueOrderDetails.preferredDeliveryDate).toLocaleDateString('en-NG', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      />
+                    )}
+                    {queueOrderDetails.paymentMethod && (
+                      <DetailRow
+                        label="Payment"
+                        value={queueOrderDetails.paymentMethod === 'PAY_ONLINE' ? 'Pay online' : 'Pay on delivery'}
+                      />
+                    )}
+                    {queueOrderDetails.customerEmail && (
+                      <DetailRow label="Email" value={queueOrderDetails.customerEmail} />
+                    )}
+                    {queueOrderDetails.customerGender && (
+                      <DetailRow label="Gender" value={queueOrderDetails.customerGender} />
+                    )}
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="flex flex-col gap-2 pt-1">
@@ -2047,7 +2314,14 @@ export function CSDashboardPage({
                   </Link>
                   <button
                     type="button"
-                    onClick={() => { setSelectedQueueOrder(null); setCancelConfirmOrder({ orderId: qOrder.id, customerName: qOrder.customerName }); }}
+                    onClick={() => {
+                      setSelectedQueueOrder(null);
+                      setCancelConfirmOrder({
+                        orderId: qOrder.id,
+                        customerName: qOrder.customerName,
+                        branchId: qOrder.branchId,
+                      });
+                    }}
                     disabled={fetcher.state === 'submitting'}
                     className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-danger-700 dark:text-danger-300 bg-danger-50 dark:bg-danger-900/20 hover:bg-danger-100 dark:hover:bg-danger-900/40 transition-colors disabled:opacity-50"
                   >
@@ -2071,7 +2345,7 @@ export function CSDashboardPage({
               No active CS-engaged orders today
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
               {activeOrders.map((order: CSOrder) => {
                 const agent = workloads.find((w: AgentWorkload) => w.agentId === order.assignedCsId);
                 return (
@@ -2079,7 +2353,7 @@ export function CSDashboardPage({
                     key={order.id}
                     type="button"
                     onClick={() => setSelectedActiveOrder(order)}
-                    className="group relative w-full text-left rounded-xl border border-indigo-200 dark:border-indigo-800 bg-app-elevated hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    className="group relative shrink-0 w-64 text-left rounded-xl border border-indigo-200 dark:border-indigo-800 bg-app-elevated hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                   >
                     {/* Live pulse dot */}
                     <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
@@ -2165,8 +2439,12 @@ export function CSDashboardPage({
                       setHotSwapOrderIds([]);
                       const next = new URLSearchParams(searchParams);
                       next.delete('from');
-                      if (v) next.set('hotSwapFrom', v);
-                      else next.delete('hotSwapFrom');
+                      if (v) {
+                        next.set('hotSwapFrom', v);
+                        next.set('tab', 'hotswap');
+                      } else {
+                        next.delete('hotSwapFrom');
+                      }
                       setSearchParams(next, { replace: true });
                     });
                   }}
@@ -2223,29 +2501,81 @@ export function CSDashboardPage({
                   </button>
                 </div>
 
-                <div className="space-y-1 max-h-64 overflow-y-auto">
-                  {hotSwapSourceOrders.map((order: CSOrder) => (
-                    <label
-                      key={order.id}
-                      className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-app-hover/50 cursor-pointer"
-                    >
-                      <Checkbox
-                        checked={hotSwapOrderIds.includes(order.id)}
-                        onChange={() => toggleHotSwapOrder(order.id)}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-app-fg truncate">
-                            {order.customerName}
-                          </span>
-                          <OrderStatusBadge status={order.status} />
+                <p className="text-xs text-app-fg-muted mb-2">
+                  Click cards to select — same layout as Unassigned Queue
+                </p>
+                <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
+                  {hotSwapSourceOrders.map((order: CSOrder) => {
+                    const isSelected = hotSwapOrderIds.includes(order.id);
+                    return (
+                      <div
+                        key={order.id}
+                        onClick={() => toggleHotSwapOrder(order.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleHotSwapOrder(order.id);
+                          }
+                        }}
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        tabIndex={0}
+                        className={`group relative shrink-0 w-64 text-left rounded-xl border bg-app-elevated transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                          isSelected
+                            ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
+                            : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
+                        }`}
+                      >
+                        <div
+                          className="absolute top-3 left-3 z-10"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={isSelected}
+                            onChange={() => toggleHotSwapOrder(order.id)}
+                          />
                         </div>
-                        <span className="text-xs text-app-fg-muted">
-                          <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" /> &middot; {order.totalAmount ? `\u20A6${Number(order.totalAmount).toLocaleString()}` : '\u2014'}
+                        <span className="absolute top-3 right-3 flex h-2.5 w-2.5 pointer-events-none">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning-400 opacity-60" />
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning-500" />
                         </span>
+                        <div className="p-3.5 pl-10 pr-8">
+                          <div className="mb-2">
+                            <OrderStatusBadge status={order.status} />
+                          </div>
+                          <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2 pr-1">
+                            {order.customerName}
+                          </p>
+                          {order.totalAmount ? (
+                            <div className="mb-2">
+                              <NairaPrice
+                                amount={order.totalAmount}
+                                className="text-[11px] font-bold text-app-fg"
+                              />
+                            </div>
+                          ) : null}
+                          <div className="text-[11px] font-medium text-app-fg-muted">
+                            {new Date(order.createdAt).toLocaleString('en-NG', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </div>
+                          <div className="mt-2 pt-2 border-t border-app-border/80">
+                            <OrderIdBadge
+                              id={order.id}
+                              length={8}
+                              ellipsis=""
+                              textClassName="text-[10px] text-app-fg-muted"
+                              className="inline-flex"
+                            />
+                          </div>
+                        </div>
                       </div>
-                    </label>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -2359,7 +2689,11 @@ export function CSDashboardPage({
                                     onClick={() => {
                                       setClaimingOrderId(order.id);
                                       claimFetcher.submit(
-                                        { intent: 'claimOrder', orderId: order.id },
+                                        {
+                                          intent: 'claimOrder',
+                                          orderId: order.id,
+                                          ...csMutationBranchPayload([order]),
+                                        },
                                         { method: 'post' },
                                       );
                                     }}
@@ -2413,7 +2747,11 @@ export function CSDashboardPage({
                                 onClick={() => {
                                   setClaimingOrderId(order.id);
                                   claimFetcher.submit(
-                                    { intent: 'claimOrder', orderId: order.id },
+                                    {
+                                      intent: 'claimOrder',
+                                      orderId: order.id,
+                                      ...csMutationBranchPayload([order]),
+                                    },
                                     { method: 'post' },
                                   );
                                 }}
@@ -2439,7 +2777,7 @@ export function CSDashboardPage({
           {(lb: CSLeaderboardEntry[]) => {
             if (lb.length === 0) return null;
             return (
-              <div className="card p-0 overflow-hidden flex flex-col h-[28rem]">
+              <div className="card p-0 flex flex-col h-[28rem]">
                 <div className="px-4 py-3 border-b border-app-border shrink-0">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -2472,8 +2810,8 @@ export function CSDashboardPage({
                     </div>
                   </div>
                 </div>
-                <div className="hidden md:block overflow-auto flex-1 min-h-0">
-                  <table className="w-full">
+                <div className="table-sticky-panel isolate hidden md:block overflow-auto flex-1 min-h-0 overscroll-y-contain">
+                  <table className="w-full border-separate border-spacing-0">
                     <thead>
                       <tr>
                         <th className="table-header">#</th>
@@ -2492,7 +2830,13 @@ export function CSDashboardPage({
                         <tr key={e.agentId} className="table-row">
                           <td className="table-cell text-app-fg-muted font-mono text-sm">{idx + 1}</td>
                           <td className="table-cell">
-                            <p className="text-sm font-medium text-app-fg">{e.agentName}</p>
+                            <Link
+                              to={`/hr/users/${e.agentId}`}
+                              prefetch="intent"
+                              className="text-sm font-medium text-brand-500 hover:text-brand-600 hover:underline"
+                            >
+                              {e.agentName}
+                            </Link>
                           </td>
                           <td className="table-cell text-right text-sm">{e.ordersEngaged}</td>
                           <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">{e.ordersConfirmed}</td>
@@ -2525,7 +2869,13 @@ export function CSDashboardPage({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-mono text-app-fg-muted">#{idx + 1}</span>
-                          <span className="font-medium text-app-fg text-sm">{e.agentName}</span>
+                          <Link
+                            to={`/hr/users/${e.agentId}`}
+                            prefetch="intent"
+                            className="min-w-0 truncate font-medium text-sm text-brand-500 hover:text-brand-600 hover:underline"
+                          >
+                            {e.agentName}
+                          </Link>
                         </div>
                         <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`}>
                           {e.deliveryRate.toFixed(1)}% del.
@@ -2686,10 +3036,18 @@ export function CSDashboardPage({
                               variant="danger"
                               size="sm"
                               className="text-[11px] px-2 py-0.5 h-auto"
-                              onClick={() => fetcher.submit(
-                                { intent: 'mergeDuplicate', duplicateId: pair.duplicate.id, originalId: pair.original?.id ?? '' },
-                                { method: 'post' },
-                              )}
+                              onClick={() =>
+                                fetcher.submit(
+                                  {
+                                    intent: 'mergeDuplicate',
+                                    duplicateId: pair.duplicate.id,
+                                    originalId: pair.original?.id ?? '',
+                                    ...csMutationBranchPayload(
+                                      [pair.duplicate, ...(pair.original ? [pair.original] : [])],
+                                    ),
+                                  },
+                                  { method: 'post' },
+                                )}
                               disabled={!pair.original || fetcher.state !== 'idle'}
                             >
                               Merge
@@ -2699,10 +3057,15 @@ export function CSDashboardPage({
                               variant="secondary"
                               size="sm"
                               className="text-[11px] px-2 py-0.5 h-auto"
-                              onClick={() => fetcher.submit(
-                                { intent: 'dismissDuplicate', orderId: pair.duplicate.id },
-                                { method: 'post' },
-                              )}
+                              onClick={() =>
+                                fetcher.submit(
+                                  {
+                                    intent: 'dismissDuplicate',
+                                    orderId: pair.duplicate.id,
+                                    ...csMutationBranchPayload([pair.duplicate]),
+                                  },
+                                  { method: 'post' },
+                                )}
                               disabled={fetcher.state !== 'idle'}
                             >
                               Dismiss
@@ -2879,6 +3242,9 @@ export function CSDashboardPage({
                     orderId: cancelConfirmOrder.orderId,
                     newStatus: 'CANCELLED',
                     reason: cancelReason.trim(),
+                    ...csMutationBranchPayload(
+                      cancelConfirmOrder.branchId ? [{ branchId: cancelConfirmOrder.branchId }] : [],
+                    ),
                   },
                   { method: 'post' },
                 );

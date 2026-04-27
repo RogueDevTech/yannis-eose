@@ -206,7 +206,7 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
         </button>
       </div>
 
-      <div className="card overflow-hidden p-0">
+      <div className="card p-0">
         {rules.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-app-fg-muted">
             <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1.2} stroke="currentColor">
@@ -222,12 +222,12 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-app-border">
-              <thead className="bg-app-hover/80">
+              <thead>
                 <tr>
                   {['Name', 'Trigger', 'Target', 'Status', 'Last fired', 'Actions'].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-app-fg-muted"
+                      className="table-header"
                     >
                       {h}
                     </th>

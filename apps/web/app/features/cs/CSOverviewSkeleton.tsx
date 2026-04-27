@@ -115,7 +115,7 @@ export function CSOverviewSkeleton() {
       </div>
 
       {/* Tab content: table card */}
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>

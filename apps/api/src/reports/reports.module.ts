@@ -3,10 +3,11 @@ import { OrdersModule } from '../orders/orders.module';
 import { MarketingModule } from '../marketing/marketing.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { FinanceModule } from '../finance/finance.module';
+import { UsersModule } from '../users/users.module';
 import { ReportsService } from './reports.service';
 
 @Module({
-  imports: [OrdersModule, MarketingModule, InventoryModule, FinanceModule],
+  imports: [OrdersModule, MarketingModule, InventoryModule, FinanceModule, UsersModule],
   providers: [ReportsService],
   exports: [ReportsService],
 })

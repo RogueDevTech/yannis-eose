@@ -126,6 +126,14 @@ const requireBranchScopeForGlobalAdminMutations = t.middleware(async ({ ctx, typ
   const rawInput = await getRawInput().catch(() => null);
   const explicitBranchId = extractInputBranchId(input) ?? extractInputBranchId(rawInput);
   if (explicitBranchId) return next();
+  // Upstream funding request to Finance — org-wide, not a branch-ledger write (per marketing.service.getBranchUserIds when branchId is null).
+  if (
+    typeof path === 'string' &&
+    path === 'marketing.requestFunding' &&
+    ctx.user.role === 'HEAD_OF_MARKETING'
+  ) {
+    return next();
+  }
   throw new TRPCError({ code: 'BAD_REQUEST', message: BRANCH_CONTEXT_REQUIRED_MESSAGE });
 });
 

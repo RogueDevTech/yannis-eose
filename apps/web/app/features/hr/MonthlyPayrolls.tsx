@@ -350,7 +350,7 @@ function MonthGroup({
   const [open, setOpen] = useState(true);
 
   return (
-    <div className="card p-0 overflow-hidden">
+    <div className="card p-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -501,14 +501,14 @@ function BatchDetailModal({
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-xs text-app-fg-muted">
-                  <th className="py-2 pr-3">Staff</th>
-                  <th className="py-2 pr-3 text-right">Base</th>
-                  <th className="py-2 pr-3 text-right">Bonus</th>
-                  <th className="py-2 pr-3 text-right">Add-ons</th>
-                  <th className="py-2 pr-3 text-right">Deductions</th>
-                  <th className="py-2 pr-3 text-right">Net</th>
-                  {batch.status === 'PENDING_HR' && canReview(viewer) && <th className="py-2 pr-3"></th>}
+                <tr>
+                  <th className="table-header !py-2 !px-0 pr-3">Staff</th>
+                  <th className="table-header !py-2 !px-0 pr-3 text-right">Base</th>
+                  <th className="table-header !py-2 !px-0 pr-3 text-right">Bonus</th>
+                  <th className="table-header !py-2 !px-0 pr-3 text-right">Add-ons</th>
+                  <th className="table-header !py-2 !px-0 pr-3 text-right">Deductions</th>
+                  <th className="table-header !py-2 !px-0 pr-3 text-right">Net</th>
+                  {batch.status === 'PENDING_HR' && canReview(viewer) && <th className="table-header !py-2 !px-0 pr-3 w-0" />}
                 </tr>
               </thead>
               <tbody>

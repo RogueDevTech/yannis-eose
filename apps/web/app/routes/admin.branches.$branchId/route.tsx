@@ -12,8 +12,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Tabs } from '~/components/ui/tabs';
-import { StatCard } from '~/components/ui/card';
-import { DataTable, type TableColumn } from '~/components/ui/data-table';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills';
 import { SearchInput } from '~/components/ui/search-input';
 import { RoleBadge } from '~/components/ui/role-badge';
@@ -398,7 +397,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return Response.json({ error: 'Unknown intent' }, { status: 400 });
 }
 
-function BranchMembersPanel({ members, branchId }: { members: OverviewMember[]; branchId: string }) {
+function BranchMembersPanel({ members }: { members: OverviewMember[] }) {
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
   const [search, setSearch] = useState('');
   const [removeTarget, setRemoveTarget] = useState<OverviewMember | null>(null);
@@ -425,70 +424,6 @@ function BranchMembersPanel({ members, branchId }: { members: OverviewMember[]; 
       return true;
     });
   }, [members, deptFilter, search]);
-
-  const columns = useMemo(
-    (): TableColumn<OverviewMember>[] => [
-      {
-        key: 'name',
-        header: 'Name',
-        render: (m) => <span className="font-medium text-app-fg">{m.name}</span>,
-      },
-      {
-        key: 'role',
-        header: 'Role',
-        render: (m) => <RoleBadge role={m.effectiveRole} size="sm" />,
-      },
-      {
-        key: 'department',
-        header: 'Department',
-        hideOnMobile: true,
-        render: (m) => <span className="text-sm text-app-fg-muted">{DEPT_LABEL[m.department]}</span>,
-      },
-      {
-        key: 'primary',
-        header: 'Primary',
-        render: (m) =>
-          m.isPrimary ? (
-            <span className="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 font-medium">
-              <svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
-                <path
-                  fillRule="evenodd"
-                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              Yes
-            </span>
-          ) : (
-            <span className="text-app-fg-muted text-sm">—</span>
-          ),
-      },
-      {
-        key: 'actions',
-        header: '',
-        align: 'right',
-        className: 'whitespace-nowrap',
-        render: (m) => (
-          <div className="inline-flex items-center gap-3 justify-end">
-            <Link
-              to={`/hr/users/${m.userId}`}
-              className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-            >
-              Profile
-            </Link>
-            <button
-              type="button"
-              onClick={() => setRemoveTarget(m)}
-              className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400"
-            >
-              Remove
-            </button>
-          </div>
-        ),
-      },
-    ],
-    [],
-  );
 
   if (members.length === 0) {
     return (
@@ -518,14 +453,77 @@ function BranchMembersPanel({ members, branchId }: { members: OverviewMember[]; 
         </div>
       </div>
 
-      <DataTable
-        caption="Branch members"
-        columns={columns}
-        data={filtered}
-        keyField="userId"
-        emptyTitle="No matching members"
-        emptyDescription="Try another department filter or clear the search."
-      />
+      {filtered.length === 0 ? (
+        <EmptyState
+          title="No matching members"
+          description="Try another department filter or clear the search."
+          variant="card"
+        />
+      ) : (
+        <div className="card p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px]">
+              <thead>
+                <tr>
+                  <th className="table-header">Name</th>
+                  <th className="table-header">Role</th>
+                  <th className="table-header max-sm:hidden">Department</th>
+                  <th className="table-header">Primary</th>
+                  <th className="table-header text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m) => (
+                  <tr key={m.userId} className="table-row">
+                    <td className="table-cell">
+                      <span className="font-medium text-app-fg">{m.name}</span>
+                    </td>
+                    <td className="table-cell">
+                      <RoleBadge role={m.effectiveRole} size="sm" />
+                    </td>
+                    <td className="table-cell max-sm:hidden">
+                      <span className="text-sm text-app-fg-muted">{DEPT_LABEL[m.department]}</span>
+                    </td>
+                    <td className="table-cell">
+                      {m.isPrimary ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 font-medium">
+                          <svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
+                            <path
+                              fillRule="evenodd"
+                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          Yes
+                        </span>
+                      ) : (
+                        <span className="text-app-fg-muted text-sm">—</span>
+                      )}
+                    </td>
+                    <td className="table-cell text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-3 justify-end">
+                        <Link
+                          to={`/hr/users/${m.userId}`}
+                          className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                        >
+                          Profile
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setRemoveTarget(m)}
+                          className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {removeTarget && (
         <RemoveModal member={removeTarget} onClose={() => setRemoveTarget(null)} />
@@ -659,11 +657,11 @@ function BranchSupervisorTeamsPanel({
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
-                      <tr className="border-b border-app-border text-left text-app-fg-muted">
-                        <th className="py-2 pr-4 font-medium">Member</th>
-                        <th className="py-2 pr-4 font-medium">Role</th>
-                        <th className="py-2 pr-4 font-medium">Supervisor</th>
-                        <th className="py-2 font-medium w-28"> </th>
+                      <tr>
+                        <th className="table-header">Member</th>
+                        <th className="table-header">Role</th>
+                        <th className="table-header">Supervisor</th>
+                        <th className="table-header w-28 text-right" />
                       </tr>
                     </thead>
                     <tbody>
@@ -798,14 +796,79 @@ export default function BranchOverviewRoute() {
       ? Math.round((counts.deliveredOrders / counts.totalOrders) * 100)
       : null;
 
-  const deliveryAccent =
-    deliveryRate === null
-      ? undefined
-      : deliveryRate >= 70
-        ? 'success'
-        : deliveryRate >= 40
-          ? 'warning'
-          : 'danger';
+  const branchOverviewStatItems = useMemo(() => {
+    const deliveryPct =
+      counts.totalOrders > 0
+        ? Math.round((counts.deliveredOrders / counts.totalOrders) * 100)
+        : null;
+    const rateClass =
+      deliveryPct === null
+        ? 'text-app-fg'
+        : deliveryPct >= 70
+          ? 'text-success-600 dark:text-success-400'
+          : deliveryPct >= 40
+            ? 'text-warning-600 dark:text-warning-400'
+            : 'text-danger-600 dark:text-danger-400';
+
+    const sub = (text: string) => (
+      <span className="block text-[10px] font-medium normal-case tracking-normal text-app-fg-muted mt-0.5">{text}</span>
+    );
+
+    return [
+      {
+        label: 'Total orders',
+        plainValue: true as const,
+        value: (
+          <div className="flex flex-col items-center">
+            <span className="text-xl font-bold text-app-fg tabular-nums">{counts.totalOrders}</span>
+            {sub('All statuses')}
+          </div>
+        ),
+      },
+      {
+        label: 'Active',
+        plainValue: true as const,
+        value: (
+          <div className="flex flex-col items-center">
+            <span className="text-xl font-bold text-brand-600 dark:text-brand-400 tabular-nums">{counts.activeOrders}</span>
+            {sub('In pipeline')}
+          </div>
+        ),
+      },
+      {
+        label: 'Delivered',
+        plainValue: true as const,
+        value: (
+          <div className="flex flex-col items-center">
+            <span className="text-xl font-bold text-success-600 dark:text-success-400 tabular-nums">{counts.deliveredOrders}</span>
+            {sub('Completed')}
+          </div>
+        ),
+      },
+      {
+        label: 'Delivery rate',
+        plainValue: true as const,
+        value: (
+          <div className="flex flex-col items-center">
+            <span className={`text-xl font-bold tabular-nums ${rateClass}`}>
+              {deliveryPct !== null ? `${deliveryPct}%` : '—'}
+            </span>
+            {sub('Delivered / total')}
+          </div>
+        ),
+      },
+      {
+        label: 'Campaigns',
+        plainValue: true as const,
+        value: (
+          <div className="flex flex-col items-center">
+            <span className="text-xl font-bold text-brand-600 dark:text-brand-400 tabular-nums">{counts.campaigns}</span>
+            {sub('Marketing')}
+          </div>
+        ),
+      },
+    ];
+  }, [counts]);
 
   const deptCounts = useMemo(() => {
     const out = { CS: 0, MARKETING: 0, LOGISTICS: 0, FINANCE: 0, HR: 0, OTHER: 0 };
@@ -853,19 +916,8 @@ export default function BranchOverviewRoute() {
         </div>
       </div>
 
-      {/* ── KPI strip (shared StatCard) ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard label="Total orders" value={counts.totalOrders} description="All statuses" />
-        <StatCard label="Active" value={counts.activeOrders} description="In pipeline" accent="brand" />
-        <StatCard label="Delivered" value={counts.deliveredOrders} description="Completed" accent="success" />
-        <StatCard
-          label="Delivery rate"
-          value={deliveryRate !== null ? `${deliveryRate}%` : '—'}
-          description="Delivered / total"
-          accent={deliveryAccent}
-        />
-        <StatCard label="Campaigns" value={counts.campaigns} description="Marketing" accent="brand" />
-      </div>
+      {/* ── KPI strip (same OverviewStatStrip as CS queue, orders list, team pages) ── */}
+      <OverviewStatStrip items={branchOverviewStatItems} />
 
       {/* Shared global Tabs component — matches the look used elsewhere in the app
           (HRPage, Settings, Order Detail). */}
@@ -1007,7 +1059,7 @@ export default function BranchOverviewRoute() {
             </Button>
           </div>
 
-          <BranchMembersPanel members={overview.members} branchId={branch.id} />
+          <BranchMembersPanel members={overview.members} />
         </div>
       )}
 

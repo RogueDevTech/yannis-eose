@@ -174,7 +174,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           description="Loosen the role or status filter to see more results."
         />
       ) : (
-        <div className="card p-0 overflow-hidden">
+        <div className="card p-0">
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -212,11 +212,11 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
                       <td className="table-cell text-xs text-app-fg-muted max-w-[280px] truncate">{formatRules(plan.rules)}</td>
                       <td className="table-cell text-right whitespace-nowrap">
                         <div className="inline-flex gap-1.5">
-                          <Button variant="secondary" size="sm" className="text-xs" onClick={() => setViewPlan(plan)}>
+                          <Button variant="primary" size="sm" className="text-xs" onClick={() => setViewPlan(plan)}>
                             View
                           </Button>
                           {editable && (
-                            <Button variant="primary" size="sm" className="text-xs" onClick={() => setEditPlan(plan)}>
+                            <Button variant="secondary" size="sm" className="text-xs" onClick={() => setEditPlan(plan)}>
                               Edit
                             </Button>
                           )}
@@ -252,11 +252,11 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
                   </div>
                   <p className="text-xs text-app-fg-muted">{formatRules(plan.rules)}</p>
                   <div className="flex gap-2">
-                    <Button variant="secondary" size="sm" className="text-xs flex-1" onClick={() => setViewPlan(plan)}>
+                    <Button variant="primary" size="sm" className="text-xs flex-1" onClick={() => setViewPlan(plan)}>
                       View
                     </Button>
                     {editable && (
-                      <Button variant="primary" size="sm" className="text-xs flex-1" onClick={() => setEditPlan(plan)}>
+                      <Button variant="secondary" size="sm" className="text-xs flex-1" onClick={() => setEditPlan(plan)}>
                         Edit
                       </Button>
                     )}

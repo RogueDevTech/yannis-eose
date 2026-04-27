@@ -1,6 +1,10 @@
 import { Link } from '@remix-run/react';
 import { formatNaira } from '~/lib/format-amount';
 import type { FundingBalanceRow } from './types';
+import {
+  confirmationRateColorClass,
+  deliveryRateColorClass,
+} from '~/lib/rate-color';
 
 export interface MediaBuyerBalanceCardProps {
   row: FundingBalanceRow;
@@ -75,13 +79,17 @@ export function MediaBuyerBalanceCard({ row, className = '', ordersDateFilters }
         {row.confirmationRate != null && (
           <div className="flex justify-between text-app-fg-muted">
             <span>Confirmation rate</span>
-            <span className="font-medium text-app-fg">{Math.round(row.confirmationRate)}%</span>
+            <span className={`font-medium tabular-nums ${confirmationRateColorClass(row.confirmationRate)}`}>
+              {Math.round(row.confirmationRate)}%
+            </span>
           </div>
         )}
         {row.deliveryRate != null && (
           <div className="flex justify-between text-app-fg-muted">
             <span>Delivery rate</span>
-            <span className="font-medium text-app-fg">{Math.round(row.deliveryRate)}%</span>
+            <span className={`font-medium tabular-nums ${deliveryRateColorClass(row.deliveryRate)}`}>
+              {Math.round(row.deliveryRate)}%
+            </span>
           </div>
         )}
         {row.cpa != null && (

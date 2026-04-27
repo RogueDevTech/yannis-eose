@@ -778,7 +778,7 @@ export function InventoryPage({
             )}
           </div>
         )}
-        <div className="card p-0 overflow-hidden">
+        <div className="card p-0">
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -946,7 +946,7 @@ export function InventoryPage({
       ) : (
         <DeferredSection resolve={movements} skeleton="table">
           {(resolvedMovements) => (
-            <div className="card p-0 overflow-hidden">
+            <div className="card p-0">
               <div className="hidden md:block overflow-x-auto">
                 <table className="w-full">
                   <thead>
@@ -1074,7 +1074,7 @@ function TransfersTab({
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'Unknown location';
 
   return (
-    <div className="card p-0 overflow-hidden">
+    <div className="card p-0">
       <p className="px-4 pt-3 pb-1 text-sm text-app-fg-muted">
         Read-only list. Use <span className="text-app-fg">Admin → Transfers</span> to record a movement.
       </p>
@@ -1206,7 +1206,7 @@ function ReturnsTab({
       )}
 
       {/* Returns table */}
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -1443,7 +1443,7 @@ function ReconciliationTab({
       {/* Reconciliation Table */}
       <DeferredSection resolve={reconciliations} skeleton="table">
         {(resolved) => (
-          <div className="card p-0 overflow-hidden">
+          <div className="card p-0">
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>

@@ -168,6 +168,20 @@ export const listAdSpendSchema = z.object({
 });
 export type ListAdSpendInput = z.infer<typeof listAdSpendSchema>;
 
+/** Grouped accordion (`listAdSpendGrouped`) — same filter dimensions as `listAdSpend`, separate pagination. */
+export const listAdSpendGroupedSchema = z.object({
+  mediaBuyerId: z.string().uuid().optional(),
+  productId: z.string().uuid().optional(),
+  campaignId: z.string().uuid().optional(),
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  search: z.string().trim().max(200).optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(50).default(20),
+});
+export type ListAdSpendGroupedInput = z.infer<typeof listAdSpendGroupedSchema>;
+
 /** Scope for ad spend status counts — matches listAdSpend filters except status. */
 export const adSpendStatusCountsSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),

@@ -132,10 +132,10 @@ export function PermissionRequestsPage({
         tabs={STATUS_TABS.map((t) => ({ value: t.value, label: t.label }))}
       />
 
-      <div className="card p-0 overflow-hidden flex flex-col">
-        <div className="hidden md:block overflow-auto max-h-[min(60vh,22rem)] overscroll-contain">
+      <div className="card p-0 flex flex-col">
+        <div className="table-sticky-panel hidden md:block overflow-auto max-h-[min(60vh,22rem)] overscroll-contain">
           <table className="w-full min-w-[640px]">
-            <thead className="sticky top-0 z-[1] bg-app-elevated border-b border-app-border">
+            <thead>
               <tr>
                 <th className="table-header">Status</th>
                 <th className="table-header">Requester</th>

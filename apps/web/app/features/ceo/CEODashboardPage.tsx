@@ -969,19 +969,19 @@ export function CEODashboardPage({
 
       {/* Branch Breakdown — only shown when system has multiple branches */}
       {branchBreakdown && branchBreakdown.length > 1 && (
-        <div className="card overflow-hidden p-0">
+        <div className="card p-0">
           <div className="px-4 py-3 border-b border-app-border flex items-center justify-between">
             <h2 className="text-sm font-semibold text-app-fg">Branch Breakdown</h2>
             <span className="text-xs text-app-fg-muted">All branches</span>
           </div>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-app-border bg-app-hover">
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-app-fg-muted uppercase tracking-wider">Branch</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-app-fg-muted uppercase tracking-wider">Total Orders</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-app-fg-muted uppercase tracking-wider">Active</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-app-fg-muted uppercase tracking-wider">Delivered</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-app-fg-muted uppercase tracking-wider">Delivery Rate</th>
+              <tr>
+                <th className="table-header-muted">Branch</th>
+                <th className="table-header-muted text-right">Total Orders</th>
+                <th className="table-header-muted text-right">Active</th>
+                <th className="table-header-muted text-right">Delivered</th>
+                <th className="table-header-muted text-right">Delivery Rate</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-app-border">

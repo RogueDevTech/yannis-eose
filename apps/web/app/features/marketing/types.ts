@@ -346,6 +346,12 @@ export interface MarketingAdSpendLoaderData {
   /** Currently selected product filter — narrows the list to one product so HoM can audit
    * spend product-by-product. `undefined` = all products. */
   productIdFilter?: string;
+  /** Narrow to one campaign (HoM / admin). */
+  campaignIdFilter?: string;
+  /** Narrow to one media buyer (HoM / admin). */
+  mediaBuyerIdFilter?: string;
+  /** Active MEDIA_BUYER users for the media-buyer filter dropdown (admin view only). */
+  mediaBuyersForFilter: Array<{ id: string; name: string }>;
   statusCounts: AdSpendStatusCounts;
   campaigns: Campaign[];
   metrics: Metrics;

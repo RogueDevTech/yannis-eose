@@ -289,6 +289,7 @@ export default function MessageTemplatesRoute() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [previewAllOpen, setPreviewAllOpen] = useState(false);
+  const [viewTemplate, setViewTemplate] = useState<MessageTemplate | null>(null);
   const [editTemplate, setEditTemplate] = useState<MessageTemplate | null>(null);
   const [filterChannel, setFilterChannel] = useState<'ALL' | 'SMS' | 'WHATSAPP'>('ALL');
   const [createBody, setCreateBody] = useState('');
@@ -367,16 +368,16 @@ export default function MessageTemplatesRoute() {
       />
 
       {/* Templates table */}
-      <div className="card overflow-hidden p-0">
+      <div className="card p-0">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-app-border">
-                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Channel</th>
-                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Preview</th>
-                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Status</th>
-                <th className="px-4 py-3" />
+              <tr>
+                <th className="table-header-muted">Name</th>
+                <th className="table-header-muted">Channel</th>
+                <th className="table-header-muted">Preview</th>
+                <th className="table-header-muted">Status</th>
+                <th className="table-header-muted w-0" />
               </tr>
             </thead>
             <tbody className="divide-y divide-app-border">
@@ -412,13 +413,21 @@ export default function MessageTemplatesRoute() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {canEditTemplate(tpl) ? (
-                      <Button variant="secondary" size="sm" onClick={() => setEditTemplate(tpl)}>
-                        Edit
+                    <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        onClick={() => setViewTemplate(tpl)}
+                      >
+                        View
                       </Button>
-                    ) : (
-                      <span className="text-xs text-app-fg-muted">Read-only</span>
-                    )}
+                      {canEditTemplate(tpl) && (
+                        <Button variant="secondary" size="sm" onClick={() => setEditTemplate(tpl)}>
+                          Edit
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -459,19 +468,76 @@ export default function MessageTemplatesRoute() {
               <p className="mt-3 text-xs text-app-fg-muted line-clamp-3 break-words">
                 {toUiBody(tpl.body)}
               </p>
-              <div className="mt-3">
-                {canEditTemplate(tpl) ? (
-                  <Button variant="secondary" size="sm" className="w-full" onClick={() => setEditTemplate(tpl)}>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  className="min-w-0 flex-1"
+                  onClick={() => setViewTemplate(tpl)}
+                >
+                  View
+                </Button>
+                {canEditTemplate(tpl) && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="min-w-0 flex-1"
+                    onClick={() => setEditTemplate(tpl)}
+                  >
                     Edit
                   </Button>
-                ) : (
-                  <p className="text-center text-xs text-app-fg-muted">Read-only — created by another user</p>
                 )}
               </div>
+              {!canEditTemplate(tpl) && (
+                <p className="mt-2 text-center text-xs text-app-fg-muted">Read-only — created by another user</p>
+              )}
             </div>
           ))}
         </div>
       </div>
+
+      {viewTemplate && (
+        <Modal
+          open
+          onClose={() => setViewTemplate(null)}
+          maxWidth="max-w-2xl"
+          contentClassName="p-5 max-h-[85vh] overflow-y-auto"
+          aria-labelledby="view-template-title"
+          aria-describedby="view-template-desc"
+        >
+          <h3 id="view-template-title" className="text-lg font-semibold text-app-fg">
+            {viewTemplate.name}
+          </h3>
+          <p id="view-template-desc" className="mt-1 text-xs text-app-fg-muted">
+            Sample values stand in for variables (same placeholders as on orders). Live sends use real order fields.
+          </p>
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex shrink-0 items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                  viewTemplate.channel === 'WHATSAPP'
+                    ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                    : 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                }`}
+              >
+                {viewTemplate.channel}
+              </span>
+            </div>
+            <p className="text-xs text-app-fg-muted">
+              Status: <span className="font-medium text-app-fg">{viewTemplate.status}</span>
+            </p>
+            <div className="rounded-md border border-app-border bg-app-canvas px-3 py-2.5 text-sm text-app-fg whitespace-pre-wrap break-words leading-relaxed">
+              {renderTemplateWithSampleData(viewTemplate.body)}
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end border-t border-app-border pt-4">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setViewTemplate(null)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
 
       {/* Preview all templates */}
       {previewAllOpen && (

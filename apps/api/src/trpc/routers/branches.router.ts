@@ -379,6 +379,9 @@ export const branchesRouter = router({
 
   /**
    * Whether the current user may start Mirror Mode for the target user (HoS matrix or branch supervisor graph).
+   * When already mirroring (`mirroredBy` set), `allowed` is always false (no nested chains) but
+   * `previewEligible` reflects whether the mirrored identity would be allowed to mirror the target
+   * so the UI can show a disabled Mirror affordance.
    */
   canMirrorToUser: authedProcedure
     .input(z.object({ targetUserId: z.string().uuid() }))
@@ -396,7 +399,12 @@ export const branchesRouter = router({
         .where(eq(schema.users.id, input.targetUserId))
         .limit(1);
       if (!target || target.status !== 'ACTIVE') {
-        return { allowed: false as const, reason: 'not_found_or_inactive' as const };
+        return {
+          allowed: false as const,
+          previewEligible: false as const,
+          nestedMirrorSession: false as const,
+          reason: 'not_found_or_inactive' as const,
+        };
       }
       const actor = {
         id: ctx.user.id,
@@ -404,22 +412,47 @@ export const branchesRouter = router({
         currentBranchId: ctx.user.currentBranchId ?? null,
         mirroredBy: ctx.user.mirroredBy ?? null,
       };
-      if (
-        canMirror(actor, {
-          id: target.id,
-          role: target.role,
-          primaryBranchId: target.primaryBranchId,
-        })
-      ) {
-        return { allowed: true as const, reason: 'role_matrix' as const };
-      }
+      const targetPayload = {
+        id: target.id,
+        role: target.role,
+        primaryBranchId: target.primaryBranchId,
+      };
+
       const viaSupervision = await teams.actorCanMirrorViaSupervision(actor, {
         id: target.id,
         role: target.role,
       });
-      return viaSupervision
-        ? ({ allowed: true as const, reason: 'supervision' as const })
-        : ({ allowed: false as const, reason: 'forbidden' as const });
+
+      const previewEligible =
+        canMirror({ ...actor, mirroredBy: null }, targetPayload) || viaSupervision;
+
+      const nestedMirrorSession = !!actor.mirroredBy;
+
+      if (!previewEligible) {
+        return {
+          allowed: false as const,
+          previewEligible: false as const,
+          nestedMirrorSession,
+          reason: 'forbidden' as const,
+        };
+      }
+
+      if (nestedMirrorSession) {
+        return {
+          allowed: false as const,
+          previewEligible: true as const,
+          nestedMirrorSession: true as const,
+          reason: 'preview_only_nested_mirror' as const,
+        };
+      }
+
+      const byMatrix = canMirror({ ...actor, mirroredBy: null }, targetPayload);
+      return {
+        allowed: true as const,
+        previewEligible: true as const,
+        nestedMirrorSession: false as const,
+        reason: byMatrix ? ('role_matrix' as const) : ('supervision' as const),
+      };
     }),
 
   listTeamsWithMembers: permissionProcedure('branches.manage')

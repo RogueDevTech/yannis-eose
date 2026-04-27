@@ -653,9 +653,8 @@ export class OrdersService {
   }
 
   /**
-   * Branch-scoped list queries filter by session branch when not listing by media buyer.
-   * When `mediaBuyerId` is set (marketing orders), do not apply session branch — campaign branch
-   * can differ from the buyer's primary session branch; attribution is media_buyer_id.
+   * Resolves `branch_id` for a newly created order: campaign branch wins, else media buyer's
+   * primary branch from `user_branches`, else explicit fallback (e.g. session branch).
    */
   private async resolveBranchIdForNewOrder(params: {
     campaignId?: string | null;
@@ -1526,7 +1525,7 @@ export class OrdersService {
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.createdAt, end));
     }
-    if (branchId && !input.mediaBuyerId) {
+    if (branchId) {
       conditions.push(eq(schema.orders.branchId, branchId));
     }
 
@@ -2788,7 +2787,7 @@ export class OrdersService {
     if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
-    if (branchId && !mediaBuyerId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);

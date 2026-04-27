@@ -106,7 +106,10 @@ export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', da
     trendData.length === 0
       ? 0
       : Math.max(...trendData.map((row) => Math.max(row.orderCount, row.deliveredCount)));
-  const yTop = Math.max(50, Math.ceil(maxPoint / 10) * 10);
+  // Tight-to-data Y axis: round up to next 10 with one tick of headroom so the
+  // line never grazes the top, and floor at 10 for empty/tiny charts. Previously
+  // the floor was 50, which flattened the wave whenever daily counts < ~40.
+  const yTop = Math.max(10, Math.ceil((maxPoint + 1) / 10) * 10);
   const yTicks = Array.from({ length: yTop / 10 + 1 }, (_, i) => i * 10);
 
   return (

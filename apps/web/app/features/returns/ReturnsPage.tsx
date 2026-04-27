@@ -180,7 +180,7 @@ export function ReturnsPage({
           )}
 
           {/* Returns table */}
-          <div className="card p-0 overflow-hidden">
+          <div className="card p-0">
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -435,7 +435,7 @@ function ReconciliationTable({
   };
 
   return (
-    <div className="card p-0 overflow-hidden">
+    <div className="card p-0">
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full">
           <thead>

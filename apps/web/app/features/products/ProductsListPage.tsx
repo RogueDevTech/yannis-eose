@@ -219,7 +219,7 @@ export function ProductsListPage({
       </div>
 
       {/* Desktop table */}
-      <div className="card p-0 overflow-hidden hidden md:block">
+      <div className="card p-0 hidden md:block">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>

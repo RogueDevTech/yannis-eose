@@ -90,7 +90,7 @@ export function DeliveryConfirmationsPage({
         ]}
       />
 
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0">
         <div className="px-4 py-3 border-b border-app-border bg-app-elevated/50">
           <h2 className="text-sm font-semibold text-app-fg">Allocated orders ready for delivery</h2>
           <p className="text-xs text-app-fg-muted mt-0.5">
@@ -207,7 +207,7 @@ export function DeliveryConfirmationsPage({
         </div>
       </div>
 
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>

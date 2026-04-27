@@ -67,7 +67,7 @@ export function MarketingLeaderboardPage({
           const startIdx = (safePage - 1) * LEADERBOARD_PAGE_SIZE;
           const pagedLb = lb.slice(startIdx, startIdx + LEADERBOARD_PAGE_SIZE);
           return (
-            <div className="card p-0 overflow-hidden">
+            <div className="card p-0">
               <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
                 <h2 className="text-base font-semibold text-app-fg sm:text-lg">Media Buyer Performance</h2>
                 <p className="text-xs text-app-fg-muted mt-0.5">

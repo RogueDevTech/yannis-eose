@@ -92,25 +92,33 @@ export function DataTable<T>({
     );
   }
 
+  const headerCellClass = (extra: string[]) =>
+    [
+      stickyHeader
+        ? 'sticky z-[15] top-[var(--table-sticky-top,var(--header-height))] border-b border-app-border bg-app-elevated shadow-sm'
+        : 'border-b border-app-border bg-app-elevated',
+      'px-4 py-2.5 text-xs font-semibold text-app-fg-muted whitespace-nowrap',
+      ...extra,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
   return (
     <div className={['overflow-x-auto rounded-xl border border-app-border', className].filter(Boolean).join(' ')}>
       <table className="w-full min-w-full border-collapse text-sm">
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead>
-          <tr className={[stickyHeader ? 'sticky top-[var(--header-height,3.5rem)] z-10' : ''].filter(Boolean).join(' ')}>
+          <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
                 scope="col"
-                className={[
-                  'border-b border-app-border bg-app-elevated px-4 py-2.5 text-xs font-semibold text-app-fg-muted whitespace-nowrap',
+                className={headerCellClass([
                   alignClass[col.align ?? 'left'],
                   col.hideOnMobile ? 'hidden sm:table-cell' : '',
                   col.minWidth ?? '',
                   col.className ?? '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
+                ])}
               >
                 {col.header}
               </th>

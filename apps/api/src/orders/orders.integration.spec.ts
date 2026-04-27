@@ -515,4 +515,71 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
     expect(ids).toContain(o1);
     expect(ids).toContain(o2);
   });
+
+  it('list with specific branchId returns only orders for that branch', async () => {
+    const branchA = await createTestBranch(db as any);
+    const branchB = await createTestBranch(db as any);
+    const { orderId: o1 } = await createTestOrder(db as any, { branchId: branchA.id });
+    const { orderId: o2 } = await createTestOrder(db as any, { branchId: branchB.id });
+
+    const ordersService = new OrdersService(
+      db as any,
+      {} as any,
+      { emitToUser: () => undefined, emitToRoom: () => undefined } as any,
+      { create: async () => undefined } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      new BranchTeamsService(db as any),
+    );
+
+    const listA = await ordersService.list(
+      { page: 1, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' },
+      branchA.id,
+    );
+    expect(listA.orders.map((o) => o.id)).toContain(o1);
+    expect(listA.orders.map((o) => o.id)).not.toContain(o2);
+
+    const listB = await ordersService.list(
+      { page: 1, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' },
+      branchB.id,
+    );
+    expect(listB.orders.map((o) => o.id)).toContain(o2);
+    expect(listB.orders.map((o) => o.id)).not.toContain(o1);
+  });
+
+  it('list applies branch filter together with mediaBuyerId', async () => {
+    const branchA = await createTestBranch(db as any);
+    const branchB = await createTestBranch(db as any);
+    const mb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    const { orderId: oA } = await createTestOrder(db as any, { branchId: branchA.id, mediaBuyerId: mb.id });
+    const { orderId: oB } = await createTestOrder(db as any, { branchId: branchB.id, mediaBuyerId: mb.id });
+
+    const ordersService = new OrdersService(
+      db as any,
+      {} as any,
+      { emitToUser: () => undefined, emitToRoom: () => undefined } as any,
+      { create: async () => undefined } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      new BranchTeamsService(db as any),
+    );
+
+    const filtered = await ordersService.list(
+      {
+        page: 1,
+        limit: 50,
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
+        mediaBuyerId: mb.id,
+      },
+      branchA.id,
+    );
+    const ids = filtered.orders.map((o) => o.id);
+    expect(ids).toContain(oA);
+    expect(ids).not.toContain(oB);
+  });
 });
