@@ -21,7 +21,18 @@ export type ExportDateRange = z.infer<typeof exportDateRangeSchema>;
 
 export const reportColumnsByKey = {
   cs_orders: ['id', 'customer', 'assignedCs', 'phone', 'status', 'amount', 'created'] as const,
-  marketing_orders: ['id', 'customer', 'mediaBuyer', 'status', 'amount', 'created'] as const,
+  marketing_orders: [
+    'id',
+    'customer',
+    'mediaBuyer',
+    'assignedCs',
+    'product',
+    'campaign',
+    'branch',
+    'status',
+    'amount',
+    'created',
+  ] as const,
   disbursements: ['id', 'sender', 'receiver', 'amount', 'status', 'receipt', 'date', 'verifiedAt'] as const,
   inventory: ['product', 'location', 'stock', 'reserved', 'available', 'status', 'updated'] as const,
   finance_invoices: ['reference', 'orderId', 'amount', 'status', 'dueDate'] as const,
@@ -45,6 +56,9 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         status: z.string().optional(),
         search: z.string().optional(),
         assignedCsId: z.string().uuid().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
       })
       .optional(),
   }),
@@ -57,6 +71,12 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         status: z.string().optional(),
         search: z.string().optional(),
         mediaBuyerId: z.string().uuid().optional(),
+        assignedCsId: z.string().uuid().optional(),
+        productId: z.string().uuid().optional(),
+        campaignId: z.string().uuid().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
       })
       .optional(),
   }),

@@ -73,6 +73,11 @@ export const orders = pgTable('orders', {
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),
   dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
   deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  /**
+   * Soft-delete (archive): when set, the order is excluded from lists and detail views.
+   * Rows are never physically removed — temporal history + audit remain intact.
+   */
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   ...temporalColumns,
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

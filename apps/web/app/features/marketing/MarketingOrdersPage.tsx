@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -9,12 +9,13 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
-import { ExportModal } from '~/components/ui/export-modal';
+import { ExportModal, type MarketingExportPicklists } from '~/components/ui/export-modal';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { Order } from '~/features/orders/types';
@@ -31,6 +32,9 @@ interface MarketingOrdersPageProps {
   isMediaBuyer: boolean;
   /** Show Media buyer column (HoM and SuperAdmin only). */
   showMediaBuyerColumn?: boolean;
+  /** For "Filter by media buyer" (HoM / Admin / SuperAdmin). */
+  mediaBuyersForFilter?: Array<{ id: string; name: string }>;
+  marketingExportPicklists?: MarketingExportPicklists;
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
@@ -53,6 +57,8 @@ export function MarketingOrdersPage({
   searchFilter,
   isMediaBuyer,
   showMediaBuyerColumn = false,
+  mediaBuyersForFilter = [],
+  marketingExportPicklists,
   filters,
   liveEvents,
   cpa,
@@ -73,7 +79,7 @@ export function MarketingOrdersPage({
     setSearchQuery(searchFilter || '');
   }, [statusFilter, searchFilter]);
 
-  const buildQueryString = (overrides: { page?: number; status?: string; search?: string }) => {
+  const buildQueryString = (overrides: { page?: number; status?: string; search?: string; mediaBuyerId?: string }) => {
     const params = new URLSearchParams(searchParams);
     if (overrides.page !== undefined) params.set('page', String(overrides.page));
     // Always pass `status` when changing the status filter (including ALL) so the URL stays in sync.
@@ -86,9 +92,21 @@ export function MarketingOrdersPage({
       if (overrides.search) params.set('search', overrides.search);
       else params.delete('search');
     }
+    if (overrides.mediaBuyerId !== undefined) {
+      if (overrides.mediaBuyerId && overrides.mediaBuyerId !== 'ALL') params.set('mediaBuyerId', overrides.mediaBuyerId);
+      else params.delete('mediaBuyerId');
+    }
     const qs = params.toString();
     return qs ? `?${qs}` : '?';
   };
+
+  const mediaBuyerFilterOptions = useMemo(
+    () => [
+      { value: 'ALL', label: 'All media buyers' },
+      ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+    ],
+    [mediaBuyersForFilter],
+  );
 
   const ordersInPeriodTotal = Object.values(statusCounts).reduce((sum, n) => sum + n, 0);
   const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
@@ -186,6 +204,25 @@ export function MarketingOrdersPage({
           options={statusOptions}
           wrapperClassName="w-auto min-w-[11rem]"
         />
+        {showMediaBuyerColumn && mediaBuyersForFilter.length > 0 && (
+          <SearchableSelect
+            id="marketing-orders-filter-buyer"
+            value={searchParams.get('mediaBuyerId') || 'ALL'}
+            onChange={(v) => {
+              setSearchParams((p) => {
+                const next = new URLSearchParams(p);
+                next.set('page', '1');
+                if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                else next.delete('mediaBuyerId');
+                return next;
+              });
+            }}
+            options={mediaBuyerFilterOptions}
+            wrapperClassName="w-full sm:w-56 min-w-0"
+            placeholder="All media buyers"
+            searchPlaceholder="Search buyers…"
+          />
+        )}
       </div>
 
       {showChartView ? (
@@ -345,10 +382,16 @@ export function MarketingOrdersPage({
         open={showExportModal}
         onClose={() => setShowExportModal(false)}
         config={EXPORT_CONFIGS.marketing_orders}
+        marketingExportPicklists={marketingExportPicklists}
         initialFilters={{
           status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
           search: searchQuery || undefined,
           mediaBuyerId: searchParams.get('mediaBuyerId') || undefined,
+          ...(dateFilters.periodAllTime
+            ? { periodAllTime: true as const }
+            : dateFilters.startDate && dateFilters.endDate
+              ? { startDate: dateFilters.startDate, endDate: dateFilters.endDate }
+              : {}),
         }}
       />
     </div>

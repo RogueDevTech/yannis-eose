@@ -156,6 +156,13 @@ export const updateOrderSchema = z.object({
   deliveryState: z.string().max(100).optional(),
   customerGender: z.enum(['male', 'female']).optional(),
   preferredDeliveryDate: z.string().max(100).optional(),
+  /**
+   * Form-builder responses (same shape as create). CS / supervisors / heads may correct
+   * answers without changing line pricing when not permitted.
+   */
+  customFields: z
+    .record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string()).max(50)]))
+    .optional(),
   /** Optional delivery fee add-on (e.g. from Resolve order modal). Added to existing deliveryFee. */
   deliveryFeeAddOn: z.number().min(0).optional(),
   /** Optional discount at delivery. Reduces totalAmount and stored on order. */
@@ -169,6 +176,35 @@ export const updateOrderSchema = z.object({
 });
 
 export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;
+
+/**
+ * Proposed line-item prices + total submitted for approval (actors who cannot edit prices inline).
+ */
+export const requestOrderLinePriceChangeSchema = z.object({
+  orderId: z.string().uuid(),
+  items: z.array(orderItemSchema).min(1),
+  totalAmount: z.coerce.number().min(0).multipleOf(0.01),
+  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+});
+
+export type RequestOrderLinePriceChangeInput = z.infer<typeof requestOrderLinePriceChangeSchema>;
+
+/**
+ * Request soft-delete (archive) for approval — row stays until an approver stamps `deleted_at`.
+ */
+export const requestOrderDeletionSchema = z.object({
+  orderId: z.string().uuid(),
+  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+});
+
+export type RequestOrderDeletionInput = z.infer<typeof requestOrderDeletionSchema>;
+
+/**
+ * Immediate soft-delete by privileged roles (same approver matrix as line-price edits).
+ */
+export const softDeleteOrderSchema = requestOrderDeletionSchema;
+
+export type SoftDeleteOrderInput = z.infer<typeof softDeleteOrderSchema>;
 
 /**
  * Assign order to CS agent — manual assignment or bulk reassign.
@@ -200,6 +236,8 @@ export const listOrdersSchema = z.object({
   statuses: z.array(orderStatusSchema).min(1).optional(),
   assignedCsId: z.string().uuid().optional(),
   mediaBuyerId: z.string().uuid().optional(),
+  campaignId: z.string().uuid().optional(),
+  productId: z.string().uuid().optional(),
   riderId: z.string().uuid().optional(),
   logisticsLocationId: z.string().uuid().optional(),
   search: z.string().optional(),

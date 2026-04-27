@@ -6,7 +6,7 @@ import type { FundingBalanceRow } from '~/features/marketing/types';
 import { buildLeaderboardInput, resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 
 export const meta: MetaFunction = () => [
-  { title: 'Team — Yannis EOSE' },
+  { title: 'Team Analysis — Yannis EOSE' },
 ];
 
 function parseBalancesList(res: { ok: boolean; status: number; data: unknown }): FundingBalanceRow[] {
@@ -84,20 +84,54 @@ export async function loader({ request }: LoaderFunctionArgs) {
     teamMembers = toBalanceRows(merged);
   }
 
-  type LeaderboardEntry = { mediaBuyerId: string; confirmationRate: number; deliveryRate: number };
+  type LeaderboardEntry = {
+    mediaBuyerId: string;
+    confirmationRate: number;
+    deliveryRate: number;
+    cpa: number;
+    trueRoas: number;
+    profitabilityScore: number | null;
+  };
   const leaderboard: LeaderboardEntry[] = leaderboardRes.ok
     ? (leaderboardRes.data as { result?: { data?: LeaderboardEntry[] } })?.result?.data ?? []
     : [];
-  const metricsByUser = new Map(leaderboard.map((e) => [e.mediaBuyerId, { confirmationRate: e.confirmationRate, deliveryRate: e.deliveryRate }]));
+  const metricsByUser = new Map(
+    leaderboard.map((e) => [
+      e.mediaBuyerId,
+      {
+        confirmationRate: e.confirmationRate,
+        deliveryRate: e.deliveryRate,
+        cpa: e.cpa,
+        trueRoas: e.trueRoas,
+        profitabilityScore: e.profitabilityScore,
+      },
+    ]),
+  );
 
   const teamMembersWithMetrics: FundingBalanceRow[] = teamMembers.map((m) => {
     const metrics = metricsByUser.get(m.userId);
     return metrics
-      ? { ...m, confirmationRate: metrics.confirmationRate, deliveryRate: metrics.deliveryRate }
+      ? {
+          ...m,
+          confirmationRate: metrics.confirmationRate,
+          deliveryRate: metrics.deliveryRate,
+          cpa: metrics.cpa,
+          trueRoas: metrics.trueRoas,
+          profitabilityScore: metrics.profitabilityScore,
+        }
       : m;
   });
 
-  const SORT_BY_VALUES = new Set(['name', 'balance', 'received', 'spent', 'confirm', 'delivery']);
+  const SORT_BY_VALUES = new Set([
+    'name',
+    'balance',
+    'received',
+    'spent',
+    'confirm',
+    'delivery',
+    'cpa',
+    'profitability',
+  ]);
   const q = (url.searchParams.get('q') ?? '').trim();
   const qLower = q.toLowerCase();
   const sortByRaw = url.searchParams.get('sortBy') ?? 'name';
@@ -130,11 +164,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return sortDir === 'asc' ? c : -c;
     });
   } else {
-    const num = (m: FundingBalanceRow) => (sortBy === 'balance' ? Number(m.balance) : sortBy === 'received' ? Number(m.totalReceived) : Number(m.totalSpend));
+    const num = (m: FundingBalanceRow) =>
+      sortBy === 'balance'
+        ? Number(m.balance)
+        : sortBy === 'received'
+          ? Number(m.totalReceived)
+          : sortBy === 'spent'
+            ? Number(m.totalSpend)
+            : sortBy === 'cpa'
+              ? m.cpa ?? 0
+              : 0;
     const rate = (m: FundingBalanceRow, k: 'confirmationRate' | 'deliveryRate') => m[k];
     sorted.sort((a, b) => {
-      if (sortBy === 'balance' || sortBy === 'received' || sortBy === 'spent') {
+      if (sortBy === 'balance' || sortBy === 'received' || sortBy === 'spent' || sortBy === 'cpa') {
         return sortDir === 'asc' ? num(a) - num(b) : num(b) - num(a);
+      }
+      if (sortBy === 'profitability') {
+        const av = a.profitabilityScore;
+        const bv = b.profitabilityScore;
+        const aNull = av == null;
+        const bNull = bv == null;
+        if (aNull && bNull) return 0;
+        if (aNull) return 1;
+        if (bNull) return -1;
+        return sortDir === 'asc' ? av - bv : bv - av;
       }
       const k = sortBy === 'confirm' ? 'confirmationRate' : 'deliveryRate';
       const av = rate(a, k);

@@ -23,6 +23,51 @@ export function isSuperAdminOnly(user: { role: string } | null | undefined): boo
   return !!user && user.role === 'SUPER_ADMIN';
 }
 
+export const ORG_WIDE_DEPARTMENT_HEAD_ROLES = new Set<string>([
+  'HEAD_OF_CS',
+  'HEAD_OF_MARKETING',
+  'HEAD_OF_LOGISTICS',
+]);
+
+export function isOrgWideDepartmentHead(user: { role: string } | null | undefined): boolean {
+  return !!user && ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(user.role);
+}
+
+/** Cross-branch session / listings — mirrors apps/api `canViewAllBranches`. */
+export function canViewAllBranches(user: { role: string } | null | undefined): boolean {
+  if (!user) return false;
+  return ADMIN_LEVEL_ROLES.has(user.role) || isOrgWideDepartmentHead(user);
+}
+
+/** Mirrors `hasFinanceAccess` in apps/api — finance role, hat, or costView permission. */
+export function hasFinanceAccess(user: {
+  role: string;
+  permissions?: string[];
+  isFinanceOfficer?: boolean;
+} | null | undefined): boolean {
+  if (!user) return false;
+  if (ADMIN_LEVEL_ROLES.has(user.role)) return true;
+  if (user.permissions?.includes('finance.costView')) return true;
+  if (user.role === 'FINANCE_OFFICER') return true;
+  if (user.isFinanceOfficer === true) return true;
+  return false;
+}
+
+/**
+ * Global audit page / `audit.globalLog` — admin, finance (primary or hat), or `audit.read`.
+ */
+export function canAccessGlobalAuditLog(user: {
+  role: string;
+  permissions?: string[];
+  isFinanceOfficer?: boolean;
+} | null | undefined): boolean {
+  if (!user) return false;
+  if (isAdminLevel(user)) return true;
+  if (hasFinanceAccess(user)) return true;
+  if (user.permissions?.includes('audit.read')) return true;
+  return false;
+}
+
 const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
   'LOGISTICS_MANAGER',
   'TPL_MANAGER',
@@ -53,14 +98,17 @@ export function canMirror(
   if (ADMIN_LEVEL_ROLES.has(target.role)) return false;
   if (ADMIN_LEVEL_ROLES.has(actor.role)) return true;
 
+  if (isOrgWideDepartmentHead(actor)) {
+    if (actor.role === 'HEAD_OF_CS' && target.role === 'CS_AGENT') return true;
+    if (actor.role === 'HEAD_OF_MARKETING' && target.role === 'MEDIA_BUYER') return true;
+    if (actor.role === 'HEAD_OF_LOGISTICS' && HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role))
+      return true;
+    return false;
+  }
+
   const sameBranch =
     !!actor.currentBranchId && target.primaryBranchId === actor.currentBranchId;
   if (!sameBranch) return false;
-
-  if (actor.role === 'HEAD_OF_CS' && target.role === 'CS_AGENT') return true;
-  if (actor.role === 'HEAD_OF_MARKETING' && target.role === 'MEDIA_BUYER') return true;
-  if (actor.role === 'HEAD_OF_LOGISTICS' && HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role))
-    return true;
 
   return false;
 }

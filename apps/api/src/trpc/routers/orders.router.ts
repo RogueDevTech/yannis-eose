@@ -4,6 +4,8 @@ import {
   EDGE_FORM_ACTOR_ID,
   transitionOrderSchema,
   updateOrderSchema,
+  requestOrderLinePriceChangeSchema,
+  requestOrderDeletionSchema,
   assignOrderSchema,
   bulkReassignSchema,
   listOrdersSchema,
@@ -11,6 +13,8 @@ import {
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure, publicProcedure } from '../trpc';
+import { isAdminLevel, isOrgWideDepartmentHead } from '../../common/authz';
+import { getBranchTeamsService } from './branches.router';
 import { OrdersService } from '../../orders/orders.service';
 import type { VoipService } from '../../voip/voip.service';
 
@@ -39,6 +43,12 @@ function getVoipService(): VoipService {
     throw new Error('VoipService not initialized. Call setVoipService() first.');
   }
   return voipServiceInstance;
+}
+
+/** Org-wide department heads use unscoped order lists/metrics (same as admin-class). */
+function orderListBranchId(user: { role: string }, sessionBranchId: string | null): string | null {
+  if (isAdminLevel(user) || isOrgWideDepartmentHead(user)) return null;
+  return sessionBranchId;
 }
 
 export const ordersRouter = router({
@@ -105,19 +115,37 @@ export const ordersRouter = router({
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
       const order = await getOrdersService().getById(input.orderId);
-      if ((ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN')) return order;
-      const perms = ctx.user.permissions ?? [];
-      const hasOrdersRead = perms.includes('orders.read');
-      const hasMarketingOrders = perms.includes('marketing.orders');
-      if (hasOrdersRead) return order;
-      if (hasMarketingOrders) {
-        if (ctx.user.role === 'HEAD_OF_MARKETING') return order;
-        if (order.mediaBuyerId === ctx.user.id) return order;
+      if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') {
+        const perms = ctx.user.permissions ?? [];
+        const hasOrdersRead = perms.includes('orders.read');
+        const hasMarketingOrders = perms.includes('marketing.orders');
+        if (!hasOrdersRead) {
+          if (!hasMarketingOrders) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: 'Not authorized to view this order',
+            });
+          }
+          if (ctx.user.role !== 'HEAD_OF_MARKETING' && order.mediaBuyerId !== ctx.user.id) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: 'Not authorized to view this order',
+            });
+          }
+        }
       }
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Not authorized to view this order',
-      });
+      const ob = order.branchId ?? null;
+      const as = order.assignedCsId ?? null;
+      const cb = ctx.user.currentBranchId ?? null;
+      const [viewerCanEditOrderLinePrices, viewerIsCsTeamSupervisor] = await Promise.all([
+        getOrdersService().canActorEditOrderLinePrices(ctx.user, { branchId: ob, assignedCsId: as }),
+        ob && cb === ob
+          ? as
+            ? getOrdersService().isActorCsTeamSupervisor(ctx.user.id, as, ob)
+            : getBranchTeamsService().isActorCsSupervisorOnBranch(ctx.user.id, ob)
+          : Promise.resolve(false),
+      ]);
+      return { ...order, viewerCanEditOrderLinePrices, viewerIsCsTeamSupervisor };
     }),
 
   listAllocatableLocations: authedProcedure
@@ -136,8 +164,8 @@ export const ordersRouter = router({
   list: authedProcedure
     .input(listOrdersSchema)
     .query(async ({ input, ctx }) => {
-      const branchId = ctx.currentBranchId;
-      if ((ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN')) {
+      const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      if (isAdminLevel(ctx.user) || isOrgWideDepartmentHead(ctx.user)) {
         return getOrdersService().list(input, branchId);
       }
       const perms = ctx.user.permissions ?? [];
@@ -184,10 +212,43 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Assign an order to a CS agent.
-   * Restricted to Head of CS and SuperAdmin.
+   * Submit proposed line prices for approval (actors who cannot apply prices via `orders.update`).
    */
-  assignToCS: permissionProcedure('orders.reassign')
+  requestLinePriceChangeApproval: authedProcedure
+    .meta({ branchScopedMutation: true })
+    .input(requestOrderLinePriceChangeSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId: _branchId, ...body } = input;
+      return getOrdersService().requestLinePriceChangeApproval(body, ctx.user);
+    }),
+
+  /**
+   * Request soft-delete (archive) approval — CS and others without direct archive authority.
+   */
+  requestOrderDeletionApproval: authedProcedure
+    .meta({ branchScopedMutation: true })
+    .input(requestOrderDeletionSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId: _branchId, ...body } = input;
+      return getOrdersService().requestOrderDeletionApproval(body, ctx.user);
+    }),
+
+  /**
+   * Soft-delete (archive) immediately — Head of CS / HoLogistics / Branch Admin / supervisors / admins.
+   */
+  softDeleteOrder: authedProcedure
+    .meta({ branchScopedMutation: true })
+    .input(requestOrderDeletionSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId: _branchId, reason, orderId } = input;
+      return getOrdersService().softDeleteOrder(orderId, ctx.user, { approverNote: reason });
+    }),
+
+  /**
+   * Assign an order to a CS agent.
+   * `orders.reassign` (HoCS / Admin) or branch CS team supervisor for in-team agents (UNPROCESSED / CS_ASSIGNED only).
+   */
+  assignToCS: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(assignOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
@@ -241,10 +302,10 @@ export const ordersRouter = router({
     }),
 
   /**
-   * List CS agents (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
+   * List CS agents for assign dropdowns — full roster with `orders.reassign`, else supervised team agents only.
    */
-  listCSAgents: permissionProcedure('orders.reassign').query(async () => {
-    return getOrdersService().listCSAgents();
+  listCSAgents: authedProcedure.query(async ({ ctx }) => {
+    return getOrdersService().listCSAgents(ctx.user);
   }),
 
   /**
@@ -288,7 +349,7 @@ export const ordersRouter = router({
         input?.endDate,
         input?.assignedCsId,
         input?.logisticsLocationId,
-        ctx.currentBranchId,
+        orderListBranchId(ctx.user, ctx.currentBranchId),
         input?.statuses,
       );
     }),
@@ -332,7 +393,7 @@ export const ordersRouter = router({
       return getOrdersService().getOrdersTimeSeriesByCreated(
         input?.startDate,
         input?.endDate,
-        ctx.currentBranchId,
+        orderListBranchId(ctx.user, ctx.currentBranchId),
         {
           mediaBuyerId: input?.mediaBuyerId,
           csAgentId: input?.assignedCsId,
@@ -350,6 +411,15 @@ export const ordersRouter = router({
   csWorkloads: permissionProcedure('orders.csWorkloads').query(async ({ ctx }) => {
     return getOrdersService().getCSAgentWorkloads(ctx.currentBranchId);
   }),
+
+  /**
+   * Pending orders + line items for one closer (CS queue workload modal).
+   */
+  closerWorkloadOrders: permissionProcedure('orders.csWorkloads')
+    .input(z.object({ agentId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      return getOrdersService().getCloserWorkloadOrdersWithItems(input.agentId, ctx.currentBranchId);
+    }),
 
   /**
    * Get workload for the current CS agent — for \"My Orders\" page.
@@ -547,9 +617,9 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Bulk assign multiple orders to a CS agent.
+   * Bulk assign multiple orders to a CS agent (same gates as assignToCS).
    */
-  bulkAssignToCS: permissionProcedure('orders.bulkAssign')
+  bulkAssignToCS: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(
       z.object({

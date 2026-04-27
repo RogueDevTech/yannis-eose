@@ -1,7 +1,15 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import {
+  apiRequest,
+  getCurrentUser,
+  getSessionCookie,
+  requirePermission,
+  defaultThisMonthRange,
+  safeStatus,
+} from '~/lib/api.server';
+import { canAccessGlobalAuditLog } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
@@ -18,6 +26,8 @@ interface BranchBreakdownRow {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'ceo.overview');
+  const me = await getCurrentUser(request);
+  const canViewAuditLink = me ? canAccessGlobalAuditLog(me) : false;
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);
@@ -67,7 +77,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (branchBreakdownRes.data?.result?.data ?? [])
     : [];
 
-  return { data, filters, branchBreakdown };
+  return { data, filters, branchBreakdown, canViewAuditLink };
 }
 
 /**
@@ -105,7 +115,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CEODashboardRoute() {
-  const { data, filters, branchBreakdown } = useLoaderData<typeof loader>();
+  const { data, filters, branchBreakdown, canViewAuditLink } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
   return (
@@ -114,6 +124,7 @@ export default function CEODashboardRoute() {
       filters={filters}
       branchBreakdown={branchBreakdown as BranchBreakdownRow[]}
       showBackToDashboard
+      canViewAuditLink={canViewAuditLink}
     />
   );
 }

@@ -18,7 +18,7 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActorAndBranch } from '../common/db/with-actor';
-import { isAdminLevel } from '../common/authz';
+import { isAdminLevel, isOrgWideDepartmentHead } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
@@ -72,7 +72,7 @@ export function getManageableRolesForViewer(viewer: { role: string }): string[] 
 function canPrepareDept(user: SessionUser, branchId: string, dept: PayrollDepartment): boolean {
   if (isAdminLevel(user)) return true;
   if (user.role !== DEPARTMENT_OWNER_ROLE[dept]) return false;
-  // Heads must operate on their own branch. currentBranchId comes from the session switcher.
+  if (isOrgWideDepartmentHead(user) && user.currentBranchId == null) return true;
   return !!user.currentBranchId && user.currentBranchId === branchId;
 }
 
@@ -650,16 +650,21 @@ export class PayrollBatchService {
    *   - admin / cross-branch: all batches matching filters
    *   - HR Manager: all batches on their currentBranchId
    *   - Finance: all batches on their currentBranchId (UI usually filters to PENDING_FINANCE+)
-   *   - Head of Dept: only their dept on their currentBranchId
+   *   - Head of Dept: their dept — on currentBranchId, or all branches when session branch is null (org-wide heads)
    */
   async listMonthlyPayrolls(input: ListMonthlyPayrollsInput, viewer: SessionUser) {
     const conditions = [] as ReturnType<typeof and>[] | unknown[];
 
     // Viewer scoping
     const cross = isAdminLevel(viewer);
+    const orgWideHeadNullSession =
+      isOrgWideDepartmentHead(viewer) && viewer.currentBranchId == null;
+
     if (!cross) {
-      if (!viewer.currentBranchId) return { batches: [], byMonth: [] };
-      conditions.push(eq(schema.payrollBatches.branchId, viewer.currentBranchId));
+      if (!viewer.currentBranchId && !orgWideHeadNullSession) return { batches: [], byMonth: [] };
+      if (viewer.currentBranchId) {
+        conditions.push(eq(schema.payrollBatches.branchId, viewer.currentBranchId));
+      }
 
       // Heads can only see their own dept
       const ownerDept = (Object.keys(DEPARTMENT_OWNER_ROLE) as PayrollDepartment[])
@@ -672,7 +677,9 @@ export class PayrollBatchService {
 
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
-    if (input.branchId && cross) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
+    if (input.branchId && (cross || orgWideHeadNullSession)) {
+      conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
+    }
     if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department));
     if (input.status) conditions.push(eq(schema.payrollBatches.status, input.status));
 

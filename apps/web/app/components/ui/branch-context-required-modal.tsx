@@ -10,7 +10,6 @@ export function BranchContextRequiredModal({
   selectedBranchId,
   actionLabel,
   onSelectedBranchChange,
-  onUseOneOff,
   onSwitchBranch,
   onClose,
 }: {
@@ -19,7 +18,6 @@ export function BranchContextRequiredModal({
   selectedBranchId: string;
   actionLabel: string;
   onSelectedBranchChange: (branchId: string) => void;
-  onUseOneOff: () => void;
   onSwitchBranch: () => void;
   onClose: () => void;
 }) {
@@ -46,11 +44,8 @@ export function BranchContextRequiredModal({
         />
 
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Button type="button" variant="secondary" onClick={onSwitchBranch} disabled={!selectedBranchId}>
+          <Button type="button" variant="primary" onClick={onSwitchBranch} disabled={!selectedBranchId}>
             Switch to selected branch
-          </Button>
-          <Button type="button" variant="primary" onClick={onUseOneOff} disabled={!selectedBranchId}>
-            Use selected branch for this action
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel

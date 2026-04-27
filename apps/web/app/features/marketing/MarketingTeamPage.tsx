@@ -57,6 +57,8 @@ const TEAM_SORT_BY_OPTIONS = [
   { value: 'balance', label: 'Balance' },
   { value: 'received', label: 'Received' },
   { value: 'spent', label: 'Ad spend' },
+  { value: 'cpa', label: 'CPA' },
+  { value: 'profitability', label: 'Profitability' },
   { value: 'confirm', label: 'Confirm %' },
   { value: 'delivery', label: 'Delivery %' },
 ];
@@ -111,8 +113,8 @@ export function MarketingTeamPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Team"
-        description="Media buyers and funding balance — same cards as Live Activities"
+        title="Team Analysis"
+        description="Media buyer funding, CPA, and profitability (True ROAS vs target) for the selected period."
         actions={
           <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
             <DateFilterBar
@@ -236,13 +238,15 @@ export function MarketingTeamPage({
             <div className="hidden md:block">
               <div className="card p-0 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px]">
+              <table className="w-full min-w-[960px]">
                 <thead>
                   <tr>
                     <th className="table-header">Member</th>
                     <th className="table-header text-right">Balance</th>
                     <th className="table-header text-right">Received</th>
                     <th className="table-header text-right">Spent</th>
+                    <th className="table-header text-right">CPA</th>
+                    <th className="table-header text-right">Profitability</th>
                     <th className="table-header text-right">Confirm %</th>
                     <th className="table-header text-right">Delivery %</th>
                     <th className="table-header">Actions</th>
@@ -275,6 +279,12 @@ export function MarketingTeamPage({
                       </td>
                       <td className="table-cell text-right text-app-fg-muted whitespace-nowrap">
                         {formatNaira(Number(m.totalSpend))}
+                      </td>
+                      <td className="table-cell text-right text-app-fg whitespace-nowrap">
+                        {m.cpa != null ? <NairaPrice amount={m.cpa} /> : '\u2014'}
+                      </td>
+                      <td className="table-cell text-right text-app-fg whitespace-nowrap tabular-nums">
+                        {m.profitabilityScore != null ? m.profitabilityScore.toFixed(1) : '\u2014'}
                       </td>
                       <td className="table-cell text-right text-app-fg whitespace-nowrap">
                         {m.confirmationRate != null ? `${Math.round(m.confirmationRate)}%` : '\u2014'}

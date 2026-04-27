@@ -21,8 +21,9 @@ import type {
 } from './types';
 import { formatRole } from './types';
 
-// Roles limited to one active holder per branch. HR_MANAGER was added 2026-04-23 (CEO directive)
-// to follow the same rule as the HEAD_OF_* roles. Naming kept for continuity with backend.
+// HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
+import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
+
 const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
 
 // ─── Constants ──────────────────────────────────────────
@@ -81,15 +82,19 @@ export function UserCreatePage({
   const [logisticsLocationId, setLogisticsLocationId] = useState('');
   const [commissionPlanId, setCommissionPlanId] = useState('');
 
-  const conflictingHead =
-    HEAD_ROLES.includes(selectedRole) && selectedBranchId
-      ? activeHeads.find(
-          (h) => h.role === selectedRole && h.primaryBranchId === selectedBranchId,
-        )
-      : undefined;
+  const conflictingHead = HEAD_ROLES.includes(selectedRole)
+    ? activeHeads.find((h) => {
+        if (h.role !== selectedRole) return false;
+        if (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)) return true;
+        return !!selectedBranchId && h.primaryBranchId === selectedBranchId;
+      })
+    : undefined;
   const conflictingBranch = conflictingHead
     ? branches.find((b) => b.id === conflictingHead.primaryBranchId)
     : undefined;
+  const conflictScopeLabel = ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
+    ? 'The organization'
+    : conflictingBranch?.name ?? 'This branch';
 
   // Role-conditional visibility
   // Capacity is only meaningful for roles that work an individual workload — CS agents
@@ -150,6 +155,7 @@ export function UserCreatePage({
 
       <Form
         method="post"
+        data-branch-scoped-action="true"
         className="space-y-6"
         onSubmit={(e) => {
           if (conflictingHead) {
@@ -241,7 +247,7 @@ export function UserCreatePage({
               <div className="sm:col-span-2">
                 <InlineNotification
                   variant="warning"
-                  message={`${conflictingBranch ? conflictingBranch.name : 'This branch'} already has an active ${formatRole(selectedRole)} (${conflictingHead.name}). Creating another will be rejected — deactivate them first.`}
+                  message={`${conflictScopeLabel} already has an active ${formatRole(selectedRole)} (${conflictingHead.name}). Creating another will be rejected — deactivate them first.`}
                 />
               </div>
             )}

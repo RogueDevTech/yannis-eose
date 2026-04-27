@@ -24,6 +24,7 @@ import { useLiveIndicator } from '~/hooks/useSocket';
 import { STATUS_OPTIONS, STATUS_LABELS, STATUS_TEXT_CLASS, formatStatus } from '~/features/shared/order-status';
 import { exportToCsv } from '~/lib/csv-export';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
+import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import type { Order } from './types';
 
 // Status transitions that make sense for bulk operations
@@ -157,6 +158,7 @@ export function OrdersListPage({
   const [bulkAction, setBulkAction] = useState<string | null>(null);
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; errors: string[] } | null>(null);
   const fetcher = useFetcher();
+  const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
 
   // Server-side filtering via URL params; orders are already filtered by loader
   const filteredOrders = orders;
@@ -242,34 +244,50 @@ export function OrdersListPage({
     }
   }
 
+  useEffect(() => {
+    const err = (fetcher.data as { error?: string } | undefined)?.error;
+    if (!err) return;
+    if (!requiresBranchSelection) return;
+    if (!err.toLowerCase().includes('branch context required')) return;
+    ensureBranchForAction({ actionLabel: 'bulk order action' });
+  }, [fetcher.data, requiresBranchSelection, ensureBranchForAction]);
+
   const submitBulkTransition = (newStatus: string) => {
     if (newStatus === 'CANCELLED') {
       setCancelModalOpen(true);
       return;
     }
     setBulkResult(null);
-    fetcher.submit(
-      {
-        intent: 'bulkTransition',
-        orderIds: JSON.stringify([...selectedIds]),
-        newStatus,
-      },
-      { method: 'post' },
-    );
+    ensureBranchForAction({
+      actionLabel: `transitioning selected orders to ${formatStatus(newStatus)}`,
+      onProceed: () =>
+        fetcher.submit(
+          {
+            intent: 'bulkTransition',
+            orderIds: JSON.stringify([...selectedIds]),
+            newStatus,
+          },
+          { method: 'post' },
+        ),
+    });
   };
 
   const submitBulkCancel = () => {
     setBulkResult(null);
     setCancelModalOpen(false);
-    fetcher.submit(
-      {
-        intent: 'bulkTransition',
-        orderIds: JSON.stringify([...selectedIds]),
-        newStatus: 'CANCELLED',
-        reason: cancelReason,
-      },
-      { method: 'post' },
-    );
+    ensureBranchForAction({
+      actionLabel: 'cancelling selected orders',
+      onProceed: () =>
+        fetcher.submit(
+          {
+            intent: 'bulkTransition',
+            orderIds: JSON.stringify([...selectedIds]),
+            newStatus: 'CANCELLED',
+            reason: cancelReason,
+          },
+          { method: 'post' },
+        ),
+    });
   };
 
   const submitBulkExport = () => {
@@ -846,6 +864,11 @@ export function OrdersListPage({
           status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
           search: searchQuery || undefined,
           assignedCsId: searchParams.get('csAgentId') || undefined,
+          ...(filters?.periodAllTime
+            ? { periodAllTime: true as const }
+            : filters?.startDate && filters?.endDate
+              ? { startDate: filters.startDate, endDate: filters.endDate }
+              : {}),
         }}
       />
 

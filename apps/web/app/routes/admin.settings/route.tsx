@@ -31,6 +31,19 @@ interface NotificationEmailConfig {
   mandatory: NotificationTypeConfig[];
 }
 
+interface MyNotificationPrefItem {
+  type: string;
+  label: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+}
+
+interface MyNotificationPrefs {
+  items: MyNotificationPrefItem[];
+  preferences: Record<string, boolean>;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   const cookie = getSessionCookie(request);
@@ -59,6 +72,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
+  // Per-user notification preferences (every authenticated user has a Notifications tab).
+  let myNotificationPrefs: MyNotificationPrefs | null = null;
+  if (user) {
+    const prefsRes = await apiRequest<unknown>(
+      '/trpc/users.getMyNotificationPreferences',
+      { method: 'GET', cookie },
+    );
+    if (prefsRes.ok) {
+      const data = prefsRes.data as { result?: { data?: MyNotificationPrefs } };
+      myNotificationPrefs = data?.result?.data ?? null;
+    }
+  }
+
   // VOIP provider state — needed so the System tab can render the provider picker. The
   // backend exposes the list (which is configured) and the active selection separately,
   // so the dropdown can disable unconfigured options + show which env vars are missing.
@@ -77,7 +103,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (active && list) voipState = { active, providers: list };
   }
 
-  return { user, systemSettings, notificationEmailConfig, voipState };
+  return { user, systemSettings, notificationEmailConfig, voipState, myNotificationPrefs };
 }
 
 interface VoipActive {
@@ -259,6 +285,36 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, message: `VOIP provider switched to Africa's Talking` });
   }
 
+  if (intent === 'updateMyNotificationPreferences') {
+    const rawPrefs = formData.get('preferences')?.toString() ?? '{}';
+    let preferences: Record<string, boolean>;
+    try {
+      const parsed = JSON.parse(rawPrefs) as Record<string, unknown>;
+      preferences = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'boolean') preferences[k] = v;
+      }
+    } catch {
+      return json({ error: 'Invalid notification preferences' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>(
+      '/trpc/users.updateMyNotificationPreferences',
+      {
+        method: 'POST',
+        cookie,
+        body: { preferences },
+      },
+    );
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to save notification preferences') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, message: 'Notification preferences saved' });
+  }
+
   if (intent === 'updateNotificationEmailConfig') {
     const rawEnabledTypes = formData.get('enabledTypes')?.toString() ?? '{}';
     let enabledTypes: Record<string, boolean>;
@@ -283,13 +339,15 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SettingsRoute() {
-  const { user, systemSettings, notificationEmailConfig, voipState } = useLoaderData<typeof loader>();
+  const { user, systemSettings, notificationEmailConfig, voipState, myNotificationPrefs } =
+    useLoaderData<typeof loader>();
   return (
     <SettingsPage
       user={user}
       systemSettings={systemSettings}
       notificationEmailConfig={notificationEmailConfig}
       voipState={voipState}
+      myNotificationPrefs={myNotificationPrefs}
     />
   );
 }

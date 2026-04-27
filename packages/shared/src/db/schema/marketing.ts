@@ -1,5 +1,5 @@
-import { uuid, pgTable, text, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
-import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, recordStatusEnum, adSpendStatusEnum } from './enums';
+import { uuid, pgTable, text, numeric, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, recordStatusEnum, adSpendStatusEnum, adPlatformEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
@@ -90,6 +90,10 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
     .references(() => campaigns.id),
   spendAmount: numeric('spend_amount', { precision: 12, scale: 2 }).notNull(),
   screenshotUrl: text('screenshot_url').notNull(),
+  /** Optional link to the actual ad creative (Meta Ads Manager URL, TikTok Ads URL, etc.). */
+  adUrl: text('ad_url'),
+  /** Ad platform — defaults to FACEBOOK (vast majority of spend). */
+  platform: adPlatformEnum('platform').default('FACEBOOK').notNull(),
   spendDate: timestamp('spend_date', { withTimezone: true }).notNull(),
   status: adSpendStatusEnum('status').default('PENDING').notNull(),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
@@ -100,3 +104,58 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,
 });
+
+/**
+ * cross_funnel_attempts — same customer (phone) tried to order the same product
+ * via a DIFFERENT Media Buyer's funnel within the dedup window. The first MB to
+ * land an order wins attribution; subsequent submissions are recorded here, NOT
+ * created as orders, NOT seen by CS, and NOT counted in any metric.
+ *
+ * Purpose: give each MB visibility that their funnel is generating real interest
+ * even when they didn't get attribution. Strictly per-MB visibility.
+ *
+ * `original_order_id` FK is enforced at the DB level only (SQL migration) to
+ * avoid a circular Drizzle import between marketing.ts and orders.ts.
+ */
+export const crossFunnelAttempts = pgTable(
+  'cross_funnel_attempts',
+  {
+    id: uuidv7Pk(),
+    /** SHA-256 hash of the normalized phone — never store raw phone (Pillar 2). */
+    customerPhoneHash: text('customer_phone_hash').notNull(),
+    customerName: text('customer_name').notNull(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    /** Whose form caught the duplicate. They are the only non-admin who can see this row. */
+    mediaBuyerId: uuid('media_buyer_id')
+      .notNull()
+      .references(() => users.id),
+    /** Their funnel/campaign. */
+    campaignId: uuid('campaign_id').references(() => campaigns.id),
+    /** Branch context for HoM scoping. Derived from campaign or MB at insert. */
+    branchId: uuid('branch_id').references(() => branches.id),
+    /** The winning order (DB-level FK to orders.id). May be null if order was hard-deleted. */
+    originalOrderId: uuid('original_order_id'),
+    /** Denormalized — who got attribution. Useful for the MB to see "credited to X". */
+    originalMediaBuyerId: uuid('original_media_buyer_id').references(() => users.id),
+    attemptedAt: timestamp('attempted_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    mediaBuyerAttemptedAtIdx: index('cfa_media_buyer_attempted_at_idx').on(
+      table.mediaBuyerId,
+      table.attemptedAt,
+    ),
+    branchAttemptedAtIdx: index('cfa_branch_attempted_at_idx').on(
+      table.branchId,
+      table.attemptedAt,
+    ),
+    phoneProductIdx: index('cfa_phone_product_idx').on(
+      table.customerPhoneHash,
+      table.productId,
+      table.attemptedAt,
+    ),
+    originalOrderIdx: index('cfa_original_order_idx').on(table.originalOrderId),
+  }),
+);

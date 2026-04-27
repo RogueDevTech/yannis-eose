@@ -70,15 +70,36 @@ export interface SettingsVoipState {
   providers: VoipProviderInfo[];
 }
 
+interface MyNotificationPrefItem {
+  type: string;
+  label: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+}
+
+interface MyNotificationPrefs {
+  items: MyNotificationPrefItem[];
+  preferences: Record<string, boolean>;
+}
+
 interface SettingsPageProps {
   user: SettingsUser | null;
   systemSettings?: SystemSetting[];
   notificationEmailConfig?: NotificationEmailConfig | null;
   /** SuperAdmin/Admin only: active provider + list of all providers for the picker. */
   voipState?: SettingsVoipState | null;
+  /** Per-user notification preferences (visible to all roles). */
+  myNotificationPrefs?: MyNotificationPrefs | null;
 }
 
-export type SettingsTabId = 'profile' | 'security' | 'push' | 'system' | 'orgEmails';
+export type SettingsTabId =
+  | 'profile'
+  | 'security'
+  | 'notifications'
+  | 'push'
+  | 'system'
+  | 'orgEmails';
 
 
 function ThemeAppearanceOption({
@@ -210,6 +231,8 @@ function tabLabel(tab: SettingsTabId): string {
       return 'Profile';
     case 'security':
       return 'Security';
+    case 'notifications':
+      return 'Notifications';
     case 'push':
       return 'Push';
     case 'system':
@@ -221,7 +244,23 @@ function tabLabel(tab: SettingsTabId): string {
   }
 }
 
-export function SettingsPage({ user, systemSettings = [], notificationEmailConfig, voipState }: SettingsPageProps) {
+const NOTIFICATION_CATEGORY_LABELS: Record<string, string> = {
+  orders: 'Orders',
+  marketing: 'Marketing',
+  finance: 'Finance',
+  logistics: 'Logistics',
+  hr: 'Payroll & HR',
+  approvals: 'Approvals',
+  account: 'Account',
+};
+
+export function SettingsPage({
+  user,
+  systemSettings = [],
+  notificationEmailConfig,
+  voipState,
+  myNotificationPrefs,
+}: SettingsPageProps) {
   const fetcher = useFetcher();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -231,7 +270,9 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
   const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
 
   const allowedTabs = useMemo((): SettingsTabId[] => {
-    return isSuperAdmin ? ['profile', 'security', 'push', 'system', 'orgEmails'] : ['profile', 'security', 'push'];
+    return isSuperAdmin
+      ? ['profile', 'security', 'notifications', 'push', 'system', 'orgEmails']
+      : ['profile', 'security', 'notifications', 'push'];
   }, [isSuperAdmin]);
 
   const resolveTab = useCallback(
@@ -289,6 +330,42 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
     });
     setEnabledTypes(initial);
   }, [notificationEmailConfig]);
+
+  // Local state for the per-user notification opt-out toggles. Default = enabled
+  // unless the server says explicitly false. Saved as `{type: boolean}` map.
+  const [myNotifEnabled, setMyNotifEnabled] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const initial: Record<string, boolean> = {};
+    myNotificationPrefs?.items?.forEach((item) => {
+      initial[item.type] = item.enabled;
+    });
+    setMyNotifEnabled(initial);
+  }, [myNotificationPrefs]);
+
+  const myNotifGroupedItems = useMemo(() => {
+    const groups: Record<string, MyNotificationPrefItem[]> = {};
+    (myNotificationPrefs?.items ?? []).forEach((item) => {
+      const key = item.category;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(item);
+    });
+    return groups;
+  }, [myNotificationPrefs]);
+
+  const myNotifSavedMap = useMemo(() => {
+    const m: Record<string, boolean> = {};
+    (myNotificationPrefs?.items ?? []).forEach((item) => {
+      m[item.type] = item.enabled;
+    });
+    return m;
+  }, [myNotificationPrefs]);
+
+  const myNotifHasChanges = useMemo(() => {
+    return Object.keys(myNotifEnabled).some(
+      (k) => myNotifEnabled[k] !== myNotifSavedMap[k],
+    );
+  }, [myNotifEnabled, myNotifSavedMap]);
 
   const actionData = fetcher.data as { error?: string; success?: boolean; message?: string } | undefined;
   const [dismissedError, setDismissedError] = useState(false);
@@ -565,6 +642,138 @@ export function SettingsPage({ user, systemSettings = [], notificationEmailConfi
             </div>
           </fetcher.Form>
 
+        </div>
+      )}
+
+      {/* Notifications Tab — per-user opt-outs (in-app + push + email gate together) */}
+      {activeTab === 'notifications' && (
+        <div className="space-y-6">
+          <fetcher.Form method="post" className="space-y-6">
+            <input type="hidden" name="intent" value="updateMyNotificationPreferences" />
+            <input type="hidden" name="preferences" value={JSON.stringify(myNotifEnabled)} />
+
+            <div className="card">
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-app-fg">My notifications</h3>
+                  <p className="text-sm text-app-fg-muted mt-0.5">
+                    Choose which notifications you receive. Turning a type off stops all delivery
+                    for that type — in-app, push, and email. You can turn it back on any time.
+                  </p>
+                </div>
+                {myNotificationPrefs && myNotificationPrefs.items.length > 0 && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-app-fg-muted">Toggle all:</span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        const allOn: Record<string, boolean> = {};
+                        myNotificationPrefs.items.forEach((i) => {
+                          allOn[i.type] = true;
+                        });
+                        setMyNotifEnabled(allOn);
+                      }}
+                    >
+                      Enable all
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        const allOff: Record<string, boolean> = {};
+                        myNotificationPrefs.items.forEach((i) => {
+                          allOff[i.type] = false;
+                        });
+                        setMyNotifEnabled(allOff);
+                      }}
+                    >
+                      Disable all
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {!myNotificationPrefs ? (
+                <p className="text-sm text-app-fg-muted">Loading notification settings…</p>
+              ) : myNotificationPrefs.items.length === 0 ? (
+                <p className="text-sm text-app-fg-muted">
+                  No optional notifications for your role. Action-required alerts always
+                  reach you so you don&apos;t miss anything urgent.
+                </p>
+              ) : (
+                <div className="space-y-6">
+                  {Object.keys(myNotifGroupedItems)
+                    .sort()
+                    .map((category) => (
+                      <div key={category}>
+                        <h4 className="text-sm font-medium text-app-fg-muted mb-3">
+                          {NOTIFICATION_CATEGORY_LABELS[category] ?? category}
+                        </h4>
+                        <div className="space-y-3">
+                          {myNotifGroupedItems[category]!.map((item) => (
+                            <div
+                              key={item.type}
+                              className="flex items-center justify-between py-3 px-4 rounded-lg border border-app-border"
+                            >
+                              <div className="flex-1 min-w-0 pr-4">
+                                <p className="text-sm font-medium text-app-fg">
+                                  {item.label}
+                                </p>
+                                <p className="text-xs text-app-fg-muted mt-0.5">
+                                  {item.description}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setMyNotifEnabled((prev) => ({
+                                    ...prev,
+                                    [item.type]: !prev[item.type],
+                                  }))
+                                }
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
+                                  myNotifEnabled[item.type] ? 'bg-brand-600' : 'bg-app-border'
+                                }`}
+                                role="switch"
+                                aria-checked={myNotifEnabled[item.type] ?? false}
+                                aria-label={`Toggle notifications for ${item.label}`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                    myNotifEnabled[item.type] ? 'translate-x-5' : 'translate-x-0'
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                  <div className="pt-4 border-t border-app-border">
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      disabled={!myNotifHasChanges || fetcher.state === 'submitting'}
+                      loading={fetcher.state === 'submitting'}
+                      loadingText="Saving..."
+                    >
+                      Save notification preferences
+                    </Button>
+                    {myNotifHasChanges && (
+                      <span className="ml-3 text-xs text-app-fg-muted">
+                        You have unsaved changes
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </fetcher.Form>
         </div>
       )}
 

@@ -84,6 +84,18 @@ export function MediaBuyerBalanceCard({ row, className = '', ordersDateFilters }
             <span className="font-medium text-app-fg">{Math.round(row.deliveryRate)}%</span>
           </div>
         )}
+        {row.cpa != null && (
+          <div className="flex justify-between text-app-fg-muted">
+            <span>CPA</span>
+            <span className="font-medium text-app-fg">{formatNaira(row.cpa)}</span>
+          </div>
+        )}
+        {row.profitabilityScore != null && (
+          <div className="flex justify-between text-app-fg-muted">
+            <span>Profitability</span>
+            <span className="font-medium text-app-fg tabular-nums">{row.profitabilityScore.toFixed(1)}</span>
+          </div>
+        )}
       </div>
       <div className="mt-3 flex flex-nowrap items-center gap-2">
         <Link

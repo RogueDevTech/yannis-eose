@@ -4,10 +4,19 @@ import { z } from 'zod';
 // Product Offer (bundle pricing)
 // ============================================
 
+/** Max gallery images per offer tier (stored in `products.offers` JSON). */
+export const MAX_PRODUCT_OFFER_IMAGES = 12;
+
 export const productOfferSchema = z.object({
   label: z.string().min(1, 'Offer label is required'),
   qty: z.number().int().min(1, 'Quantity must be at least 1'),
   price: z.coerce.number().min(0).multipleOf(0.01),
+  /** Public URLs (e.g. S3) for this tier; optional. */
+  imageUrls: z
+    .array(z.string().url('Each image must be a valid URL'))
+    .max(MAX_PRODUCT_OFFER_IMAGES)
+    .optional()
+    .transform((v) => (Array.isArray(v) ? v : [])),
 });
 
 export type ProductOffer = z.infer<typeof productOfferSchema>;
@@ -51,6 +60,14 @@ export const updateProductSchema = z.object({
 });
 
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+
+/** Request to archive a product — Super Admin archives immediately; others create a permission request. */
+export const requestProductArchiveSchema = z.object({
+  productId: z.string().uuid(),
+  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+});
+
+export type RequestProductArchiveInput = z.infer<typeof requestProductArchiveSchema>;
 
 // ============================================
 // List Products

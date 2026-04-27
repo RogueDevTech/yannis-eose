@@ -76,6 +76,19 @@
     { "idx": 71, "version": "7", "when": 1778112600000, "tag": "0069_add_orders_custom_fields", "breakpoints": true },
     { "idx": 72, "version": "7", "when": 1778199000000, "tag": "0070_marketing_funding_source_request", "breakpoints": true },
     { "idx": 73, "version": "7", "when": 1778285400000, "tag": "0071_ad_spend_rejected_status", "breakpoints": true },
-    { "idx": 74, "version": "7", "when": 1778371800000, "tag": "0072_stock_reconciliations", "breakpoints": true }
+    { "idx": 74, "version": "7", "when": 1778371800000, "tag": "0072_stock_reconciliations", "breakpoints": true },
+    { "idx": 75, "version": "7", "when": 1778415000000, "tag": "0073_fix_stock_batches_history_insert_numeric", "breakpoints": true },
+    { "idx": 76, "version": "7", "when": 1778458200000, "tag": "0074_yannis_capture_history_delete_return_old", "breakpoints": true },
+    { "idx": 77, "version": "7", "when": 1778544600000, "tag": "0075_permission_request_product_archive", "breakpoints": true },
+    { "idx": 78, "version": "7", "when": 1778631000000, "tag": "0076_branch_team_supervisors", "breakpoints": true },
+    { "idx": 79, "version": "7", "when": 1778717400000, "tag": "0077_user_notification_preferences", "breakpoints": true },
+    { "idx": 80, "version": "7", "when": 1778803800000, "tag": "0078_permission_request_order_line_price", "breakpoints": true },
+    { "idx": 81, "version": "7", "when": 1778890200000, "tag": "0079_order_soft_delete_deletion_request", "breakpoints": true },
+    { "idx": 82, "version": "7", "when": 1778976600000, "tag": "0080_org_wide_department_heads", "breakpoints": true },
+    { "idx": 83, "version": "7", "when": 1779063000000, "tag": "0081_normalize_modified_by_payroll_stock", "breakpoints": true },
+    { "idx": 84, "version": "7", "when": 1779149400000, "tag": "0082_cross_funnel_attempts", "breakpoints": true },
+    { "idx": 85, "version": "7", "when": 1779235800000, "tag": "0083_ad_spend_platform_and_url", "breakpoints": true },
+    { "idx": 86, "version": "7", "when": 1779322200000, "tag": "0084_budgets_and_approval_requests", "breakpoints": true },
+    { "idx": 87, "version": "7", "when": 1779408600000, "tag": "0085_add_admin_role", "breakpoints": true }
   ]
 }

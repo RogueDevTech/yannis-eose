@@ -1,6 +1,12 @@
 export interface PermissionRequest {
   id: string;
-  type: 'USER_CREATION' | 'ROLE_CHANGE' | 'PERMISSION_GRANT';
+  type:
+    | 'USER_CREATION'
+    | 'ROLE_CHANGE'
+    | 'PERMISSION_GRANT'
+    | 'PRODUCT_ARCHIVE'
+    | 'ORDER_LINE_PRICE_CHANGE'
+    | 'ORDER_DELETION';
   status: string;
   requesterId: string;
   targetUserId: string | null;

@@ -19,6 +19,7 @@ import {
   CONFIGURABLE_EMAIL_TYPES,
   NOTIFICATION_EMAIL_CONFIG_KEY,
 } from '@yannis/shared';
+import type { NotificationPreferences } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { SettingsService } from '../settings/settings.service';
@@ -317,6 +318,8 @@ export class NotificationsService {
       return '/admin/notifications';
     }
     if (!data) return '/admin';
+    if (data['permissionRequestKind'] === 'order_line_price') return '/admin/permission-requests';
+    if (data['permissionRequestKind'] === 'order_deletion') return '/admin/permission-requests';
     if (data['orderId']) return `/admin/orders/${data['orderId']}`;
     if (data['requestId'] && type.includes('approval')) return '/admin/users';
     if (data['fundingId'] || (data['requesterId'] && type === 'funding:request')) return '/admin/marketing/funding';
@@ -328,11 +331,37 @@ export class NotificationsService {
   }
 
   /**
+   * Check if the recipient has opted out of this notification type.
+   * Mandatory (action-required) types ignore the user preference. Missing key /
+   * empty map = enabled. Returns true when delivery should be skipped entirely.
+   */
+  private async isUserOptedOut(userId: string, type: string): Promise<boolean> {
+    if ((MANDATORY_EMAIL_TYPES as readonly string[]).includes(type)) {
+      return false;
+    }
+    const [row] = await this.db
+      .select({ prefs: schema.users.notificationPreferences })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    const prefs = (row?.prefs as NotificationPreferences | null) ?? null;
+    return prefs?.[type] === false;
+  }
+
+  /**
    * Create a notification and push it via Socket.io in real-time.
    * Sends email if configured for this notification type.
    * Also fires a web push notification (non-blocking, fire-and-forget).
+   *
+   * Per-user opt-out: if the recipient has set
+   * `users.notification_preferences[type] = false`, the entire fan-out is skipped
+   * (no DB row, no socket emit, no push, no email). Mandatory types ignore this.
    */
   async create(input: CreateNotificationInput) {
+    if (await this.isUserOptedOut(input.userId, input.type)) {
+      return null;
+    }
+
     const rows = await this.db
       .insert(schema.notifications)
       .values({

@@ -403,10 +403,43 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
         spendAmount: formData.get('spendAmount')?.toString() ?? '',
         screenshotUrl,
         spendDate: formData.get('spendDate')?.toString() ?? '',
+        platform: formData.get('platform')?.toString() || undefined,
+        adUrl: formData.get('adUrl')?.toString() || undefined,
       },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to log ad spend') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  /**
+   * Multi-line "Add Expense" submission. Lines arrive as a JSON-encoded string
+   * in `lines` so we don't have to coordinate `lines[0][campaignId]` etc. style
+   * field-name conventions across the boundary.
+   */
+  if (intent === 'createAdSpendBatch') {
+    const linesRaw = formData.get('lines')?.toString() ?? '';
+    let lines: unknown;
+    try {
+      lines = JSON.parse(linesRaw);
+    } catch {
+      return json({ error: 'Invalid expense lines payload' }, { status: 400 });
+    }
+    if (!Array.isArray(lines) || lines.length === 0) {
+      return json({ error: 'Add at least one expense line' }, { status: 400 });
+    }
+    const spendDate = formData.get('spendDate')?.toString() ?? '';
+    if (!spendDate) {
+      return json({ error: 'Date is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/marketing.createAdSpendBatch', {
+      method: 'POST',
+      cookie,
+      body: { spendDate, lines },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to submit ad spend batch') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

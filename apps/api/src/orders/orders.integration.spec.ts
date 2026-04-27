@@ -13,7 +13,8 @@ import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
-import { createTestUser, createTestOrder } from '../test/factories/order.factory';
+import { createTestUser, createTestOrder, createTestBranch } from '../test/factories/order.factory';
+import { BranchTeamsService } from '../branches/branch-teams.service';
 import { isTransitionAllowed } from './order-state-machine';
 import { OrdersService } from './orders.service';
 
@@ -86,6 +87,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       {} as any,
+      new BranchTeamsService(db as any),
     );
 
     const logisticsStatuses = ['CONFIRMED', 'ALLOCATED', 'DELIVERED'] as const;
@@ -396,5 +398,121 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       .where(eq(schema.orderTimelineEvents.id, eventId));
 
     expect(eventAfterNameChange!.actorName).toBe(snapshotName); // unchanged
+  });
+
+  it('assignToCS allows CS team supervisor for UNPROCESSED order on same branch', async () => {
+    const branch = await createTestBranch(db as any);
+    const supervisor = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const agent = await createTestUser(db as any, { role: 'CS_AGENT' });
+    await db.insert(schema.userBranches).values([
+      { userId: supervisor.id, branchId: branch.id, isPrimary: true },
+      { userId: agent.id, branchId: branch.id, isPrimary: true },
+    ]);
+    const [team] = await db
+      .insert(schema.branchTeams)
+      .values({ branchId: branch.id, department: 'CS', name: 'CS squad' })
+      .returning({ id: schema.branchTeams.id });
+    await db.insert(schema.branchTeamMembers).values([
+      { teamId: team!.id, userId: supervisor.id, isSupervisor: true },
+      { teamId: team!.id, userId: agent.id, isSupervisor: false },
+    ]);
+    await setSessionActor(pgClient, supervisor.id, branch.id);
+    const { orderId } = await createTestOrder(db as any, { status: 'UNPROCESSED', branchId: branch.id });
+
+    const ordersService = new OrdersService(
+      db as any,
+      {} as any,
+      { emitToUser: () => undefined, emitToRoom: () => undefined } as any,
+      { create: async () => undefined } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      new BranchTeamsService(db as any),
+    );
+
+    const actor = {
+      id: supervisor.id,
+      email: supervisor.email,
+      name: 'Supervisor',
+      role: 'CS_AGENT',
+      logisticsLocationId: null,
+      currentBranchId: branch.id,
+    };
+    const updated = await ordersService.assignToCS(orderId, agent.id, actor as any);
+    expect(updated.assignedCsId).toBe(agent.id);
+    expect(updated.status).toBe('CS_ASSIGNED');
+  });
+
+  it('assignToCS rejects CS supervisor assigning to agent outside team', async () => {
+    const branch = await createTestBranch(db as any);
+    const supervisor = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const stranger = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const teammate = await createTestUser(db as any, { role: 'CS_AGENT' });
+    await db.insert(schema.userBranches).values([
+      { userId: supervisor.id, branchId: branch.id, isPrimary: true },
+      { userId: stranger.id, branchId: branch.id, isPrimary: true },
+      { userId: teammate.id, branchId: branch.id, isPrimary: true },
+    ]);
+    const [team] = await db
+      .insert(schema.branchTeams)
+      .values({ branchId: branch.id, department: 'CS', name: 'T' })
+      .returning({ id: schema.branchTeams.id });
+    await db.insert(schema.branchTeamMembers).values([
+      { teamId: team!.id, userId: supervisor.id, isSupervisor: true },
+      { teamId: team!.id, userId: teammate.id, isSupervisor: false },
+    ]);
+    await setSessionActor(pgClient, supervisor.id, branch.id);
+    const { orderId } = await createTestOrder(db as any, { status: 'UNPROCESSED', branchId: branch.id });
+
+    const ordersService = new OrdersService(
+      db as any,
+      {} as any,
+      { emitToUser: () => undefined, emitToRoom: () => undefined } as any,
+      { create: async () => undefined } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      new BranchTeamsService(db as any),
+    );
+    const actor = {
+      id: supervisor.id,
+      email: supervisor.email,
+      name: 'Supervisor',
+      role: 'CS_AGENT',
+      logisticsLocationId: null,
+      currentBranchId: branch.id,
+    };
+    await expect(ordersService.assignToCS(orderId, stranger.id, actor as any)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('list with null branchId includes orders from every branch', async () => {
+    const branchA = await createTestBranch(db as any);
+    const branchB = await createTestBranch(db as any);
+    const { orderId: o1 } = await createTestOrder(db as any, { branchId: branchA.id });
+    const { orderId: o2 } = await createTestOrder(db as any, { branchId: branchB.id });
+
+    const ordersService = new OrdersService(
+      db as any,
+      {} as any,
+      { emitToUser: () => undefined, emitToRoom: () => undefined } as any,
+      { create: async () => undefined } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      new BranchTeamsService(db as any),
+    );
+
+    const listResult = await ordersService.list(
+      { page: 1, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' },
+      null,
+    );
+    const ids = listResult.orders.map((o) => o.id);
+    expect(ids).toContain(o1);
+    expect(ids).toContain(o2);
   });
 });

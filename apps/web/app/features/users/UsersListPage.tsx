@@ -168,7 +168,6 @@ export function UsersListPage({
                 <th className="table-header">Role</th>
                 <th className="table-header">Branches</th>
                 <th className="table-header">Status</th>
-                <th className="table-header text-center">Capacity</th>
                 <th className="table-header">Joined</th>
                 <th className="table-header text-right">Actions</th>
               </tr>
@@ -196,7 +195,6 @@ export function UsersListPage({
                   <td className="table-cell">
                     <StatusBadge status={user.status} />
                   </td>
-                  <td className="table-cell text-center">{user.capacity}</td>
                   <td className="table-cell text-app-fg-muted">
                     {new Date(user.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',

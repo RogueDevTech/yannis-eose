@@ -37,9 +37,9 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { RadioGroup } from '~/components/ui/radio-group';
+import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
 
-// Roles limited to one active holder per branch. HR_MANAGER was added 2026-04-23 (CEO directive)
-// to follow the same rule as the HEAD_OF_* roles. Naming kept for continuity with backend.
+// HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
 const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
 
 // ─── Constants ──────────────────────────────────────────
@@ -237,17 +237,17 @@ export function UserDetailPage({
   const pendingConflict =
     HEAD_ROLES.includes(selectedRole) &&
     selectedRole !== user.role &&
-    user.primaryBranchId &&
     resolvedActiveHeads
-      ? resolvedActiveHeads.find(
-          (h) =>
-            h.role === selectedRole &&
-            h.primaryBranchId === user.primaryBranchId &&
-            h.id !== user.id,
-        )
+      ? resolvedActiveHeads.find((h) => {
+          if (h.role !== selectedRole || h.id === user.id) return false;
+          if (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)) return true;
+          return !!user.primaryBranchId && h.primaryBranchId === user.primaryBranchId;
+        })
       : undefined;
   const pendingConflictBranchName = pendingConflict
-    ? resolvedBranches?.find((b) => b.id === user.primaryBranchId)?.name ?? 'This branch'
+    ? ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
+      ? 'The organization'
+      : resolvedBranches?.find((b) => b.id === user.primaryBranchId)?.name ?? 'This branch'
     : null;
 
   const [assignFinanceHat, setAssignFinanceHat] = useState(user.isFinanceOfficer === true);
@@ -369,7 +369,7 @@ export function UserDetailPage({
                       </Link>
                     )}
                     {viewerCanMirror && (
-                      <Form method="post">
+                      <Form method="post" data-branch-scoped-action="true">
                         <input type="hidden" name="intent" value="mirror" />
                         <Button
                           type="submit"
@@ -413,7 +413,7 @@ export function UserDetailPage({
                           </Button>
                         )}
                         {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
-                          <Form method="post">
+                          <Form method="post" data-branch-scoped-action="true">
                             <input type="hidden" name="intent" value="reactivate" />
                             <Button type="submit" variant="secondary" size="sm" loading={isReactivating} loadingText="Reactivating..." className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5">
                               Reactivate
@@ -1124,6 +1124,7 @@ export function UserDetailPage({
       {activeTab === 'edit' && (
         <Form
           method="post"
+          data-branch-scoped-action="true"
           className="space-y-6"
           onSubmit={(e) => {
             if (pendingConflict) {
@@ -1165,21 +1166,28 @@ export function UserDetailPage({
                   onChange={(e) => setSelectedRole(e.target.value)}
                   options={ROLES.map((role) => ({ value: role.value, label: role.label }))}
                 />
-                {HEAD_ROLES.includes(selectedRole) && selectedRole !== user.role && user.primaryBranchId && activeHeads && (
+                {HEAD_ROLES.includes(selectedRole) &&
+                  selectedRole !== user.role &&
+                  activeHeads &&
+                  (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole) || !!user.primaryBranchId) && (
                   <DeferredSection resolve={activeHeads} skeleton="inline">
                     {(heads: ActiveHeadUser[]) => {
-                      const conflict = heads.find(
-                        (h) =>
-                          h.role === selectedRole &&
-                          h.primaryBranchId === user.primaryBranchId &&
-                          h.id !== user.id,
-                      );
+                      const conflict = heads.find((h) => {
+                        if (h.role !== selectedRole || h.id === user.id) return false;
+                        if (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)) return true;
+                        return h.primaryBranchId === user.primaryBranchId;
+                      });
                       if (!conflict) return null;
+                      const scopeLabel = ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
+                        ? 'The organization'
+                        : null;
                       return (
                         <DeferredSection resolve={branchesList ?? Promise.resolve([])} skeleton="inline">
                           {(branches: Array<{ id: string; name: string }>) => {
                             const branchName =
-                              branches.find((b) => b.id === user.primaryBranchId)?.name ?? 'This branch';
+                              scopeLabel ??
+                              branches.find((b) => b.id === user.primaryBranchId)?.name ??
+                              'This branch';
                             return (
                               <div className="mt-2">
                                 <InlineNotification
@@ -1383,7 +1391,7 @@ export function UserDetailPage({
             {resetFetcher.data?.error && (
               <InlineNotification variant="danger" message={resetFetcher.data.error} />
             )}
-            <resetFetcher.Form method="post" action=".">
+            <resetFetcher.Form method="post" action="." data-branch-scoped-action="true">
               <input type="hidden" name="intent" value="resetPassword" />
               <div className="space-y-4">
                 <div>
@@ -1419,7 +1427,7 @@ export function UserDetailPage({
                 ? 'This will update the user\'s email address. Please provide a reason for the approval.'
                 : 'This will reject the pending email change. Please provide a reason.'}
             </p>
-            <Form method="post">
+            <Form method="post" data-branch-scoped-action="true">
               <input type="hidden" name="intent" value="processEmailChange" />
               <input type="hidden" name="requestId" value={showEmailChangeModal.requestId} />
               <input type="hidden" name="action" value={showEmailChangeModal.action} />
@@ -1494,7 +1502,7 @@ export function UserDetailPage({
               <Button type="button" variant="secondary" onClick={() => setShowDeactivateConfirm(false)} disabled={isDeactivating}>
                 Cancel
               </Button>
-              <Form method="post">
+              <Form method="post" data-branch-scoped-action="true">
                 <input type="hidden" name="intent" value="deactivate" />
                 <Button
                   type="submit"
@@ -1517,11 +1525,24 @@ export function UserDetailPage({
           maxWidth="max-w-md"
           contentClassName="p-6"
         >
-          <h3 className="text-lg font-semibold text-app-fg mb-2">Role already taken in this branch</h3>
+          <h3 className="text-lg font-semibold text-app-fg mb-2">
+            {ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
+              ? 'Role already taken (organization-wide)'
+              : 'Role already taken in this branch'}
+          </h3>
           <p className="text-sm text-app-fg-muted mb-3">
-            Only one active <strong>{formatRole(selectedRole)}</strong> is allowed per branch.{' '}
-            <strong>{pendingConflictBranchName}</strong> already has{' '}
-            <strong>{pendingConflict.name}</strong> in that role.
+            {ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole) ? (
+              <>
+                Only one active <strong>{formatRole(selectedRole)}</strong> is allowed for the whole organization.{' '}
+                <strong>{pendingConflict.name}</strong> already holds that role.
+              </>
+            ) : (
+              <>
+                Only one active <strong>{formatRole(selectedRole)}</strong> is allowed per branch.{' '}
+                <strong>{pendingConflictBranchName}</strong> already has{' '}
+                <strong>{pendingConflict.name}</strong> in that role.
+              </>
+            )}
           </p>
           <p className="text-sm text-app-fg-muted mb-4">
             To change {user.name}&apos;s role to {formatRole(selectedRole)}, first change{' '}

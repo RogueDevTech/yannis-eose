@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Link, useLoaderData, useFetcher } from '@remix-run/react';
-import { useEffect, useRef, useState } from 'react';
+import { Link, useLoaderData, useFetcher, useRevalidator } from '@remix-run/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
@@ -12,16 +12,20 @@ import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Tabs } from '~/components/ui/tabs';
+import { StatCard } from '~/components/ui/card';
+import { DataTable, type TableColumn } from '~/components/ui/data-table';
+import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills';
+import { SearchInput } from '~/components/ui/search-input';
+import { RoleBadge } from '~/components/ui/role-badge';
+import { Checkbox } from '~/components/ui/checkbox';
 
 // ── Remove confirmation modal ─────────────────────────────────────────────────
 
 function RemoveModal({
   member,
-  branchId,
   onClose,
 }: {
   member: OverviewMember;
-  branchId: string;
   onClose: () => void;
 }) {
   const removeFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -95,11 +99,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   return [{ title: `${name} — Branch — Yannis EOSE` }];
 };
 
+type MemberDepartment = 'CS' | 'MARKETING' | 'LOGISTICS' | 'FINANCE' | 'HR' | 'OTHER';
+
 interface OverviewMember {
   userId: string;
   name: string;
   effectiveRole: string;
   isPrimary: boolean;
+  department: MemberDepartment;
 }
 
 interface BranchOverview {
@@ -117,16 +124,39 @@ interface BranchOverview {
     activeOrders: number;
     campaigns: number;
   };
-  csTeam: OverviewMember[];
-  marketingTeam: OverviewMember[];
-  otherMembers: OverviewMember[];
+  members: OverviewMember[];
 }
+
+const DEPT_LABEL: Record<MemberDepartment, string> = {
+  CS: 'Customer support',
+  MARKETING: 'Marketing',
+  LOGISTICS: 'Logistics',
+  FINANCE: 'Finance',
+  HR: 'HR',
+  OTHER: 'Other',
+};
 
 interface UserOption {
   id: string;
   name: string;
   role: string;
   email: string;
+}
+
+interface BranchTeamWithMembers {
+  id: string;
+  branchId: string;
+  department: 'CS' | 'MARKETING';
+  name: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+  members: Array<{
+    teamId: string;
+    userId: string;
+    isSupervisor: boolean;
+    name: string;
+    role: string;
+  }>;
 }
 
 const ROLE_OPTIONS = [
@@ -151,7 +181,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const cookie = getSessionCookie(request);
 
-  const [overviewRes, usersRes] = await Promise.all([
+  const [overviewRes, usersRes, teamsRes] = await Promise.all([
     apiRequest<{ result?: { data?: BranchOverview } }>(
       `/trpc/branches.overview?input=${encodeURIComponent(JSON.stringify({ branchId }))}`,
       { method: 'GET', cookie },
@@ -162,6 +192,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // only for SUPER_ADMIN / ADMIN — the route is gated by `branches.manage` so
       // non-admins can't reach it anyway.
       `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', status: 'ACTIVE', allBranches: true }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<{ result?: { data?: BranchTeamWithMembers[] } }>(
+      `/trpc/branches.listTeamsWithMembers?input=${encodeURIComponent(JSON.stringify({ branchId }))}`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -181,7 +215,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     (u) => u.role !== 'SUPER_ADMIN' && u.role !== 'ADMIN',
   );
 
-  return { overview, allUsers };
+  const teams: BranchTeamWithMembers[] = teamsRes.ok
+    ? (teamsRes.data?.result?.data as BranchTeamWithMembers[] | undefined) ?? []
+    : [];
+
+  return { overview, allUsers, teams };
 }
 
 // ── Action ───────────────────────────────────────────────────────────────────
@@ -246,144 +284,484 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return Response.json({ success: true });
   }
 
+  if (intent === 'createBranchTeam') {
+    const department = form.get('department')?.toString();
+    if (department !== 'CS' && department !== 'MARKETING') {
+      return Response.json({ error: 'Invalid department' }, { status: 400 });
+    }
+    const name = form.get('name')?.toString()?.trim() || undefined;
+    const res = await apiRequest('/trpc/branches.createBranchTeam', {
+      method: 'POST',
+      cookie,
+      body: { branchId, department, name },
+    });
+    if (!res.ok) {
+      return Response.json(
+        { error: extractApiErrorMessage(res.data, 'Failed to create team') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'updateBranchTeam') {
+    const teamId = form.get('teamId')?.toString() ?? '';
+    const name = form.get('name')?.toString()?.trim();
+    if (!teamId) return Response.json({ error: 'Team is required' }, { status: 400 });
+    const res = await apiRequest('/trpc/branches.updateBranchTeam', {
+      method: 'POST',
+      cookie,
+      body: { teamId, name: name ?? null },
+    });
+    if (!res.ok) {
+      return Response.json(
+        { error: extractApiErrorMessage(res.data, 'Failed to update team') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'deleteBranchTeam') {
+    const teamId = form.get('teamId')?.toString() ?? '';
+    if (!teamId) return Response.json({ error: 'Team is required' }, { status: 400 });
+    const res = await apiRequest('/trpc/branches.deleteBranchTeam', {
+      method: 'POST',
+      cookie,
+      body: { teamId },
+    });
+    if (!res.ok) {
+      return Response.json(
+        { error: extractApiErrorMessage(res.data, 'Failed to delete team') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'addBranchTeamMember') {
+    const teamId = form.get('teamId')?.toString() ?? '';
+    const userId = form.get('userId')?.toString() ?? '';
+    const isSupervisor = form.get('isSupervisor') === 'true';
+    if (!teamId || !userId) return Response.json({ error: 'Team and user are required' }, { status: 400 });
+    const res = await apiRequest('/trpc/branches.addBranchTeamMember', {
+      method: 'POST',
+      cookie,
+      body: { teamId, userId, isSupervisor },
+    });
+    if (!res.ok) {
+      return Response.json(
+        { error: extractApiErrorMessage(res.data, 'Failed to add team member') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'removeBranchTeamMember') {
+    const teamId = form.get('teamId')?.toString() ?? '';
+    const userId = form.get('userId')?.toString() ?? '';
+    if (!teamId || !userId) return Response.json({ error: 'Team and user are required' }, { status: 400 });
+    const res = await apiRequest('/trpc/branches.removeBranchTeamMember', {
+      method: 'POST',
+      cookie,
+      body: { teamId, userId },
+    });
+    if (!res.ok) {
+      return Response.json(
+        { error: extractApiErrorMessage(res.data, 'Failed to remove team member') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'setBranchTeamMemberSupervisor') {
+    const teamId = form.get('teamId')?.toString() ?? '';
+    const userId = form.get('userId')?.toString() ?? '';
+    const isSupervisor = form.get('isSupervisor') === 'true';
+    if (!teamId || !userId) return Response.json({ error: 'Team and user are required' }, { status: 400 });
+    const res = await apiRequest('/trpc/branches.setBranchTeamMemberSupervisor', {
+      method: 'POST',
+      cookie,
+      body: { teamId, userId, isSupervisor },
+    });
+    if (!res.ok) {
+      return Response.json(
+        { error: extractApiErrorMessage(res.data, 'Failed to update supervisor flag') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return Response.json({ success: true });
+  }
+
   return Response.json({ error: 'Unknown intent' }, { status: 400 });
 }
 
-// ── Branch overview KPI tile (distinct from shared card StatCard — supports `sub` line)
-
-function BranchOverviewStat({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: number | string;
-  sub?: string;
-  accent?: 'green' | 'blue' | 'yellow';
-}) {
-  const valueClass =
-    accent === 'green'
-      ? 'text-success-600 dark:text-success-400'
-      : accent === 'blue'
-      ? 'text-primary-600 dark:text-primary-400'
-      : accent === 'yellow'
-      ? 'text-warning-600 dark:text-warning-400'
-      : 'text-app-fg';
-
-  return (
-    <div className="card p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-app-fg-muted">
-        {label}
-      </p>
-      <p className={`text-2xl font-semibold mt-1 ${valueClass}`}>{value}</p>
-      {sub && <p className="text-xs text-app-fg-muted mt-1">{sub}</p>}
-    </div>
-  );
-}
-
-// ── Member table ─────────────────────────────────────────────────────────────
-
-function MemberTable({
-  title,
-  members,
-  branchId,
-}: {
-  title: string;
-  members: OverviewMember[];
-  branchId: string;
-}) {
+function BranchMembersPanel({ members, branchId }: { members: OverviewMember[]; branchId: string }) {
+  const [deptFilter, setDeptFilter] = useState<string>('ALL');
+  const [search, setSearch] = useState('');
   const [removeTarget, setRemoveTarget] = useState<OverviewMember | null>(null);
+
+  const pillOptions = useMemo((): FilterPillOption[] => {
+    const byDept = new Map<string, number>();
+    for (const m of members) {
+      byDept.set(m.department, (byDept.get(m.department) ?? 0) + 1);
+    }
+    const order: MemberDepartment[] = ['CS', 'MARKETING', 'LOGISTICS', 'FINANCE', 'HR', 'OTHER'];
+    const opts: FilterPillOption[] = [{ value: 'ALL', label: 'All', count: members.length }];
+    for (const d of order) {
+      const c = byDept.get(d) ?? 0;
+      if (c > 0) opts.push({ value: d, label: DEPT_LABEL[d], count: c });
+    }
+    return opts;
+  }, [members]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return members.filter((m) => {
+      if (deptFilter !== 'ALL' && m.department !== deptFilter) return false;
+      if (q && !m.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [members, deptFilter, search]);
+
+  const columns = useMemo(
+    (): TableColumn<OverviewMember>[] => [
+      {
+        key: 'name',
+        header: 'Name',
+        render: (m) => <span className="font-medium text-app-fg">{m.name}</span>,
+      },
+      {
+        key: 'role',
+        header: 'Role',
+        render: (m) => <RoleBadge role={m.effectiveRole} size="sm" />,
+      },
+      {
+        key: 'department',
+        header: 'Department',
+        hideOnMobile: true,
+        render: (m) => <span className="text-sm text-app-fg-muted">{DEPT_LABEL[m.department]}</span>,
+      },
+      {
+        key: 'primary',
+        header: 'Primary',
+        render: (m) =>
+          m.isPrimary ? (
+            <span className="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 font-medium">
+              <svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              Yes
+            </span>
+          ) : (
+            <span className="text-app-fg-muted text-sm">—</span>
+          ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        align: 'right',
+        className: 'whitespace-nowrap',
+        render: (m) => (
+          <div className="inline-flex items-center gap-3 justify-end">
+            <Link
+              to={`/hr/users/${m.userId}`}
+              className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+            >
+              Profile
+            </Link>
+            <button
+              type="button"
+              onClick={() => setRemoveTarget(m)}
+              className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400"
+            >
+              Remove
+            </button>
+          </div>
+        ),
+      },
+    ],
+    [],
+  );
 
   if (members.length === 0) {
     return (
-      <div className="card p-4">
-        <p className="text-sm font-semibold text-app-fg mb-3">{title}</p>
-        <EmptyState
-          title="No members yet"
-          variant="inline"
-        />
-      </div>
+      <EmptyState
+        title="No members yet"
+        description="Add staff to this branch so they can work in this location."
+        variant="card"
+      />
     );
   }
 
   return (
-    <>
-      <div className="card overflow-hidden p-0">
-        <div className="px-4 py-3 border-b border-app-border">
-          <p className="text-sm font-semibold text-app-fg">{title}</p>
-          <p className="text-xs text-app-fg-muted mt-0.5">
-            {members.length} {members.length === 1 ? 'person' : 'people'}
-          </p>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0 overflow-x-auto pb-1 -mb-1">
+          <FilterPills options={pillOptions} value={deptFilter} onChange={setDeptFilter} size="sm" />
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-app-border">
-              <th className="px-4 py-2 text-left font-medium text-app-fg-muted">Name</th>
-              <th className="px-4 py-2 text-left font-medium text-app-fg-muted">Role</th>
-              <th className="px-4 py-2 text-left font-medium text-app-fg-muted">Primary</th>
-              <th className="px-4 py-2 text-right font-medium text-app-fg-muted" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-app-border">
-            {members.map((m) => (
-              <tr key={m.userId} className="hover:bg-app-hover/50">
-                <td className="px-4 py-2 font-medium text-app-fg">
-                  {m.name}
-                </td>
-                <td className="px-4 py-2 font-mono text-xs text-app-fg-muted">
-                  {m.effectiveRole.replace(/_/g, ' ')}
-                </td>
-                <td className="px-4 py-2 text-xs text-app-fg-muted">
-                  {m.isPrimary ? (
-                    <span className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 font-medium">
-                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                      Yes
-                    </span>
-                  ) : '—'}
-                </td>
-                <td className="px-4 py-2 text-right whitespace-nowrap">
-                  <div className="inline-flex items-center gap-3 justify-end">
-                    <Link
-                      to={`/hr/users/${m.userId}`}
-                      className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                    >
-                      Profile
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setRemoveTarget(m)}
-                      className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="w-full min-w-0 lg:max-w-xs shrink-0">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search by name…"
+            aria-label="Filter members by name"
+            controlSize="sm"
+            debounceMs={200}
+          />
+        </div>
       </div>
 
+      <DataTable
+        caption="Branch members"
+        columns={columns}
+        data={filtered}
+        keyField="userId"
+        emptyTitle="No matching members"
+        emptyDescription="Try another department filter or clear the search."
+      />
+
       {removeTarget && (
-        <RemoveModal
-          member={removeTarget}
-          branchId={branchId}
-          onClose={() => setRemoveTarget(null)}
-        />
+        <RemoveModal member={removeTarget} onClose={() => setRemoveTarget(null)} />
       )}
-    </>
+    </div>
+  );
+}
+
+const DEPT_TEAM_LABEL: Record<'CS' | 'MARKETING', string> = {
+  CS: 'Customer support',
+  MARKETING: 'Marketing',
+};
+
+function BranchSupervisorTeamsPanel({
+  teams,
+  branchMembers,
+}: {
+  teams: BranchTeamWithMembers[];
+  branchMembers: OverviewMember[];
+}) {
+  const squadFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const revalidate = useRevalidator();
+  useFetcherToast(squadFetcher.data, { successMessage: 'Teams updated' });
+
+  useEffect(() => {
+    if (squadFetcher.state === 'idle' && squadFetcher.data?.success) {
+      revalidate.revalidate();
+    }
+  }, [squadFetcher.state, squadFetcher.data, revalidate]);
+
+  const addOptions = (dept: 'CS' | 'MARKETING', team: BranchTeamWithMembers) => {
+    const onTeam = new Set(team.members.map((m) => m.userId));
+    return branchMembers
+      .filter((m) => m.department === dept && !onTeam.has(m.userId))
+      .map((m) => ({
+        value: m.userId,
+        label: `${m.name} · ${m.effectiveRole.replace(/_/g, ' ')}`,
+      }));
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border border-app-border bg-app-elevated/40 p-4 space-y-3">
+        <div>
+          <p className="text-sm font-semibold text-app-fg">Create supervisor team</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">
+            Supervisors can mirror supervised staff, assign CS orders to in-team agents (unprocessed or CS-assigned), or send marketing funding to supervised media buyers — enforced server-side.
+          </p>
+        </div>
+        <squadFetcher.Form method="post" className="flex flex-wrap gap-3 items-end">
+          <input type="hidden" name="intent" value="createBranchTeam" />
+          <div className="w-full sm:w-auto min-w-[10rem]">
+            <FormSelect
+              label="Department"
+              id="sq-new-dept"
+              name="department"
+              defaultValue="CS"
+              options={[
+                { value: 'CS', label: DEPT_TEAM_LABEL.CS },
+                { value: 'MARKETING', label: DEPT_TEAM_LABEL.MARKETING },
+              ]}
+            />
+          </div>
+          <div className="flex-1 min-w-[12rem]">
+            <TextInput label="Team name (optional)" id="sq-new-name" name="name" placeholder="e.g. Squad A" />
+          </div>
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            disabled={squadFetcher.state !== 'idle'}
+            loading={squadFetcher.state !== 'idle'}
+            loadingText="Creating…"
+          >
+            + Create team
+          </Button>
+        </squadFetcher.Form>
+      </div>
+
+      {teams.length === 0 ? (
+        <EmptyState
+          title="No supervisor teams yet"
+          description="Create a team, add branch members, and mark who is the supervisor."
+        />
+      ) : (
+        <div className="space-y-4">
+          {teams.map((team) => {
+            const title = team.name?.trim() || `${DEPT_TEAM_LABEL[team.department]} team`;
+            const pick = addOptions(team.department, team);
+            return (
+              <div key={team.id} className="card p-4 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-app-fg">{title}</p>
+                    <p className="text-xs text-app-fg-muted mt-0.5">
+                      {DEPT_TEAM_LABEL[team.department]} · {team.members.length} member
+                      {team.members.length === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <squadFetcher.Form method="post" className="flex flex-wrap items-end gap-2">
+                      <input type="hidden" name="intent" value="updateBranchTeam" />
+                      <input type="hidden" name="teamId" value={team.id} />
+                      <TextInput
+                        label="Rename"
+                        id={`rn-${team.id}`}
+                        name="name"
+                        defaultValue={team.name ?? ''}
+                        placeholder="Team name"
+                        controlSize="sm"
+                      />
+                      <Button type="submit" variant="secondary" size="sm" disabled={squadFetcher.state !== 'idle'}>
+                        Save name
+                      </Button>
+                    </squadFetcher.Form>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      disabled={squadFetcher.state !== 'idle'}
+                      onClick={() => {
+                        if (!confirm(`Delete team "${title}"?`)) return;
+                        squadFetcher.submit({ intent: 'deleteBranchTeam', teamId: team.id }, { method: 'post' });
+                      }}
+                    >
+                      Delete team
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-app-border text-left text-app-fg-muted">
+                        <th className="py-2 pr-4 font-medium">Member</th>
+                        <th className="py-2 pr-4 font-medium">Role</th>
+                        <th className="py-2 pr-4 font-medium">Supervisor</th>
+                        <th className="py-2 font-medium w-28"> </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {team.members.map((m) => (
+                        <tr key={m.userId} className="border-b border-app-border/80">
+                          <td className="py-2 pr-4 font-medium text-app-fg">{m.name}</td>
+                          <td className="py-2 pr-4">
+                            <RoleBadge role={m.role} size="sm" />
+                          </td>
+                          <td className="py-2 pr-4">
+                            <label className="inline-flex items-center gap-2 cursor-pointer">
+                              <Checkbox
+                                key={`${team.id}-${m.userId}-${String(m.isSupervisor)}`}
+                                defaultChecked={m.isSupervisor}
+                                onChange={(e) => {
+                                  squadFetcher.submit(
+                                    {
+                                      intent: 'setBranchTeamMemberSupervisor',
+                                      teamId: team.id,
+                                      userId: m.userId,
+                                      isSupervisor: e.target.checked ? 'true' : 'false',
+                                    },
+                                    { method: 'post' },
+                                  );
+                                }}
+                              />
+                              <span className="text-app-fg-muted text-xs">Supervisor</span>
+                            </label>
+                          </td>
+                          <td className="py-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-danger-600 dark:text-danger-400"
+                              disabled={squadFetcher.state !== 'idle'}
+                              onClick={() => {
+                                if (!confirm(`Remove ${m.name} from this team?`)) return;
+                                squadFetcher.submit(
+                                  { intent: 'removeBranchTeamMember', teamId: team.id, userId: m.userId },
+                                  { method: 'post' },
+                                );
+                              }}
+                            >
+                              Remove
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <squadFetcher.Form method="post" className="flex flex-wrap gap-3 items-end border-t border-app-border pt-3">
+                  <input type="hidden" name="intent" value="addBranchTeamMember" />
+                  <input type="hidden" name="teamId" value={team.id} />
+                  <div className="min-w-[12rem] flex-1">
+                    {pick.length === 0 ? (
+                      <p className="text-xs text-app-fg-muted">All eligible members are already on this team.</p>
+                    ) : (
+                      <FormSelect
+                        label={`Add ${DEPT_TEAM_LABEL[team.department]} member`}
+                        id={`add-${team.id}`}
+                        name="userId"
+                        required
+                        placeholder="Choose member…"
+                        options={pick}
+                      />
+                    )}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-app-fg-muted pb-2">
+                    <Checkbox name="isSupervisor" value="true" />
+                    Add as supervisor
+                  </label>
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    size="sm"
+                    disabled={squadFetcher.state !== 'idle' || pick.length === 0}
+                  >
+                    Add to team
+                  </Button>
+                </squadFetcher.Form>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-type ActiveTab = 'overview' | 'team';
+type ActiveTab = 'overview' | 'team' | 'squads';
 
 export default function BranchOverviewRoute() {
-  const { overview, allUsers } = useLoaderData<typeof loader>();
+  const { overview, allUsers, teams } = useLoaderData<typeof loader>();
   const { branch, counts } = overview;
 
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -412,17 +790,30 @@ export default function BranchOverviewRoute() {
 
   const isSubmitting = fetcher.state !== 'idle';
 
-  const existingMemberIds = new Set([
-    ...overview.csTeam.map((m) => m.userId),
-    ...overview.marketingTeam.map((m) => m.userId),
-    ...overview.otherMembers.map((m) => m.userId),
-  ]);
+  const existingMemberIds = new Set(overview.members.map((m) => m.userId));
   const availableUsers = allUsers.filter((u) => !existingMemberIds.has(u.id));
 
   const deliveryRate =
     counts.totalOrders > 0
       ? Math.round((counts.deliveredOrders / counts.totalOrders) * 100)
       : null;
+
+  const deliveryAccent =
+    deliveryRate === null
+      ? undefined
+      : deliveryRate >= 70
+        ? 'success'
+        : deliveryRate >= 40
+          ? 'warning'
+          : 'danger';
+
+  const deptCounts = useMemo(() => {
+    const out = { CS: 0, MARKETING: 0, LOGISTICS: 0, FINANCE: 0, HR: 0, OTHER: 0 };
+    for (const m of overview.members) {
+      out[m.department]++;
+    }
+    return out;
+  }, [overview.members]);
 
   return (
     <div className="space-y-6">
@@ -462,18 +853,18 @@ export default function BranchOverviewRoute() {
         </div>
       </div>
 
-      {/* ── KPI strip ── */}
+      {/* ── KPI strip (shared StatCard) ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <BranchOverviewStat label="Total Orders" value={counts.totalOrders} sub="All statuses" />
-        <BranchOverviewStat label="Active" value={counts.activeOrders} sub="In pipeline" accent="blue" />
-        <BranchOverviewStat label="Delivered" value={counts.deliveredOrders} sub="Completed" accent="green" />
-        <BranchOverviewStat
-          label="Delivery Rate"
+        <StatCard label="Total orders" value={counts.totalOrders} description="All statuses" />
+        <StatCard label="Active" value={counts.activeOrders} description="In pipeline" accent="brand" />
+        <StatCard label="Delivered" value={counts.deliveredOrders} description="Completed" accent="success" />
+        <StatCard
+          label="Delivery rate"
           value={deliveryRate !== null ? `${deliveryRate}%` : '—'}
-          sub="Delivered / total"
-          accent={deliveryRate !== null && deliveryRate >= 70 ? 'green' : deliveryRate !== null && deliveryRate >= 40 ? 'yellow' : undefined}
+          description="Delivered / total"
+          accent={deliveryAccent}
         />
-        <BranchOverviewStat label="Campaigns" value={counts.campaigns} sub="Marketing" />
+        <StatCard label="Campaigns" value={counts.campaigns} description="Marketing" accent="brand" />
       </div>
 
       {/* Shared global Tabs component — matches the look used elsewhere in the app
@@ -483,7 +874,8 @@ export default function BranchOverviewRoute() {
         onChange={(v) => setActiveTab(v as ActiveTab)}
         tabs={[
           { value: 'overview', label: 'Overview' },
-          { value: 'team', label: `Team (${counts.totalMembers})` },
+          { value: 'team', label: `Branch members (${counts.totalMembers})` },
+          { value: 'squads', label: `Supervisor teams (${teams.length})` },
         ]}
       />
 
@@ -541,9 +933,12 @@ export default function BranchOverviewRoute() {
               </p>
               <div className="space-y-2">
                 {[
-                  { label: 'CS agents', value: overview.csTeam.length },
-                  { label: 'Marketing', value: overview.marketingTeam.length },
-                  { label: 'Other roles', value: overview.otherMembers.length },
+                  { label: 'Customer support', value: deptCounts.CS },
+                  { label: 'Marketing', value: deptCounts.MARKETING },
+                  { label: 'Logistics', value: deptCounts.LOGISTICS },
+                  { label: 'Finance', value: deptCounts.FINANCE },
+                  { label: 'HR', value: deptCounts.HR },
+                  { label: 'Other roles', value: deptCounts.OTHER },
                   { label: 'Total members', value: counts.totalMembers },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex items-center justify-between text-sm">
@@ -612,19 +1007,12 @@ export default function BranchOverviewRoute() {
             </Button>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <MemberTable title="Customer Support" members={overview.csTeam} branchId={branch.id} />
-            <MemberTable title="Marketing" members={overview.marketingTeam} branchId={branch.id} />
-          </div>
-
-          {overview.otherMembers.length > 0 && (
-            <MemberTable
-              title="Other Roles"
-              members={overview.otherMembers}
-              branchId={branch.id}
-            />
-          )}
+          <BranchMembersPanel members={overview.members} branchId={branch.id} />
         </div>
+      )}
+
+      {activeTab === 'squads' && (
+        <BranchSupervisorTeamsPanel teams={teams} branchMembers={overview.members} />
       )}
 
       {/* ── Edit branch modal ── */}

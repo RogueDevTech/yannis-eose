@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Form, useNavigation, Link } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
@@ -13,6 +13,8 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { FormField } from '~/components/ui/form-field';
 import { StatusBadge } from '~/components/ui/status-badge';
+import type { FileUploadUploadState } from '~/components/ui/file-upload';
+import { OfferImagesEditor } from './OfferImagesEditor';
 import type { Product } from './types';
 
 interface CategoryOption {
@@ -25,6 +27,7 @@ interface OfferRow {
   label: string;
   qty: string;
   price: string;
+  imageUrls: string[];
 }
 
 interface ProductEditPageProps {
@@ -36,11 +39,12 @@ interface ProductEditPageProps {
 }
 
 function parseOffers(offers: Product['offers']): OfferRow[] {
-  if (!offers?.length) return [{ label: '', qty: '1', price: '' }];
+  if (!offers?.length) return [{ label: '', qty: '1', price: '', imageUrls: [] }];
   return offers.map((o) => ({
     label: o.label ?? '',
     qty: String(o.qty ?? 1),
     price: String(o.price ?? ''),
+    imageUrls: Array.isArray(o.imageUrls) ? o.imageUrls.filter((u) => typeof u === 'string') : [],
   }));
 }
 
@@ -54,6 +58,12 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
 
   const [offers, setOffers] = useState<OfferRow[]>(() => parseOffers(product.offers));
   const [categoryId, setCategoryId] = useState(() => product.categoryId ?? '');
+  const [offerUploadStates, setOfferUploadStates] = useState<Record<number, FileUploadUploadState>>({});
+
+  const anyOfferImageUploading = useMemo(
+    () => Object.values(offerUploadStates).some((s) => s === 'uploading'),
+    [offerUploadStates],
+  );
 
   // Close archive confirm modal on successful submission
   const prevNavState = useRef(navigation.state);
@@ -75,17 +85,21 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
   }, [actionData?.error]);
 
   function addOffer() {
-    setOffers((prev) => [...prev, { label: '', qty: '1', price: '' }]);
+    setOffers((prev) => [...prev, { label: '', qty: '1', price: '', imageUrls: [] }]);
   }
 
   function removeOffer(index: number) {
     setOffers((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function updateOffer(index: number, field: keyof OfferRow, value: string) {
+  function updateOffer(index: number, field: keyof Pick<OfferRow, 'label' | 'qty' | 'price'>, value: string) {
     setOffers((prev) =>
       prev.map((o, i) => (i === index ? { ...o, [field]: value } : o)),
     );
+  }
+
+  function setOfferImageUrls(index: number, urls: string[]) {
+    setOffers((prev) => prev.map((o, i) => (i === index ? { ...o, imageUrls: urls } : o)));
   }
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -128,6 +142,7 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
             label: o.label,
             qty: parseInt(o.qty, 10) || 1,
             price: o.price,
+            imageUrls: o.imageUrls,
           })),
         )} />
 
@@ -207,7 +222,7 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
             <div>
               <h2 className="text-lg font-semibold text-app-fg">Offer Bundles</h2>
               <p className="text-xs text-app-fg-muted mt-0.5">
-                Define pricing tiers. E.g. &quot;Buy 1 Get 1 Free&quot; = 2 units at &#8358;16,500
+                Each tier can include its own images (e.g. for sales forms).
               </p>
             </div>
             <button
@@ -230,54 +245,64 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
             {offers.map((offer, index) => (
               <div
                 key={index}
-                className="flex flex-col sm:flex-row items-stretch sm:items-end gap-4 p-4 rounded-lg bg-app-hover border border-app-border"
+                className="flex flex-col gap-4 p-4 rounded-lg bg-app-hover border border-app-border"
               >
-                <div className="flex-1 min-w-[280px]">
-                  <TextInput
-                    id={`offer-label-${index}`}
-                    label="Label"
-                    required
-                    placeholder="e.g. Buy 1 Get 1 Free"
-                    value={offer.label}
-                    onChange={(e) => updateOffer(index, 'label', e.target.value)}
-                  />
-                </div>
-                <div className="w-full sm:w-32 sm:flex-shrink-0">
-                  <TextInput
-                    id={`offer-qty-${index}`}
-                    label="Total Qty"
-                    type="number"
-                    required
-                    min={1}
-                    placeholder="2"
-                    value={offer.qty}
-                    onChange={(e) => updateOffer(index, 'qty', e.target.value)}
-                  />
-                </div>
-                <div className="w-full sm:w-32 sm:flex-shrink-0">
-                  <FormField label="Price (&#8358;)" htmlFor={`offer-price-${index}`}>
-                    <AmountInput
-                      id={`offer-price-${index}`}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-4">
+                  <div className="flex-1 min-w-[280px]">
+                    <TextInput
+                      id={`offer-label-${index}`}
+                      label="Label"
                       required
-                      className="input py-2 text-sm"
-                      placeholder="16,500.00"
-                      value={offer.price}
-                      onChange={(v) => updateOffer(index, 'price', v)}
+                      placeholder="e.g. Buy 1 Get 1 Free"
+                      value={offer.label}
+                      onChange={(e) => updateOffer(index, 'label', e.target.value)}
                     />
-                  </FormField>
+                  </div>
+                  <div className="w-full sm:w-32 sm:flex-shrink-0">
+                    <TextInput
+                      id={`offer-qty-${index}`}
+                      label="Total Qty"
+                      type="number"
+                      required
+                      min={1}
+                      placeholder="2"
+                      value={offer.qty}
+                      onChange={(e) => updateOffer(index, 'qty', e.target.value)}
+                    />
+                  </div>
+                  <div className="w-full sm:w-32 sm:flex-shrink-0">
+                    <FormField label="Price (&#8358;)" htmlFor={`offer-price-${index}`}>
+                      <AmountInput
+                        id={`offer-price-${index}`}
+                        required
+                        className="input py-2 text-sm"
+                        placeholder="16,500.00"
+                        value={offer.price}
+                        onChange={(v) => updateOffer(index, 'price', v)}
+                      />
+                    </FormField>
+                  </div>
+                  {offers.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeOffer(index)}
+                      className="p-1.5 text-danger-500 hover:text-danger-700 dark:hover:text-danger-400 transition-colors self-end sm:self-auto"
+                      title="Remove offer"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
-                {offers.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeOffer(index)}
-                    className="p-1.5 text-danger-500 hover:text-danger-700 dark:hover:text-danger-400 transition-colors self-end sm:self-auto"
-                    title="Remove offer"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                    </svg>
-                  </button>
-                )}
+                <OfferImagesEditor
+                  imageUrls={offer.imageUrls}
+                  onChange={(urls) => setOfferImageUrls(index, urls)}
+                  disabled={isSubmitting || product.status === 'ARCHIVED'}
+                  onUploadStateChange={(s) =>
+                    setOfferUploadStates((prev) => ({ ...prev, [index]: s }))
+                  }
+                />
               </div>
             ))}
           </div>
@@ -318,7 +343,14 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
               Cancel
             </Link>
           )}
-          <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isSubmitting} loadingText="Saving..." disabled={offers.length === 0}>
+          <Button
+            type="submit"
+            variant="primary"
+            className="w-full sm:w-auto"
+            loading={isSubmitting}
+            loadingText="Saving..."
+            disabled={offers.length === 0 || anyOfferImageUploading}
+          >
             Save Changes
           </Button>
         </div>

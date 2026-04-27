@@ -29,16 +29,24 @@ interface LoaderData {
 }
 
 function mapApiProductToProduct(apiProduct: Record<string, unknown>): Product {
-  const offers = (apiProduct.offers as Array<{ label: string; qty: number; price: string }>) ?? [];
+  const offers =
+    (apiProduct.offers as Array<{ label: string; qty: number; price: string; imageUrls?: unknown }>) ?? [];
   return {
     id: String(apiProduct.id ?? ''),
     name: String(apiProduct.name ?? ''),
     description: apiProduct.description != null ? String(apiProduct.description) : null,
-    offers: offers.map((o) => ({
-      label: o?.label ?? '',
-      qty: typeof o?.qty === 'number' ? o.qty : parseInt(String(o?.qty), 10) || 1,
-      price: String(o?.price ?? ''),
-    })),
+    offers: offers.map((o) => {
+      const raw = o?.imageUrls;
+      const imageUrls = Array.isArray(raw)
+        ? raw.filter((u): u is string => typeof u === 'string' && u.length > 0)
+        : [];
+      return {
+        label: o?.label ?? '',
+        qty: typeof o?.qty === 'number' ? o.qty : parseInt(String(o?.qty), 10) || 1,
+        price: String(o?.price ?? ''),
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
+      };
+    }),
     baseSalePrice: String(apiProduct.baseSalePrice ?? apiProduct.base_sale_price ?? '0'),
     costPrice: apiProduct.costPrice != null || apiProduct.cost_price != null
       ? String(apiProduct.costPrice ?? apiProduct.cost_price ?? '')

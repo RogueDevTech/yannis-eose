@@ -108,6 +108,7 @@ interface ProductOffer {
   label: string;
   qty: number;
   price: string;
+  imageUrls?: string[];
 }
 
 interface CampaignConfig {
@@ -217,9 +218,19 @@ async function hashPhone(phone: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function dedupKey(phone: string, productId: string): Promise<string> {
+/**
+ * KV dedup key. Scoped by `mediaBuyerId` so that the SAME MB submitting the
+ * same phone+product twice within the window is short-circuited at the edge
+ * (no API call), but a DIFFERENT MB submitting the same phone+product is NOT
+ * blocked here — that case must fall through to the API so a cross-funnel
+ * attempt row can be recorded for attribution truth (Pillar 2 / per-MB
+ * visibility). When mediaBuyerId is missing (legacy embeds, manual posts) we
+ * fall back to the older unscoped key to preserve old behavior.
+ */
+async function dedupKey(phone: string, productId: string, mediaBuyerId?: string): Promise<string> {
   const encoder = new TextEncoder();
-  const data = encoder.encode(`dedup:${phone}:${productId}`);
+  const suffix = mediaBuyerId ? `:${mediaBuyerId}` : '';
+  const data = encoder.encode(`dedup:${phone}:${productId}${suffix}`);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -380,10 +391,15 @@ async function verifyTurnstile(token: string, ip: string, env: Env): Promise<boo
 
 // ── Dedup Check ────────────────────────────────────────────────
 
-async function checkDedup(phone: string, productIds: string[], env: Env): Promise<string | null> {
+async function checkDedup(
+  phone: string,
+  productIds: string[],
+  env: Env,
+  mediaBuyerId?: string,
+): Promise<string | null> {
   if (!env.DEDUP_CACHE) return null; // KV not bound (local dev)
   for (const productId of productIds) {
-    const key = await dedupKey(phone, productId);
+    const key = await dedupKey(phone, productId, mediaBuyerId);
     const existing = await env.DEDUP_CACHE.get(key);
     if (existing) {
       return productId;
@@ -392,10 +408,15 @@ async function checkDedup(phone: string, productIds: string[], env: Env): Promis
   return null;
 }
 
-async function markDedup(phone: string, productIds: string[], env: Env): Promise<void> {
+async function markDedup(
+  phone: string,
+  productIds: string[],
+  env: Env,
+  mediaBuyerId?: string,
+): Promise<void> {
   if (!env.DEDUP_CACHE) return; // KV not bound (local dev)
   for (const productId of productIds) {
-    const key = await dedupKey(phone, productId);
+    const key = await dedupKey(phone, productId, mediaBuyerId);
     await env.DEDUP_CACHE.put(key, new Date().toISOString(), {
       expirationTtl: DEDUP_WINDOW_SECONDS,
     });
@@ -618,6 +639,7 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .product-price{color:${accentColor};font-weight:700;font-size:.875rem}
     .yannis-form-card .offer-selector{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem}
     .yannis-form-card .offer-option{display:flex;align-items:center;gap:.75rem;padding:.75rem;border:2px solid #ddd;border-radius:8px;cursor:pointer;transition:border-color .2s,background .2s}
+    .yannis-form-card .offer-thumb{width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid #e5e5e5}
     .yannis-form-card .offer-option:hover{border-color:${accentColor}}
     .yannis-form-card .offer-option.selected{border-color:${accentColor};background:${accentColor}08}
     .yannis-form-card .offer-option input[type=radio]{accent-color:${accentColor};width:18px;height:18px;flex-shrink:0}
@@ -1033,6 +1055,20 @@ function getFormScript(
         submitOrder(orderData).then(function(result) {
           if (result.ok) {
             var authUrl = result.data.authorizationUrl;
+            // Already-submitted (dedup hit OR cross-funnel attempt): never redirect to the
+            // funnel's thank-you page — that masks the duplicate as a fresh success and is
+            // why one customer can post the same order three times and think each worked.
+            // Always show the inline message and lock the form so they can't retry into
+            // the same dead state.
+            if (result.data.alreadySubmitted) {
+              btn.disabled = true;
+              btn.textContent = 'Already submitted';
+              if (!showInlineSuccess(result.data.message || 'Your order has already been submitted. No need to submit again.')) {
+                msg.className = 'msg msg-info';
+                msg.textContent = result.data.message || 'Your order has already been submitted. No need to submit again.';
+              }
+              return;
+            }
             if (authUrl) {
               // Payment redirect always wins over the campaign-level success URL — the buyer
               // needs to complete payment before any thank-you page.
@@ -1135,8 +1171,13 @@ function getFormScript(
             msg.textContent = 'Network error. Please try again.';
           });
         }).finally(function() {
-          btn.disabled = false;
-          btn.textContent = form.dataset.btnText || 'Submit Order';
+          // Don't re-enable when we deliberately locked the form (e.g. alreadySubmitted
+          // dedup hit). The handler that sets that state has already stamped the button
+          // text — leave it alone so the user sees they can't resubmit.
+          if (btn.textContent !== 'Already submitted') {
+            btn.disabled = false;
+            btn.textContent = form.dataset.btnText || 'Submit Order';
+          }
         });
       });
     })();
@@ -1188,17 +1229,24 @@ function getFormInnerHTML(config: CampaignConfig): string {
       : [{ label: 'Standard', qty: 1, price: p.price }];
 
     const radioName = `offer-${p.id}`;
-    const offersHtml = offers.map((o) =>
-      `<label class="offer-option">
+    const offersHtml = offers.map((o) => {
+      const urls = (o as ProductOffer).imageUrls;
+      const firstImg =
+        Array.isArray(urls) && typeof urls[0] === 'string' && /^https?:\/\//i.test(urls[0]) ? urls[0] : '';
+      const thumbHtml = firstImg
+        ? `<img src="${escapeHtml(firstImg)}" alt="" class="offer-thumb" width="48" height="48" loading="lazy">`
+        : '';
+      return `<label class="offer-option">
         <input type="radio" name="${radioName}" class="offer-radio"
           data-offer='${JSON.stringify({ label: o.label, qty: o.qty, price: o.price }).replace(/'/g, '&#39;')}'>
+        ${thumbHtml}
         <span class="offer-label">${escapeHtml(o.label)}</span>
         <span class="offer-details">
           <span class="offer-qty">${o.qty} unit${o.qty > 1 ? 's' : ''}</span>
           <span class="offer-price">${formatPrice(o.price)}</span>
         </span>
-      </label>`
-    ).join('\n');
+      </label>`;
+    }).join('\n');
 
     const display = hasSingleProduct ? 'flex' : 'none';
     return `<div id="offers-${p.id}" class="offer-group offer-selector" style="display:${display}">${offersHtml}</div>`;
@@ -1781,9 +1829,13 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     }
   }
 
-  // 4. Dedup check (phone + product within 6hr window)
+  // 4. Dedup check (phone + product + mediaBuyerId within 6hr window).
+  //    Per-MB scoping: same MB resubmits → short-circuit at edge (no API call).
+  //    Different MB → KV miss here, API will record a cross_funnel_attempt row
+  //    so the second MB can see their funnel got traction without creating a
+  //    duplicate order or polluting CS/metrics.
   const productIds = data.items.map((item) => item.productId);
-  const dupProduct = await checkDedup(data.customerPhone, productIds, env);
+  const dupProduct = await checkDedup(data.customerPhone, productIds, env, data.mediaBuyerId);
   if (dupProduct) {
     return corsResponse(
       {
@@ -1836,12 +1888,30 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     : await forwardToApi(orderPayload, env);
 
   if (apiResult.ok) {
-    // Success — mark dedup entries
-    await markDedup(data.customerPhone, productIds, env);
-
-    const resultData = apiResult.data as { result?: { data?: { id?: string; authorizationUrl?: string; reference?: string } } };
+    const resultData = apiResult.data as {
+      result?: {
+        data?: { id?: string; authorizationUrl?: string; reference?: string; crossFunnelAttempt?: true };
+      };
+    };
     const orderId = resultData?.result?.data?.id;
     const authorizationUrl = resultData?.result?.data?.authorizationUrl;
+    const crossFunnelAttempt = resultData?.result?.data?.crossFunnelAttempt === true;
+
+    // Mark dedup so this same MB can't re-submit within the window.
+    // Cross-funnel attempts also mark dedup so the form doesn't keep posting
+    // through to the API on every retry.
+    await markDedup(data.customerPhone, productIds, env, data.mediaBuyerId);
+
+    if (crossFunnelAttempt) {
+      // Original MB already won attribution — surface the same "already submitted"
+      // UX as a same-MB duplicate. The DB row in cross_funnel_attempts is the only
+      // place this collision is recorded; CS / metrics never see it.
+      return corsResponse({
+        success: true,
+        message: 'Your order has already been submitted. No need to submit again.',
+        alreadySubmitted: true,
+      });
+    }
 
     if (isPayOnline && authorizationUrl) {
       return corsResponse({
@@ -1872,7 +1942,7 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
 
     if (buffered) {
       // Mark dedup even for buffered orders
-      await markDedup(data.customerPhone, productIds, env);
+      await markDedup(data.customerPhone, productIds, env, data.mediaBuyerId);
 
       return corsResponse({
         success: true,

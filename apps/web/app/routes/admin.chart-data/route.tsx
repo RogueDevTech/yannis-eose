@@ -40,7 +40,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       opts,
     ),
     topic === 'media_buyers'
-      ? apiRequest<{ result?: { data?: Array<{ mediaBuyerId: string; name: string; email?: string; totalSpend: number; totalOrders: number; deliveredOrders: number; deliveredRevenue: number; cpa: number; trueRoas: number; deliveryRate: number }> } }>(
+      ? apiRequest<{
+          result?: {
+            data?: Array<{
+              mediaBuyerId: string;
+              name: string;
+              email?: string;
+              totalSpend: number;
+              totalOrders: number;
+              deliveredOrders: number;
+              deliveredRevenue: number;
+              confirmedOrders: number;
+              confirmationRate: number;
+              cpa: number;
+              trueRoas: number;
+              deliveryRate: number;
+              profitabilityScore: number | null;
+            }>;
+          };
+        }>(
           `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify({ period: startDate && endDate ? 'this_month' : 'all_time', startDate, endDate }))}`,
           opts,
         )

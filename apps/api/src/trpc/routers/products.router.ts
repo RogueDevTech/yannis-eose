@@ -4,6 +4,7 @@ import {
   createProductSchema,
   updateProductSchema,
   listProductsSchema,
+  requestProductArchiveSchema,
 } from '@yannis/shared';
 import type { ProductsService } from '../../products/products.service';
 
@@ -58,6 +59,15 @@ export const productsRouter = router({
     .input(updateProductSchema)
     .mutation(async ({ input, ctx }) => {
       return getProductsService().update(input, ctx.user);
+    }),
+
+  /**
+   * Archive product: Super Admin applies immediately; others create a PENDING request for Super Admin.
+   */
+  requestArchive: permissionProcedure('products.update')
+    .input(requestProductArchiveSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getProductsService().requestArchive(input, ctx.user);
     }),
 
   /**

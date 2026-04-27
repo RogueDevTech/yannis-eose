@@ -57,9 +57,17 @@ export interface CEODashboardPageProps {
   filters?: CEODashboardFilters;
   showBackToDashboard?: boolean;
   branchBreakdown?: BranchBreakdownRow[];
+  /** When false, hide Quick Nav link to global audit (same gate as sidebar). */
+  canViewAuditLink?: boolean;
 }
 
-export function CEODashboardPage({ data, filters = { startDate: '', endDate: '', periodAllTime: false }, showBackToDashboard = true, branchBreakdown }: CEODashboardPageProps) {
+export function CEODashboardPage({
+  data,
+  filters = { startDate: '', endDate: '', periodAllTime: false },
+  showBackToDashboard = true,
+  branchBreakdown,
+  canViewAuditLink = true,
+}: CEODashboardPageProps) {
   const [showChartView, setShowChartView] = useState(false);
   const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -666,7 +674,9 @@ export function CEODashboardPage({ data, filters = { startDate: '', endDate: '',
             { href: '/admin/marketing/ad-spend', label: 'Ad spend', icon: 'marketing' },
             { href: '/admin/inventory', label: 'Inventory', icon: 'inventory' },
             { href: '/hr/payroll', label: 'HR & Payroll', icon: 'hr' },
-            { href: '/admin/analytics/audit', label: 'Audit Trail', icon: 'audit' },
+            ...(canViewAuditLink
+              ? [{ href: '/admin/analytics/audit', label: 'Audit Trail', icon: 'audit' as const }]
+              : []),
           ].map((item) => (
             <Link
               key={item.href}

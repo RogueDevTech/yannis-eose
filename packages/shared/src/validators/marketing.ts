@@ -44,7 +44,7 @@ export const fundingStatusCountsSchema = z.object({
 });
 export type FundingStatusCountsInput = z.infer<typeof fundingStatusCountsSchema>;
 
-/** Same date scope as listFundingRequests (createdAt); visibility matches list (MB = own, others = branch). */
+/** Same date scope as listFundingRequests (createdAt); requester filters mirror the list API. */
 export const fundingRequestStatusCountsSchema = z.object({
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
@@ -100,6 +100,16 @@ export type RejectFundingRequestInput = z.infer<typeof rejectFundingRequestSchem
 // Ad Spend Log Validators
 // ============================================
 
+export const adPlatformValues = ['FACEBOOK', 'TIKTOK', 'GOOGLE'] as const;
+export type AdPlatform = (typeof adPlatformValues)[number];
+export const adPlatformSchema = z.enum(adPlatformValues);
+
+/** Optional URL — accepts blank, http(s), and rejects everything else. */
+const adUrlSchema = z
+  .union([z.literal(''), z.string().url()])
+  .optional()
+  .transform((v) => (v ? v : undefined));
+
 export const createAdSpendSchema = z.object({
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
@@ -107,6 +117,8 @@ export const createAdSpendSchema = z.object({
   screenshotUrl: z.string().url().min(1),
   spendDate: z.string().date(),
   notes: z.string().max(500).optional(),
+  platform: adPlatformSchema.default('FACEBOOK'),
+  adUrl: adUrlSchema,
 });
 export type CreateAdSpendInput = z.infer<typeof createAdSpendSchema>;
 
@@ -118,6 +130,30 @@ export const createAdSpendLogFormSchema = createAdSpendSchema.merge(
   }),
 );
 export type CreateAdSpendLogFormInput = z.infer<typeof createAdSpendLogFormSchema>;
+
+/**
+ * Multi-line "Add Expense" submission — one shared spendDate, N line items
+ * (each: campaign + product + amount + platform + optional adUrl + screenshot).
+ * Server writes all rows in a single transaction; HoM gets ONE notification
+ * for the whole batch, not one per line.
+ */
+export const createAdSpendBatchSchema = z.object({
+  spendDate: z.string().date(),
+  lines: z
+    .array(
+      z.object({
+        campaignId: z.string().uuid(),
+        productId: z.string().uuid(),
+        spendAmount: z.coerce.number().min(0).multipleOf(0.01),
+        screenshotUrl: z.string().url().min(1),
+        platform: adPlatformSchema.default('FACEBOOK'),
+        adUrl: adUrlSchema,
+      }),
+    )
+    .min(1, 'Add at least one expense line')
+    .max(50, 'Up to 50 lines per submission'),
+});
+export type CreateAdSpendBatchInput = z.infer<typeof createAdSpendBatchSchema>;
 
 export const listAdSpendSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),

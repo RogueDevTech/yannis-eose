@@ -320,20 +320,37 @@ export class UsersService {
       });
     }
 
-    // Enforce one active HEAD_OF_* per branch
-    // Roles limited to at most one active holder per branch. HR_MANAGER joined this set on
-    // 2026-04-23 per CEO directive — same rule as the HEAD_OF_* roles even though it's not
-    // literally a "head" (naming kept for continuity with migration 0056/0060 + callers).
-    const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'] as const;
-    if (HEAD_ROLES.includes(input.role as typeof HEAD_ROLES[number]) && input.primaryBranchId) {
-      // PENDING also blocks: a branch with an invited-but-not-yet-logged-in head should
-      // not accept a second invite. Only DEACTIVATED / INACTIVE / ARCHIVED frees the slot.
+    // Org-wide singletons: at most one ACTIVE/PENDING HEAD_OF_CS, HEAD_OF_MARKETING, or
+    // HEAD_OF_LOGISTICS for the whole org. HR_MANAGER remains one per branch (below).
+    const ORG_WIDE_HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
+    if (ORG_WIDE_HEAD_ROLES.includes(input.role as (typeof ORG_WIDE_HEAD_ROLES)[number])) {
       const existingHead = await this.db
         .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
         .from(schema.users)
         .where(
           and(
             eq(schema.users.role, input.role as typeof schema.users.role._.data),
+            inArray(schema.users.status, ['ACTIVE', 'PENDING']),
+          ),
+        )
+        .limit(1);
+
+      if (existingHead[0]) {
+        const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `The organization already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} ${input.role.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
+        });
+      }
+    }
+
+    if (input.role === 'HR_MANAGER' && input.primaryBranchId) {
+      const existingHead = await this.db
+        .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.role, 'HR_MANAGER'),
             eq(schema.users.primaryBranchId, input.primaryBranchId),
             inArray(schema.users.status, ['ACTIVE', 'PENDING']),
           ),
@@ -344,7 +361,7 @@ export class UsersService {
         const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
         throw new TRPCError({
           code: 'CONFLICT',
-          message: `Branch already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} ${input.role.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
+          message: `Branch already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} hr manager (${existingHead[0].name}). Deactivate them first.`,
         });
       }
     }
@@ -1038,36 +1055,56 @@ export class UsersService {
       }
     }
 
-    // Enforce one active HEAD_OF_* per branch on role change or branch change
-    const HEAD_ROLES_UPDATE = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'] as const;
+    // Enforce org-wide singleton heads + per-branch HR_MANAGER when the role field is in the payload.
+    const ORG_WIDE_HEAD_ROLES_UPDATE = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
     const roleBeingSet = input.role ?? beforeRow.role;
-    const branchBeingSet = beforeRow.primaryBranchId ?? null;
-    if (
-      HEAD_ROLES_UPDATE.includes(roleBeingSet as typeof HEAD_ROLES_UPDATE[number]) &&
-      branchBeingSet &&
-      input.role // only run if role is actually changing
-    ) {
-      const existingHead = await this.db
-        .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
-        .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.role, roleBeingSet as typeof schema.users.role._.data),
-            eq(schema.users.primaryBranchId, branchBeingSet),
-            // PENDING + ACTIVE both block — see createStaff for rationale.
-            inArray(schema.users.status, ['ACTIVE', 'PENDING']),
-            // exclude the user being updated themselves
-            sql`${schema.users.id} != ${input.userId}`,
-          ),
+    const mergedPrimary = beforeRow.primaryBranchId ?? null;
+    if (input.role) {
+      if (
+        ORG_WIDE_HEAD_ROLES_UPDATE.includes(
+          roleBeingSet as (typeof ORG_WIDE_HEAD_ROLES_UPDATE)[number],
         )
-        .limit(1);
+      ) {
+        const existingHead = await this.db
+          .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.role, roleBeingSet as typeof schema.users.role._.data),
+              inArray(schema.users.status, ['ACTIVE', 'PENDING']),
+              sql`${schema.users.id} != ${input.userId}`,
+            ),
+          )
+          .limit(1);
 
-      if (existingHead[0]) {
-        const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: `Branch already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} ${roleBeingSet.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
-        });
+        if (existingHead[0]) {
+          const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `The organization already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} ${roleBeingSet.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
+          });
+        }
+      } else if (roleBeingSet === 'HR_MANAGER' && mergedPrimary) {
+        const existingHead = await this.db
+          .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.role, 'HR_MANAGER'),
+              eq(schema.users.primaryBranchId, mergedPrimary),
+              inArray(schema.users.status, ['ACTIVE', 'PENDING']),
+              sql`${schema.users.id} != ${input.userId}`,
+            ),
+          )
+          .limit(1);
+
+        if (existingHead[0]) {
+          const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `Branch already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} hr manager (${existingHead[0].name}). Deactivate them first.`,
+          });
+        }
       }
     }
 
@@ -1715,6 +1752,45 @@ export class UsersService {
     });
 
     return { fontScale: row.fontScale ?? null };
+  }
+
+  /**
+   * Read the calling user's notification preferences map.
+   * Missing keys / empty map = all types enabled by default.
+   */
+  async getMyNotificationPreferences(
+    userId: string,
+  ): Promise<Record<string, boolean>> {
+    const [row] = await this.db
+      .select({ prefs: schema.users.notificationPreferences })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    return (row?.prefs as Record<string, boolean>) ?? {};
+  }
+
+  /**
+   * Persist the calling user's notification preferences. Map of type → enabled.
+   * Only `false` entries are meaningful (they opt the user out); `true` entries are
+   * stored but equivalent to the default. Wipes nothing — the caller is expected
+   * to send the full intended map.
+   */
+  async updateMyNotificationPreferences(
+    preferences: Record<string, boolean>,
+    actor: SessionUser,
+  ): Promise<{ preferences: Record<string, boolean> }> {
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .update(schema.users)
+        .set({ notificationPreferences: preferences, updatedAt: new Date() })
+        .where(eq(schema.users.id, actor.id))
+        .returning({ prefs: schema.users.notificationPreferences });
+
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+      return { preferences: (row.prefs as Record<string, boolean>) ?? {} };
+    });
   }
 
   /**

@@ -14,6 +14,9 @@ export {
   createOfflineOrderSchema,
   transitionOrderSchema,
   updateOrderSchema,
+  requestOrderLinePriceChangeSchema,
+  requestOrderDeletionSchema,
+  softDeleteOrderSchema,
   assignOrderSchema,
   bulkReassignSchema,
   listOrdersSchema,
@@ -28,6 +31,9 @@ export type {
   CreateOfflineOrderInput,
   TransitionOrderInput,
   UpdateOrderInput,
+  RequestOrderLinePriceChangeInput,
+  RequestOrderDeletionInput,
+  SoftDeleteOrderInput,
   AssignOrderInput,
   BulkReassignInput,
   ListOrdersInput,
@@ -60,10 +66,12 @@ export type {
 
 // Product validators
 export {
+  MAX_PRODUCT_OFFER_IMAGES,
   productOfferSchema,
   createProductSchema,
   updateProductSchema,
   listProductsSchema,
+  requestProductArchiveSchema,
 } from './products';
 
 export type {
@@ -71,6 +79,7 @@ export type {
   CreateProductInput,
   UpdateProductInput,
   ListProductsInput,
+  RequestProductArchiveInput,
 } from './products';
 
 // Product category validators
@@ -166,6 +175,9 @@ export {
   getFundingBalanceSchema,
   createAdSpendSchema,
   createAdSpendLogFormSchema,
+  createAdSpendBatchSchema,
+  adPlatformSchema,
+  adPlatformValues,
   listAdSpendSchema,
   adSpendStatusCountsSchema,
   approveAdSpendSchema,
@@ -197,6 +209,8 @@ export type {
   GetFundingBalanceInput,
   CreateAdSpendInput,
   CreateAdSpendLogFormInput,
+  CreateAdSpendBatchInput,
+  AdPlatform,
   ListAdSpendInput,
   AdSpendStatusCountsInput,
   ApproveAdSpendInput,
@@ -242,12 +256,16 @@ export {
   listNotificationsSchema,
   markNotificationsReadSchema,
   createNotificationSchema,
+  notificationPreferencesSchema,
+  updateMyNotificationPreferencesSchema,
 } from './notifications';
 
 export type {
   ListNotificationsInput,
   MarkNotificationsReadInput,
   CreateNotificationInput,
+  NotificationPreferences,
+  UpdateMyNotificationPreferencesInput,
 } from './notifications';
 
 // System settings validators

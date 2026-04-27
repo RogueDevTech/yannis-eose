@@ -29,6 +29,7 @@ export const CONFIGURABLE_EMAIL_TYPES = [
   'order:callback_due',
   'delivery:assigned',
   'marketing:high_cpa',
+  'marketing:ad_spend_submitted',
   'funding:request',
   'funding:approved',
   'funding:rejected',
@@ -208,6 +209,13 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     mandatory: false,
     category: 'marketing',
   },
+  'marketing:ad_spend_submitted': {
+    type: 'marketing:ad_spend_submitted',
+    label: 'New ad spend submitted',
+    description: 'Head of Marketing — Media Buyer submitted a daily ad spend batch for review',
+    mandatory: false,
+    category: 'marketing',
+  },
   'finance:approval_processed': {
     type: 'finance:approval_processed',
     label: 'Approval processed',
@@ -335,3 +343,154 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     category: 'approvals',
   },
 };
+
+/**
+ * Per-user notification opt-out support.
+ *
+ * For each role, the list of notification types that user could realistically receive.
+ * The Settings → Notifications tab renders one toggle per type in this list. Default for
+ * every type is "enabled" — a user only ever opts OUT, never IN. Mandatory types
+ * (action-required) cannot be disabled and are not included here.
+ *
+ * Notes:
+ * - Account-level types (`account:*`) and request-status types (`finance:approval_processed`,
+ *   `funding:approved`, `funding:rejected`, `order:transfer_*`) apply to anyone who could be
+ *   the requester, so they're listed under every role that participates in those flows.
+ * - SuperAdmin / Admin / Branch Admin see everything because broadcast targeting and
+ *   future automation rules can reach them.
+ */
+const COMMON_ACCOUNT_TYPES: NotificationType[] = [
+  'account:updated',
+  'account:security',
+  'account:finance_hat_assigned',
+  'account:finance_hat_revoked',
+];
+
+const ALL_CONFIGURABLE: NotificationType[] = [...CONFIGURABLE_EMAIL_TYPES];
+
+export const RELEVANT_NOTIFICATION_TYPES_BY_ROLE: Record<string, NotificationType[]> = {
+  // Admin tier — visibility into everything; broadcasts often target them.
+  SUPER_ADMIN: ALL_CONFIGURABLE,
+  ADMIN: ALL_CONFIGURABLE,
+  BRANCH_ADMIN: ALL_CONFIGURABLE,
+
+  // CS
+  HEAD_OF_CS: [
+    'order:new',
+    'order:assigned_bulk',
+    'order:reassigned',
+    'order:callback_scheduled',
+    'order:callback_due',
+    'hr:batch_rejected',
+    'hr:batch_paid',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+  CS_AGENT: [
+    'order:assigned',
+    'order:assigned_bulk',
+    'order:reassigned',
+    'order:transfer_requested',
+    'order:transfer_accepted',
+    'order:transfer_rejected',
+    'order:callback_scheduled',
+    'order:callback_due',
+    'hr:payout_approved',
+    'hr:deduction_created',
+    'hr:addon_approved',
+    'hr:deduction_applied',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+
+  // Marketing
+  HEAD_OF_MARKETING: [
+    'order:new',
+    'marketing:high_cpa',
+    'marketing:ad_spend_submitted',
+    'funding:request',
+    'funding:approved',
+    'funding:rejected',
+    'hr:batch_rejected',
+    'hr:batch_paid',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+  MEDIA_BUYER: [
+    'order:new_campaign',
+    'funding:approved',
+    'funding:rejected',
+    'hr:payout_approved',
+    'hr:deduction_created',
+    'hr:addon_approved',
+    'hr:deduction_applied',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+
+  // Logistics
+  HEAD_OF_LOGISTICS: [
+    'logistics:shrinkage',
+    'transfer:sent',
+    'order:allocated',
+    'hr:batch_rejected',
+    'hr:batch_paid',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+  STOCK_MANAGER: [
+    'logistics:shrinkage',
+    'transfer:sent',
+    'hr:payout_approved',
+    'hr:deduction_created',
+    'hr:addon_approved',
+    'hr:deduction_applied',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+  TPL_MANAGER: [
+    'order:allocated',
+    'transfer:sent',
+    'delivery_remittance:received',
+    'hr:payout_approved',
+    'hr:deduction_created',
+    'hr:addon_approved',
+    'hr:deduction_applied',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+  TPL_RIDER: [
+    'delivery:assigned',
+    'hr:payout_approved',
+    'hr:deduction_created',
+    'hr:addon_approved',
+    'hr:deduction_applied',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+
+  // Finance / HR
+  FINANCE_OFFICER: [
+    'finance:approval_processed',
+    'delivery_remittance:sent',
+    'funding:request',
+    'hr:batch_approved',
+    'hr:batch_paid',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+  HR_MANAGER: [
+    'hr:batch_submitted',
+    'hr:batch_rejected',
+    'hr:batch_paid',
+    'approval:permission_request',
+    ...COMMON_ACCOUNT_TYPES,
+  ],
+};
+
+/**
+ * Returns the notification types this user can opt out of, given their role and Finance hat.
+ * The result is a deduped union — Finance hat carries Finance Officer types on top of role types.
+ */
+export function getRelevantNotificationTypesForRole(
+  role: string,
+  isFinanceOfficer: boolean = false,
+): NotificationType[] {
+  const base = RELEVANT_NOTIFICATION_TYPES_BY_ROLE[role] ?? COMMON_ACCOUNT_TYPES;
+  if (!isFinanceOfficer || role === 'FINANCE_OFFICER') {
+    return [...new Set(base)];
+  }
+  const financeTypes = RELEVANT_NOTIFICATION_TYPES_BY_ROLE['FINANCE_OFFICER'] ?? [];
+  return [...new Set([...base, ...financeTypes])];
+}

@@ -101,7 +101,7 @@ export function CSOverviewSkeleton() {
         </div>
       </div>
 
-      {/* Tabs row + Redistribute button */}
+      {/* Tabs row + toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-app-border pb-0">
         <div className="flex gap-1 flex-1 min-w-0">
           {[1, 2, 3, 4, 5, 6].map((i) => (

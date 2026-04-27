@@ -40,6 +40,15 @@ export const users = pgTable('users', {
    * so the hat is only meaningful for users with a non-finance primary role.
    */
   isFinanceOfficer: boolean('is_finance_officer').default(false).notNull(),
+  /**
+   * Per-user notification opt-outs. Map of notification-type → enabled.
+   * Empty / missing key = enabled (default). `false` = skip this type entirely
+   * (no in-app row, no socket emit, no push, no email) for this user.
+   */
+  notificationPreferences: jsonb('notification_preferences')
+    .$type<Record<string, boolean>>()
+    .default({})
+    .notNull(),
   ...temporalColumns,
   ...timestampColumns,
 });

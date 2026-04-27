@@ -61,6 +61,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit: AD_SPEND_PER_PAGE,
     ...adSpendScope,
   });
+  // Phase 17 — accordion grouped view runs alongside the legacy flat list so
+  // both renderings can co-exist while the UI migrates. Group page lives on
+  // `?gpage=` to avoid colliding with the flat list's `?page=`.
+  const groupsPage = Math.max(1, parseInt(url.searchParams.get('gpage') || '1', 10));
+  const groupedScope: Record<string, unknown> = {
+    page: groupsPage,
+    limit: 20,
+    ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
+    ...(startDate && { startDate }),
+    ...(endDate && { endDate }),
+  };
+  const groupedInput = JSON.stringify(groupedScope);
   // Status counts share the product filter so the pill counts match the visible list.
   const countsInput = JSON.stringify({
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
@@ -77,6 +89,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const campaignsInput = JSON.stringify(isMediaBuyer ? { mediaBuyerId: user.id, page: 1, limit: 20 } : { page: 1, limit: 20 });
 
   const adSpendP = apiRequest<unknown>(`/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`, { method: 'GET', cookie });
+  const groupedP = apiRequest<unknown>(`/trpc/marketing.listAdSpendGrouped?input=${encodeURIComponent(groupedInput)}`, { method: 'GET', cookie });
   const adSpendCountsP = apiRequest<unknown>(
     `/trpc/marketing.adSpendStatusCounts?input=${encodeURIComponent(countsInput)}`,
     { method: 'GET', cookie },
@@ -91,7 +104,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { method: 'GET', cookie },
   ).catch(() => ({ ok: false, data: { result: { data: [] } } }));
 
-  const [adSpendRes, adSpendCountsRes, campaignsRes] = await Promise.all([adSpendP, adSpendCountsP, campaignsP]);
+  const [adSpendRes, adSpendCountsRes, campaignsRes, groupedRes] = await Promise.all([
+    adSpendP,
+    adSpendCountsP,
+    campaignsP,
+    groupedP,
+  ]);
+  type GroupedShape = {
+    groups?: Array<{
+      spendDate: string;
+      mediaBuyerId: string;
+      mediaBuyerName: string | null;
+      lineCount: number;
+      totalAmount: string;
+      rolledStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
+      lines: Array<{
+        id: string;
+        mediaBuyerId: string;
+        mediaBuyerName: string | null;
+        productId: string;
+        productName: string | null;
+        campaignId: string;
+        campaignName: string | null;
+        spendAmount: string;
+        screenshotUrl: string;
+        adUrl: string | null;
+        platform: 'FACEBOOK' | 'TIKTOK' | 'GOOGLE';
+        spendDate: string;
+        status: 'PENDING' | 'APPROVED' | 'REJECTED';
+        rejectionReason: string | null;
+        approvedAt: string | null;
+        rejectedAt: string | null;
+        createdAt: string;
+      }>;
+    }>;
+    pagination?: { page: number; limit: number; total: number };
+  };
+  const groupedData: GroupedShape = groupedRes.ok
+    ? (((groupedRes.data as { result?: { data?: GroupedShape } })?.result?.data) ?? {})
+    : {};
+  const groups = groupedData.groups ?? [];
+  const groupsTotal = groupedData.pagination?.total ?? 0;
+  const groupsTotalPages = Math.max(1, Math.ceil(groupsTotal / 20));
   const adSpendData = parseAdSpend(adSpendRes);
   const statusCounts = parseAdSpendStatusCounts(adSpendCountsRes);
   const totalRows = adSpendData?.pagination?.total ?? 0;
@@ -159,6 +213,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     products: productsData,
     leaderboardPeriod,
     filters,
+    groups,
+    groupsTotal,
+    groupsPage,
+    groupsTotalPages,
   };
 
   return data;

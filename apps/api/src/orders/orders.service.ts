@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
-import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray, exists, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
@@ -11,6 +11,8 @@ import {
   type CreateOfflineOrderInput,
   type TransitionOrderInput,
   type UpdateOrderInput,
+  type RequestOrderLinePriceChangeInput,
+  type RequestOrderDeletionInput,
   type ListOrdersInput,
   type OrderStatus,
   customFormFieldSchema,
@@ -32,10 +34,14 @@ import {
 import { CartService } from '../cart/cart.service';
 import { PaystackService } from '../payments/paystack.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { isAdminLevel } from '../common/authz';
+import { isAdminLevel, isOrgWideDepartmentHead } from '../common/authz';
+import { BranchTeamsService } from '../branches/branch-teams.service';
 
 const PENDING_PAYMENT_PREFIX = 'pending_payment:';
 const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
+
+/** Pre-confirmation orders only — avoids inventory side effects on soft-archive. */
+const ARCHIVABLE_ORDER_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
 
 @Injectable()
 export class OrdersService {
@@ -50,7 +56,600 @@ export class OrdersService {
     private readonly cartService: CartService,
     private readonly inventoryService: InventoryService,
     private readonly paystackService: PaystackService,
+    private readonly branchTeams: BranchTeamsService,
   ) {}
+
+  /** HoCS / Admin / `orders.reassign`, or CS team supervisor for same-branch team (supervisor: UNPROCESSED / CS_ASSIGNED only). */
+  private async assertCanManualAssignToCs(
+    actor: SessionUser,
+    csAgentId: string,
+    orderBranchId: string,
+    orderStatus: string,
+  ): Promise<void> {
+    const hasReassign = actor.permissions?.includes('orders.reassign') ?? false;
+    if (hasReassign || isAdminLevel(actor)) return;
+    if (!actor.currentBranchId || actor.currentBranchId !== orderBranchId) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You cannot assign orders outside your active branch.',
+      });
+    }
+    if (orderStatus !== 'UNPROCESSED' && orderStatus !== 'CS_ASSIGNED') {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Team supervisors may only assign orders that are unprocessed or CS-assigned.',
+      });
+    }
+    const ok = await this.branchTeams.isCsSupervisorOf(actor.id, csAgentId, orderBranchId);
+    if (!ok) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only Head of CS, Admin, or a CS supervisor for this agent may assign orders.',
+      });
+    }
+  }
+
+  /**
+   * True when the actor may change line unit prices (and derived totals) on this order.
+   * Admin-class; org-wide Head of CS / Head of Logistics (any branch); same-branch Branch Admin;
+   * or a branch CS team supervisor for the order's assigned agent.
+   */
+  async canActorEditOrderLinePrices(
+    actor: SessionUser,
+    order: { branchId: string | null; assignedCsId: string | null },
+  ): Promise<boolean> {
+    if (isAdminLevel(actor)) return true;
+    const ob = order.branchId;
+    if (!ob) return false;
+    if (
+      isOrgWideDepartmentHead(actor) &&
+      (actor.role === 'HEAD_OF_CS' || actor.role === 'HEAD_OF_LOGISTICS')
+    ) {
+      return true;
+    }
+    const cb = actor.currentBranchId ?? null;
+    if (!cb || ob !== cb) return false;
+    if (actor.role === 'BRANCH_ADMIN') return true;
+    if (order.assignedCsId) {
+      return this.branchTeams.isCsSupervisorOf(actor.id, order.assignedCsId, ob);
+    }
+    return false;
+  }
+
+  /** Branch CS team: actor is a supervisor row for this assignee on this branch. */
+  async isActorCsTeamSupervisor(actorId: string, assignedCsId: string, branchId: string): Promise<boolean> {
+    return this.branchTeams.isCsSupervisorOf(actorId, assignedCsId, branchId);
+  }
+
+  private async assertActorMayUpdateOrder(
+    actor: SessionUser,
+    order: { branchId: string | null; assignedCsId: string | null; status: string },
+  ): Promise<void> {
+    if (isAdminLevel(actor)) return;
+
+    const ob = order.branchId;
+    const branchAdminSame =
+      actor.role === 'BRANCH_ADMIN' &&
+      !!ob &&
+      !!actor.currentBranchId &&
+      ob === actor.currentBranchId;
+    if (branchAdminSame) return;
+
+    if (actor.role === 'HEAD_OF_CS') {
+      if (ob) return;
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Head of CS cannot update orders without a branch.',
+      });
+    }
+
+    if (actor.role === 'HEAD_OF_LOGISTICS') {
+      if (ob) return;
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Head of Logistics cannot update orders without a branch.',
+      });
+    }
+
+    if (ob && order.assignedCsId && actor.currentBranchId === ob) {
+      const sup = await this.branchTeams.isCsSupervisorOf(actor.id, order.assignedCsId, ob);
+      if (sup) return;
+    }
+
+    if (actor.role === 'CS_AGENT') {
+      const isAssigned = order.assignedCsId === actor.id;
+      const canTakePool = order.status === 'UNPROCESSED' && !order.assignedCsId;
+      if (isAssigned || canTakePool) return;
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the assigned CS agent may update this order.',
+      });
+    }
+
+    if (actor.role === 'TPL_MANAGER') return;
+
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'You are not allowed to update this order.',
+    });
+  }
+
+  /**
+   * Forces submitted line items to existing DB unit prices (per line), recomputes total.
+   * Used when the actor may change quantities but not pricing.
+   */
+  private async clampOrderItemsToExistingUnitPrices(
+    orderId: string,
+    items: NonNullable<UpdateOrderInput['items']>,
+  ): Promise<{ items: NonNullable<UpdateOrderInput['items']>; totalAmount: number }> {
+    const dbRows = await this.db
+      .select()
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, orderId))
+      .orderBy(asc(schema.orderItems.id));
+
+    if (dbRows.length !== items.length) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'You cannot add or remove products on this order. Adjust quantities only, or ask a supervisor to change pricing.',
+      });
+    }
+
+    const used = new Set<number>();
+    const nextItems: NonNullable<UpdateOrderInput['items']> = items.map((it) => {
+      const idx = dbRows.findIndex((r, i) => !used.has(i) && r.productId === it.productId);
+      if (idx === -1) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Line items must match the current products on the order.',
+        });
+      }
+      used.add(idx);
+      const row = dbRows[idx]!;
+      const unit = parseFloat(String(row.unitPrice));
+      if (Number.isNaN(unit)) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Invalid stored unit price' });
+      }
+      return {
+        productId: it.productId,
+        quantity: it.quantity,
+        unitPrice: unit,
+        offerLabel: it.offerLabel ?? (row.offerLabel ?? undefined),
+      };
+    });
+
+    const totalAmount = nextItems.reduce((sum, row) => sum + row.quantity * row.unitPrice, 0);
+    return { items: nextItems, totalAmount };
+  }
+
+  /** PENDING permission_request for this order's line price change (if any). */
+  async findPendingOrderLinePriceRequestId(orderId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          eq(schema.permissionRequests.type, 'ORDER_LINE_PRICE_CHANGE'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${orderId}`,
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  /** PENDING permission_request to archive (soft-delete) this order (if any). */
+  async findPendingOrderDeletionRequestId(orderId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          eq(schema.permissionRequests.type, 'ORDER_DELETION'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${orderId}`,
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  private async proposedLineItemPricingDiffersFromDatabase(
+    orderId: string,
+    items: RequestOrderLinePriceChangeInput['items'],
+  ): Promise<boolean> {
+    const dbRows = await this.db
+      .select()
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, orderId))
+      .orderBy(asc(schema.orderItems.id));
+    if (dbRows.length !== items.length) return true;
+    const used = new Set<number>();
+    for (const it of items) {
+      const idx = dbRows.findIndex((r, i) => !used.has(i) && r.productId === it.productId);
+      if (idx === -1) return true;
+      used.add(idx);
+      const row = dbRows[idx]!;
+      const dbp = parseFloat(String(row.unitPrice));
+      if (Number.isNaN(dbp) || Math.abs(dbp - it.unitPrice) > 0.0001) return true;
+    }
+    return false;
+  }
+
+  private async notifyOrderLinePriceChangeApprovers(params: {
+    requestId: string;
+    orderId: string;
+    branchId: string | null;
+    requesterName: string | null;
+    excludeUserId: string;
+  }): Promise<void> {
+    const short = params.orderId.slice(0, 8).toUpperCase();
+    const title = 'Order line price change — approval needed';
+    const body = `${params.requesterName ?? 'A teammate'} requested updated unit prices on order ${short}. Review it under Permission Requests.`;
+    const data: Record<string, string> = {
+      requestId: params.requestId,
+      orderId: params.orderId,
+      permissionRequestKind: 'order_line_price',
+    };
+
+    const recipientIds = new Set<string>();
+    const admins = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN'])));
+    for (const r of admins) {
+      if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+    }
+
+    if (params.branchId) {
+      const heads = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.status, 'ACTIVE'),
+            inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS', 'BRANCH_ADMIN']),
+            eq(schema.users.primaryBranchId, params.branchId),
+          ),
+        );
+      for (const r of heads) {
+        if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+      }
+    }
+
+    for (const userId of recipientIds) {
+      await this.notifications
+        .create({
+          userId,
+          type: 'approval:permission_request',
+          title,
+          body,
+          data,
+        })
+        .catch(() => {});
+    }
+  }
+
+  private async notifyOrderDeletionApprovers(params: {
+    requestId: string;
+    orderId: string;
+    branchId: string | null;
+    requesterName: string | null;
+    excludeUserId: string;
+  }): Promise<void> {
+    const short = params.orderId.slice(0, 8).toUpperCase();
+    const title = 'Order archive — approval needed';
+    const body = `${params.requesterName ?? 'A teammate'} requested to archive (soft-delete) order ${short}. Review under Permission Requests.`;
+    const data: Record<string, string> = {
+      requestId: params.requestId,
+      orderId: params.orderId,
+      permissionRequestKind: 'order_deletion',
+    };
+
+    const recipientIds = new Set<string>();
+    const admins = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN'])));
+    for (const r of admins) {
+      if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+    }
+
+    if (params.branchId) {
+      const heads = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.status, 'ACTIVE'),
+            inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS', 'BRANCH_ADMIN']),
+            eq(schema.users.primaryBranchId, params.branchId),
+          ),
+        );
+      for (const r of heads) {
+        if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+      }
+    }
+
+    for (const userId of recipientIds) {
+      await this.notifications
+        .create({
+          userId,
+          type: 'approval:permission_request',
+          title,
+          body,
+          data,
+        })
+        .catch(() => {});
+    }
+  }
+
+  /**
+   * CS (and others who cannot set prices directly) submit a permission_request; an approver applies `orders.update`.
+   */
+  async requestLinePriceChangeApproval(input: RequestOrderLinePriceChangeInput, actor: SessionUser) {
+    const existingRows = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    const order = existingRows[0];
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED'];
+    if (!allowedStatuses.includes(order.status)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Order items cannot be adjusted once the order has been dispatched.',
+      });
+    }
+
+    await this.assertActorMayUpdateOrder(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+      status: order.status,
+    });
+
+    const mayEditPrices = await this.canActorEditOrderLinePrices(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+    });
+    if (mayEditPrices) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'You can change line prices directly on this order — no approval request is needed.',
+      });
+    }
+
+    const sumLines = input.items.reduce((s, it) => s + it.quantity * it.unitPrice, 0);
+    if (Math.abs(sumLines - input.totalAmount) > 0.02) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Total amount must match the sum of quantity × unit price for all lines.',
+      });
+    }
+
+    const differs = await this.proposedLineItemPricingDiffersFromDatabase(input.orderId, input.items);
+    if (!differs) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'At least one unit price must differ from the current order to submit an approval request.',
+      });
+    }
+
+    const [duplicate] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          eq(schema.permissionRequests.type, 'ORDER_LINE_PRICE_CHANGE'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${input.orderId}`,
+        ),
+      )
+      .limit(1);
+    if (duplicate) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'A price-change request is already pending for this order.',
+      });
+    }
+
+    const payload = {
+      orderId: input.orderId,
+      items: input.items,
+      totalAmount: input.totalAmount,
+    };
+
+    const [req] = await withActor(this.db, actor, async (tx) =>
+      tx
+        .insert(schema.permissionRequests)
+        .values({
+          type: 'ORDER_LINE_PRICE_CHANGE',
+          status: 'PENDING',
+          requesterId: actor.id,
+          reason: input.reason,
+          payload: payload as unknown as Record<string, unknown>,
+        })
+        .returning({ id: schema.permissionRequests.id }),
+    );
+
+    if (!req?.id) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create approval request' });
+    }
+
+    void this.notifyOrderLinePriceChangeApprovers({
+      requestId: req.id,
+      orderId: input.orderId,
+      branchId: order.branchId ?? null,
+      requesterName: actor.name ?? null,
+      excludeUserId: actor.id,
+    });
+
+    return { success: true as const, requestId: req.id };
+  }
+
+  /**
+   * CS (and others without archive authority) request soft-delete; approver sets `deleted_at` (row kept).
+   */
+  async requestOrderDeletionApproval(input: RequestOrderDeletionInput, actor: SessionUser) {
+    const existingRows = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    const order = existingRows[0];
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    if (!ARCHIVABLE_ORDER_STATUSES.includes(order.status as (typeof ARCHIVABLE_ORDER_STATUSES)[number])) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          'Only unprocessed or CS-stage orders can be archived this way. Cancel the order first if it is already confirmed.',
+      });
+    }
+
+    await this.assertActorMayUpdateOrder(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+      status: order.status,
+    });
+
+    const mayArchiveDirectly = await this.canActorEditOrderLinePrices(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+    });
+    if (mayArchiveDirectly) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'You can archive this order immediately from the order page — no approval request is needed.',
+      });
+    }
+
+    const [duplicate] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          eq(schema.permissionRequests.type, 'ORDER_DELETION'),
+          sql`(${schema.permissionRequests.payload}->>'orderId') = ${input.orderId}`,
+        ),
+      )
+      .limit(1);
+    if (duplicate) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'An archive request is already pending for this order.',
+      });
+    }
+
+    const payload = { orderId: input.orderId };
+
+    const [req] = await withActor(this.db, actor, async (tx) =>
+      tx
+        .insert(schema.permissionRequests)
+        .values({
+          type: 'ORDER_DELETION',
+          status: 'PENDING',
+          requesterId: actor.id,
+          reason: input.reason,
+          payload: payload as unknown as Record<string, unknown>,
+        })
+        .returning({ id: schema.permissionRequests.id }),
+    );
+
+    if (!req?.id) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create approval request' });
+    }
+
+    void this.notifyOrderDeletionApprovers({
+      requestId: req.id,
+      orderId: input.orderId,
+      branchId: order.branchId ?? null,
+      requesterName: actor.name ?? null,
+      excludeUserId: actor.id,
+    });
+
+    return { success: true as const, requestId: req.id };
+  }
+
+  /**
+   * Soft-delete (archive): sets `deleted_at`; order row and temporal history remain. Privileged roles only.
+   */
+  async softDeleteOrder(
+    orderId: string,
+    actor: SessionUser,
+    opts?: { approverNote?: string },
+  ): Promise<{ success: true }> {
+    const existingRows = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    const order = existingRows[0];
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    if (!ARCHIVABLE_ORDER_STATUSES.includes(order.status as (typeof ARCHIVABLE_ORDER_STATUSES)[number])) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          'Only unprocessed or CS-stage orders can be archived this way. Cancel the order first if it is already confirmed.',
+      });
+    }
+
+    const mayArchive = await this.canActorEditOrderLinePrices(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+    });
+    if (!mayArchive) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message:
+          'Only Head of CS, Head of Logistics, Branch Admin, a CS team supervisor for the assignee, or an Admin may archive this order.',
+      });
+    }
+
+    await this.assertActorMayUpdateOrder(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+      status: order.status,
+    });
+
+    const note = opts?.approverNote?.trim();
+    const actorLabel = actor.name ?? 'Staff';
+    const description = note
+      ? `Order archived (removed from active lists). Note: ${note.slice(0, 500)}`
+      : `Order archived (removed from active lists) by ${actorLabel}.`;
+
+    await withActor(this.db, actor, async (tx) => {
+      const updatedRows = await tx
+        .update(schema.orders)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+        .returning({ id: schema.orders.id });
+      if (!updatedRows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found or already archived' });
+      }
+      await tx.insert(schema.orderTimelineEvents).values({
+        orderId,
+        eventType: 'ORDER_ARCHIVED',
+        actorId: actor.id,
+        actorName: actor.name ?? null,
+        description,
+        metadata: note ? { note } : null,
+        branchId: order.branchId ?? null,
+      });
+    });
+
+    return { success: true };
+  }
 
   /**
    * Branch-scoped list queries filter by session branch when not listing by media buyer.
@@ -91,7 +690,7 @@ export class OrdersService {
     input: CreateOrderInput & { cartId?: string },
     actorId: string | null,
     orderSource?: 'edge-form' | null,
-  ): Promise<{ id: string; authorizationUrl?: string }> {
+  ): Promise<{ id?: string; authorizationUrl?: string; crossFunnelAttempt?: true }> {
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
 
@@ -133,6 +732,36 @@ export class OrdersService {
       mediaBuyerId: orderInput.mediaBuyerId ?? null,
       fallbackBranchId: null,
     });
+
+    // Cross-funnel attempt detection (Pillar 2 / attribution truth):
+    // If an order with the same phone+product already exists in the last 6h via a
+    // DIFFERENT Media Buyer, do NOT create a new order. Record the attempt in
+    // cross_funnel_attempts so the second MB can see their funnel got traction —
+    // but the original MB keeps attribution. CS never sees this row; it does not
+    // count in any order metric. Only applies to edge-form submissions with a
+    // mediaBuyerId. Direct API callers (admin/CS offline entry) skip this path.
+    if (orderSource === 'edge-form' && orderInput.mediaBuyerId && orderInput.customerPhoneHash) {
+      const productIds = orderInput.items.map((i) => i.productId);
+      const existing = await this.detectDuplicates(orderInput.customerPhoneHash, productIds);
+      const crossMbWinner = existing.find(
+        (o) => o.mediaBuyerId && o.mediaBuyerId !== orderInput.mediaBuyerId,
+      );
+      if (crossMbWinner) {
+        await this.db.insert(schema.crossFunnelAttempts).values(
+          productIds.map((productId) => ({
+            customerPhoneHash: orderInput.customerPhoneHash,
+            customerName: orderInput.customerName,
+            productId,
+            mediaBuyerId: orderInput.mediaBuyerId!,
+            campaignId: orderInput.campaignId ?? null,
+            branchId: branchId ?? null,
+            originalOrderId: crossMbWinner.id,
+            originalMediaBuyerId: crossMbWinner.mediaBuyerId,
+          })),
+        );
+        return { crossFunnelAttempt: true };
+      }
+    }
 
     const insertOrder = async (
       dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
@@ -500,7 +1129,7 @@ export class OrdersService {
     const rows = await this.db
       .select()
       .from(schema.orders)
-      .where(eq(schema.orders.id, orderId))
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
       .limit(1);
 
     const order = rows[0];
@@ -629,6 +1258,9 @@ export class OrdersService {
     const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
     const remittanceId = remittanceRow[0]?.remittanceId ?? null;
 
+    const pendingOrderLinePriceRequestId = await this.findPendingOrderLinePriceRequestId(orderId);
+    const pendingOrderDeletionRequestId = await this.findPendingOrderDeletionRequestId(orderId);
+
     const { customerPhone: _rawPhone, ...orderSafe } = order;
     return {
       ...orderSafe,
@@ -646,6 +1278,8 @@ export class OrdersService {
       lockedByName,
       remittanceStatus,
       remittanceId,
+      pendingOrderLinePriceRequestId,
+      pendingOrderDeletionRequestId,
     };
   }
 
@@ -657,6 +1291,15 @@ export class OrdersService {
     eligible: boolean;
     reason: string | null;
   }>> {
+    const [orderRow] = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!orderRow) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
     const orderItems = await this.db
       .select({
         productId: schema.orderItems.productId,
@@ -828,7 +1471,7 @@ export class OrdersService {
    * List orders with filtering, search, and pagination.
    */
   async list(input: ListOrdersInput, branchId?: string | null) {
-    const conditions = [];
+    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
 
     if (input.status) {
       conditions.push(eq(schema.orders.status, input.status));
@@ -841,6 +1484,24 @@ export class OrdersService {
     }
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.campaignId) {
+      conditions.push(eq(schema.orders.campaignId, input.campaignId));
+    }
+    if (input.productId) {
+      conditions.push(
+        exists(
+          this.db
+            .select({ one: sql`1` })
+            .from(schema.orderItems)
+            .where(
+              and(
+                eq(schema.orderItems.orderId, schema.orders.id),
+                eq(schema.orderItems.productId, input.productId),
+              ),
+            ),
+        ),
+      );
     }
     if (input.riderId) {
       conditions.push(eq(schema.orders.riderId, input.riderId));
@@ -944,6 +1605,59 @@ export class OrdersService {
   }
 
   /**
+   * Batched line labels + campaign + branch names for marketing CSV export (avoids N+1).
+   */
+  async getMarketingExportEnrichment(orderIds: string[]): Promise<
+    Map<string, { productLines: string; campaignName: string; branchName: string }>
+  > {
+    const out = new Map<string, { productLines: string; campaignName: string; branchName: string }>();
+    if (orderIds.length === 0) return out;
+    const unique = [...new Set(orderIds)];
+    const chunks: string[][] = [];
+    for (let i = 0; i < unique.length; i += 400) chunks.push(unique.slice(i, i + 400));
+
+    for (const chunk of chunks) {
+      const lineRows = await this.db
+        .select({
+          orderId: schema.orderItems.orderId,
+          productLines:
+            sql<string>`string_agg(${schema.products.name} || ' x' || ${schema.orderItems.quantity}::text, '; ' ORDER BY ${schema.orderItems.id})`.as(
+              'product_lines',
+            ),
+        })
+        .from(schema.orderItems)
+        .innerJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+        .where(inArray(schema.orderItems.orderId, chunk))
+        .groupBy(schema.orderItems.orderId);
+
+      const metaRows = await this.db
+        .select({
+          id: schema.orders.id,
+          campaignName: schema.campaigns.name,
+          branchName: schema.branches.name,
+        })
+        .from(schema.orders)
+        .leftJoin(schema.campaigns, eq(schema.orders.campaignId, schema.campaigns.id))
+        .leftJoin(schema.branches, eq(schema.orders.branchId, schema.branches.id))
+        .where(and(inArray(schema.orders.id, chunk), isNull(schema.orders.deletedAt)));
+
+      const metaById = new Map(metaRows.map((r) => [r.id, r]));
+      const linesByOrder = new Map(lineRows.map((r) => [r.orderId, r.productLines]));
+
+      for (const id of chunk) {
+        const meta = metaById.get(id);
+        out.set(id, {
+          productLines: linesByOrder.get(id) ?? '—',
+          campaignName: meta?.campaignName ?? '—',
+          branchName: meta?.branchName ?? '—',
+        });
+      }
+    }
+
+    return out;
+  }
+
+  /**
    * Transition an order to a new status.
    * Enforces the state machine, gates, and side effects.
    */
@@ -952,7 +1666,7 @@ export class OrdersService {
     const rows = await this.db
       .select()
       .from(schema.orders)
-      .where(eq(schema.orders.id, input.orderId))
+      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
       .limit(1);
 
     const order = rows[0];
@@ -1284,7 +1998,7 @@ export class OrdersService {
     const existingRows = await this.db
       .select()
       .from(schema.orders)
-      .where(eq(schema.orders.id, input.orderId))
+      .where(and(eq(schema.orders.id, input.orderId), isNull(schema.orders.deletedAt)))
       .limit(1);
 
     const order = existingRows[0];
@@ -1305,7 +2019,7 @@ export class OrdersService {
     }
 
     // TPL_MANAGER may update preferred delivery date, optional delivery fee/discount, and required receipt (Resolve order)
-    const effectiveInput =
+    let workingInput: UpdateOrderInput =
       actor.role === 'TPL_MANAGER'
         ? {
             orderId: input.orderId,
@@ -1316,25 +2030,58 @@ export class OrdersService {
           }
         : input;
 
+    if (actor.role !== 'TPL_MANAGER') {
+      await this.assertActorMayUpdateOrder(actor, {
+        branchId: order.branchId ?? null,
+        assignedCsId: order.assignedCsId ?? null,
+        status: order.status,
+      });
+    }
+
+    if (actor.role !== 'TPL_MANAGER' && workingInput.items) {
+      const mayPrice = await this.canActorEditOrderLinePrices(actor, {
+        branchId: order.branchId ?? null,
+        assignedCsId: order.assignedCsId ?? null,
+      });
+      if (!mayPrice) {
+        const clamped = await this.clampOrderItemsToExistingUnitPrices(input.orderId, workingInput.items);
+        workingInput = { ...workingInput, items: clamped.items, totalAmount: clamped.totalAmount };
+      }
+    } else if (
+      actor.role !== 'TPL_MANAGER' &&
+      workingInput.totalAmount !== undefined &&
+      workingInput.items === undefined
+    ) {
+      const mayPrice = await this.canActorEditOrderLinePrices(actor, {
+        branchId: order.branchId ?? null,
+        assignedCsId: order.assignedCsId ?? null,
+      });
+      if (!mayPrice) {
+        const { totalAmount: _ignored, ...rest } = workingInput;
+        workingInput = rest;
+      }
+    }
+
     const updateFields: Record<string, unknown> = { updatedAt: new Date() };
-    if (effectiveInput.customerAddress !== undefined) updateFields['customerAddress'] = effectiveInput.customerAddress;
-    if (effectiveInput.deliveryAddress !== undefined) updateFields['deliveryAddress'] = effectiveInput.deliveryAddress;
-    if (effectiveInput.deliveryNotes !== undefined) updateFields['deliveryNotes'] = effectiveInput.deliveryNotes;
-    if (effectiveInput.deliveryState !== undefined) updateFields['deliveryState'] = effectiveInput.deliveryState;
-    if (effectiveInput.customerGender !== undefined) updateFields['customerGender'] = effectiveInput.customerGender;
-    if (effectiveInput.preferredDeliveryDate !== undefined) updateFields['preferredDeliveryDate'] = effectiveInput.preferredDeliveryDate;
+    if (workingInput.customerAddress !== undefined) updateFields['customerAddress'] = workingInput.customerAddress;
+    if (workingInput.deliveryAddress !== undefined) updateFields['deliveryAddress'] = workingInput.deliveryAddress;
+    if (workingInput.deliveryNotes !== undefined) updateFields['deliveryNotes'] = workingInput.deliveryNotes;
+    if (workingInput.deliveryState !== undefined) updateFields['deliveryState'] = workingInput.deliveryState;
+    if (workingInput.customerGender !== undefined) updateFields['customerGender'] = workingInput.customerGender;
+    if (workingInput.preferredDeliveryDate !== undefined) updateFields['preferredDeliveryDate'] = workingInput.preferredDeliveryDate;
+    if (workingInput.customFields !== undefined) updateFields['customFields'] = workingInput.customFields;
 
     // Delivery fee add-on (Resolve order / TPL)
-    if (effectiveInput.deliveryFeeAddOn !== undefined) {
-      const addOn = Number(effectiveInput.deliveryFeeAddOn);
+    if (workingInput.deliveryFeeAddOn !== undefined) {
+      const addOn = Number(workingInput.deliveryFeeAddOn);
       if (!Number.isNaN(addOn) && addOn >= 0) {
         const current = parseFloat(String(order.deliveryFee ?? 0)) || 0;
         updateFields['deliveryFee'] = (current + addOn).toFixed(2);
       }
     }
     // Delivery discount (Resolve order / TPL) — reduces total and stores amount
-    if (effectiveInput.deliveryDiscountAmount !== undefined) {
-      const discount = Number(effectiveInput.deliveryDiscountAmount);
+    if (workingInput.deliveryDiscountAmount !== undefined) {
+      const discount = Number(workingInput.deliveryDiscountAmount);
       if (!Number.isNaN(discount) && discount >= 0) {
         const currentTotal = parseFloat(String(order.totalAmount ?? 0)) || 0;
         const newTotal = Math.max(0, currentTotal - discount);
@@ -1343,13 +2090,13 @@ export class OrdersService {
       }
     }
     // Resolve order receipt (required when TPL resolves)
-    if (effectiveInput.resolveReceiptUrl !== undefined) {
-      updateFields['resolveReceiptUrl'] = effectiveInput.resolveReceiptUrl.trim();
+    if (workingInput.resolveReceiptUrl !== undefined) {
+      updateFields['resolveReceiptUrl'] = workingInput.resolveReceiptUrl.trim();
     }
-    if (effectiveInput.paymentMethod !== undefined) updateFields['paymentMethod'] = effectiveInput.paymentMethod;
-    if (effectiveInput.customerEmail !== undefined) updateFields['customerEmail'] = effectiveInput.customerEmail;
-    if (effectiveInput.totalAmount !== undefined) updateFields['totalAmount'] = String(effectiveInput.totalAmount);
-    if (effectiveInput.items !== undefined) updateFields['items'] = effectiveInput.items;
+    if (workingInput.paymentMethod !== undefined) updateFields['paymentMethod'] = workingInput.paymentMethod;
+    if (workingInput.customerEmail !== undefined) updateFields['customerEmail'] = workingInput.customerEmail;
+    if (workingInput.totalAmount !== undefined) updateFields['totalAmount'] = String(workingInput.totalAmount);
+    if (workingInput.items !== undefined) updateFields['items'] = workingInput.items;
 
     const updated = await withActor(this.db, actor, async (tx) => {
       const updatedRows = await tx
@@ -1363,17 +2110,20 @@ export class OrdersService {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update order' });
       }
 
-      if (effectiveInput.items) {
+      if (workingInput.items) {
         await tx
           .delete(schema.orderItems)
           .where(eq(schema.orderItems.orderId, input.orderId));
 
         await tx.insert(schema.orderItems).values(
-          effectiveInput.items.map((item) => ({
+          workingInput.items.map((item) => ({
             orderId: input.orderId,
             productId: item.productId,
             quantity: item.quantity,
             unitPrice: String(item.unitPrice),
+            ...(item.offerLabel != null && item.offerLabel !== ''
+              ? { offerLabel: item.offerLabel }
+              : {}),
           })),
         );
       }
@@ -1382,11 +2132,12 @@ export class OrdersService {
 
     const actorName = actor.name ?? 'CS agent';
     if (
-      effectiveInput.customerAddress !== undefined ||
-      effectiveInput.deliveryAddress !== undefined ||
-      effectiveInput.deliveryNotes !== undefined ||
-      effectiveInput.deliveryState !== undefined ||
-      effectiveInput.preferredDeliveryDate !== undefined
+      workingInput.customerAddress !== undefined ||
+      workingInput.deliveryAddress !== undefined ||
+      workingInput.deliveryNotes !== undefined ||
+      workingInput.deliveryState !== undefined ||
+      workingInput.preferredDeliveryDate !== undefined ||
+      workingInput.customFields !== undefined
     ) {
       this.writeTimelineEvent({
         orderId: input.orderId,
@@ -1396,7 +2147,7 @@ export class OrdersService {
         description: `Delivery details updated by ${actorName}`,
       });
     }
-    if (effectiveInput.items !== undefined) {
+    if (workingInput.items !== undefined) {
       const oldQty = Array.isArray(order.items)
         ? order.items.reduce((sum: number, item: unknown) => {
             if (item && typeof item === 'object' && 'quantity' in item) {
@@ -1406,7 +2157,7 @@ export class OrdersService {
             return sum;
           }, 0)
         : 0;
-      const newQty = effectiveInput.items.reduce(
+      const newQty = workingInput.items.reduce(
         (sum, item) => sum + item.quantity,
         0,
       );
@@ -1605,18 +2356,25 @@ export class OrdersService {
 
   /**
    * Manually assign an order to a CS agent.
-   * Only Head of CS or SuperAdmin may call this (Hot Swap). CS agents cannot self-initiate transfers.
+   * Callers with `orders.reassign` (HoCS / Admin), or a branch CS team supervisor for in-team agents
+   * on orders in UNPROCESSED or CS_ASSIGNED (supervisors only).
    */
   async assignToCS(orderId: string, csAgentId: string, actor: SessionUser) {
     const existingRows = await this.db
       .select()
       .from(schema.orders)
-      .where(eq(schema.orders.id, orderId))
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
       .limit(1);
 
     if (!existingRows[0]) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
+    const orderRow = existingRows[0];
+    const ob = orderRow.branchId;
+    if (!ob) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no branch context' });
+    }
+    await this.assertCanManualAssignToCs(actor, csAgentId, ob, orderRow.status);
 
     const updated = await withActor(this.db, actor, async (tx) => {
       const updatedRows = await tx
@@ -1988,16 +2746,23 @@ export class OrdersService {
    * List active CS agents (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
    * Agent-initiated order transfers have been removed — reassignment is management-only.
    */
-  async listCSAgents(): Promise<Array<{ agentId: string; agentName: string }>> {
+  async listCSAgents(actor: SessionUser): Promise<Array<{ agentId: string; agentName: string }>> {
+    const hasReassign = actor.permissions?.includes('orders.reassign') ?? false;
+    if (hasReassign || isAdminLevel(actor)) {
+      const agents = await this.db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.users)
+        .where(and(eq(schema.users.role, 'CS_AGENT'), eq(schema.users.status, 'ACTIVE')));
+      return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
+    }
+    const branchId = actor.currentBranchId;
+    if (!branchId) return [];
+    const ids = await this.branchTeams.listSupervisedUserIds(actor.id, branchId, 'CS');
+    if (ids.length === 0) return [];
     const agents = await this.db
       .select({ id: schema.users.id, name: schema.users.name })
       .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.role, 'CS_AGENT'),
-          eq(schema.users.status, 'ACTIVE'),
-        ),
-      );
+      .where(and(inArray(schema.users.id, ids), eq(schema.users.status, 'ACTIVE')));
     return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
   }
 
@@ -2017,7 +2782,7 @@ export class OrdersService {
     branchId?: string | null,
     statuses?: Array<(typeof schema.orders.$inferSelect)['status']>,
   ) {
-    const conditions: Parameters<typeof and>[0][] = [];
+    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     if (mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
     if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
@@ -2097,6 +2862,7 @@ export class OrdersService {
         .from(schema.orders)
         .where(
           and(
+            isNull(schema.orders.deletedAt),
             inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
             ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
           ),
@@ -2115,6 +2881,74 @@ export class OrdersService {
       capacity: agent.capacity ?? 10,
       pendingCount: pendingMap[agent.id] ?? 0,
       lastActionAt: agent.lastActionAt,
+    }));
+  }
+
+  /**
+   * Pending workload orders for a CS agent (same status/branch rules as getCSAgentWorkloads),
+   * with line items for HoCS queue modal. Sorted by updatedAt desc (most recently touched first).
+   */
+  async getCloserWorkloadOrdersWithItems(agentId: string, branchId?: string | null) {
+    const workloadStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
+    const conditions = [
+      eq(schema.orders.assignedCsId, agentId),
+      inArray(schema.orders.status, [...workloadStatuses]),
+    ];
+    if (branchId) {
+      conditions.push(eq(schema.orders.branchId, branchId));
+    }
+
+    const orderRows = await this.db
+      .select({
+        id: schema.orders.id,
+        status: schema.orders.status,
+        customerName: schema.orders.customerName,
+        createdAt: schema.orders.createdAt,
+        updatedAt: schema.orders.updatedAt,
+        totalAmount: schema.orders.totalAmount,
+      })
+      .from(schema.orders)
+      .where(and(...conditions))
+      .orderBy(desc(schema.orders.updatedAt));
+
+    if (orderRows.length === 0) {
+      return [];
+    }
+
+    const orderIds = orderRows.map((o) => o.id);
+    const itemRows = await this.db
+      .select({
+        orderId: schema.orderItems.orderId,
+        quantity: schema.orderItems.quantity,
+        unitPrice: schema.orderItems.unitPrice,
+        offerLabel: schema.orderItems.offerLabel,
+        productName: schema.products.name,
+      })
+      .from(schema.orderItems)
+      .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+      .where(inArray(schema.orderItems.orderId, orderIds));
+
+    type ItemRow = (typeof itemRows)[number];
+    const itemsByOrder = new Map<string, ItemRow[]>();
+    for (const row of itemRows) {
+      const list = itemsByOrder.get(row.orderId) ?? [];
+      list.push(row);
+      itemsByOrder.set(row.orderId, list);
+    }
+
+    return orderRows.map((o) => ({
+      id: o.id,
+      status: o.status,
+      customerName: o.customerName,
+      createdAt: o.createdAt,
+      updatedAt: o.updatedAt,
+      totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
+      items: (itemsByOrder.get(o.id) ?? []).map((row) => ({
+        productName: row.productName ?? null,
+        quantity: row.quantity,
+        unitPrice: String(row.unitPrice),
+        offerLabel: row.offerLabel ?? null,
+      })),
     }));
   }
 
@@ -2221,6 +3055,7 @@ export class OrdersService {
     },
   ): Promise<{ date: string; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
+      isNull(schema.orders.deletedAt),
       eq(schema.orders.status, 'DELIVERED'),
       sql`${schema.orders.deliveredAt} IS NOT NULL`,
     ];
@@ -2285,7 +3120,7 @@ export class OrdersService {
       statuses?: Array<(typeof schema.orders.$inferSelect)['status']>;
     },
   ): Promise<{ date: string; orderCount: number; deliveredCount: number }[]> {
-    const conditions: Parameters<typeof and>[0][] = [];
+    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);
@@ -2391,6 +3226,7 @@ export class OrdersService {
         .from(schema.orders)
         .where(
         and(
+          isNull(schema.orders.deletedAt),
           eq(schema.orders.assignedCsId, agent.id),
           or(
             eq(schema.orders.status, 'UNPROCESSED'),
@@ -2894,14 +3730,10 @@ export class OrdersService {
           order.branchId === actor.currentBranchId;
         const bypassCallGate = isAdminLevel(actor) || branchAdminSameBranch;
 
-        const hoCsSameBranch =
-          actor.role === 'HEAD_OF_CS' &&
-          !!order.branchId &&
-          !!actor.currentBranchId &&
-          order.branchId === actor.currentBranchId;
+        const hoCsOversightPath = actor.role === 'HEAD_OF_CS' && !!order.branchId;
 
         if (!bypassCallGate) {
-          if (hoCsSameBranch) {
+          if (hoCsOversightPath) {
             // Head of CS may confirm using any rep's qualifying call on this order (oversight path).
             if (isVoipEnabled) {
               const qualifying = await this.db
@@ -3834,11 +4666,12 @@ export class OrdersService {
       'ORDER_CLAIMED', 'ORDER_VIEWED', 'CALL_INITIATED', 'CALL_COMPLETED', 'CALL_NO_ANSWER',
       'CALL_FAILED', 'MANUAL_CALL_LOGGED', 'SMS_SENT', 'WHATSAPP_SENT', 'ORDER_CONFIRMED',
       'ORDER_CANCELLED', 'ADDRESS_UPDATED', 'QUANTITY_UPDATED', 'CALLBACK_SCHEDULED',
-      'SUPERVISOR_WATCHING', 'PAYMENT_RECEIVED',
+      'SUPERVISOR_WATCHING', 'PAYMENT_RECEIVED', 'ORDER_ARCHIVED',
     ]);
     const LOGISTICS_EVENTS = new Set([
       'ORDER_ALLOCATED', 'ORDER_DISPATCHED', 'ORDER_IN_TRANSIT', 'ORDER_DELIVERED',
       'ORDER_PARTIALLY_DELIVERED', 'ORDER_RETURNED', 'ORDER_RESTOCKED', 'ORDER_WRITTEN_OFF',
+      'ORDER_ARCHIVED',
     ]);
 
     const rows = await this.db
@@ -3859,7 +4692,7 @@ export class OrdersService {
           assignedCsId: schema.orders.assignedCsId,
         })
         .from(schema.orders)
-        .where(eq(schema.orders.id, orderId))
+        .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
         .limit(1);
       if (ord) {
         const [mediaBuyerName, assignedCsName] = await Promise.all([
@@ -4013,14 +4846,14 @@ export class OrdersService {
     deliveredOrders: number;
     activeOrders: number;
   }>> {
-    const conditions: Parameters<typeof and>[0][] = [];
+    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.createdAt, end));
     }
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const whereClause = and(...conditions);
 
     // Join orders with branches to get per-branch counts
     const rows = await this.db

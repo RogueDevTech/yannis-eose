@@ -1,5 +1,6 @@
 import { redirect } from '@remix-run/node';
 import { isNetworkErrorLike } from './network-error';
+import { canAccessGlobalAuditLog } from './rbac';
 
 /**
  * Server-side API helper for Remix loaders/actions.
@@ -247,6 +248,26 @@ export async function requireStaffAccountsAccess(
   if (user.role === 'HR_MANAGER' || user.role === 'FINANCE_OFFICER' || user.isFinanceOfficer === true) {
     return user;
   }
+  throw redirect('/admin/unauthorized');
+}
+
+/**
+ * Global audit trail (`/admin/analytics/audit`) — aligned with `canAccessGlobalAuditLog` on the API.
+ */
+export async function requireGlobalAuditAccess(
+  request: Request,
+): Promise<{
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  permissions?: string[];
+  currentBranchId?: string | null;
+  isFinanceOfficer?: boolean;
+}> {
+  const user = await getCurrentUser(request);
+  if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
+  if (canAccessGlobalAuditLog(user)) return user;
   throw redirect('/admin/unauthorized');
 }
 

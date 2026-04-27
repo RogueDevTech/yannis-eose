@@ -223,6 +223,17 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 - The form supports 3 deployment modes: Shadow DOM snippet, iframe, and hosted URL
 - Media Buyers select from pre-approved Offer Templates (configured by Stock Manager). They CANNOT set prices or modify product details
 
+**Dedup is per-Media-Buyer, not global (CEO directive 2026-04-27 — migration 0079):**
+The 6-hour `(phone + product)` dedup key in Cloudflare KV is scoped by `mediaBuyerId`. Same MB resubmits → KV short-circuits at the edge with `alreadySubmitted: true` (no API call, no order, no record — same as before). DIFFERENT MB submits the same `(phone + product)` within 6h → KV miss; the API runs `OrdersService.detectDuplicates` and, if a same-phone+product order exists from another MB in the last 6h, the API does **NOT** create a new order. Instead it inserts a `cross_funnel_attempts` row and returns `{ crossFunnelAttempt: true }`. The Edge Worker then marks dedup for the runner-up MB and returns `alreadySubmitted: true` to the form (same UX as same-MB dedup).
+
+**Cross-funnel attempts are strictly per-MB visibility:**
+- The runner-up MB (the one who would have lost attribution silently) sees their attempts on `/admin/marketing/cross-funnel`. HoM sees their branch's MBs. Admin-class sees all. CS / Logistics / Finance / HR **never** see this data.
+- These rows are **NOT orders**. They never appear in `orders.list`, the CS queue, the Order Pipeline, profit reports, CPA / ROAS, commission, or any materialized view. Do NOT add joins from `orders` → `cross_funnel_attempts` that bleed counts back into operational metrics — the entire point of the separate table is metrics isolation.
+- Phone is stored as `customer_phone_hash` only (Pillar 2). Customer name and product are stored so the MB has enough context to recognize their own funnel's traffic without exposing PII beyond what an order would already show.
+- tRPC procedures: `marketing.listMyCrossFunnelAttempts` (paginated), `marketing.crossFunnelStats` (totals + per-product breakdown). Service: `MarketingService.listMyCrossFunnelAttempts` / `crossFunnelStats` ([apps/api/src/marketing/marketing.service.ts](apps/api/src/marketing/marketing.service.ts)). Page: [apps/web/app/features/marketing/MarketingCrossFunnelPage.tsx](apps/web/app/features/marketing/MarketingCrossFunnelPage.tsx).
+- Detection lives in `OrdersService.create` and **only fires for `orderSource === 'edge-form'` with a `mediaBuyerId`**. Direct/admin/CS-offline order paths do not record cross-funnel attempts (no funnel attribution to compare).
+- Form UX: when the API returns `alreadySubmitted: true` (whether from KV or cross-funnel), the form shows the message inline AND **disables the submit button** AND **skips the `successCallbackUrl` redirect**. Without this, the funnel's thank-you page silently masks duplicate submissions and customers can post the same order 3+ times thinking each worked. Do NOT remove the `alreadySubmitted` branch from `submitOrder().then(...)` in [apps/edge-worker/src/index.ts](apps/edge-worker/src/index.ts).
+
 ### When Building the CS Module
 - Phone numbers in API responses must be masked: 0803****1234. The full number is NEVER sent to the frontend
 - The Call button sends a call_token to the VOIP provider, which connects the two parties. The frontend never receives the raw number
@@ -233,7 +244,7 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
   - `claim`: orders sit in an open pool; reps race to claim via `claimOrder()` with atomic Redis/Postgres lock.
   - Claim cap (`CS_CLAIM_CAP.cap`, default 2): rep blocked from claiming if they have ≥ cap unconfirmed orders — enforced server-side. Only applies in `claim` mode.
   - CEO directive: `manual` is the default so Head of CS retains full control over order distribution. Do NOT change the default without an explicit product decision.
-- **Confirm gate (locked 2026-04-26 — keep backend + web in sync):** For the **assigned CS agent**, the Confirm button stays disabled until a qualifying call exists on the order (VOIP: `call_duration ≥ 15s` on a completed call; manual mode: at least one call log). **Overrides (3PL often off-platform):** `SuperAdmin` / `Admin` (`isAdminLevel` — `apps/api/src/common/authz.ts`, `apps/web/app/lib/rbac.ts`) and **Branch Admin** (`BRANCH_ADMIN` when `order.branchId === session.currentBranchId`) **bypass** the call-log requirement for confirm (server gate in `orders.service.ts::validateTransitionGates` + UI in `OrderDetailPage.tsx`). **Head of CS** on the **same branch as the order** may confirm using **any** rep's qualifying call on **that order** (not only `actor.id`). Do NOT strip these overrides without a CEO directive — they exist so ops can confirm when reps or 3PL are not in-app.
+- **Confirm gate (locked 2026-04-26 — keep backend + web in sync):** For the **assigned CS agent**, the Confirm button stays disabled until a qualifying call exists on the order (VOIP: `call_duration ≥ 15s` on a completed call; manual mode: at least one call log). **Overrides (3PL often off-platform):** `SuperAdmin` / `Admin` (`isAdminLevel` — `apps/api/src/common/authz.ts`, `apps/web/app/lib/rbac.ts`) and **Branch Admin** (`BRANCH_ADMIN` when `order.branchId === session.currentBranchId`) **bypass** the call-log requirement for confirm (server gate in `orders.service.ts::validateTransitionGates` + UI in `OrderDetailPage.tsx`). **Head of CS** (org-wide) may confirm using **any** rep's qualifying call on **that order** (not only `actor.id`), for orders that have a `branch_id`. Do NOT strip these overrides without a CEO directive — they exist so ops can confirm when reps or 3PL are not in-app.
 - **Order reassignment is a management action only.** CS agents CANNOT transfer orders between themselves. Only HoCS and SuperAdmin can reassign via Hot Swap. The `order_transfer_requests` table and all agent-initiated transfer UI/procedures are REMOVED.
 - Head of CS can Hot Swap — select orders from one agent and mass-reassign to another
 - When CS updates an order (address change, quantity change, upsell), the system creates a VERSION SNAPSHOT, not an in-place edit. The original data is preserved in the temporal table. The order history timeline shows every change with the agent's name and timestamp
@@ -272,12 +283,13 @@ Because the 3PL partners are not in-app yet, the assigned CS agent is the de fac
 **Mirror Mode** (full-session impersonation — distinct from Supervisor Mirror View above):
 The admin temporarily renders the entire app *as* another user — their role, branch, RLS, sidebar, theme, font scale. Different from Supervisor Mirror View, which only watches a rep's screen state via Socket.io. Mirror Mode actually **swaps the session identity**.
 
-- **Trigger**: "Mirror user" button on the user detail page (`/hr/users/:id`) when `viewerCanMirror` is true. POSTs `intent=mirror` to `/auth/mirror/start` then redirects to `/admin`.
-- **Permission gate** (`apps/api/src/common/authz.ts::canMirror`, mirrored on the frontend at `apps/web/app/lib/rbac.ts::canMirror`):
+- **Trigger**: "Mirror user" button on the user detail page (`/hr/users/:id`) when `viewerCanMirror` is true (server: `branches.canMirrorToUser`, which applies `canMirror()` **or** branch-team supervision via `BranchTeamsService.actorCanMirrorViaSupervision`). POSTs `intent=mirror` to `/auth/mirror/start` then redirects to `/admin`.
+- **Permission gate** (`apps/api/src/common/authz.ts::canMirror` for role-matrix heads/admins; **plus** async supervision in `auth.service.ts::startMirror` and `branches.canMirrorToUser`):
   - SuperAdmin / Admin can mirror anyone except another admin-level user.
-  - HEAD_OF_CS → CS_AGENT on their branch.
-  - HEAD_OF_MARKETING → MEDIA_BUYER on their branch.
-  - HEAD_OF_LOGISTICS → LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER on their branch.
+  - HEAD_OF_CS → CS_AGENT (any branch — org-wide head).
+  - HEAD_OF_MARKETING → MEDIA_BUYER (any branch — org-wide head).
+  - HEAD_OF_LOGISTICS → LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER (any branch — org-wide head).
+  - **Branch supervisors** (`branch_teams` / `branch_team_members`, same active branch): CS team supervisor → supervised `CS_AGENT`; marketing team supervisor → supervised `MEDIA_BUYER`.
   - HR_MANAGER cannot mirror anyone (per CEO directive — HR doesn't need it).
   - Nobody can self-mirror; nested mirroring is forbidden (you must exit first).
 - **Read-only enforcement**: `apps/api/src/trpc/trpc.ts` has a root-level middleware (`blockMutationsWhileMirroring`) that rejects any tRPC `mutation` while `ctx.user.mirroredBy` is set. Returns a clear `FORBIDDEN` with the message "Read-only while mirroring user. Exit mirror mode to make changes." Backend services don't need to know about Mirror Mode — the gate is centralised.
@@ -300,7 +312,7 @@ The admin temporarily renders the entire app *as* another user — their role, b
 - **Phone numbers stay masked**: when an admin mirrors a CS agent, the agent's regular phone-mask + Click-to-Call rules apply. Mirror Mode is not a side-channel for raw PII.
 - **Do NOT** add an "exit mirror" hard route at the API layer — the cookie + session is updated in place by `stopMirror`, and any redirect-based "logout" would also kill the original admin's session.
 - **Do NOT** use Mirror Mode to perform actions on the user's behalf — that's what `users.update` is for. Every mutation throws by design.
-- Files: `apps/api/src/auth/auth.service.ts` (start/stopMirror), `apps/api/src/auth/auth.controller.ts` (`POST /auth/mirror/start`, `POST /auth/mirror/stop`), `apps/api/src/common/decorators/current-user.decorator.ts` (SessionUser fields), `apps/api/src/common/authz.ts` (canMirror), `apps/api/src/trpc/trpc.ts` (mutation block middleware), `apps/web/app/components/layout/dashboard-layout.tsx` (green ring), `apps/web/app/components/layout/header.tsx` (Exit pill), `apps/web/app/features/users/UserDetailPage.tsx` (Mirror button), `apps/web/app/routes/hr.users.$id/route.tsx` (mirror intent → start), `apps/web/app/routes/admin/route.tsx` (exitMirror intent → stop).
+- Files: `apps/api/src/auth/auth.service.ts` (start/stopMirror + supervision fallback), `apps/api/src/auth/auth.controller.ts` (`POST /auth/mirror/start`, `POST /auth/mirror/stop`), `apps/api/src/branches/branch-teams.service.ts` (supervision graph), `apps/api/src/trpc/routers/branches.router.ts` (`canMirrorToUser`), `apps/api/src/common/decorators/current-user.decorator.ts` (SessionUser fields), `apps/api/src/common/authz.ts` (canMirror), `apps/api/src/trpc/trpc.ts` (mutation block middleware), `apps/web/app/components/layout/dashboard-layout.tsx` (green ring), `apps/web/app/components/layout/header.tsx` (Exit pill), `apps/web/app/features/users/UserDetailPage.tsx` (Mirror button), `apps/web/app/routes/hr.users.$id/route.tsx` (mirror intent → start; mirror button uses `branches.canMirrorToUser`), `apps/web/app/routes/admin/route.tsx` (exitMirror intent → stop).
 
 **Order Lifecycle Timeline (shared across ALL order detail pages):**
 - Every state transition service method MUST write an `order_timeline_events` row in the same transaction — never separately, never optionally
@@ -390,6 +402,7 @@ The push system has four layers — all must be consistent:
 - Funding Ledger: HoM creates a funding record with amount + receipt image upload. Status starts as SENT. Media Buyer receives a PWA push notification and must click Mark Received (status becomes COMPLETED) or Not Received (status becomes DISPUTED, triggers alert to CEO)
 - **Approve funding request = ledger row:** When HoM/Finance/SuperAdmin/Admin approves a `marketing_funding_requests` row (`approveFundingRequest`), the API **must** insert a matching `marketing_funding` row in the **same transaction** (status `SENT`, optional `source_funding_request_id` FK) so **Total Received**, the **Transfers** tab, and **getFundingBalance** stay aligned with **My Requests**. `createFunding` (Send Funding) remains the other path into the same ledger.
 - Ad Spend Logging: Media Buyers log daily spend per product with a MANDATORY Ads Manager screenshot. No screenshot = no log entry accepted
+- **Daily-grouped Add Expense (Phase 17, CEO directive 2026-04-27 — migration 0082):** The single-row "Log spend" form is replaced by a multi-line **"Add Expense"** modal where MBs record an entire day's spend in one batch (one shared `spendDate`, N line items each with campaign + auto-filled product + amount + platform + optional ad URL + screenshot). Backend: `marketing.createAdSpendBatch` writes all rows in one `withActor` transaction; HoM gets **ONE** notification per batch (`marketing:ad_spend_submitted`) — never N pings for one busy day. The `/admin/marketing/ad-spend` page renders an accordion grouped by `(spend_date, media_buyer_id)` (`marketing.listAdSpendGrouped`) — each accordion row = one day's batch with rolled-up status (`PENDING` if any line is pending; `APPROVED` / `REJECTED` only when uniform; otherwise `MIXED`). The legacy flat per-line table is preserved behind a "Detailed view" toggle for HoM/admin who need single-line edit/preview flows. New columns on `ad_spend_logs`: `platform ad_platform NOT NULL DEFAULT 'FACEBOOK'` (enum: FACEBOOK / TIKTOK / GOOGLE — extend with `ALTER TYPE ADD VALUE`) and `ad_url text` (optional, app-level URL validation). The `ad_spend_logs_history` and INSERT trigger were synced in the same migration. Do NOT regress to per-row-only entry — a busy MB has ~5–15 lines/day and the accordion is what makes that workflow tolerable.
 - CPA = Total Ad Spend / Total Orders Created (all statuses)
 - True ROAS = Total Revenue from DELIVERED orders only / Total Ad Spend
 - If a Media Buyer logged spend vs actual leads exceeds a configurable threshold, auto-alert the Head of Marketing (High CPA Warning)
@@ -397,10 +410,12 @@ The push system has four layers — all must be consistent:
 **Funding page layout — two-section model (CEO directive 2026-04-26):**
 The two-tier funding flow (Finance → HoM, HoM → MB) is reflected in the page layout itself, so HoMs (who are both *receiver* and *disburser*) don't have to mentally untangle two roles on one screen. `/admin/marketing/funding` renders:
 
-- **Section 1 — "Funds I've Received" / "Incoming Funding"** (always shown). HoM sees money from Finance; MB sees money from HoM. Tabs: **Transfers** (incoming, mark-received CTA on each `SENT` row) | **My Requests** (their outbound asks). The header has a **+ Request Funds** button when `canRequestFunding`. Title is dynamic — `Funds I've Received` for HoM/Admin, `Incoming Funding` for MB (since some of their funding is still `SENT` waiting).
+- **Section 1 — "Funds I've Received" / "Incoming Funding"** (always shown). HoM sees money from Finance; MB sees money from HoM. Tabs: **Transfers** (incoming, mark-received CTA on each `SENT` row) | **My Requests** (their outbound asks). Title is dynamic — `Funds I've Received` for HoM/Admin, `Incoming Funding` for MB (since some of their funding is still `SENT` waiting).
 - **Section 2 — "Funds I Distribute"** (`canDistribute` — HoM/Admin only). Tabs: **Transfers** (sent ledger, read-only) | **MB Requests** (pending approval inbox). Header has a **+ Send Funding** button.
 
-URL state is `?section=received|distributing&tab=transfers|requests` plus per-(section,tab) `page` / `status` / `requestStatus` / `search`. Switching section drops those filter params (they're scoped to the slice you came from). Each section card has its own action button so the affordance is unambiguous: `+ Request Funds` always means "ask upstream", `+ Send Funding` always means "disburse downstream".
+The shared ledger card header shows **+ Request Funds** whenever `canRequestFunding` (Media Buyer or Head of Marketing) — **not** only on Section 1 — so HoM can ask Finance without switching back from **Funds I Distribute**. **+ Send Funding** still appears only while the active primary tab is **Funds I Distribute** (`canSendFunding`).
+
+URL state is `?section=received|distributing&tab=transfers|requests` plus per-(section,tab) `page` / `status` / `requestStatus` / `search`. Switching section drops those filter params (they're scoped to the slice you came from). Affordances stay unambiguous: `+ Request Funds` always means "ask upstream", `+ Send Funding` always means "disburse downstream".
 
 **Funding-relevant top metrics** (replaced the old marketing-perf strip — CPA / ROAS / Delivery Rate / Confirmation Rate didn't speak to funding work):
 - `Total Received` (period sum, incoming ledger `marketing_funding` — any status, `sent_at` in range)
@@ -471,7 +486,7 @@ Payroll is no longer a flat list of payouts that HR approves one by one. Each mo
 **Lifecycle + permission gates:**
 | Stage | Trigger | Gate (`apps/api/src/hr/payroll-batch.service.ts`) |
 |---|---|---|
-| `DRAFT` | `generateBatch()` derives payouts for staff in (branch, dept) | `canPrepareDept(viewer, branchId, dept)` — admin OR matching Head on their `currentBranchId` |
+| `DRAFT` | `generateBatch()` derives payouts for staff in (branch, dept) | `canPrepareDept(viewer, branchId, dept)` — admin OR matching Head (`currentBranchId` matches branch, or org-wide head with null session branch — uses `input.branchId`) |
 | `PENDING_HR` | `submitBatch()` (DRAFT → PENDING_HR) | Same as DRAFT (the owner submits) |
 | `PENDING_FINANCE` | `approveBatch()` (PENDING_HR → PENDING_FINANCE) — HR may attach `hrNotes` and add per-staff adjustments via `addBatchAdjustment` while in this stage | `canReviewBatch` — admin OR `HR_MANAGER` |
 | `PAID` | `markBatchPaid({ financeReference })` cascades all child payouts to PAID | `canProcessBatch` — admin OR `FINANCE_OFFICER` OR Finance hat (`hasFinanceAccess`) |
@@ -505,7 +520,7 @@ Deep-link mapper in `notifications.service.ts::getLinkPathForType` routes any `h
 - `listMonthlyPayrolls` auto-scopes:
   - admins → all branches
   - HR Manager / Finance → their `currentBranchId`
-  - Heads → their `currentBranchId` AND their dept only
+  - Org-wide department heads with **null** `currentBranchId` → their **dept only**, all branches (optional `input.branchId` to narrow); heads with a session branch → that branch AND their dept only
 - `listCommissionPlans` / `createCommissionPlan` / `updateCommissionPlan` auto-scope by `getManageableRolesForViewer` (exported from `payroll-batch.service.ts`):
   - admin / HR_MANAGER → every role across all departments
   - HEAD_OF_CS → `CS_AGENT` only
@@ -551,20 +566,19 @@ Files to know: [apps/api/src/hr/payroll-batch.service.ts](apps/api/src/hr/payrol
 - Frontend: `apps/web/app/lib/rbac.ts` → same helpers mirrored.
 - Permission bypass: `PermissionsService.getEffectivePermissions` and `permissionProcedure` short-circuit for BOTH `SUPER_ADMIN` and `ADMIN` (they carry `permissions: []` in the session).
 - Finance field stripping: `hasFinanceAccess` returns true for both.
-- Branch visibility: `canViewAllBranches` returns true for both.
+- Branch visibility: `canViewAllBranches` returns true for admin-class **and** for org-wide department heads (`HEAD_OF_CS`, `HEAD_OF_MARKETING`, `HEAD_OF_LOGISTICS`).
 - `SENSITIVE_ROLES` includes both `SUPER_ADMIN` and `ADMIN` — creating/promoting anyone into an admin-level role generates a `permission_request` for SuperAdmin approval.
 
-**One holder per branch (uniqueness rule — both ACTIVE and PENDING count):**
-Four roles are limited to at most one holder per branch: `HEAD_OF_CS`, `HEAD_OF_MARKETING`, `HEAD_OF_LOGISTICS`, and **`HR_MANAGER`** (added 2026-04-23 per CEO directive, migration 0060).
+**Head / HR uniqueness (ACTIVE + PENDING both count):**
+- **Org-wide singletons:** `HEAD_OF_CS`, `HEAD_OF_MARKETING`, and `HEAD_OF_LOGISTICS` — at most one `ACTIVE` holder per role for the **whole org** (partial unique indexes `uq_active_head_of_*_org_wide` in migration `0080_org_wide_department_heads.sql`). Service-layer conflict checks use the same roles **without** filtering by `primary_branch_id`.
+- **Per branch:** **`HR_MANAGER`** — at most one `ACTIVE`/`PENDING` per `primary_branch_id` (migration 0060 + service check on `HR_MANAGER` + branch).
 
-The rule covers both **ACTIVE** and **PENDING** statuses (tightened 2026-04-25 — earlier behaviour only blocked ACTIVE conflicts, which let admins stack multiple pending invites on the same branch). Only `INACTIVE` / `DEACTIVATED` / `ARCHIVED` frees the slot. Enforcement lives at:
-- **Service:** `UsersService.createStaff` and `UsersService.update` check the `HEAD_ROLES` tuple and reject with `CONFLICT` (`"Branch already has a pending Head Of Cs (Comfort). Deactivate them first."` or `"… an active Hr Manager (Mary). …"`) before writing. Filter: `inArray(status, ['ACTIVE', 'PENDING'])`.
-- **DB:** partial unique indexes `uq_active_head_of_*_per_branch` + `uq_active_hr_manager_per_branch` (migrations 0056 + 0060). **Note**: these still filter `status = 'ACTIVE'` only — the service check is the canonical guard. Tightening the index to include PENDING requires cleaning any existing PENDING duplicates in the DB first; see "Open data hygiene" below.
-- **UI proactive warning:** `users.listActiveHeads` tRPC returns ACTIVE + PENDING holders so the user create / edit pages can render an inline warning AND the blocking modal BEFORE submit. Constant `HEAD_ROLES` is mirrored in `apps/web/app/features/users/UserCreatePage.tsx` and `UserDetailPage.tsx`.
-- **Note on naming:** the constant stays `HEAD_ROLES` even though `HR_MANAGER` isn't literally a "head" — renaming would churn every call site for no functional benefit.
-- **This is the per-branch uniqueness pattern**, distinct from the **org-wide singleton** pattern used by the Finance hat (`is_finance_officer` flag). Do not conflate the two.
+Only `INACTIVE` / `DEACTIVATED` / `ARCHIVED` frees a slot for the next invite. Enforcement lives at:
+- **Service:** `UsersService.createStaff` / `UsersService.update` — org-wide head roles vs `HR_MANAGER` branch-scoped path; filter `inArray(status, ['ACTIVE', 'PENDING'])`.
+- **DB:** org-wide partial unique on `(true)` per head role (`0080`) + `uq_active_hr_manager_per_branch` for HR. Service checks remain the canonical guard for `PENDING`.
+- **UI proactive warning:** `users.listActiveHeads` + `HEAD_ROLES` on `UserCreatePage.tsx` / `UserDetailPage.tsx` — org-wide head conflicts show for **any** primary branch choice; HR conflicts stay branch-keyed.
 
-**Edge case — heads with `primary_branch_id IS NULL`:** Heads created without a primary branch (legacy/seed data) bypass the per-branch check entirely. They show up in branch UIs via `user_branches` membership, but the uniqueness invariant is keyed on `primary_branch_id`. When you encounter one, set their `primary_branch_id` to a real branch (or deactivate them) so the invariant becomes enforceable.
+**Edge case — `primary_branch_id`:** Org-wide heads still **carry** a primary branch for HR/home-branch UX; uniqueness for their role is **not** keyed on that column. `HR_MANAGER` remains keyed on `primary_branch_id`.
 
 ---
 
@@ -675,6 +689,9 @@ These tables carry `branch_id` and are filtered by RLS: `orders`, `campaigns`, `
 ### SuperAdmin / Global Finance Bypass
 SuperAdmin and global Finance bypass branch RLS entirely. Their session `current_branch_id` is set to `NULL` and RLS policies treat NULL as "show all branches".
 
+### Org-wide department heads (CS, Marketing, Logistics)
+`HEAD_OF_CS`, `HEAD_OF_MARKETING`, and `HEAD_OF_LOGISTICS` are **org-wide singletons** (at most one `ACTIVE` holder per role for the whole org — migration `0080_org_wide_department_heads.sql`). They use the same session pattern as admin-class: `canViewAllBranches` is true, so **`currentBranchId` is `NULL`** on login. They see and act across all branches for their domain (orders, marketing, logistics, payroll batch prep, mirror targets). **Mutations** that require branch context still use explicit `branchId` in the payload (see `requireBranchScopeForGlobalAdminMutations` in `apps/api/src/trpc/trpc.ts` and `BranchScopeGuardProvider` on the web). **Branch team supervisors** remain branch-scoped (`branch_teams`); they do not replace org-wide heads.
+
 ### Branch Switcher Session
 If a user belongs to multiple branches, the active branch is stored in their Redis session as `currentBranchId`. The sidebar shows a branch selector. Switching branch calls `auth.switchBranch(branchId)` which updates the Redis session.
 
@@ -703,12 +720,12 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT allow CS agents to initiate order transfers between themselves — only HoCS and SuperAdmin can reassign orders
 - Do NOT bypass or reorder the **order ↔ inventory** gates: `InventoryService.assertGlobalAvailabilityForOrder` on `CONFIRMED`, `assertLocationCanFulfillOrder` on `ALLOCATED`, then `reserveForAllocateWithMovements` and `completeDeliveryInventory` in side effects. Do NOT read `logistics_location_id` from a stale pre-update order row in `executeTransitionSideEffects` — pass the post-update order + metadata. Locked spec: `CLAUDE.md` → "When Building the Inventory Module" → "Order ↔ shelf integrity".
 - Do NOT shrink `inventory.verifyTransfer` in `packages/shared/scripts/seed-permissions.ts` to **only** `TPL_MANAGER` — `HEAD_OF_LOGISTICS` and `STOCK_MANAGER` must retain verify when partners are off-platform; re-run `pnpm db:seed-permissions` after edits.
-- Do NOT change the **confirm call-gate overrides** (admin-class via `isAdminLevel`, same-branch `BRANCH_ADMIN`, HoCS any-call-on-order) without updating **both** `apps/api/src/orders/orders.service.ts::validateTransitionGates` **and** `apps/web/app/features/orders/OrderDetailPage.tsx` in the same change — server and UI must stay aligned.
+- Do NOT change the **confirm call-gate overrides** (admin-class via `isAdminLevel`, same-branch `BRANCH_ADMIN`, org-wide `HEAD_OF_CS` any-call-on-order) without updating **both** `apps/api/src/orders/orders.service.ts::validateTransitionGates` **and** `apps/web/app/features/orders/OrderDetailPage.tsx` in the same change — server and UI must stay aligned.
 - Do NOT send raw phone numbers via SMS or WhatsApp — always route through the platform bridge
 - Do NOT write `order_timeline_events` rows outside of the same database transaction as the triggering mutation — timeline events must be atomic with their state change
 - Do NOT render the Mirror View with any interactive action buttons — it is read-only, always
 - Do NOT bypass the `blockMutationsWhileMirroring` tRPC middleware on any new router. Mirror Mode read-only enforcement lives at the root middleware so individual services don't have to know about it; if you ever build a non-tRPC mutation endpoint (REST controller, webhook handler, raw fetch handler), you MUST add `if (ctx.user?.mirroredBy) throw FORBIDDEN` before any write. See `apps/api/src/trpc/trpc.ts` for the canonical pattern.
-- Do NOT change `canMirror()` permission rules without a CEO directive. The matrix (SuperAdmin → anyone, Heads → their direct-report role on their branch, HR → nobody) is locked. If product asks to expand it, write a new memory entry first.
+- Do NOT change `canMirror()` permission rules without a CEO directive. The matrix (SuperAdmin → anyone, org-wide Heads → their direct-report role set **without** same-branch requirement, branch supervisors → supervised users on the active branch, HR → nobody) is locked. If product asks to expand it, write a new memory entry first.
 - Do NOT delete `mirror_sessions` rows. The audit trail is permanent — even when a session ends, the row stays with `ended_at` stamped. Closed rows are how we answer "who looked through whose account, and when."
 - Do NOT let admin clicks during Mirror Mode mutate the target user's data — including soft-mutations like "mark notification as read", `lastActionAt` updates, `agent:state_update` socket broadcasts, push-ack receipts, or any client-side optimistic UI that pretends a write happened. Mirror Mode is **strictly view-only**. Implementation:
   - Server: `blockMutationsWhileMirroring` middleware (already in place) rejects every tRPC mutation.
@@ -737,7 +754,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT serve the heavy CEO Executive Overview on `/admin` for SuperAdmin/Admin. The landing page is intentionally lightweight (`dashboard.quickOverview`); the full report lives at `/admin/ceo` and is reached via the card on the landing. Reverting to "show everything on /admin" reintroduces the slow-first-paint problem flagged 2026-04-23.
 - Do NOT query a materialized view without applying the user's date filter to it. Every cost line in `getFastProfitReport` must be scoped by `startDate`/`endDate` (via `spend_date`, `period_month`, `delivery_date`, etc.). An unfiltered MV query silently returns all-time totals and corrupts the CEO dashboard.
 - Do NOT set the audit actor with `this.pgClient\`SELECT set_config('yannis.current_user_id', ..., true)\``. It runs outside any drizzle transaction and the setting dies before the next `this.db.*` call — writes get attributed to "System" in the audit trail. Always use `withActor(this.db, actor, async (tx) => { ... })` from `apps/api/src/common/db/with-actor.ts` and route every write through `tx`, never `this.db`, inside the callback. See the "Actor Injection Pattern" section for the full rationale.
-- Do NOT remove `HR_MANAGER` from the `HEAD_ROLES` tuples in `users.service.ts` or the frontend equivalents. CEO directive 2026-04-23: HR follows the same one-per-branch rule as `HEAD_OF_CS` / `HEAD_OF_MARKETING` / `HEAD_OF_LOGISTICS`. Migration 0060 enforces it at the DB layer too.
+- Do NOT remove `HR_MANAGER` from the `HEAD_ROLES` tuples in `users.service.ts` or the frontend equivalents. CEO directive 2026-04-23: HR follows **one per branch** (`ACTIVE`/`PENDING` on `primary_branch_id`). The three department heads are **org-wide** singletons (migration `0080` + service); do not collapse HR into the org-wide head indexes.
 - Do NOT let HR approve payroll batches one payout at a time. The unit of HR review is the **batch** (`payroll_batches`) — `approveBatch` / `rejectBatch` move the whole `(branch, dept, month)` slot together so the audit trail tells one coherent story per stage. Per-payout APIs (`hr.approvePayout`, `hr.generatePayouts`) still exist for legacy DRAFT rows, but new flows must use the batch lifecycle.
 - Do NOT bypass `withActorAndBranch()` on payroll batch writes. Every batch insert/update/transition must run inside that wrapper so both `yannis.current_user_id` AND `yannis.current_branch_id` are set on the same pinned connection — RLS on branch-scoped child tables (and audit attribution on `payroll_batches_history`) depend on it. See "Actor Injection Pattern".
 - Do NOT regenerate a non-DRAFT payroll batch. `generateBatch` rejects any slot already in `PENDING_HR` / `PENDING_FINANCE` / `PAID` with `CONFLICT`. To revise a submitted batch, the reviewer must first `rejectBatch` it (sends back to `DRAFT`), then the head re-generates and re-submits.

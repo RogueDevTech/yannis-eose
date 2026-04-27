@@ -24,6 +24,8 @@
     "db:seed:delivery-remittance-disputed": "tsx src/db/seed-delivery-remittance-disputed.ts",
     "db:seed-permissions": "tsx scripts/seed-permissions.ts",
     "db:baseline": "tsx scripts/baseline-migrations.ts",
+    "db:dedupe-products": "tsx scripts/dedupe-products.ts",
+    "db:dedupe-products:loose": "tsx scripts/dedupe-products.ts --loose",
     "simulate:orders": "tsx test-script/order-simulate.ts",
     "simulate:cs": "tsx test-script/cs-simulation.ts",
     "simulate:logistics": "tsx test-script/logistics-simulation.ts",

@@ -3156,3 +3156,90 @@ Validate that the system meets the 2,000 req/min target and all PRD performance 
 ---
 
 **Phase 16 build order:** 16.2 → 16.1 → 16.4 → 16.3 → 16.5
+
+---
+
+## Phase 17: Ad Spend Daily Grouping + Multi-Line Add Expense (CEO directive 2026-04-27)
+
+**Why:** Media Buyers record their day's ad spend as one batch at end-of-day (Campaign A — ₦X, Campaign B — ₦Y, etc.). The current flat single-row entry forces N submissions per day. Move to one "Add Expense" action that captures all of a day's lines at once, and replace the flat table with an accordion grouped by `(media_buyer_id, spend_date)` so the page reflects how the work actually happens.
+
+### Task 17.1 — Schema: ad_url + platform on ad_spend_logs
+**Migration:** `0082_ad_spend_platform_and_url.sql` (0080/0081 already claimed by concurrent untracked work)
+
+- New enum `ad_platform_enum` with values `FACEBOOK` (default), `TIKTOK`, `GOOGLE`. Easy to extend later (Snapchat, X, etc.) — additive ALTER TYPE ADD VALUE.
+- `ad_spend_logs.platform ad_platform_enum NOT NULL DEFAULT 'FACEBOOK'`.
+- `ad_spend_logs.ad_url text` nullable. App-level URL validation (`http(s)://...`) at write time — no CHECK constraint so we can soften later without a migration.
+- Sync `ad_spend_logs_history` (existing temporal `*_history` table) — both columns added so the temporal trigger doesn't blow up on the type-mismatched copy.
+
+**Acceptance Criteria:**
+- [x] Enum + columns added; defaults applied to existing rows.
+- [x] `ad_spend_logs_history` columns mirror main table.
+- [x] Drizzle schema updated ([packages/shared/src/db/schema/marketing.ts](packages/shared/src/db/schema/marketing.ts), [enums.ts](packages/shared/src/db/schema/enums.ts)).
+
+### Task 17.2 — Validators: createAdSpendBatchSchema
+
+- `createAdSpendSchema` extended with `platform` (enum, default FACEBOOK) and `adUrl` (optional URL).
+- New `createAdSpendBatchSchema` — `{ spendDate, lines: [{ campaignId, productId, spendAmount, platform, adUrl?, screenshotUrl }] }` — at least 1 line, max 50.
+
+**Acceptance Criteria:**
+- [x] Both schemas exported from `@yannis/shared`.
+- [x] Zod URL validation accepts blank + http(s); rejects everything else.
+
+### Task 17.3 — MarketingService: createAdSpendBatch + listAdSpendGrouped
+
+- New batch method writes N `ad_spend_logs` rows in a single `withActor` transaction with shared `spend_date`.
+- Existing `createAdSpend` continues to work for single-row callers (legacy).
+- Notification: HoM still notified on submission, **once per batch** (not N times).
+- New helper: `listAdSpendGrouped({ startDate?, endDate?, mediaBuyerId? })` returns rows grouped by `(spend_date, media_buyer_id)` with rolled-up status (`APPROVED` if all approved, else `PENDING` if any pending, else `REJECTED`).
+
+**Acceptance Criteria:**
+- [x] Batch insert is atomic — partial failures roll back.
+- [x] Grouped list returns the day's total + per-line items in one round trip.
+- [x] HoM notification fires once per batch, not per line.
+
+### Task 17.4 — tRPC: marketing.createAdSpendBatch + listAdSpendGrouped
+
+- `marketing.createAdSpendBatch` (mutation; MEDIA_BUYER + admin-class).
+- `marketing.listAdSpendGrouped` (query; scoped by role same as `listAdSpend`).
+
+**Acceptance Criteria:**
+- [x] Both procedures available in tRPC router.
+- [x] Branch scoping flows from `ctx.currentBranchId` for both.
+
+### Task 17.5 — UI: Add Expense modal (multi-row)
+
+Replace the single-row "Log spend" modal with an "Add Expense" modal:
+
+- Date picker (defaults to today).
+- Repeating row group — each row has Campaign select (auto-fills product), Amount, Platform (Facebook default; Tiktok / Google), Ad URL (optional), Screenshot upload.
+- "Add another line" button below the rows.
+- "Remove" icon on each row (disabled when only 1 row).
+- Running total at the bottom of the modal.
+- Submit → calls `createAdSpendBatch` → on success, modal closes and list refreshes.
+
+**Acceptance Criteria:**
+- [x] MB can add ≥ 1 line item; "Add another line" appends a fresh row.
+- [x] Selecting a campaign auto-fills product (campaigns own `productIds`).
+- [x] Submit fails inline with row-level error if any line is invalid.
+
+### Task 17.6 — UI: Accordion grouped by day on /admin/marketing/ad-spend
+
+Replace the flat table with an accordion list:
+
+- Each accordion item = one (date × MB) group.
+- Header: date · MB name (HoM/admin only) · count of lines · total ₦ · rolled-up status pill.
+- Toggle expands → table of line items: campaign, product, platform, amount, ad URL, screenshot, status, per-line approve/reject (HoM/admin).
+- Top stat strip: total this period, total approved, pending count, rejected count.
+
+**Acceptance Criteria:**
+- [x] Accordion preserves URL state (page, date filter) on expand/collapse.
+- [x] Per-line approve/reject still works; group status rolls up correctly.
+- [x] MB sees only own groups; HoM sees their branch; admin sees all.
+
+### Task 17.7 — Docs
+
+- CLAUDE.md "When Building the Marketing Module" updated with the platform/grouping spec.
+- Memory entry for the daily-grouping pattern.
+
+**Acceptance Criteria:**
+- [x] CLAUDE.md updated; memory entry indexed.

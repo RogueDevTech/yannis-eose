@@ -3,7 +3,7 @@ import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requireStaffAccountsAccess, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { canMirror } from '~/lib/rbac';
+import { canAccessGlobalAuditLog } from '~/lib/rbac';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { UserDetailPage } from '~/features/users/UserDetailPage';
 import type {
@@ -99,20 +99,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const canDisburseToThisUser =
       user.role === 'HEAD_OF_MARKETING' && (isSuperAdmin || perms.includes('finance.disburse'));
 
-    // Mirror permission gate (UI-side mirror of canMirror() in apps/web/app/lib/rbac.ts).
-    // Real enforcement is server-side in apps/api/src/auth/auth.service.ts -> startMirror().
-    const viewerCanMirror = canMirror(
-      currentUser
-        ? {
-            id: currentUser.id,
-            role: currentUser.role,
-            currentBranchId: currentUser.currentBranchId ?? null,
-            mirroredBy: currentUser.mirroredBy ?? null,
-          }
-        : null,
-      { id: profileUser.id, role: profileUser.role, primaryBranchId: profileUser.primaryBranchId },
-    ) && profileUser.status === 'ACTIVE';
-
     // ── Build role-specific order filter ───────────────────
     const orderFilter: Record<string, unknown> = { limit: 10 };
   if (['CS_AGENT', 'HEAD_OF_CS'].includes(user.role)) {
@@ -206,29 +192,42 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     })
     .catch(() => []);
 
-  // Audit trail (actions by this user)
-  const auditLog: Promise<UserAuditEntry[]> = apiRequest<unknown>(
-    `/trpc/audit.globalLog?input=${encodeURIComponent(JSON.stringify({ actorId: userId, page: 1, limit: 20 }))}`,
-    { method: 'GET', cookie },
-  )
-    .then((res) => {
-      if (!res.ok) return [];
-      const d = res.data as {
-        result?: { data?: { rows: Array<{ id: string; action: string; tableName: string; recordId: string; data: Record<string, unknown>; validFrom: string }> } };
-      };
-      const rows = d?.result?.data?.rows ?? [];
-      return rows.map((r) => ({
-        id: r.id,
-        action: r.action,
-        tableName: r.tableName,
-        recordId: r.recordId,
-        oldValues: null,
-        newValues: r.data,
-        createdAt: r.validFrom,
-        data: r.data,
-      })) as UserAuditEntry[];
-    })
-    .catch(() => []);
+  // Audit trail (actions by this user) — same gate as global audit page.
+  const auditLog: Promise<UserAuditEntry[]> = canAccessGlobalAuditLog(currentUser)
+    ? apiRequest<unknown>(
+        `/trpc/audit.globalLog?input=${encodeURIComponent(JSON.stringify({ actorId: userId, page: 1, limit: 20 }))}`,
+        { method: 'GET', cookie },
+      )
+        .then((res) => {
+          if (!res.ok) return [];
+          const d = res.data as {
+            result?: {
+              data?: {
+                rows: Array<{
+                  id: string;
+                  action: string;
+                  tableName: string;
+                  recordId: string;
+                  data: Record<string, unknown>;
+                  validFrom: string;
+                }>;
+              };
+            };
+          };
+          const rows = d?.result?.data?.rows ?? [];
+          return rows.map((r) => ({
+            id: r.id,
+            action: r.action,
+            tableName: r.tableName,
+            recordId: r.recordId,
+            oldValues: null,
+            newValues: r.data,
+            createdAt: r.validFrom,
+            data: r.data,
+          })) as UserAuditEntry[];
+        })
+        .catch(() => [])
+    : Promise.resolve([]);
 
   // Marketing metrics (only for MEDIA_BUYER / HEAD_OF_MARKETING)
   const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
@@ -362,6 +361,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         })
         .catch(() => null)
     : Promise.resolve(null);
+
+    const mirrorRes = await apiRequest<unknown>(
+      `/trpc/branches.canMirrorToUser?input=${encodeURIComponent(JSON.stringify({ targetUserId: profileUser.id }))}`,
+      { method: 'GET', cookie },
+    );
+    const mirrorPayload = mirrorRes.data as { result?: { data?: { allowed: boolean } } } | undefined;
+    const viewerCanMirror =
+      profileUser.status === 'ACTIVE' &&
+      mirrorRes.ok &&
+      mirrorPayload?.result?.data?.allowed === true;
 
     return { user, products, locations, plans, recentOrders, payouts, adjustments, auditLog, marketingMetrics, fundingBalance, pendingEmailChange, stockMovements, financeActivity, pushStatus, activeHeads, currentFinanceOfficer, branchesList, canDisburseToThisUser, isSuperAdmin, isViewerHeadOfMarketing, isViewerHeadOfCS, canEditLimited, viewerCanMirror, isSelfView };
   })();
