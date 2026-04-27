@@ -102,7 +102,7 @@ export function DeliveryRemittancesPage({
       remittances.map((r) => ({
         id: r.id,
         location: r.locationName ?? '',
-        sentBy: userMap[r.sentBy] ?? `${r.sentBy.slice(0, 8)}…`,
+        sentBy: userMap[r.sentBy] ?? 'Unknown user',
         orderCount: r.orderCount,
         status: STATUS_LABEL[r.status] ?? r.status,
         sentAt: new Date(r.sentAt).toLocaleString(),
@@ -211,7 +211,7 @@ export function DeliveryRemittancesPage({
                   </td>
                   <td className="table-cell text-sm text-app-fg">{r.locationName ?? '—'}</td>
                   <td className="table-cell text-sm text-app-fg-muted">
-                    {userMap[r.sentBy] ?? `${r.sentBy.slice(0, 8)}…`}
+                    {userMap[r.sentBy] ?? 'Unknown user'}
                   </td>
                   <td className="table-cell text-right">{r.orderCount}</td>
                   <td className="table-cell">

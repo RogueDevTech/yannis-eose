@@ -4,11 +4,11 @@ import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
-import { Checkbox } from '~/components/ui/checkbox';
 import { PageNotification } from '~/components/ui/page-notification';
-import type { CustomFormField, Product } from './types';
+import type { CustomFormField, Product, StandardFieldConfig } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
 import { FormFullPreview } from './form-full-preview';
+import { StandardFieldsEditor } from './standard-fields-editor';
 
 export interface MarketingFormCreatePageProps {
   products: Product[];
@@ -26,19 +26,16 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
 
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
   const [fields, setFields] = useState<CustomFormField[]>([]);
+  const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>([]);
   const [dismissedProductsError, setDismissedProductsError] = useState(false);
   const [dismissedActionError, setDismissedActionError] = useState(false);
   const [formHeading, setFormHeading] = useState('');
   const [formSubtitle, setFormSubtitle] = useState('');
   const [formButtonText, setFormButtonText] = useState('');
-  const [showDeliveryAddress, setShowDeliveryAddress] = useState(false);
-  const [showDeliveryNotes, setShowDeliveryNotes] = useState(false);
-  const [showDeliveryState, setShowDeliveryState] = useState(false);
-  const [showGender, setShowGender] = useState(false);
-  const [showPreferredDeliveryDate, setShowPreferredDeliveryDate] = useState(false);
-  const [showPaymentMethod, setShowPaymentMethod] = useState(false);
+  const [successCallbackUrl, setSuccessCallbackUrl] = useState('');
 
   const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
+  const standardFieldsJson = useMemo(() => JSON.stringify(standardFields), [standardFields]);
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
 
   useEffect(() => {
@@ -91,13 +88,8 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
           <fetcher.Form method="post" className="space-y-6">
             <input type="hidden" name="intent" value="createForm" />
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
+            <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
-            {showDeliveryAddress && <input type="hidden" name="showDeliveryAddress" value="on" />}
-            {showDeliveryNotes && <input type="hidden" name="showDeliveryNotes" value="on" />}
-            {showDeliveryState && <input type="hidden" name="showDeliveryState" value="on" />}
-            {showGender && <input type="hidden" name="showGender" value="on" />}
-            {showPreferredDeliveryDate && <input type="hidden" name="showPreferredDeliveryDate" value="on" />}
-            {showPaymentMethod && <input type="hidden" name="showPaymentMethod" value="on" />}
 
             <div className="card space-y-3">
               <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
@@ -146,53 +138,17 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
                     label="Success URL (optional)"
                     placeholder="e.g. https://funnel.example.com/thank-you"
                     hint="Skips the inline success message when set."
-                    defaultValue=""
+                    value={successCallbackUrl}
+                    onChange={(e) => setSuccessCallbackUrl(e.target.value)}
                     className="sm:col-span-2"
                   />
                 </div>
-                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">Optional standard fields</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={showDeliveryAddress}
-                      onChange={(e) => setShowDeliveryAddress(e.target.checked)}
-                    />
-                    <span className="text-sm text-app-fg-muted">Delivery Address</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={showDeliveryNotes}
-                      onChange={(e) => setShowDeliveryNotes(e.target.checked)}
-                    />
-                    <span className="text-sm text-app-fg-muted">Delivery Notes</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={showDeliveryState}
-                      onChange={(e) => setShowDeliveryState(e.target.checked)}
-                    />
-                    <span className="text-sm text-app-fg-muted">Delivery State</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox checked={showGender} onChange={(e) => setShowGender(e.target.checked)} />
-                    <span className="text-sm text-app-fg-muted">Gender</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={showPreferredDeliveryDate}
-                      onChange={(e) => setShowPreferredDeliveryDate(e.target.checked)}
-                    />
-                    <span className="text-sm text-app-fg-muted">Preferred Delivery Date</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={showPaymentMethod}
-                      onChange={(e) => setShowPaymentMethod(e.target.checked)}
-                    />
-                    <span className="text-sm text-app-fg-muted">Payment method (Pay on delivery / Pay online)</span>
-                  </label>
-                </div>
               </div>
+            </div>
+
+            <div>
+              <h2 className="text-sm font-semibold text-app-fg mb-2">Standard fields</h2>
+              <StandardFieldsEditor fields={standardFields} onFieldsChange={setStandardFields} />
             </div>
 
             <div>
@@ -228,12 +184,8 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
             buttonText={formButtonText}
             accentColor={accentColor}
             multiProduct={false}
-            showGender={showGender}
-            showDeliveryState={showDeliveryState}
-            showDeliveryAddress={showDeliveryAddress}
-            showDeliveryNotes={showDeliveryNotes}
-            showPreferredDeliveryDate={showPreferredDeliveryDate}
-            showPaymentMethod={showPaymentMethod}
+            standardFields={standardFields}
+            successCallbackUrl={successCallbackUrl}
             customFields={fields}
           />
         </div>

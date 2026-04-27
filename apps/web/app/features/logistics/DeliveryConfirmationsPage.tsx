@@ -243,7 +243,7 @@ export function DeliveryConfirmationsPage({
                       </div>
                     </td>
                     <td className="table-cell text-app-fg-muted">
-                      {req.requesterName ?? req.requestedBy.slice(0, 8)}
+                      {req.requesterName ?? 'Unknown user'}
                     </td>
                     <td className="table-cell">
                       <StatusBadge status={req.status} showDot />
@@ -323,7 +323,7 @@ export function DeliveryConfirmationsPage({
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <p className="text-app-fg-muted">Requested by</p>
-                    <p className="text-app-fg">{req.requesterName ?? req.requestedBy.slice(0, 8)}</p>
+                    <p className="text-app-fg">{req.requesterName ?? 'Unknown user'}</p>
                   </div>
                   <div>
                     <p className="text-app-fg-muted">Transition</p>

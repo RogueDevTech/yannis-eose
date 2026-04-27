@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData, useFetcher } from '@remix-run/react';
 import { useEffect, useRef, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
@@ -64,8 +65,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { name, channel, body },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
-      return json({ error: err?.error?.message ?? 'Failed to create template' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create template') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -83,8 +83,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { templateId, name, body, status },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
-      return json({ error: err?.error?.message ?? 'Failed to update template' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update template') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

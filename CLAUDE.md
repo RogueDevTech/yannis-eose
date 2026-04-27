@@ -582,6 +582,7 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | Text input (any type) | `<TextInput />` |
 | Multiline text | `<Textarea />` |
 | Dropdown select | `<FormSelect />` |
+| Searchable / long dropdown | `<SearchableSelect />` |
 | Amount / currency input | `<AmountInput />` |
 | Search bar | `<SearchInput />` |
 | Label + input + error wrapper | `<FormField />` (when using custom inputs) |

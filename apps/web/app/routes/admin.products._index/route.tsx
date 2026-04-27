@@ -2,6 +2,7 @@ import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { ProductsListPage } from '~/features/products/ProductsListPage';
 import type { Product } from '~/features/products/types';
@@ -57,9 +58,8 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { id, status: 'ARCHIVED' },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
       return json(
-        { error: errorData?.error?.message ?? 'Failed to archive product' },
+        { error: extractApiErrorMessage(res.data, 'Failed to archive product') },
         { status: safeStatus(res.status) },
       );
     }

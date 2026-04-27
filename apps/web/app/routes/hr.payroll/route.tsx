@@ -8,6 +8,7 @@ import {
   requirePermissionOrRoles,
   safeStatus,
 } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { HRPage } from '~/features/hr/HRPage';
 import type {
   Adjustment,
@@ -193,8 +194,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 function extractError(res: { data: unknown }, fallback: string): string {
-  const errorData = res.data as { error?: { message?: string } };
-  return errorData?.error?.message ?? fallback;
+  return extractApiErrorMessage(res.data, fallback);
 }
 
 export default function HRRoute() {

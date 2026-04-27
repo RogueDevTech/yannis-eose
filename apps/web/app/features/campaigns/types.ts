@@ -29,6 +29,19 @@ export interface CustomFormField {
   max?: number | string;
 }
 
+export type StandardFieldKey =
+  | 'deliveryAddress'
+  | 'deliveryNotes'
+  | 'deliveryState'
+  | 'gender'
+  | 'preferredDeliveryDate'
+  | 'paymentMethod';
+
+export interface StandardFieldConfig {
+  key: StandardFieldKey;
+  required: boolean;
+}
+
 export interface CampaignFormConfig {
   heading?: string;
   subtitle?: string;
@@ -41,8 +54,15 @@ export interface CampaignFormConfig {
   showGender?: boolean | string;
   showPreferredDeliveryDate?: boolean | string;
   showPaymentMethod?: boolean | string;
+  requireDeliveryAddress?: boolean | string;
+  requireDeliveryNotes?: boolean | string;
+  requireDeliveryState?: boolean | string;
+  requireGender?: boolean | string;
+  requirePreferredDeliveryDate?: boolean | string;
+  requirePaymentMethod?: boolean | string;
   deliveryStateOptions?: string[];
   preferredDeliveryDateOptions?: string[];
+  standardFields?: StandardFieldConfig[];
   /** Custom fields the Media Buyer adds to their public form (create / edit). */
   customFields?: CustomFormField[];
   /** Post-submit redirect for the buyer (funnel thank-you page). */

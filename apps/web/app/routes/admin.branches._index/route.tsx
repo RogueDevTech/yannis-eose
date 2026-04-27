@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData, useFetcher, Link } from '@remix-run/react';
 import { useEffect, useRef, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -53,8 +54,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { name, code },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
-      return json({ error: err?.error?.message ?? 'Failed to create branch' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create branch') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -69,8 +69,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { branchId, name, status },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
-      return json({ error: err?.error?.message ?? 'Failed to update branch' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update branch') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

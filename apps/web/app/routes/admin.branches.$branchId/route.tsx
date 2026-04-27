@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { Link, useLoaderData, useFetcher } from '@remix-run/react';
 import { useEffect, useRef, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -156,15 +157,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<{ result?: { data?: { users: UserOption[]; pagination: unknown } } }>(
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', status: 'ACTIVE' }))}`,
+      // Branch member picker: needs ALL active staff regardless of which branch the
+      // admin is currently switched to. `allBranches: true` is honoured server-side
+      // only for SUPER_ADMIN / ADMIN — the route is gated by `branches.manage` so
+      // non-admins can't reach it anyway.
+      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', status: 'ACTIVE', allBranches: true }))}`,
       { method: 'GET', cookie },
     ),
   ]);
 
   if (!overviewRes.ok) {
     const errMsg =
-      (overviewRes.data as { error?: { message?: string } } | undefined)?.error?.message ??
-      'Unable to load branch';
+      extractApiErrorMessage(overviewRes.data, 'Unable to load branch');
     throw new Response(errMsg, {
       status: overviewRes.status >= 400 && overviewRes.status < 600 ? overviewRes.status : 500,
     });
@@ -198,9 +202,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       body: { branchId, name, status },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
       return Response.json(
-        { error: err?.error?.message ?? 'Failed to update branch' },
+        { error: extractApiErrorMessage(res.data, 'Failed to update branch') },
         { status: safeStatus(res.status) },
       );
     }
@@ -218,9 +221,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       body: { branchId, userId, roleInBranch, isPrimary },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
       return Response.json(
-        { error: err?.error?.message ?? 'Failed to add member' },
+        { error: extractApiErrorMessage(res.data, 'Failed to add member') },
         { status: safeStatus(res.status) },
       );
     }
@@ -236,9 +238,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       body: { branchId, userId },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
       return Response.json(
-        { error: err?.error?.message ?? 'Failed to remove member' },
+        { error: extractApiErrorMessage(res.data, 'Failed to remove member') },
         { status: safeStatus(res.status) },
       );
     }

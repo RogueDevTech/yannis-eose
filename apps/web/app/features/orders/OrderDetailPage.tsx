@@ -17,6 +17,7 @@ import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { S3_FOLDERS } from '~/lib/s3-upload';
@@ -552,6 +553,7 @@ export function OrderDetailPage({
   permissions,
   csAgentsForAssign = [],
   logisticsLocations = [],
+  allocatableLocations = [],
   logisticsDispatchTemplates = [],
   invoice,
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
@@ -592,6 +594,8 @@ export function OrderDetailPage({
   const [shareTemplateId, setShareTemplateId] = useState('');
   const [sharePending, setSharePending] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const selectedAllocatableLocation = allocatableLocations.find((l) => l.id === allocateLocationId);
+  const eligibleAllocatableCount = allocatableLocations.filter((l) => l.eligible).length;
 
   const currentStatusIndex = getProgressIndex(order.status);
   const actionError = (fetcher.data as { error?: string })?.error;
@@ -606,6 +610,20 @@ export function OrderDetailPage({
 
   const { toast } = useToast();
   const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
+  const logisticsLocationWithGroupLink =
+    order.logisticsLocationId != null
+      ? logisticsLocations.find(
+          (location) =>
+            location.id === order.logisticsLocationId &&
+            !!location.whatsappGroupLink,
+        )
+      : undefined;
+  const showPostAllocationWhatsAppActions =
+    showCopyOrderSummary &&
+    (order.status === 'ALLOCATED' ||
+      order.status === 'DISPATCHED' ||
+      order.status === 'IN_TRANSIT') &&
+    !!logisticsLocationWithGroupLink;
 
   const handleCopyOrderSummary = useCallback(async () => {
     const text = buildOrderSummaryClipboardText(order);
@@ -839,11 +857,6 @@ export function OrderDetailPage({
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <PageRefreshButton />
-          {showCopyOrderSummary && (
-            <Button type="button" variant="secondary" size="sm" onClick={() => void handleCopyOrderSummary()}>
-              Copy for WhatsApp
-            </Button>
-          )}
           {!canEditOrder && (
             <span className="inline-flex items-center rounded-full bg-app-hover px-2.5 py-1 text-xs font-medium text-app-fg-muted">
               View only
@@ -1160,14 +1173,14 @@ export function OrderDetailPage({
                   {/* Assign to agent — CS_ENGAGED only */}
                   {order.status === 'CS_ENGAGED' && canAssignToCS && csAgentsForAssign && csAgentsForAssign.length > 0 && (
                     <div className="flex gap-2">
-                      <FormSelect
+                      <SearchableSelect
                         id="order-assign-cs"
                         value={assignToId}
-                        onChange={(e) => setAssignToId(e.target.value)}
+                        onChange={setAssignToId}
                         placeholder="Select agent..."
                         options={csAgentsForAssign.map((a) => ({ value: a.id, label: a.name }))}
                         wrapperClassName="flex-1 min-w-0"
-                        aria-label="Assign to agent"
+                        searchPlaceholder="Search agents..."
                       />
                       <fetcher.Form method="post" className="flex-shrink-0">
                         <input type="hidden" name="intent" value="assignToCS" />
@@ -1242,6 +1255,41 @@ export function OrderDetailPage({
                         Share to 3PL (WhatsApp)
                       </Button>
                     )}
+                    {showPostAllocationWhatsAppActions && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full"
+                          onClick={() => void handleCopyOrderSummary()}
+                        >
+                          Copy for WhatsApp
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full"
+                          onClick={() =>
+                            window.open(
+                              logisticsLocationWithGroupLink.whatsappGroupLink as string,
+                              '_blank',
+                              'noopener,noreferrer',
+                            )
+                          }
+                        >
+                          Open Logistics Group Chat
+                        </Button>
+                      </>
+                    )}
+                    {showCopyOrderSummary &&
+                      (order.status === 'ALLOCATED' ||
+                        order.status === 'DISPATCHED' ||
+                        order.status === 'IN_TRANSIT') &&
+                      !logisticsLocationWithGroupLink && (
+                        <p className="text-xs text-warning-600 dark:text-warning-400">
+                          Add a WhatsApp group link on this allocated logistics location to enable manual share actions.
+                        </p>
+                      )}
                     {canMarkDelivered && (
                       <Button
                         type="button"
@@ -1513,21 +1561,35 @@ export function OrderDetailPage({
           <p className="text-sm text-app-fg-muted mb-3">
             Select the 3PL location that will fulfil this order. Stock must be available at that location.
           </p>
-          <FormSelect
-            id="allocate-location-id"
-            label="Logistics location"
-            value={allocateLocationId}
-            onChange={(e) => setAllocateLocationId(e.target.value)}
-            placeholder="Select a location..."
-            options={logisticsLocations.map((loc) => ({
-              value: loc.id,
-              label: `${loc.name}${loc.address ? ` — ${loc.address}` : ''}`,
-            }))}
-          />
+          {eligibleAllocatableCount === 0 ? (
+            <EmptyState
+              title="No allocatable locations"
+              description="No 3PL location currently has enough stock for this order. Receive stock (intake or verified transfer) and try again."
+              variant="card"
+            />
+          ) : (
+            <SearchableSelect
+              id="allocate-location-id"
+              label="Logistics location"
+              value={allocateLocationId}
+              onChange={setAllocateLocationId}
+              placeholder="Select a location..."
+              searchPlaceholder="Search locations..."
+              options={allocatableLocations.map((loc) => ({
+                value: loc.id,
+                label: loc.name,
+                description: loc.eligible
+                  ? (loc.address ?? undefined)
+                  : (loc.reason ?? 'Unavailable'),
+                disabled: !loc.eligible,
+              }))}
+            />
+          )}
           <div className="flex gap-2 mt-4 justify-end">
             <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
               Back
             </Button>
+            {eligibleAllocatableCount > 0 && (
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
               <input type="hidden" name="newStatus" value="ALLOCATED" />
@@ -1535,13 +1597,14 @@ export function OrderDetailPage({
               <Button
                 type="submit"
                 variant="primary"
-                disabled={!allocateLocationId || fetcher.state === 'submitting'}
+                disabled={!allocateLocationId || !selectedAllocatableLocation?.eligible || fetcher.state === 'submitting'}
                 loading={fetcher.state === 'submitting'}
                 loadingText="Allocating..."
               >
                 Allocate
               </Button>
             </fetcher.Form>
+            )}
           </div>
         </Modal>
       )}

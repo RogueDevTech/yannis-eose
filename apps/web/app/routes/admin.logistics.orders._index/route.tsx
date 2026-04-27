@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
 import type { Order } from '~/features/orders/types';
@@ -125,7 +126,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ?.result?.data
     : null;
   const listErrorMessage = !ordersRes.ok
-    ? (ordersRes.data as { error?: { message?: string } })?.error?.message ?? 'Could not load logistics orders'
+    ? extractApiErrorMessage(ordersRes.data, 'Could not load logistics orders')
     : undefined;
   const countsData = countsRes.ok
     ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
@@ -201,8 +202,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Allocation failed';
-      return json({ success: false, error: err }, { status: safeStatus(res.status) });
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Allocation failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -266,8 +266,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Transition failed';
-      return json({ success: false, error: err }, { status: safeStatus(res.status) });
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Transition failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -289,8 +288,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Dispatch failed';
-      return json({ success: false, error: err }, { status: safeStatus(res.status) });
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Dispatch failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

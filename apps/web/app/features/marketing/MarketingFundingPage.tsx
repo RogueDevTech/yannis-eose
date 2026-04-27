@@ -22,6 +22,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { Textarea } from '~/components/ui/textarea';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
+  DistributingFundingEntry,
   FundingRecord,
   FundingRequestRecord,
   FundingSection,
@@ -46,7 +47,11 @@ const REQUEST_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'REJECTED', label: 'Rejected' },
 ];
 
-const truncId = (id: string) => id.slice(0, 8) + '...';
+const DISTRIBUTING_TYPE_OPTIONS: { value: 'all' | 'transfer' | 'request'; label: string }[] = [
+  { value: 'all', label: 'All items' },
+  { value: 'transfer', label: 'Transfers' },
+  { value: 'request', label: 'Requests' },
+];
 
 function parseSectionTab(
   search: string,
@@ -56,6 +61,9 @@ function parseSectionTab(
   const sectionParam = u.get('section');
   const section: FundingSection =
     sectionParam === 'distributing' && canDistribute ? 'distributing' : 'received';
+  if (section === 'distributing') {
+    return { section, tab: 'transfers' };
+  }
   const tabParam = u.get('tab');
   const tab: FundingTab = tabParam === 'requests' ? 'requests' : 'transfers';
   return { section, tab };
@@ -86,9 +94,11 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     myRequests,
     outgoingTransfers,
     mbRequests,
+    distributingEntries,
     directionSummary,
     fundingBalance,
     users,
+    activeBranchName,
   } = props;
 
   const isMediaBuyer = viewMode === 'media_buyer';
@@ -119,6 +129,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
   const [fundingReceiptModal, setFundingReceiptModal] = useState<FundingRecord | null>(null);
+  const [requestDetailsEntry, setRequestDetailsEntry] = useState<DistributingFundingEntry | null>(null);
 
   // The request being approved — looked up across both Section 1 (mine) and Section 2 (MBs')
   // so the Approve modal can pre-fill amount and show requester reason regardless of section.
@@ -204,7 +215,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     setSearchParams(params, { preventScrollReset: true });
   };
 
-  const updateSliceParam = (key: 'status' | 'requestStatus' | 'search', value: string | undefined) => {
+  const updateSliceParam = (
+    key: 'status' | 'requestStatus' | 'search' | 'entryType' | 'entryStatus',
+    value: string | undefined,
+  ) => {
     const params = new URLSearchParams(searchParams);
     if (!value || value === 'ALL') params.delete(key);
     else params.set(key, value);
@@ -228,6 +242,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const totalDisputed = directionSummary.disputedAsReceiver + directionSummary.disputedAsSender;
 
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') ?? '');
+  const userNameById = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown user';
   useEffect(() => {
     setSearchQuery(searchParams.get('search') ?? '');
   }, [searchParams]);
@@ -279,8 +294,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     activeSection === 'distributing' && outgoingTransfers ? outgoingTransfers : receivedTransfers;
   const requestsSlice: FundingRequestsSliceData =
     activeSection === 'distributing' && mbRequests ? mbRequests : myRequests;
+  const unifiedDistributingSlice = distributingEntries;
   const sectionDescriptionDisplay = displaySection === 'received' ? receivedDescription : distributingDescription;
-  const requestsSubLabel = displaySection === 'received' ? 'My Requests' : 'MB Requests';
+  const requestsSubLabel = 'My Requests';
   const transferEmptyMessage =
     activeSection === 'received'
       ? isMediaBuyer
@@ -385,7 +401,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         </div>
       )}
 
-      {/* ─── Ledger: primary tabs (received | distribute) + sub-tabs (transfers | requests) ─ */}
+      {/* ─── Ledger: primary tabs (received | distribute) ─ */}
       <div className="card p-0 overflow-hidden" id="funding-ledger">
         {canDistribute && (
           <div className="px-4 pt-2">
@@ -422,30 +438,32 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           </div>
         </div>
 
-        <div className="px-4">
-          <Tabs
-            value={displayTab}
-            onChange={(v) => navigateToSlice(displaySection, v as FundingTab)}
-            tabs={[
-              {
-                value: 'transfers',
-                label: 'Transfers',
-                badge:
-                  transfersSlice.statusCounts.ALL > 0 ? (
-                    <CountPill active={displayTab === 'transfers'}>{transfersSlice.statusCounts.ALL}</CountPill>
-                  ) : undefined,
-              },
-              {
-                value: 'requests',
-                label: requestsSubLabel,
-                badge:
-                  requestsSlice.statusCounts.ALL > 0 ? (
-                    <CountPill active={displayTab === 'requests'}>{requestsSlice.statusCounts.ALL}</CountPill>
-                  ) : undefined,
-              },
-            ]}
-          />
-        </div>
+        {displaySection === 'received' && (
+          <div className="px-4">
+            <Tabs
+              value={displayTab}
+              onChange={(v) => navigateToSlice(displaySection, v as FundingTab)}
+              tabs={[
+                {
+                  value: 'transfers',
+                  label: 'Transfers',
+                  badge:
+                    transfersSlice.statusCounts.ALL > 0 ? (
+                      <CountPill active={displayTab === 'transfers'}>{transfersSlice.statusCounts.ALL}</CountPill>
+                    ) : undefined,
+                },
+                {
+                  value: 'requests',
+                  label: requestsSubLabel,
+                  badge:
+                    requestsSlice.statusCounts.ALL > 0 ? (
+                      <CountPill active={displayTab === 'requests'}>{requestsSlice.statusCounts.ALL}</CountPill>
+                    ) : undefined,
+                },
+              ]}
+            />
+          </div>
+        )}
 
         <div className="relative min-h-[14rem]" aria-busy={isFundingRouteLoading} aria-live="polite">
           {isFundingRouteLoading ? (
@@ -461,40 +479,64 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             </div>
           ) : (
             <>
-          <SliceFilterBar
-            tab={activeTab}
-            transfers={transfersSlice}
-            requests={requestsSlice}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onSearchSubmit={submitSearch}
-            onStatusChange={(v) => updateSliceParam('status', v)}
-            onRequestStatusChange={(v) => updateSliceParam('requestStatus', v)}
-          />
+          {displaySection === 'distributing' && unifiedDistributingSlice ? (
+            <>
+              <UnifiedDistributingFilterBar
+                slice={unifiedDistributingSlice}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                onSearchSubmit={submitSearch}
+                onTypeChange={(v) => updateSliceParam('entryType', v)}
+                onStatusChange={(v) => updateSliceParam('entryStatus', v)}
+              />
+              <UnifiedDistributingTable
+                slice={unifiedDistributingSlice}
+                users={users}
+                onViewReceipt={setFundingReceiptModal}
+                onOpenDetails={setRequestDetailsEntry}
+                onApprove={setApprovingRequestId}
+                onReject={setRejectingRequestId}
+                emptyMessage={transferEmptyMessage}
+              />
+            </>
+          ) : (
+            <>
+              <SliceFilterBar
+                tab={activeTab}
+                transfers={transfersSlice}
+                requests={requestsSlice}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                onSearchSubmit={submitSearch}
+                onStatusChange={(v) => updateSliceParam('status', v)}
+                onRequestStatusChange={(v) => updateSliceParam('requestStatus', v)}
+              />
 
-          {activeTab === 'transfers' && (
-            <TransfersTable
-              slice={transfersSlice}
-              users={users}
-              currentUserId={currentUserId}
-              direction={activeSection === 'received' ? 'incoming' : 'outgoing'}
-              onViewReceipt={setFundingReceiptModal}
-              onOpenMarkReceived={setMarkReceivedTarget}
-              onOpenNotReceived={setNotReceivedTarget}
-              emptyMessage={transferEmptyMessage}
-            />
-          )}
-          {activeTab === 'requests' && (
-            <RequestsTable
-              slice={requestsSlice}
-              users={users}
-              currentUserId={currentUserId}
-              mode={activeSection === 'received' ? 'my-requests' : 'mb-requests'}
-              fetcher={fetcher}
-              onApprove={activeSection === 'distributing' ? setApprovingRequestId : () => {}}
-              onReject={activeSection === 'distributing' ? setRejectingRequestId : () => {}}
-              emptyMessage={requestsEmptyMessage}
-            />
+              {activeTab === 'transfers' && (
+                <TransfersTable
+                  slice={transfersSlice}
+                  users={users}
+                  currentUserId={currentUserId}
+                  direction={activeSection === 'received' ? 'incoming' : 'outgoing'}
+                  onViewReceipt={setFundingReceiptModal}
+                  onOpenMarkReceived={setMarkReceivedTarget}
+                  onOpenNotReceived={setNotReceivedTarget}
+                  emptyMessage={transferEmptyMessage}
+                />
+              )}
+              {activeTab === 'requests' && (
+                <RequestsTable
+                  slice={requestsSlice}
+                  users={users}
+                  currentUserId={currentUserId}
+                  mode="my-requests"
+                  fetcher={fetcher}
+                  onApprove={() => {}}
+                  onReject={() => {}}
+                  emptyMessage={requestsEmptyMessage}
+                />
+              )}
+            </>
           )}
             </>
           )}
@@ -558,6 +600,12 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                   .map((u: User) => ({ value: u.id, label: `${u.name} (${u.email})` }))}
                 wrapperClassName="w-full"
               />
+              {activeBranchName && (
+                <p className="mt-1 text-xs text-app-fg-muted">
+                  Showing Media Buyers in <span className="font-medium text-app-fg">{activeBranchName}</span>.
+                  Switch branches in the header to send to a buyer in another branch.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount ({'₦'})</label>
@@ -607,9 +655,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               <NairaPrice amount={Number(markReceivedTarget.amount)} />
             </p>
             <p className="text-app-fg-muted text-xs mt-1">
-              {markReceivedTarget.senderName ?? users.find((u) => u.id === markReceivedTarget.senderId)?.name ?? truncId(markReceivedTarget.senderId)}
+              {markReceivedTarget.senderName ?? userNameById(markReceivedTarget.senderId)}
               {' → '}
-              {markReceivedTarget.receiverName ?? users.find((u) => u.id === markReceivedTarget.receiverId)?.name ?? truncId(markReceivedTarget.receiverId)}
+              {markReceivedTarget.receiverName ?? userNameById(markReceivedTarget.receiverId)}
             </p>
             <p className="text-xs text-app-fg-muted mt-1">
               {new Date(markReceivedTarget.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -671,9 +719,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               <NairaPrice amount={Number(notReceivedTarget.amount)} />
             </p>
             <p className="text-app-fg-muted text-xs mt-1">
-              {notReceivedTarget.senderName ?? users.find((u) => u.id === notReceivedTarget.senderId)?.name ?? truncId(notReceivedTarget.senderId)}
+              {notReceivedTarget.senderName ?? userNameById(notReceivedTarget.senderId)}
               {' → '}
-              {notReceivedTarget.receiverName ?? users.find((u) => u.id === notReceivedTarget.receiverId)?.name ?? truncId(notReceivedTarget.receiverId)}
+              {notReceivedTarget.receiverName ?? userNameById(notReceivedTarget.receiverId)}
             </p>
           </div>
           {notReceivedTarget.receiptUrl ? (
@@ -833,9 +881,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               </p>
               <div className="flex items-center gap-2 mt-2 text-xs text-brand-500 dark:text-brand-400 flex-wrap">
                 <span>
-                  {fundingReceiptModal.senderName ?? users.find((u) => u.id === fundingReceiptModal.senderId)?.name ?? truncId(fundingReceiptModal.senderId)}
+                  {fundingReceiptModal.senderName ?? userNameById(fundingReceiptModal.senderId)}
                   {' → '}
-                  {fundingReceiptModal.receiverName ?? users.find((u) => u.id === fundingReceiptModal.receiverId)?.name ?? truncId(fundingReceiptModal.receiverId)}
+                  {fundingReceiptModal.receiverName ?? userNameById(fundingReceiptModal.receiverId)}
                 </span>
                 <span>·</span>
                 <span>{new Date(fundingReceiptModal.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
@@ -852,6 +900,46 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               Open in new tab
             </a>
             <Button variant="secondary" size="sm" onClick={() => setFundingReceiptModal(null)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {requestDetailsEntry && requestDetailsEntry.entryType === 'request' && (
+        <Modal
+          open
+          onClose={() => setRequestDetailsEntry(null)}
+          maxWidth="max-w-md"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">Request details</h3>
+          <div className="space-y-2 text-sm">
+            <p className="text-app-fg">
+              <span className="font-medium">Amount:</span> <NairaPrice amount={Number(requestDetailsEntry.amount)} />
+            </p>
+            <p className="text-app-fg">
+              <span className="font-medium">Requester:</span> {requestDetailsEntry.requesterName ?? userNameById(requestDetailsEntry.requesterId)}
+            </p>
+            <p className="text-app-fg">
+              <span className="font-medium">Status:</span> <StatusBadge status={requestDetailsEntry.status} />
+            </p>
+            <p className="text-app-fg">
+              <span className="font-medium">Reason:</span> {requestDetailsEntry.reason ?? '—'}
+            </p>
+            <p className="text-app-fg">
+              <span className="font-medium">Requested:</span>{' '}
+              {new Date(requestDetailsEntry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </p>
+            <p className="text-app-fg">
+              <span className="font-medium">Resolved:</span>{' '}
+              {requestDetailsEntry.resolvedAt
+                ? new Date(requestDetailsEntry.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
+                : '—'}
+            </p>
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setRequestDetailsEntry(null)}>
               Close
             </Button>
           </div>
@@ -1006,6 +1094,253 @@ function SliceFilterBar({
   );
 }
 
+function UnifiedDistributingFilterBar({
+  slice,
+  searchQuery,
+  onSearchChange,
+  onSearchSubmit,
+  onTypeChange,
+  onStatusChange,
+}: {
+  slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
+  searchQuery: string;
+  onSearchChange: (val: string) => void;
+  onSearchSubmit: (e: React.FormEvent) => void;
+  onTypeChange: (val: string) => void;
+  onStatusChange: (val: string) => void;
+}) {
+  const statusOptions = [
+    { value: 'ALL', label: `All (${slice.statusCounts.ALL})` },
+    { value: 'SENT', label: `Sent (${slice.statusCounts.SENT})` },
+    { value: 'COMPLETED', label: `Received (${slice.statusCounts.COMPLETED})` },
+    { value: 'DISPUTED', label: `Disputed (${slice.statusCounts.DISPUTED})` },
+    { value: 'PENDING', label: `Pending requests (${slice.statusCounts.PENDING})` },
+    { value: 'APPROVED', label: `Approved requests (${slice.statusCounts.APPROVED})` },
+    { value: 'REJECTED', label: `Rejected requests (${slice.statusCounts.REJECTED})` },
+  ];
+
+  return (
+    <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center px-4 py-3 border-b border-app-border">
+      <form onSubmit={onSearchSubmit} className="flex gap-2 flex-1 min-w-0">
+        <SearchInput
+          value={searchQuery}
+          onChange={(val) => onSearchChange(val)}
+          placeholder="Search by requester, sender, receiver, or reason..."
+          wrapperClassName="flex-1 min-w-0"
+        />
+        <Button type="submit" variant="secondary" size="sm">
+          Search
+        </Button>
+      </form>
+      <FormSelect
+        value={slice.typeFilter}
+        onChange={(e) => onTypeChange(e.target.value)}
+        options={DISTRIBUTING_TYPE_OPTIONS.map((opt) => ({
+          value: opt.value,
+          label:
+            opt.value === 'all'
+              ? `${opt.label} (${slice.typeCounts.all})`
+              : opt.value === 'transfer'
+                ? `${opt.label} (${slice.typeCounts.transfer})`
+                : `${opt.label} (${slice.typeCounts.request})`,
+        }))}
+        wrapperClassName="w-auto min-w-[10rem]"
+      />
+      <FormSelect
+        value={slice.statusFilter ?? 'ALL'}
+        onChange={(e) => onStatusChange(e.target.value)}
+        options={statusOptions}
+        wrapperClassName="w-auto min-w-[13rem]"
+      />
+    </div>
+  );
+}
+
+function UnifiedDistributingTable({
+  slice,
+  users,
+  onViewReceipt,
+  onOpenDetails,
+  onApprove,
+  onReject,
+  emptyMessage,
+}: {
+  slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
+  users: User[];
+  onViewReceipt: (rec: FundingRecord) => void;
+  onOpenDetails: (entry: DistributingFundingEntry) => void;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+  emptyMessage: string;
+}) {
+  const userNameById = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown user';
+  return (
+    <>
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr>
+              <th className="table-header">Type</th>
+              <th className="table-header">From</th>
+              <th className="table-header">To</th>
+              <th className="table-header text-right">Amount</th>
+              <th className="table-header">Status</th>
+              <th className="table-header">Date</th>
+              <th className="table-header">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {slice.records.map((entry) => {
+              const leftName =
+                entry.entryType === 'request'
+                  ? (entry.requesterName ?? userNameById(entry.requesterId))
+                  : (entry.senderName ?? userNameById(entry.senderId));
+              const rightName =
+                entry.entryType === 'request'
+                  ? '—'
+                  : (entry.receiverName ?? userNameById(entry.receiverId));
+              const isPendingRequest = entry.entryType === 'request' && entry.status === 'PENDING';
+              return (
+                <tr key={`${entry.entryType}-${entry.id}`} className="table-row">
+                  <td className="table-cell text-app-fg-muted text-xs uppercase tracking-wide">
+                    {entry.entryType === 'request' ? 'Request' : 'Transfer'}
+                  </td>
+                  <td className="table-cell text-app-fg text-sm">{leftName}</td>
+                  <td className="table-cell text-app-fg text-sm">{rightName}</td>
+                  <td className="table-cell text-right font-medium"><NairaPrice amount={Number(entry.amount)} /></td>
+                  <td className="table-cell"><StatusBadge status={entry.status} /></td>
+                  <td className="table-cell text-app-fg-muted text-sm">
+                    {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </td>
+                  <td className="table-cell">
+                    <div className="flex items-center gap-2">
+                      {entry.entryType === 'request' ? (
+                        <>
+                          <Button type="button" variant="ghost" size="sm" className="text-xs" onClick={() => onOpenDetails(entry)}>
+                            View
+                          </Button>
+                          {isPendingRequest && (
+                            <>
+                              <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => onApprove(entry.id)}>
+                                Approve
+                              </Button>
+                              <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => onReject(entry.id)}>
+                                Reject
+                              </Button>
+                            </>
+                          )}
+                        </>
+                      ) : entry.receiptUrl ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-brand-500 hover:text-brand-600"
+                          onClick={() =>
+                            onViewReceipt({
+                              id: entry.id,
+                              senderId: entry.senderId,
+                              receiverId: entry.receiverId,
+                              amount: entry.amount,
+                              receiptUrl: entry.receiptUrl,
+                              status: entry.status,
+                              sentAt: entry.createdAt,
+                              verifiedAt: null,
+                              senderName: entry.senderName,
+                              receiverName: entry.receiverName,
+                            })
+                          }
+                        >
+                          Receipt
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-app-fg-muted">{'—'}</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {slice.records.length === 0 && (
+              <tr>
+                <td colSpan={7}>
+                  <EmptyState title="No entries" description={emptyMessage} />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="md:hidden space-y-3 px-1 py-3">
+        {slice.records.map((entry) => (
+          <div key={`${entry.entryType}-${entry.id}`} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-app-fg"><NairaPrice amount={Number(entry.amount)} /></span>
+              <StatusBadge status={entry.status} />
+            </div>
+            <p className="text-xs text-app-fg-muted uppercase tracking-wide">
+              {entry.entryType === 'request' ? 'Request' : 'Transfer'}
+            </p>
+            <p className="text-xs text-app-fg-muted">
+              {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </p>
+            <div className="flex items-center gap-2">
+              {entry.entryType === 'request' ? (
+                <>
+                  <Button type="button" variant="ghost" size="sm" className="text-xs" onClick={() => onOpenDetails(entry)}>
+                    View
+                  </Button>
+                  {entry.status === 'PENDING' && (
+                    <>
+                      <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => onApprove(entry.id)}>
+                        Approve
+                      </Button>
+                      <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => onReject(entry.id)}>
+                        Reject
+                      </Button>
+                    </>
+                  )}
+                </>
+              ) : entry.receiptUrl ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-brand-500 hover:text-brand-600"
+                  onClick={() =>
+                    onViewReceipt({
+                      id: entry.id,
+                      senderId: entry.senderId,
+                      receiverId: entry.receiverId,
+                      amount: entry.amount,
+                      receiptUrl: entry.receiptUrl,
+                      status: entry.status,
+                      sentAt: entry.createdAt,
+                      verifiedAt: null,
+                      senderName: entry.senderName,
+                      receiverName: entry.receiverName,
+                    })
+                  }
+                >
+                  Receipt
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ))}
+        {slice.records.length === 0 && <EmptyState title="No entries" description={emptyMessage} />}
+      </div>
+
+      {slice.totalPages > 1 && (
+        <div className="border-t border-app-border px-4 py-3">
+          <Pagination page={slice.page} totalPages={slice.totalPages} pageParam="page" />
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * Transfers table — used for both incoming (Section 1) and outgoing (Section 2) ledgers.
  * The Action column adapts: incoming + SENT + receiver=me → Mark Received / Not Received;
@@ -1031,7 +1366,7 @@ function TransfersTable({
   emptyMessage: string;
 }) {
   const nameOf = (id: string) =>
-    users.find((u: User) => u.id === id)?.name ?? truncId(id);
+    users.find((u: User) => u.id === id)?.name ?? 'Unknown user';
 
   return (
     <>
@@ -1212,7 +1547,7 @@ function RequestsTable({
                     <td className="table-cell text-app-fg text-sm">
                       {r.requesterName ??
                         users.find((u) => u.id === r.requesterId)?.name ??
-                        truncId(r.requesterId)}
+                        'Unknown user'}
                     </td>
                   )}
                   <td className="table-cell text-right font-medium"><NairaPrice amount={Number(r.amount)} /></td>
@@ -1286,7 +1621,7 @@ function RequestsTable({
               <div className="flex items-center justify-between">
                 {showRequester ? (
                   <span className="font-medium text-app-fg text-sm">
-                    {r.requesterName ?? users.find((u) => u.id === r.requesterId)?.name ?? truncId(r.requesterId)}
+                    {r.requesterName ?? users.find((u) => u.id === r.requesterId)?.name ?? 'Unknown user'}
                   </span>
                 ) : (
                   <span className="font-medium text-app-fg text-sm">

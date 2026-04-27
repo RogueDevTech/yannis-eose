@@ -1,7 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requireStaffAccountsAccess, safeStatus } from '~/lib/api.server';
 import { UserCreatePage } from '~/features/users/UserCreatePage';
 import type {
   UserCreateProduct,
@@ -20,7 +20,7 @@ export const meta: MetaFunction = () => [
 // ─── Loader ─────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'users.create');
+  await requireStaffAccountsAccess(request);
   const cookie = getSessionCookie(request);
 
   const productsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20, sortBy: 'name', sortOrder: 'asc' }));

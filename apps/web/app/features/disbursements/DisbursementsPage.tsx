@@ -426,7 +426,7 @@ export function DisbursementsPage({
     approveRequestUploadState === 'uploading' || !approveRequestReceiptUrl.trim();
 
   const getRequesterName = useCallback(
-    (requesterId: string) => requestersList.find((u) => u.id === requesterId)?.name ?? requesterId.slice(0, 8) + '...',
+    (requesterId: string) => requestersList.find((u) => u.id === requesterId)?.name ?? 'Unknown user',
     [requestersList],
   );
 
@@ -460,7 +460,7 @@ export function DisbursementsPage({
     return map;
   }, [recipientBalances, funding]);
 
-  const getName = useCallback((id: string) => nameMap.get(id) ?? id.slice(0, 8) + '...', [nameMap]);
+  const getName = useCallback((id: string) => nameMap.get(id) ?? 'Unknown user', [nameMap]);
 
   const selectedStatus = optimisticStatus;
   const selectedReceiver = optimisticReceiver;
@@ -730,12 +730,12 @@ export function DisbursementsPage({
                         {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </td>
                       <td className="table-cell text-sm">
-                        <Link to={`/hr/users/${f.senderId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300">
+                        <Link to={`/admin/finance/staff-accounts/${f.senderId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300">
                           {getName(f.senderId)}
                         </Link>
                       </td>
                       <td className="table-cell text-sm">
-                        <Link to={`/hr/users/${f.receiverId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300">
+                        <Link to={`/admin/finance/staff-accounts/${f.receiverId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300">
                           {getName(f.receiverId)}
                         </Link>
                       </td>
@@ -862,7 +862,7 @@ export function DisbursementsPage({
                           {fundingRequests.map((r) => (
                             <tr key={r.id} className="table-row">
                               <td className="table-cell text-sm">
-                                <Link to={`/hr/users/${r.requesterId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400">
+                                <Link to={`/admin/finance/staff-accounts/${r.requesterId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400">
                                   {r.requesterName ?? getRequesterName(r.requesterId)}
                                 </Link>
                               </td>
@@ -933,7 +933,7 @@ export function DisbursementsPage({
                       {fundingRequests.map((r) => (
                         <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
                           <div className="flex justify-between items-center">
-                            <Link to={`/hr/users/${r.requesterId}`} className="font-medium text-app-fg text-sm">
+                            <Link to={`/admin/finance/staff-accounts/${r.requesterId}`} className="font-medium text-app-fg text-sm">
                               {r.requesterName ?? getRequesterName(r.requesterId)}
                             </Link>
                             <StatusBadge status={r.status} />
@@ -1007,7 +1007,7 @@ export function DisbursementsPage({
                       return (
                         <tr key={b.userId} className="table-row">
                           <td className="table-cell">
-                            <Link to={`/hr/users/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 text-sm font-medium">
+                            <Link to={`/admin/finance/staff-accounts/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 text-sm font-medium">
                               {b.name}
                             </Link>
                           </td>
@@ -1062,7 +1062,7 @@ export function DisbursementsPage({
                   return (
                     <div key={b.userId} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                       <div className="flex items-start justify-between gap-2 mb-2">
-                        <Link to={`/hr/users/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 font-medium">
+                        <Link to={`/admin/finance/staff-accounts/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 font-medium">
                           {b.name}
                         </Link>
                         <span className={`font-medium text-sm ${

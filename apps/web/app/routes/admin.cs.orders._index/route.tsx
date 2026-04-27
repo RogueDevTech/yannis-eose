@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { OrdersListPage } from '~/features/orders/OrdersListPage';
@@ -212,8 +213,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
-      return json({ error: err?.error?.message ?? 'Failed to create offline order' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create offline order') }, { status: safeStatus(res.status) });
     }
     const orderId = res.data?.result?.data?.id;
     return json({ success: true, orderId });

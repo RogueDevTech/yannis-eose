@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryConfirmationsPage } from '~/features/logistics/DeliveryConfirmationsPage';
 import type { AllocatedDeliveryOrder, DeliveryConfirmationRequest } from '~/features/logistics/types';
 
@@ -119,9 +120,8 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { orderId, newStatus: 'DELIVERED', metadata: {} },
     });
     if (!res.ok) {
-      const errData = res.data as { error?: { message?: string } };
       return json(
-        { error: errData?.error?.message ?? 'Failed to mark delivered' },
+        { error: extractApiErrorMessage(res.data, 'Failed to mark delivered') },
         { status: safeStatus(res.status) },
       );
     }
@@ -139,9 +139,8 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { requestId },
     });
     if (!res.ok) {
-      const errData = res.data as { error?: { message?: string } };
       return json(
-        { error: errData?.error?.message ?? 'Failed to approve' },
+        { error: extractApiErrorMessage(res.data, 'Failed to approve') },
         { status: safeStatus(res.status) },
       );
     }
@@ -155,9 +154,8 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { requestId, reason: reason || undefined },
     });
     if (!res.ok) {
-      const errData = res.data as { error?: { message?: string } };
       return json(
-        { error: errData?.error?.message ?? 'Failed to reject' },
+        { error: extractApiErrorMessage(res.data, 'Failed to reject') },
         { status: safeStatus(res.status) },
       );
     }

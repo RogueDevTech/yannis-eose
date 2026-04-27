@@ -7,6 +7,7 @@ import {
   requirePermission,
   safeStatus,
 } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import type { DeliveryRemittanceDetail } from '~/features/finance/DeliveryRemittancesPage';
 import { DeliveryRemittanceDetailPage } from '~/features/finance/DeliveryRemittanceDetailPage';
@@ -82,9 +83,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { deliveryRemittanceId },
     });
     if (!res.ok) {
-      const err =
-        (res.data as { error?: { message?: string } })?.error?.message ??
-        'Failed to mark received';
+      const err = extractApiErrorMessage(res.data, 'Failed to mark received');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
@@ -102,9 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { deliveryRemittanceId, disputeReason },
     });
     if (!res.ok) {
-      const err =
-        (res.data as { error?: { message?: string } })?.error?.message ??
-        'Failed to dispute remittance';
+      const err = extractApiErrorMessage(res.data, 'Failed to dispute remittance');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });

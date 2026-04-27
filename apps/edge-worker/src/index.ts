@@ -141,6 +141,16 @@ interface CampaignConfig {
     showGender?: boolean;
     showPreferredDeliveryDate?: boolean;
     showPaymentMethod?: boolean;
+    requireDeliveryAddress?: boolean;
+    requireDeliveryNotes?: boolean;
+    requireDeliveryState?: boolean;
+    requireGender?: boolean;
+    requirePreferredDeliveryDate?: boolean;
+    requirePaymentMethod?: boolean;
+    standardFields?: Array<{
+      key: 'deliveryAddress' | 'deliveryNotes' | 'deliveryState' | 'gender' | 'preferredDeliveryDate' | 'paymentMethod';
+      required: boolean;
+    }>;
     deliveryStateOptions?: string[];
     preferredDeliveryDateOptions?: string[];
     /** Form-builder output. The Edge Worker renders these between the standard fields and
@@ -1140,6 +1150,27 @@ function getFormInnerHTML(config: CampaignConfig): string {
   const heading = fc.heading ?? 'Place Your Order';
   const subtitle = fc.subtitle ?? 'Fill in your details below';
   const buttonText = fc.buttonText ?? 'Submit Order';
+  const standard = new Map((fc.standardFields ?? []).map((f) => [f.key, { required: !!f.required }]));
+  const hasStandard = standard.size > 0;
+  const showField = (key: 'deliveryAddress' | 'deliveryNotes' | 'deliveryState' | 'gender' | 'preferredDeliveryDate' | 'paymentMethod') => {
+    if (hasStandard) return standard.has(key);
+    if (key === 'deliveryAddress') return fc.showDeliveryAddress !== false;
+    if (key === 'deliveryNotes') return fc.showDeliveryNotes === true;
+    if (key === 'deliveryState') return fc.showDeliveryState === true;
+    if (key === 'gender') return fc.showGender === true;
+    if (key === 'preferredDeliveryDate') return fc.showPreferredDeliveryDate === true;
+    return fc.showPaymentMethod === true;
+  };
+  const requiredField = (key: 'deliveryAddress' | 'deliveryNotes' | 'deliveryState' | 'gender' | 'preferredDeliveryDate' | 'paymentMethod') => {
+    if (hasStandard) return standard.get(key)?.required === true;
+    if (key === 'deliveryAddress') return fc.requireDeliveryAddress === true;
+    if (key === 'deliveryNotes') return fc.requireDeliveryNotes === true;
+    if (key === 'deliveryState') return fc.requireDeliveryState === true;
+    if (key === 'gender') return fc.requireGender === true;
+    if (key === 'preferredDeliveryDate') return fc.requirePreferredDeliveryDate === true;
+    return fc.requirePaymentMethod === true;
+  };
+  const showPaymentMethod = showField('paymentMethod');
 
   const hasSingleProduct = config.products.length === 1;
 
@@ -1182,7 +1213,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
     <p class="subtitle">${escapeHtml(subtitle)}</p>
     <div id="yannisOffline" class="offline-badge hidden">Offline</div>
     <div id="yannisMsg" class="msg hidden"></div>
-    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${fc.showPaymentMethod ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}"${singleProductAttr}>
+    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}"${singleProductAttr}>
       ${!hasSingleProduct ? `<label>Select Product</label>
       <div class="product-selector">${productOptionsHtml}</div>` : ''}
       <label>Select Offer</label>
@@ -1191,34 +1222,34 @@ function getFormInnerHTML(config: CampaignConfig): string {
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
       <label for="customerPhone">Phone Number</label>
       <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
-      ${fc.showGender ? `<label for="customerGender">Gender <span class="required">*</span></label>
-      <select id="customerGender" name="customerGender" required>
+      ${showField('gender') ? `<label for="customerGender">Gender${requiredField('gender') ? ' <span class="required">*</span>' : ''}</label>
+      <select id="customerGender" name="customerGender"${requiredField('gender') ? ' required' : ''}>
         <option value="">Select gender...</option>
         <option value="male">Male</option>
         <option value="female">Female</option>
       </select>` : ''}
-      ${fc.showDeliveryState ? `<label for="deliveryState">Delivery State <span class="required">*</span></label>
-      <select id="deliveryState" name="deliveryState" required>
+      ${showField('deliveryState') ? `<label for="deliveryState">Delivery State${requiredField('deliveryState') ? ' <span class="required">*</span>' : ''}</label>
+      <select id="deliveryState" name="deliveryState"${requiredField('deliveryState') ? ' required' : ''}>
         <option value="">Select state...</option>
         ${(fc.deliveryStateOptions && fc.deliveryStateOptions.length > 0
           ? fc.deliveryStateOptions
           : ['Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun', 'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo', 'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue', 'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe', 'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi']
         ).map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('\n')}
       </select>` : ''}
-      ${fc.showDeliveryAddress !== false ? `<label for="deliveryAddress">Delivery Address</label>
-      <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"></textarea>` : ''}
-      ${fc.showDeliveryNotes ? `<label for="deliveryNotes">Delivery Notes (optional)</label>
-      <input id="deliveryNotes" name="deliveryNotes" type="text" placeholder="Any special instructions">` : ''}
-      ${fc.showPreferredDeliveryDate ? `<label for="preferredDeliveryDate">When do you want to receive your order? <span class="required">*</span></label>
-      <select id="preferredDeliveryDate" name="preferredDeliveryDate" required>
+      ${showField('deliveryAddress') ? `<label for="deliveryAddress">Delivery Address${requiredField('deliveryAddress') ? ' <span class="required">*</span>' : ''}</label>
+      <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"${requiredField('deliveryAddress') ? ' required' : ''}></textarea>` : ''}
+      ${showField('deliveryNotes') ? `<label for="deliveryNotes">Delivery Notes${requiredField('deliveryNotes') ? ' <span class="required">*</span>' : ' (optional)'}</label>
+      <input id="deliveryNotes" name="deliveryNotes" type="text" placeholder="Any special instructions"${requiredField('deliveryNotes') ? ' required' : ''}>` : ''}
+      ${showField('preferredDeliveryDate') ? `<label for="preferredDeliveryDate">When do you want to receive your order?${requiredField('preferredDeliveryDate') ? ' <span class="required">*</span>' : ''}</label>
+      <select id="preferredDeliveryDate" name="preferredDeliveryDate"${requiredField('preferredDeliveryDate') ? ' required' : ''}>
         <option value="">Select...</option>
         ${(fc.preferredDeliveryDateOptions && fc.preferredDeliveryDateOptions.length > 0
           ? fc.preferredDeliveryDateOptions
           : ['As soon as possible', 'Within 1-2 days', 'Within 3-5 days', 'Next week', 'Specific date (mention in notes)']
         ).map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('\n')}
       </select>` : ''}
-      ${fc.showPaymentMethod ? `<label for="paymentMethod">Payment method</label>
-      <select id="paymentMethod" name="paymentMethod">
+      ${showPaymentMethod ? `<label for="paymentMethod">Payment method${requiredField('paymentMethod') ? ' <span class="required">*</span>' : ''}</label>
+      <select id="paymentMethod" name="paymentMethod"${requiredField('paymentMethod') ? ' required' : ''}>
         <option value="">Select payment method...</option>
         <option value="PAY_ON_DELIVERY">Pay on delivery</option>
         <option value="PAY_ONLINE">Pay online (card / bank)</option>

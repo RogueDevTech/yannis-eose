@@ -38,6 +38,39 @@ export interface FundingRequestRecord {
   requesterName?: string | null;
 }
 
+export type DistributingFundingEntryType = 'transfer' | 'request';
+
+export interface DistributingFundingTransferEntry {
+  id: string;
+  entryType: 'transfer';
+  status: 'SENT' | 'COMPLETED' | 'DISPUTED';
+  amount: string;
+  createdAt: string;
+  senderId: string;
+  senderName: string | null;
+  receiverId: string;
+  receiverName: string | null;
+  receiptUrl: string | null;
+}
+
+export interface DistributingFundingRequestEntry {
+  id: string;
+  entryType: 'request';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  amount: string;
+  createdAt: string;
+  requesterId: string;
+  requesterName: string | null;
+  reason: string | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  receiptUrl: string | null;
+}
+
+export type DistributingFundingEntry =
+  | DistributingFundingTransferEntry
+  | DistributingFundingRequestEntry;
+
 export interface AdSpendRecord {
   id: string;
   mediaBuyerId: string;
@@ -217,6 +250,29 @@ export interface MarketingFundingLoaderData {
   /** Section 2 — "Funds I Distribute" (HoM / Admin only) */
   outgoingTransfers?: FundingSliceData;
   mbRequests?: FundingRequestsSliceData;
+  distributingEntries?: {
+    records: DistributingFundingEntry[];
+    total: number;
+    page: number;
+    totalPages: number;
+    typeFilter: 'all' | DistributingFundingEntryType;
+    statusFilter?: string;
+    searchFilter?: string;
+    typeCounts: {
+      all: number;
+      transfer: number;
+      request: number;
+    };
+    statusCounts: {
+      SENT: number;
+      COMPLETED: number;
+      DISPUTED: number;
+      PENDING: number;
+      APPROVED: number;
+      REJECTED: number;
+      ALL: number;
+    };
+  };
 
   /** Top strip + supporting data */
   directionSummary: FundingDirectionSummary;
@@ -224,6 +280,13 @@ export interface MarketingFundingLoaderData {
   fundingBalance?: { totalReceived: string; totalSpend: string; balance: string };
   users: User[];
   balancesList?: FundingBalanceRow[];
+  /**
+   * Name of the caller's active branch (resolved from `currentBranchId`).
+   * `null` when the caller is in global-view mode (admin viewing all branches) — the
+   * Send Funding modal then omits the "Showing Media Buyers in <branch>" hint because
+   * no branch scoping is being applied.
+   */
+  activeBranchName?: string | null;
 }
 
 export type AdSpendStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';

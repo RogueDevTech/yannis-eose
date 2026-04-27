@@ -22,6 +22,7 @@ interface UsersListPageProps {
   totalPages: number;
   statusParam?: string;
   roleParam?: string;
+  usersBasePath?: string;
 }
 
 export function UsersListPage({
@@ -31,6 +32,7 @@ export function UsersListPage({
   totalPages,
   statusParam = 'ALL',
   roleParam = 'ALL',
+  usersBasePath = '/hr/users',
 }: UsersListPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,7 +89,7 @@ export function UsersListPage({
         title="Users"
         description="Manage team members and their roles"
         actions={
-          <Link to="/hr/users/new" className="btn-primary">
+          <Link to={`${usersBasePath}/new`} className="btn-primary">
             <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
@@ -215,7 +217,7 @@ export function UsersListPage({
                         </button>
                       )}
                       <Link
-                        to={`/hr/users/${user.id}`}
+                        to={`${usersBasePath}/${user.id}`}
                         className="btn-secondary btn-sm"
                       >
                         View
@@ -246,7 +248,7 @@ export function UsersListPage({
               className="rounded-lg border border-app-border bg-app-elevated p-4"
             >
               <Link
-                to={`/hr/users/${user.id}`}
+                to={`${usersBasePath}/${user.id}`}
                 className="block hover:bg-app-hover/50 transition-colors"
               >
                 <div className="flex items-center gap-3 mb-2">

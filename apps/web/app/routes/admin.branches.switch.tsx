@@ -1,6 +1,7 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 
 /**
  * Branch switch action — called by the sidebar BranchSwitcher component.
@@ -24,8 +25,7 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 
   if (!res.ok) {
-    const err = res.data as { error?: { message?: string } };
-    return json({ error: err?.error?.message ?? 'Failed to switch branch' }, { status: safeStatus(res.status) });
+    return json({ error: extractApiErrorMessage(res.data, 'Failed to switch branch') }, { status: safeStatus(res.status) });
   }
 
   // Redirect back to referer or admin home so the new branch context loads

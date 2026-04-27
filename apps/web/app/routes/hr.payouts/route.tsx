@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getCurrentUser, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { PayoutsPage } from '~/features/hr/PayoutsPage';
 import type { Payout, PayoutSummary, HRUser } from '~/features/hr/types';
 
@@ -92,7 +93,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to update payout';
+      const err = extractApiErrorMessage(res.data, 'Failed to update payout');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });

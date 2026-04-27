@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
@@ -179,8 +180,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to add stock' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to add stock') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -206,8 +206,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to adjust stock' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to adjust stock') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -224,8 +223,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { key: 'INVENTORY_LOW_STOCK_CONFIG', value: { threshold } },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update threshold' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update threshold') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

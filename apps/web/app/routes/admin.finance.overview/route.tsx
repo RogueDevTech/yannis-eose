@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { FinancePage } from '~/features/finance/FinancePage';
 import type { Invoice, ProfitReport, ApprovalRequest, BudgetWithUtilization, FinanceStreamData } from '~/features/finance/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
@@ -147,8 +148,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create invoice' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create invoice') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -163,8 +163,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update invoice status' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update invoice status') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -184,8 +183,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { requestId, action, reason },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to process approval' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to process approval') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

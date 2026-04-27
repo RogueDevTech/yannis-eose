@@ -2,6 +2,7 @@ import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useActionData, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, redirectIfUnauthorized, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { ProductCreatePage } from '~/features/products/ProductCreatePage';
 
 export const meta: MetaFunction = () => [
@@ -78,9 +79,8 @@ export async function action({ request }: ActionFunctionArgs) {
   redirectIfUnauthorized(res, '/admin/products/new');
 
   if (!res.ok) {
-    const errorData = res.data as { error?: { message?: string } };
     return json(
-      { error: errorData?.error?.message ?? 'Failed to create product' },
+      { error: extractApiErrorMessage(res.data, 'Failed to create product') },
       { status: safeStatus(res.status) },
     );
   }

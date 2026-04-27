@@ -3,6 +3,7 @@ import { Link, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import type { AdminErrorBoundaryProps } from './types';
 import { applyAppTheme, readStoredThemeId } from '~/lib/theme';
+import { isNetworkErrorLike, NETWORK_ERROR_MESSAGE } from '~/lib/network-error';
 
 const AUTO_REFRESH_SECONDS = 10;
 
@@ -84,9 +85,11 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
   }
 
   // Generic server error — with countdown progress bar and auto-refresh
+  const isNetworkIssue = isNetworkErrorLike(isResponse ? errorData : _error, status);
   return (
     <GenericErrorWithProgressBar
       errorData={isResponse ? errorData : undefined}
+      variant={isNetworkIssue ? 'network' : 'server'}
       onRefresh={() => window.location.reload()}
     />
   );
@@ -94,9 +97,11 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
 
 function GenericErrorWithProgressBar({
   errorData,
+  variant,
   onRefresh,
 }: {
   errorData?: unknown;
+  variant: 'network' | 'server';
   onRefresh: () => void;
 }) {
   const navigate = useNavigate();
@@ -114,6 +119,11 @@ function GenericErrorWithProgressBar({
   }, [countdown, onRefresh]);
 
   const progressPercent = (countdown / AUTO_REFRESH_SECONDS) * 100;
+  const title = variant === 'network' ? NETWORK_ERROR_MESSAGE.title : 'Something Went Wrong';
+  const description =
+    variant === 'network'
+      ? `${NETWORK_ERROR_MESSAGE.description} Refreshing automatically in ${countdown}s, or use the buttons below.`
+      : `An unexpected error occurred. Refreshing automatically in ${countdown}s, or use the buttons below.`;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-app-canvas p-6">
@@ -123,10 +133,8 @@ function GenericErrorWithProgressBar({
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
           </svg>
         </div>
-        <h1 className="text-xl font-bold text-app-fg">Something Went Wrong</h1>
-        <p className="mt-2 text-sm text-app-fg-muted">
-          An unexpected error occurred. Refreshing automatically in {countdown}s, or use the buttons below.
-        </p>
+        <h1 className="text-xl font-bold text-app-fg">{title}</h1>
+        <p className="mt-2 text-sm text-app-fg-muted">{description}</p>
         {errorData != null ? (
           <p className="mt-2 text-xs text-app-fg-muted font-mono bg-app-hover border border-app-border rounded p-2 text-left overflow-auto max-h-24">
             {typeof errorData === 'string' ? errorData : JSON.stringify(errorData)}

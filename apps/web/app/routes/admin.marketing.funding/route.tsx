@@ -21,11 +21,13 @@ import {
   parseUsers,
   parseBalancesList,
   parseFundingBalance,
+  toDistributingFundingEntries,
   resolveMarketingDateFilters,
   runMarketingFundingAction,
 } from '~/lib/marketing-pages.server';
 
 const PER_PAGE = 20;
+const MERGED_FETCH_LIMIT = 500;
 const LEDGER_STATUSES = ['SENT', 'COMPLETED', 'DISPUTED'] as const;
 const REQUEST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 
@@ -57,6 +59,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const tabParam = url.searchParams.get('tab');
   const activeTab: FundingTab = tabParam === 'requests' ? 'requests' : 'transfers';
+  const entryTypeParam = url.searchParams.get('entryType');
+  const entryTypeFilter: 'all' | 'transfer' | 'request' =
+    entryTypeParam === 'transfer' || entryTypeParam === 'request' ? entryTypeParam : 'all';
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
 
@@ -68,6 +73,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const requestStatusFilter: FundingRequestStatusFilter | undefined =
     requestStatusParam && (REQUEST_STATUSES as readonly string[]).includes(requestStatusParam)
       ? (requestStatusParam as FundingRequestStatusFilter)
+      : undefined;
+  const entryStatusParam = url.searchParams.get('entryStatus') ?? undefined;
+  const transferStatusFilter =
+    entryStatusParam && (LEDGER_STATUSES as readonly string[]).includes(entryStatusParam)
+      ? entryStatusParam
+      : undefined;
+  const requestStatusFilterUnified =
+    entryStatusParam && (REQUEST_STATUSES as readonly string[]).includes(entryStatusParam)
+      ? (entryStatusParam as FundingRequestStatusFilter)
       : undefined;
 
   const searchRaw = url.searchParams.get('search')?.trim();
@@ -88,6 +102,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Active slice's records (only the rows the user is currently viewing)
   let recordsUrl: string;
   let recordsKind: 'transfers' | 'requests';
+  let distributingTransfersUrl: string | null = null;
+  let distributingRequestsUrl: string | null = null;
   if (activeSection === 'received' && activeTab === 'transfers') {
     const input = JSON.stringify({
       page,
@@ -121,12 +137,44 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
     recordsUrl = `/trpc/marketing.listFunding?input=${encodeURIComponent(input)}`;
     recordsKind = 'transfers';
+  } else if (activeSection === 'distributing') {
+    // Legacy path compatibility (`tab=requests`) for Section 2 now maps into unified
+    // table data fetches (split by type/status filters).
+    const transferInput =
+      entryTypeFilter === 'request'
+        ? null
+        : JSON.stringify({
+            page: entryTypeFilter === 'transfer' ? page : 1,
+            limit: entryTypeFilter === 'transfer' ? PER_PAGE : MERGED_FETCH_LIMIT,
+            senderId: user.id,
+            ...dateRange,
+            ...(transferStatusFilter ? { status: transferStatusFilter } : {}),
+            ...(searchFilter && { search: searchFilter }),
+          });
+    const requestInput =
+      entryTypeFilter === 'transfer'
+        ? null
+        : JSON.stringify({
+            page: entryTypeFilter === 'request' ? page : 1,
+            limit: entryTypeFilter === 'request' ? PER_PAGE : MERGED_FETCH_LIMIT,
+            excludeSelfAsRequester: true,
+            ...dateRange,
+            ...(requestStatusFilterUnified ? { status: requestStatusFilterUnified } : {}),
+            ...(searchFilter && { search: searchFilter }),
+          });
+    distributingTransfersUrl = transferInput
+      ? `/trpc/marketing.listFunding?input=${encodeURIComponent(transferInput)}`
+      : null;
+    distributingRequestsUrl = requestInput
+      ? `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(requestInput)}`
+      : null;
+    recordsUrl = '/trpc/marketing.listFundingRequests?input=%7B%22page%22%3A1%2C%22limit%22%3A1%7D';
+    recordsKind = 'requests';
   } else {
-    // distributing + requests → MB requests inbox
     const input = JSON.stringify({
       page,
       limit: PER_PAGE,
-      excludeSelfAsRequester: true,
+      requesterId: user.id,
       ...dateRange,
       ...(requestStatusFilter && { status: requestStatusFilter }),
       ...(searchFilter && { search: searchFilter }),
@@ -145,6 +193,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const usersP = isFundingAdmin
     ? apiRequest<unknown>('/trpc/users.list', { method: 'GET', cookie })
     : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
+
+  // Resolve active branch name for the "Showing Media Buyers in <branch>" hint in the
+  // Send Funding modal. `branches.list` is cheap (one row per branch the caller belongs to,
+  // or all branches for SuperAdmin/Admin) and is already a hot endpoint elsewhere.
+  const branchesP = user.currentBranchId
+    ? apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>(
+        '/trpc/branches.list',
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: false as const, data: {} });
 
   const balancesListP: Promise<ReturnType<typeof parseBalancesList> | undefined> = isFundingAdmin
     ? apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie })
@@ -181,7 +239,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       )
     : Promise.resolve({ ok: false as const, data: {} });
 
-  const recordsP = apiRequest<unknown>(recordsUrl, { method: 'GET', cookie });
+  const recordsP =
+    activeSection === 'distributing'
+      ? Promise.resolve({ ok: true as const, data: {} })
+      : apiRequest<unknown>(recordsUrl, { method: 'GET', cookie });
+  const distributingTransfersP =
+    activeSection === 'distributing' && distributingTransfersUrl
+      ? apiRequest<unknown>(distributingTransfersUrl, { method: 'GET', cookie })
+      : Promise.resolve({ ok: true as const, data: {} });
+  const distributingRequestsP =
+    activeSection === 'distributing' && distributingRequestsUrl
+      ? apiRequest<unknown>(distributingRequestsUrl, { method: 'GET', cookie })
+      : Promise.resolve({ ok: true as const, data: {} });
 
   const [
     recordsRes,
@@ -193,6 +262,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     usersRes,
     balancesList,
     fundingBalanceRes,
+    distributingTransfersRes,
+    distributingRequestsRes,
+    branchesRes,
   ] = await Promise.all([
     recordsP,
     incomingCountsP,
@@ -203,6 +275,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     usersP,
     balancesListP,
     fundingBalanceP,
+    distributingTransfersP,
+    distributingRequestsP,
+    branchesP,
   ]);
 
   // ── Parse counts ────────────────────────────────────────
@@ -235,9 +310,50 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let myRequests = emptyRequests(myRequestsCounts);
   let outgoingTransfers: FundingSliceData | undefined = canDistribute ? emptyTransfers(outgoingCounts) : undefined;
   let mbRequests: FundingRequestsSliceData | undefined = canDistribute ? emptyRequests(mbRequestsCounts) : undefined;
+  let distributingEntries:
+    | MarketingFundingLoaderData['distributingEntries']
+    | undefined = undefined;
 
   // ── Hydrate the active slice with the records we fetched ──
-  if (recordsKind === 'transfers') {
+  if (activeSection === 'distributing') {
+    const transferData = parseFunding(distributingTransfersRes);
+    const requestData = parseFundingRequestsPage(distributingRequestsRes);
+    const transferRows = transferData?.records ?? [];
+    const requestRows = requestData?.records ?? [];
+    const merged = toDistributingFundingEntries(transferRows, requestRows);
+    const startIndex = (page - 1) * PER_PAGE;
+    const paged = entryTypeFilter === 'all' ? merged.slice(startIndex, startIndex + PER_PAGE) : merged;
+    const totalMergedCount =
+      entryTypeFilter === 'transfer'
+        ? outgoingCounts.ALL
+        : entryTypeFilter === 'request'
+          ? mbRequestsCounts.ALL
+          : outgoingCounts.ALL + mbRequestsCounts.ALL;
+
+    distributingEntries = {
+      records: paged,
+      total: totalMergedCount,
+      page,
+      totalPages: Math.max(1, Math.ceil(totalMergedCount / PER_PAGE)),
+      typeFilter: entryTypeFilter,
+      statusFilter: entryStatusParam ?? statusParam ?? requestStatusParam ?? undefined,
+      searchFilter,
+      typeCounts: {
+        all: outgoingCounts.ALL + mbRequestsCounts.ALL,
+        transfer: outgoingCounts.ALL,
+        request: mbRequestsCounts.ALL,
+      },
+      statusCounts: {
+        SENT: outgoingCounts.SENT,
+        COMPLETED: outgoingCounts.COMPLETED,
+        DISPUTED: outgoingCounts.DISPUTED,
+        PENDING: mbRequestsCounts.PENDING,
+        APPROVED: mbRequestsCounts.APPROVED,
+        REJECTED: mbRequestsCounts.REJECTED,
+        ALL: outgoingCounts.ALL + mbRequestsCounts.ALL,
+      },
+    };
+  } else if (recordsKind === 'transfers') {
     const fundingData = parseFunding(recordsRes);
     const total = fundingData?.pagination?.total ?? 0;
     const slice: FundingSliceData = {
@@ -271,6 +387,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fundingBalance = showFundingBalance ? parseFundingBalance(fundingBalanceRes) : undefined;
   const usersList = parseUsers(usersRes);
 
+  // Resolve active branch name from the branches.list payload — null if the user has
+  // no active branch (admin in global view) or the branch can't be found in the response.
+  let activeBranchName: string | null = null;
+  if (user.currentBranchId && branchesRes.ok) {
+    const branchesData = (branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })
+      .result?.data;
+    if (Array.isArray(branchesData)) {
+      const match = branchesData.find((b) => b.id === user.currentBranchId);
+      activeBranchName = match?.name ?? null;
+    }
+  }
+
   const data: MarketingFundingLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',
     currentUserId: user.id,
@@ -285,10 +413,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     myRequests,
     outgoingTransfers,
     mbRequests,
+    distributingEntries,
     directionSummary,
     fundingBalance,
     users: usersList,
     balancesList,
+    activeBranchName,
   };
 
   return data;

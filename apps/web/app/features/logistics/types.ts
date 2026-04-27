@@ -103,6 +103,4 @@ export interface LogisticsStreamData {
   totalProviders: number;
   locations: Location[];
   totalLocations: number;
-  healthDashboard: Promise<HealthDashboard | null> | null;
-  canViewEscalations: boolean;
 }

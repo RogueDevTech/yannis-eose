@@ -7,6 +7,43 @@ import {
 } from '../common/utils/strip-finance-fields';
 
 const t = initTRPC.context<TrpcContext>().create();
+export const BRANCH_CONTEXT_REQUIRED_MESSAGE =
+  'Branch context required. Switch to a branch or pass branchId for this action.';
+const BRANCH_SCOPED_MUTATION_PATHS = new Set([
+  'orders.createOffline',
+  'orders.transition',
+  'orders.update',
+  'orders.assignToCS',
+  'orders.bulkReassign',
+  'orders.redistributeOrdersFromAgent',
+  'orders.distributeUnassignedOrders',
+  'orders.revealPhoneForManualCall',
+  'orders.scheduleCallback',
+  'orders.mergeDuplicate',
+  'orders.dismissDuplicate',
+  'orders.bulkTransition',
+  'orders.bulkAssignToCS',
+  'orders.claimOrder',
+  'marketing.createFunding',
+  'marketing.verifyFunding',
+  'marketing.requestFunding',
+  'marketing.approveFundingRequest',
+  'marketing.rejectFundingRequest',
+  'marketing.createAdSpend',
+  'marketing.approveAdSpend',
+  'marketing.rejectAdSpend',
+  'marketing.updateAdSpend',
+  'marketing.createOfferTemplate',
+  'marketing.updateOfferTemplate',
+  'marketing.createCampaign',
+  'marketing.updateCampaign',
+  'users.create',
+  'users.update',
+  'users.deactivate',
+  'users.resetPassword',
+  'users.processEmailChange',
+  'scopedMutation',
+]);
 
 /**
  * Column-Level Security middleware — strips sensitive financial fields
@@ -59,6 +96,34 @@ const blockMutationsWhileMirroring = t.middleware(async ({ ctx, type, next }) =>
   return next();
 });
 
+function extractInputBranchId(input: unknown, depth = 0): string | null {
+  if (!input || typeof input !== 'object' || depth > 4) return null;
+  const obj = input as Record<string, unknown>;
+  const direct = obj.branchId;
+  if (typeof direct === 'string' && direct.trim().length > 0) return direct;
+  for (const value of Object.values(obj)) {
+    const nested = extractInputBranchId(value, depth + 1);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+const requireBranchScopeForGlobalAdminMutations = t.middleware(async ({ ctx, type, path, meta, input, getRawInput, next }) => {
+  if (type !== 'mutation') return next();
+  if (!ctx.user) return next();
+  const isAdminLevel = ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
+  if (!isAdminLevel) return next();
+  if (ctx.currentBranchId !== null) return next();
+  const isBranchScopedMutation =
+    (meta as Record<string, unknown> | undefined)?.['branchScopedMutation'] === true ||
+    (typeof path === 'string' && BRANCH_SCOPED_MUTATION_PATHS.has(path));
+  if (!isBranchScopedMutation) return next();
+  const rawInput = await getRawInput().catch(() => null);
+  const explicitBranchId = extractInputBranchId(input) ?? extractInputBranchId(rawInput);
+  if (explicitBranchId) return next();
+  throw new TRPCError({ code: 'BAD_REQUEST', message: BRANCH_CONTEXT_REQUIRED_MESSAGE });
+});
+
 /**
  * Authenticated procedure — requires a valid session.
  * Applies Column-Level Security (finance field stripping) automatically.
@@ -72,6 +137,7 @@ export const authedProcedure = t.procedure
     return next({ ctx: { ...ctx, user: ctx.user } });
   })
   .use(blockMutationsWhileMirroring)
+  .use(requireBranchScopeForGlobalAdminMutations)
   .use(financeFieldsMiddleware);
 
 /**

@@ -649,6 +649,104 @@ export class OrdersService {
     };
   }
 
+  async listAllocatableLocations(orderId: string): Promise<Array<{
+    id: string;
+    name: string;
+    address: string | null;
+    whatsappGroupLink: string | null;
+    eligible: boolean;
+    reason: string | null;
+  }>> {
+    const orderItems = await this.db
+      .select({
+        productId: schema.orderItems.productId,
+        quantity: schema.orderItems.quantity,
+        productName: schema.products.name,
+      })
+      .from(schema.orderItems)
+      .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+      .where(eq(schema.orderItems.orderId, orderId));
+
+    if (orderItems.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items to allocate.' });
+    }
+
+    const needsByProduct = new Map<string, { qty: number; name: string }>();
+    for (const item of orderItems) {
+      const curr = needsByProduct.get(item.productId);
+      needsByProduct.set(item.productId, {
+        qty: (curr?.qty ?? 0) + item.quantity,
+        name: item.productName ?? 'Unknown product',
+      });
+    }
+
+    const locations = await this.db
+      .select({
+        id: schema.logisticsLocations.id,
+        name: schema.logisticsLocations.name,
+        address: schema.logisticsLocations.address,
+        whatsappGroupLink: schema.logisticsLocations.whatsappGroupLink,
+      })
+      .from(schema.logisticsLocations)
+      .where(eq(schema.logisticsLocations.status, 'ACTIVE'))
+      .orderBy(asc(schema.logisticsLocations.name));
+
+    const results: Array<{
+      id: string;
+      name: string;
+      address: string | null;
+      whatsappGroupLink: string | null;
+      eligible: boolean;
+      reason: string | null;
+    }> = [];
+
+    for (const location of locations) {
+      const isLocked = await this.inventoryService.isDispatchLocked(location.id);
+      if (isLocked) {
+        results.push({
+          ...location,
+          eligible: false,
+          reason: 'Dispatch locked at this location. Resolve stock reconciliations first.',
+        });
+        continue;
+      }
+
+      let reason: string | null = null;
+      for (const [productId, need] of needsByProduct) {
+        const levelRows = await this.db
+          .select({
+            stockCount: schema.inventoryLevels.stockCount,
+            reservedCount: schema.inventoryLevels.reservedCount,
+          })
+          .from(schema.inventoryLevels)
+          .where(and(
+            eq(schema.inventoryLevels.productId, productId),
+            eq(schema.inventoryLevels.locationId, location.id),
+          ))
+          .limit(1);
+
+        const level = levelRows[0];
+        if (!level) {
+          reason = `No inventory row for ${need.name}. Receive stock first.`;
+          break;
+        }
+        const available = level.stockCount - level.reservedCount;
+        if (available < need.qty) {
+          reason = `Insufficient ${need.name} stock (need ${need.qty}, have ${available}).`;
+          break;
+        }
+      }
+
+      results.push({
+        ...location,
+        eligible: reason == null,
+        reason,
+      });
+    }
+
+    return results.sort((a, b) => Number(b.eligible) - Number(a.eligible) || a.name.localeCompare(b.name));
+  }
+
   /**
    * Get the customer contact for manual calling (VOIP off).
    * Only works when VOIP feature flag is OFF. Does NOT insert MANUAL_CALL — that is recorded

@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
 import type { CEODashboardData } from '~/features/ceo/types';
@@ -86,9 +87,8 @@ export async function action({ request }: ActionFunctionArgs) {
       { method: 'POST', cookie, body: {} },
     );
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
       return json(
-        { success: false, error: errorData?.error?.message ?? 'Failed to refresh executive data' },
+        { success: false, error: extractApiErrorMessage(res.data, 'Failed to refresh executive data') },
         { status: safeStatus(res.status) },
       );
     }

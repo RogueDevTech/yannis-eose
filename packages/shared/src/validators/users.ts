@@ -158,6 +158,7 @@ export const listUsersSchema = z.object({
   search: z.string().optional(),
   role: userRoleSchema.optional(),
   status: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
+  branchId: z.string().uuid().optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
   sortBy: z.enum(['name', 'email', 'role', 'createdAt']).default('createdAt'),
@@ -168,6 +169,13 @@ export const listUsersSchema = z.object({
    * display the name behind a foreign key no matter the current active/inactive state.
    */
   userIds: z.array(z.string().uuid()).max(500).optional(),
+  /**
+   * Admin-class only: bypass auto-scoping by `ctx.currentBranchId`.
+   * Used by `/admin/branches/:id` member picker where the admin needs to add staff
+   * from any branch to a specific branch. Non-admin callers passing this flag are
+   * silently still scoped to their active branch (the service ignores the opt-in).
+   */
+  allBranches: z.boolean().optional(),
 });
 
 export type ListUsersInput = z.infer<typeof listUsersSchema>;

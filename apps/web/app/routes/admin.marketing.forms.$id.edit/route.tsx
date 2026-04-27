@@ -2,8 +2,10 @@ import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { MarketingFormEditPage } from '~/features/campaigns/MarketingFormEditPage';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
+import { parseStandardFieldsPayload, toLegacyStandardFieldFlags } from '~/features/campaigns/standard-fields';
 import type { Campaign, CampaignFormConfig } from '~/features/campaigns/types';
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -53,12 +55,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const buttonText = formData.get('formButtonText')?.toString()?.trim();
   const accentColor = formData.get('formAccentColor')?.toString()?.trim();
   const successCallbackUrl = formData.get('successCallbackUrl')?.toString()?.trim() || undefined;
-  const showDeliveryAddress = formData.get('showDeliveryAddress') === 'on';
-  const showDeliveryNotes = formData.get('showDeliveryNotes') === 'on';
-  const showDeliveryState = formData.get('showDeliveryState') === 'on';
-  const showGender = formData.get('showGender') === 'on';
-  const showPreferredDeliveryDate = formData.get('showPreferredDeliveryDate') === 'on';
-  const showPaymentMethod = formData.get('showPaymentMethod') === 'on';
+  const parsedStandard = parseStandardFieldsPayload(formData.get('standardFields')?.toString());
+  if (!parsedStandard.ok) {
+    return json({ error: parsedStandard.error }, { status: 400 });
+  }
 
   const parsedCustom = parseCustomFieldsPayload(formData.get('customFields')?.toString());
   if (!parsedCustom.ok) {
@@ -79,12 +79,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     ...(buttonText ? { buttonText } : {}),
     ...(accentColor ? { accentColor } : {}),
     ...(successCallbackUrl ? { successCallbackUrl } : {}),
-    showDeliveryAddress,
-    showDeliveryNotes,
-    showDeliveryState,
-    showGender,
-    showPreferredDeliveryDate,
-    showPaymentMethod,
+    standardFields: parsedStandard.fields,
+    ...toLegacyStandardFieldFlags(parsedStandard.fields),
     customFields: parsedCustom.fields,
   };
 
@@ -98,8 +94,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     body,
   });
   if (!res.ok) {
-    const errorData = res.data as { error?: { message?: string } };
-    return json({ error: errorData?.error?.message ?? 'Failed to update form' }, { status: safeStatus(res.status) });
+    return json({ error: extractApiErrorMessage(res.data, 'Failed to update form') }, { status: safeStatus(res.status) });
   }
   return redirect('/admin/marketing/forms?saved=1');
 }

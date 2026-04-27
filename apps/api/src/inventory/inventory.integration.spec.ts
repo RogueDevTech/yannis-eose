@@ -11,6 +11,7 @@ import { eq, sql } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
 import { createTestUser, createTestProduct } from '../test/factories/order.factory';
+import { InventoryService } from './inventory.service';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -33,6 +34,70 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
   // ---------------------------------------------------------------------------
   // Stock batch creation
   // ---------------------------------------------------------------------------
+
+  it('stock intake persists numeric costs and updates location stock', async () => {
+    const actor = await createTestUser(db as any, { role: 'STOCK_MANAGER' });
+    await setSessionActor(pgClient, actor.id);
+    const { id: productId } = await createTestProduct(db as any);
+
+    const [provider] = await db
+      .insert(schema.logisticsProviders)
+      .values({
+        name: `Provider ${randomUUID().slice(0, 8)}`,
+      })
+      .returning({ id: schema.logisticsProviders.id });
+
+    const [location] = await db
+      .insert(schema.logisticsLocations)
+      .values({
+        providerId: provider!.id,
+        name: `Location ${randomUUID().slice(0, 8)}`,
+        address: 'Lagos',
+      })
+      .returning({ id: schema.logisticsLocations.id });
+
+    const svc = new InventoryService(
+      db as any,
+      { emitToRoom: () => {} } as any,
+      { createForRole: async () => undefined } as any,
+      { get: async () => null } as any,
+    );
+
+    await svc.intake(
+      {
+        productId,
+        locationId: location!.id,
+        quantity: 200,
+        factoryCost: 3000,
+        landingCost: 2000,
+      },
+      { id: actor.id } as any,
+    );
+
+    const [batch] = await db
+      .select()
+      .from(schema.stockBatches)
+      .where(eq(schema.stockBatches.productId, productId));
+    expect(batch).toBeDefined();
+    expect(batch!.quantity).toBe(200);
+    expect(batch!.remainingQuantity).toBe(200);
+    expect(batch!.factoryCost).toBe('3000.00');
+    expect(batch!.landingCost).toBe('2000.00');
+    expect(batch!.totalLandedCost).toBe('5000.00');
+
+    const historyRows = await db.execute<{ id: string }>(
+      sql`SELECT id FROM stock_batches_history WHERE id = ${batch!.id} LIMIT 1`,
+    );
+    expect(historyRows).toHaveLength(1);
+
+    const [level] = await db
+      .select()
+      .from(schema.inventoryLevels)
+      .where(eq(schema.inventoryLevels.locationId, location!.id));
+    expect(level).toBeDefined();
+    expect(level!.stockCount).toBe(200);
+    expect(level!.reservedCount).toBe(0);
+  });
 
   it('creates two stock batches with different costs', async () => {
     const actor = await createTestUser(db as any, { role: 'STOCK_MANAGER' });

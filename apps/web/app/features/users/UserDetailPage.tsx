@@ -116,7 +116,8 @@ export function UserDetailPage({
   canEditLimited = false,
   viewerCanMirror = false,
   isSelfView = false,
-}: UserDetailLoaderData) {
+  usersBasePath = '/hr/users',
+}: UserDetailLoaderData & { usersBasePath?: string }) {
   const actionData = useActionData<{ error?: string; success?: boolean; message?: string; requiresApproval?: boolean }>();
   const navigation = useNavigation();
   // Reset Password runs through its own fetcher so the form submission inside the portaled
@@ -295,7 +296,7 @@ export function UserDetailPage({
         {isSelfView ? (
           <span className="text-app-fg-muted">My Profile</span>
         ) : (
-          <Link to="/hr/users" prefetch="intent" className="text-app-fg-muted hover:text-brand-500 transition-colors">
+          <Link to={usersBasePath} prefetch="intent" className="text-app-fg-muted hover:text-brand-500 transition-colors">
             Users
           </Link>
         )}
@@ -549,7 +550,21 @@ export function UserDetailPage({
                 {user.logisticsLocationId && (
                   <div>
                     <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Assigned Location</p>
-                    <p className="text-xs font-mono text-app-fg bg-app-hover px-2 py-1 rounded inline-block">{user.logisticsLocationId}</p>
+                    <DeferredSection resolve={locations} skeleton="inline">
+                      {(resolvedLocations) => {
+                        const assignedLocation = resolvedLocations.find(
+                          (location) => location.id === user.logisticsLocationId,
+                        );
+                        return assignedLocation ? (
+                          <Link to="/admin/logistics" className="text-sm text-brand-600 dark:text-brand-400 hover:underline">
+                            {assignedLocation.name}
+                          </Link>
+                        ) : (
+                          <p className="text-sm text-app-fg">Unknown location</p>
+                        );
+                      }}
+                    </DeferredSection>
+                    <p className="text-xs text-app-fg-muted mt-1">Open Logistics to see full location details.</p>
                   </div>
                 )}
 
@@ -564,8 +579,22 @@ export function UserDetailPage({
 
                 {user.commissionPlanId && (
                   <div>
-                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Commission Plan ID</p>
-                    <p className="text-xs font-mono bg-app-hover px-2 py-1 rounded inline-block text-app-fg">{user.commissionPlanId}</p>
+                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Commission Plan</p>
+                    <DeferredSection resolve={plans} skeleton="inline">
+                      {(resolvedPlans) => {
+                        const assignedCommissionPlan = resolvedPlans.find(
+                          (plan) => plan.id === user.commissionPlanId,
+                        );
+                        return assignedCommissionPlan ? (
+                          <Link to="/hr/plans" className="text-sm text-brand-600 dark:text-brand-400 hover:underline">
+                            {assignedCommissionPlan.planName}
+                          </Link>
+                        ) : (
+                          <p className="text-sm text-app-fg">Unknown commission plan</p>
+                        );
+                      }}
+                    </DeferredSection>
+                    <p className="text-xs text-app-fg-muted mt-1">Manage commission plans in HR Plans.</p>
                   </div>
                 )}
               </div>
@@ -1499,7 +1528,7 @@ export function UserDetailPage({
               Back
             </Button>
             <Link
-              to={`/hr/users/${pendingConflict.id}`}
+              to={`${usersBasePath}/${pendingConflict.id}`}
               className="btn-primary"
               onClick={() => setConflictModalOpen(false)}
             >

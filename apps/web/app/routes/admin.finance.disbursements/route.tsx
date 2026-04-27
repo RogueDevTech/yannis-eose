@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { DisbursementsPage } from '~/features/disbursements/DisbursementsPage';
 import type { DisbursementRecord, DisbursementsPageData } from '~/features/disbursements/DisbursementsPage';
@@ -221,8 +222,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create disbursement' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create disbursement') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -239,8 +239,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { requestId, receiptUrl },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to approve funding request' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to approve funding request') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -259,8 +258,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reject funding request' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to reject funding request') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

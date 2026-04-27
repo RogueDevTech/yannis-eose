@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { json } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { apiRequest, getSessionCookie, getCurrentUser, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { LogisticsOrderDetailPage } from '~/features/logistics/LogisticsOrderDetailPage';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
@@ -116,8 +117,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Allocation failed';
-      return json({ error: err }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Allocation failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -138,8 +138,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Dispatch failed';
-      return json({ error: err }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Dispatch failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -190,9 +189,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         },
       });
       if (!res.ok) {
-        const errorData = res.data as { error?: { message?: string } };
-        const message = errorData?.error?.message ?? 'Submit failed';
-        return json({ error: message }, { status: safeStatus(res.status) });
+        return json({ error: extractApiErrorMessage(res.data, 'Submit failed') }, { status: safeStatus(res.status) });
       }
       return json({ success: true });
     }
@@ -208,9 +205,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      const message = errorData?.error?.message ?? 'Transition failed';
-      return json({ error: message }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Transition failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

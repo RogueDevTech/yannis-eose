@@ -2,27 +2,22 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { LogisticsPage } from '~/features/logistics/LogisticsPage';
-import type { Provider, Location, HealthDashboard, LogisticsStreamData } from '~/features/logistics/types';
+import type { Provider, Location, LogisticsStreamData } from '~/features/logistics/types';
 
 export const meta: MetaFunction = () => [
-  { title: 'Partners — Yannis EOSE' },
+  { title: 'Logistics companies — Yannis EOSE' },
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'logistics.read');
+  await requirePermission(request, 'logistics.read');
   const cookie = getSessionCookie(request);
-
-  const canViewEscalations = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'].includes(user.role);
 
   const listInput = JSON.stringify({ page: 1, limit: 20 });
   const providersPromise = apiRequest<unknown>(`/trpc/logistics.listProviders?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
   const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
-  const healthPromise = canViewEscalations
-    ? apiRequest<unknown>('/trpc/logistics.healthDashboard', { method: 'GET', cookie })
-    : null;
 
-  // Await only critical data: providers and locations
   const [providersRes, locationsRes] = await Promise.all([providersPromise, locationsPromise]);
 
   const providersData = providersRes.ok
@@ -33,25 +28,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (locationsRes.data as { result?: { data?: { locations: Location[]; pagination: { total: number } } } })?.result?.data
     : null;
 
-  // healthDashboard returned as un-awaited promise — streams to client
-  const healthDashboard = healthPromise
-    ? healthPromise
-        .then((healthRes) => {
-          if (healthRes.ok) {
-            return (healthRes.data as { result?: { data?: HealthDashboard } })?.result?.data ?? null;
-          }
-          return null;
-        })
-        .catch(() => null as HealthDashboard | null)
-    : null;
-
   return {
     providers: providersData?.providers ?? [],
     totalProviders: providersData?.pagination?.total ?? 0,
     locations: locationsData?.locations ?? [],
     totalLocations: locationsData?.pagination?.total ?? 0,
-    healthDashboard,
-    canViewEscalations,
   } satisfies LogisticsStreamData;
 }
 
@@ -94,7 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
         body: { name: p.name, contactInfo: p.contactInfo, coverageArea: p.coverageArea },
       });
       if (!res.ok) {
-        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to create logistics company';
+        const err = extractApiErrorMessage(res.data, 'Failed to create logistics company');
         errors.push(`${p.name}: ${err}`);
       }
     }
@@ -117,8 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update logistics company' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update logistics company') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -136,8 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create location' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create location') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

@@ -1,9 +1,11 @@
 import { json } from '@remix-run/node';
 import { apiRequest, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import type {
   AdSpendRecord,
   AdSpendStatusCounts,
   Campaign,
+  DistributingFundingEntry,
   FundingBalanceRow,
   FundingRecord,
   FundingRequestRecord,
@@ -169,6 +171,42 @@ export function parseFundingRequestsPage(res: { ok: boolean; data: unknown }): {
   );
 }
 
+export function toDistributingFundingEntries(
+  transfers: FundingRecord[],
+  requests: FundingRequestRecord[],
+): DistributingFundingEntry[] {
+  const transferEntries: DistributingFundingEntry[] = transfers.map((record) => ({
+    id: record.id,
+    entryType: 'transfer',
+    status: (record.status as 'SENT' | 'COMPLETED' | 'DISPUTED') ?? 'SENT',
+    amount: record.amount,
+    createdAt: record.sentAt,
+    senderId: record.senderId,
+    senderName: record.senderName ?? null,
+    receiverId: record.receiverId,
+    receiverName: record.receiverName ?? null,
+    receiptUrl: record.receiptUrl ?? null,
+  }));
+
+  const requestEntries: DistributingFundingEntry[] = requests.map((record) => ({
+    id: record.id,
+    entryType: 'request',
+    status: (record.status as 'PENDING' | 'APPROVED' | 'REJECTED') ?? 'PENDING',
+    amount: record.amount,
+    createdAt: record.createdAt,
+    requesterId: record.requesterId,
+    requesterName: record.requesterName ?? null,
+    reason: record.reason ?? null,
+    resolvedAt: record.resolvedAt ?? null,
+    resolvedBy: record.resolvedBy ?? null,
+    receiptUrl: record.receiptUrl ?? null,
+  }));
+
+  return [...transferEntries, ...requestEntries].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
+
 export function parseBalancesList(res: { ok: boolean; data: unknown }): FundingBalanceRow[] {
   if (!res.ok) return [];
   const data = (res.data as { result?: { data?: FundingBalanceRow[] } })?.result?.data;
@@ -183,13 +221,31 @@ export interface MarketingDateFilterResult {
   leaderboardPeriod: 'this_month' | 'all_time';
 }
 
-export function resolveMarketingDateFilters(url: URL): MarketingDateFilterResult {
+type MarketingDefaultDatePreset = 'this_month' | 'last_48_hours';
+
+function formatDateForQuery(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function defaultLast48HoursRange(): { startDate: string; endDate: string } {
+  const end = new Date();
+  const start = new Date(end.getTime() - 48 * 60 * 60 * 1000);
+  return { startDate: formatDateForQuery(start), endDate: formatDateForQuery(end) };
+}
+
+export function resolveMarketingDateFilters(
+  url: URL,
+  defaultPreset: MarketingDefaultDatePreset = 'this_month',
+): MarketingDateFilterResult {
   const leaderboardPeriod = url.searchParams.get('period') === 'all_time' ? 'all_time' : 'this_month';
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
-    const range = defaultThisMonthRange();
+    const range = defaultPreset === 'last_48_hours' ? defaultLast48HoursRange() : defaultThisMonthRange();
     startDate = range.startDate;
     endDate = range.endDate;
   }
@@ -249,8 +305,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to create funding' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create funding') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -268,8 +323,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to verify funding' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to verify funding') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -288,8 +342,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to submit funding request' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to submit funding request') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -306,8 +359,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
       body: { requestId, receiptUrl },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to approve funding request' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to approve funding request') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -326,8 +378,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reject funding request' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to reject funding request') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -355,8 +406,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to log ad spend' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to log ad spend') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -372,8 +422,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
       body: { adSpendId },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to approve ad spend' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to approve ad spend') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -392,8 +441,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reject ad spend' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to reject ad spend') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -417,8 +465,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update ad spend' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update ad spend') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

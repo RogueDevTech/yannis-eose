@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import type {
@@ -137,8 +138,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { orderId, newStatus: 'RESTOCKED', metadata: {} },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to restock';
-      return json({ error: err }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to restock') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -155,8 +155,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { orderId, newStatus: 'WRITTEN_OFF', metadata: { reason } },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to write off';
-      return json({ error: err }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to write off') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -176,8 +175,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to create reconciliation';
-      return json({ error: err }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create reconciliation') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

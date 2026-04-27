@@ -3,7 +3,8 @@ import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { defer, json } from '@remix-run/node';
-import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
@@ -13,6 +14,11 @@ export const meta: MetaFunction = () => [
   { title: 'Order Detail — Yannis EOSE' },
 ];
 
+function logOrderDetailLoaderWarning(orderId: string, callName: string, detail?: string): void {
+  const suffix = detail ? ` (${detail})` : '';
+  console.warn(`[OrderDetailLoader] ${callName} failed for order ${orderId}${suffix}`);
+}
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await requirePermission(request, ['orders.read', 'marketing.orders']);
   const cookie = getSessionCookie(request);
@@ -21,14 +27,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!orderId) {
     throw new Response('Order ID required', { status: 400 });
   }
+  const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
   const orderDetailPromise = (async (): Promise<OrderDetailStreamData | { notFound: true }> => {
     const [orderRes, voipRes] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-        { method: 'GET', cookie },
+        deferredOpt,
       ),
-      apiRequest<unknown>('/trpc/voip.isEnabled', { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/voip.isEnabled', deferredOpt).catch((err) => {
+        const msg = err instanceof Error ? err.message : 'unknown';
+        logOrderDetailLoaderWarning(orderId, 'voip.isEnabled', msg);
+        return { ok: false, status: 503, data: {} };
+      }),
     ]);
 
     if (!orderRes.ok) return { notFound: true };
@@ -50,25 +61,39 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const latestCall: Promise<CallLogEntry | null> = apiRequest<unknown>(
       `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-      { method: 'GET', cookie },
+      deferredOpt,
     )
       .then((callRes) => {
-        if (!callRes.ok) return null;
+        if (!callRes.ok) {
+          logOrderDetailLoaderWarning(orderId, 'orders.latestCall', `status ${callRes.status}`);
+          return null;
+        }
         const callData = callRes.data as { result?: { data?: CallLogEntry | null } };
         return callData?.result?.data ?? null;
       })
-      .catch(() => null);
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : 'unknown';
+        logOrderDetailLoaderWarning(orderId, 'orders.latestCall', msg);
+        return null;
+      });
 
     const timeline: Promise<TimelineEvent[]> = apiRequest<unknown>(
       `/trpc/orders.getTimeline?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-      { method: 'GET', cookie },
+      deferredOpt,
     )
       .then((tlRes) => {
-        if (!tlRes.ok) return [];
+        if (!tlRes.ok) {
+          logOrderDetailLoaderWarning(orderId, 'orders.getTimeline', `status ${tlRes.status}`);
+          return [];
+        }
         const tlData = tlRes.data as { result?: { data?: TimelineEvent[] } };
         return tlData?.result?.data ?? [];
       })
-      .catch(() => [] as TimelineEvent[]);
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : 'unknown';
+        logOrderDetailLoaderWarning(orderId, 'orders.getTimeline', msg);
+        return [] as TimelineEvent[];
+      });
 
     return {
       order,
@@ -82,11 +107,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
   // SA + ADMIN bypass permission checks at middleware (permissions: []); include them explicitly.
   if (isAdminLevel(user) || user.permissions?.includes('orders.reassign')) {
-    const agentsRes = await apiRequest<unknown>('/trpc/orders.listCSAgents', { method: 'GET', cookie });
+    const agentsRes = await apiRequest<unknown>('/trpc/orders.listCSAgents', deferredOpt).catch((err) => {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      logOrderDetailLoaderWarning(orderId, 'orders.listCSAgents', msg);
+      return { ok: false, status: 503, data: {} };
+    });
     if (agentsRes.ok) {
       const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
       const list = agentsData?.result?.data ?? [];
       csAgentsForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
+    } else {
+      logOrderDetailLoaderWarning(orderId, 'orders.listCSAgents', `status ${agentsRes.status}`);
     }
   }
 
@@ -95,36 +126,89 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> = [];
   const locationsRes = await apiRequest<unknown>(
     `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
-    { method: 'GET', cookie },
-  );
+    deferredOpt,
+  ).catch((err) => {
+    const msg = err instanceof Error ? err.message : 'unknown';
+    logOrderDetailLoaderWarning(orderId, 'logistics.listLocations', msg);
+    return { ok: false, status: 503, data: {} };
+  });
   if (locationsRes.ok) {
     const locationsData = locationsRes.data as {
       result?: { data?: { locations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> } };
     };
     logisticsLocations = locationsData?.result?.data?.locations ?? [];
+  } else {
+    logOrderDetailLoaderWarning(orderId, 'logistics.listLocations', `status ${locationsRes.status}`);
+  }
+
+  let allocatableLocations: Array<{
+    id: string;
+    name: string;
+    address: string | null;
+    whatsappGroupLink?: string | null;
+    eligible: boolean;
+    reason: string | null;
+  }> = [];
+  const allocatableRes = await apiRequest<unknown>(
+    `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+    deferredOpt,
+  ).catch((err) => {
+    const msg = err instanceof Error ? err.message : 'unknown';
+    logOrderDetailLoaderWarning(orderId, 'orders.listAllocatableLocations', msg);
+    return { ok: false, status: 503, data: {} };
+  });
+  if (allocatableRes.ok) {
+    const data = allocatableRes.data as {
+      result?: {
+        data?: Array<{
+          id: string;
+          name: string;
+          address: string | null;
+          whatsappGroupLink?: string | null;
+          eligible: boolean;
+          reason: string | null;
+        }>;
+      };
+    };
+    allocatableLocations = data?.result?.data ?? [];
+  } else {
+    logOrderDetailLoaderWarning(orderId, 'orders.listAllocatableLocations', `status ${allocatableRes.status}`);
   }
 
   // Dispatch templates for the "Share to 3PL" WhatsApp flow.
   let logisticsDispatchTemplates: Array<{ id: string; name: string; body: string }> = [];
   const templatesRes = await apiRequest<unknown>(
     `/trpc/messaging.templates.list?input=${encodeURIComponent(JSON.stringify({ channel: 'WHATSAPP_GROUP' }))}`,
-    { method: 'GET', cookie },
-  );
+    deferredOpt,
+  ).catch((err) => {
+    const msg = err instanceof Error ? err.message : 'unknown';
+    logOrderDetailLoaderWarning(orderId, 'messaging.templates.list', msg);
+    return { ok: false, status: 503, data: {} };
+  });
   if (templatesRes.ok) {
     const templatesData = templatesRes.data as { result?: { data?: Array<{ id: string; name: string; body: string }> } };
     logisticsDispatchTemplates = templatesData?.result?.data ?? [];
+  } else {
+    logOrderDetailLoaderWarning(orderId, 'messaging.templates.list', `status ${templatesRes.status}`);
   }
 
   // Stream the auto-generated invoice (if any) — orders confirmed before this feature
   // landed have null. Used by the order detail page to render an Invoice card.
   const invoicePromise: Promise<OrderInvoice | null> = apiRequest<unknown>(
     `/trpc/finance.getInvoiceByOrder?input=${encodeURIComponent(JSON.stringify({ orderId: params['id'] }))}`,
-    { method: 'GET', cookie },
+    deferredOpt,
   ).then((res) => {
-    if (!res.ok) return null;
+    if (!res.ok) {
+      logOrderDetailLoaderWarning(orderId, 'finance.getInvoiceByOrder', `status ${res.status}`);
+      return null;
+    }
     const data = (res.data as { result?: { data?: OrderInvoice | null } })?.result?.data ?? null;
     return data;
-  }).catch(() => null);
+  }).catch((err) => {
+    const msg = err instanceof Error ? err.message : 'unknown';
+    logOrderDetailLoaderWarning(orderId, 'finance.getInvoiceByOrder', msg);
+    return null;
+  });
 
   return defer({
     orderDetail: orderDetailPromise,
@@ -135,6 +219,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     permissions: user.permissions ?? [],
     csAgentsForAssign: csAgentsForAssign,
     logisticsLocations,
+    allocatableLocations,
     logisticsDispatchTemplates,
     invoice: invoicePromise,
   });
@@ -167,7 +252,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       body: { orderId, csAgentId: toCsAgentId },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Assign failed';
+      const err = extractApiErrorMessage(res.data, 'Assign failed');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
@@ -182,8 +267,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to initiate call' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to initiate call') }, { status: safeStatus(res.status) });
     }
 
     const data = res.data as { result?: { data?: { callLog: unknown; providerError?: string } } };
@@ -204,8 +288,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reveal phone' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to reveal phone') }, { status: safeStatus(res.status) });
     }
 
     const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };
@@ -226,8 +309,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to prepare WhatsApp message' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to prepare WhatsApp message') }, { status: safeStatus(res.status) });
     }
 
     const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };
@@ -248,8 +330,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to prepare SMS recipient' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to prepare SMS recipient') }, { status: safeStatus(res.status) });
     }
 
     const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };
@@ -279,8 +360,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ ready: false, error: errorData?.error?.message ?? 'Failed to prepare WhatsApp recipient' }, { status: safeStatus(res.status) });
+      return json({ ready: false, error: extractApiErrorMessage(res.data, 'Failed to prepare WhatsApp recipient') }, { status: safeStatus(res.status) });
     }
 
     const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };
@@ -309,8 +389,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ ready: false, error: errorData?.error?.message ?? 'Failed to prepare SMS recipient' }, { status: safeStatus(res.status) });
+      return json({ ready: false, error: extractApiErrorMessage(res.data, 'Failed to prepare SMS recipient') }, { status: safeStatus(res.status) });
     }
 
     const data = res.data as { result?: { data?: { phone: string; isDialable: boolean } } };
@@ -364,7 +443,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       body: { orderId, items: parsedItems, totalAmount },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to update order items';
+      const err = extractApiErrorMessage(res.data, 'Failed to update order items');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
@@ -383,7 +462,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       body: { orderId, delayMinutes, notes },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Schedule failed';
+      const err = extractApiErrorMessage(res.data, 'Schedule failed');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true, scheduled: true });
@@ -450,8 +529,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      const message = errorData?.error?.message ?? 'Transition failed';
+      const message = extractApiErrorMessage(res.data, 'Transition failed');
       return json({ error: message }, { status: safeStatus(res.status) });
     }
 
@@ -473,6 +551,7 @@ export default function OrderDetailRoute() {
     permissions,
     csAgentsForAssign,
     logisticsLocations,
+    allocatableLocations,
     logisticsDispatchTemplates,
     invoice,
   } = useLoaderData<typeof loader>();
@@ -506,6 +585,7 @@ export default function OrderDetailRoute() {
             permissions={permissions}
             csAgentsForAssign={csAgentsForAssign}
             logisticsLocations={logisticsLocations}
+            allocatableLocations={allocatableLocations}
             logisticsDispatchTemplates={logisticsDispatchTemplates}
             invoice={invoice}
           />

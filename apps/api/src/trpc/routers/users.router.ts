@@ -50,7 +50,7 @@ export const usersRouter = router({
   list: permissionProcedure('users.read')
     .input(listUsersSchema)
     .query(async ({ input, ctx }) => {
-      return getUsersService().list(input, ctx.user);
+      return getUsersService().list(input, ctx.user, ctx.currentBranchId);
     }),
 
   /**
@@ -184,9 +184,11 @@ export const usersRouter = router({
    * Create a new staff member (SuperAdmin only).
    */
   create: permissionProcedure('users.create')
-    .input(createStaffSchema)
+    .meta({ branchScopedMutation: true })
+    .input(z.intersection(createStaffSchema, z.object({ branchId: z.string().uuid().optional() })))
     .mutation(async ({ input, ctx }) => {
-      return getUsersService().createStaff(input, ctx.user);
+      const { branchId: _branchId, ...createInput } = input;
+      return getUsersService().createStaff(createInput, ctx.user);
     }),
 
   /**
@@ -199,9 +201,11 @@ export const usersRouter = router({
    * the full admin path unchanged.
    */
   update: permissionProcedure('users.update', 'cs.teamOverview', 'marketing.teamOverview')
-    .input(updateStaffSchema)
+    .meta({ branchScopedMutation: true })
+    .input(updateStaffSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getUsersService().update(input, ctx.user);
+      const { branchId: _branchId, ...updateInput } = input;
+      return getUsersService().update(updateInput, ctx.user);
     }),
 
   /**
@@ -209,7 +213,8 @@ export const usersRouter = router({
    * Kills all their active sessions immediately.
    */
   deactivate: permissionProcedure('users.deactivate')
-    .input(z.object({ userId: z.string().uuid() }))
+    .meta({ branchScopedMutation: true })
+    .input(z.object({ userId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getUsersService().deactivate(input.userId, ctx.user);
     }),
@@ -219,9 +224,11 @@ export const usersRouter = router({
    * Forces them to re-login with the new password.
    */
   resetPassword: permissionProcedure('users.deactivate')
-    .input(resetPasswordSchema)
+    .meta({ branchScopedMutation: true })
+    .input(resetPasswordSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getUsersService().resetPassword(input, ctx.user);
+      const { branchId: _branchId, ...resetInput } = input;
+      return getUsersService().resetPassword(resetInput, ctx.user);
     }),
 
   /**
@@ -237,9 +244,11 @@ export const usersRouter = router({
    * Approve or reject an email change request (SuperAdmin only).
    */
   processEmailChange: permissionProcedure('users.update')
-    .input(processEmailChangeSchema)
+    .meta({ branchScopedMutation: true })
+    .input(processEmailChangeSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getUsersService().processEmailChange(input, ctx.user);
+      const { branchId: _branchId, ...processInput } = input;
+      return getUsersService().processEmailChange(processInput, ctx.user);
     }),
 
   /**

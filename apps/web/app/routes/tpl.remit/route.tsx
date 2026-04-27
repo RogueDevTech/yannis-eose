@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { RemitPage } from '~/features/remittances/RemitPage';
 import type {
   RemittanceRecord,
@@ -82,7 +83,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to submit remittance';
+      const err = extractApiErrorMessage(res.data, 'Failed to submit remittance');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
@@ -114,7 +115,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to submit delivery remittance';
+      const err = extractApiErrorMessage(res.data, 'Failed to submit delivery remittance');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });

@@ -1,5 +1,6 @@
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, safeStatus } from './api.server';
+import { extractApiErrorMessage } from './api-error';
 
 export async function handleExportReportAction(request: Request) {
   const cookie = getSessionCookie(request);
@@ -43,8 +44,7 @@ export async function handleExportReportAction(request: Request) {
   });
 
   if (!res.ok) {
-    const errorData = res.data as { error?: { message?: string } };
-    return json({ error: errorData?.error?.message ?? 'Failed to export report' }, { status: safeStatus(res.status) });
+    return json({ error: extractApiErrorMessage(res.data, 'Failed to export report') }, { status: safeStatus(res.status) });
   }
 
   const data = res.data?.result?.data;

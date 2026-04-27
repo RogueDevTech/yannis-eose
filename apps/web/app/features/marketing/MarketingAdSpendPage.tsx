@@ -319,7 +319,12 @@ export function MarketingAdSpendPage({
     }
   }, [actionSuccess, revalidator.state, revalidator]);
 
-  const truncateId = (id: string) => id.slice(0, 8) + '...';
+  const getProductName = (productId: string, resolvedProducts: Product[]): string =>
+    resolvedProducts.find((p) => p.id === productId)?.name ?? 'Unknown product';
+  const getCampaignName = (campaignId: string): string =>
+    campaigns.find((c: Campaign) => c.id === campaignId)?.name ?? 'Unknown campaign';
+  const getUserName = (userId: string, resolvedUsers: User[]): string =>
+    resolvedUsers.find((u) => u.id === userId)?.name ?? 'Unknown user';
 
   return (
     <div className="space-y-4">
@@ -739,9 +744,7 @@ export function MarketingAdSpendPage({
                   {viewMode !== 'media_buyer' && (
                     <td className="table-cell text-sm text-app-fg">
                       <DeferredSection resolve={users} skeleton="inline">
-                        {(resolvedUsers: User[]) => (
-                          <>{resolvedUsers.find((u) => u.id === s.mediaBuyerId)?.name ?? truncateId(s.mediaBuyerId)}</>
-                        )}
+                        {(resolvedUsers: User[]) => <>{getUserName(s.mediaBuyerId, resolvedUsers)}</>}
                       </DeferredSection>
                     </td>
                   )}
@@ -750,7 +753,12 @@ export function MarketingAdSpendPage({
                     {s.productId ? (
                       <DeferredSection resolve={products} skeleton="inline">
                         {(resolvedProducts: Product[]) => (
-                          <>{resolvedProducts.find((p) => p.id === s.productId)?.name ?? truncateId(s.productId)}</>
+                          <Link
+                            to={`/admin/products/${s.productId}`}
+                            className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                          >
+                            {getProductName(s.productId, resolvedProducts)}
+                          </Link>
                         )}
                       </DeferredSection>
                     ) : (
@@ -758,13 +766,20 @@ export function MarketingAdSpendPage({
                     )}
                   </td>
                   <td className="table-cell text-sm text-app-fg-muted">
-                    {s.campaignId ? campaigns.find((c: Campaign) => c.id === s.campaignId)?.name ?? truncateId(s.campaignId) : '\u2014'}
+                    {s.campaignId ? (
+                      <Link
+                        to={`/admin/marketing/forms?search=${encodeURIComponent(getCampaignName(s.campaignId))}`}
+                        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                      >
+                        {getCampaignName(s.campaignId)}
+                      </Link>
+                    ) : '\u2014'}
                   </td>
                   <td className="table-cell text-right text-sm text-app-fg-muted">
                     {(s.orderCount ?? 0).toLocaleString()}
                   </td>
                   <td className="table-cell text-right text-sm">
-                    {s.indicativeCpa != null && (s.orderCount ?? 0) > 0 ? (
+                    {s.indicativeCpa != null ? (
                       <NairaPrice amount={s.indicativeCpa} />
                     ) : (
                       <span className="text-app-fg-muted">{'\u2014'}</span>
@@ -817,9 +832,40 @@ export function MarketingAdSpendPage({
                 <DeferredSection resolve={users} skeleton="inline">
                   {(resolvedUsers: User[]) => (
                     <>
-                      {resolvedUsers.find((u) => u.id === s.mediaBuyerId)?.name ?? truncateId(s.mediaBuyerId)}
+                      {getUserName(s.mediaBuyerId, resolvedUsers)}
                       {' \u2014 '}
                       {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </>
+                  )}
+                </DeferredSection>
+              </p>
+              <p className="text-xs text-app-fg-muted">
+                <DeferredSection resolve={products} skeleton="inline">
+                  {(resolvedProducts: Product[]) => (
+                    <>
+                      Product:{' '}
+                      {s.productId ? (
+                        <Link
+                          to={`/admin/products/${s.productId}`}
+                          className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                        >
+                          {getProductName(s.productId, resolvedProducts)}
+                        </Link>
+                      ) : (
+                        '\u2014'
+                      )}
+                      {' \u00b7 '}
+                      Campaign:{' '}
+                      {s.campaignId ? (
+                        <Link
+                          to={`/admin/marketing/forms?search=${encodeURIComponent(getCampaignName(s.campaignId))}`}
+                          className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                        >
+                          {getCampaignName(s.campaignId)}
+                        </Link>
+                      ) : (
+                        '\u2014'
+                      )}
                     </>
                   )}
                 </DeferredSection>
@@ -828,7 +874,7 @@ export function MarketingAdSpendPage({
                 Orders in window: {(s.orderCount ?? 0).toLocaleString()}
                 {' \u00b7 '}
                 Indicative CPA:{' '}
-                {s.indicativeCpa != null && (s.orderCount ?? 0) > 0 ? (
+                {s.indicativeCpa != null ? (
                   <NairaPrice amount={s.indicativeCpa} />
                 ) : (
                   '\u2014'
@@ -899,13 +945,12 @@ export function MarketingAdSpendPage({
               <DeferredSection resolve={users} skeleton="inline">
                 {(resolvedUsers: User[]) => (
                   <p className="text-xs text-brand-500 dark:text-brand-400">
-                    Media buyer: {resolvedUsers.find((u) => u.id === adSpendDetailModal.mediaBuyerId)?.name ?? truncateId(adSpendDetailModal.mediaBuyerId)}
+                    Media buyer: {getUserName(adSpendDetailModal.mediaBuyerId, resolvedUsers)}
                     {adSpendDetailModal.status === 'APPROVED' && adSpendDetailModal.approvedBy && (
                       <>
                         {' · '}
                         Approved by:{' '}
-                        {resolvedUsers.find((u) => u.id === adSpendDetailModal.approvedBy)?.name ??
-                          truncateId(adSpendDetailModal.approvedBy)}
+                        {getUserName(adSpendDetailModal.approvedBy, resolvedUsers)}
                       </>
                     )}
                   </p>
@@ -916,14 +961,12 @@ export function MarketingAdSpendPage({
                   <p className="text-xs text-brand-500 dark:text-brand-400">
                     Product:{' '}
                     {adSpendDetailModal.productId
-                      ? resolvedProducts.find((p) => p.id === adSpendDetailModal.productId)?.name ??
-                        truncateId(adSpendDetailModal.productId)
+                      ? getProductName(adSpendDetailModal.productId, resolvedProducts)
                       : '\u2014'}
                     {' · '}
                     Campaign:{' '}
                     {adSpendDetailModal.campaignId
-                      ? campaigns.find((c: Campaign) => c.id === adSpendDetailModal.campaignId)?.name ??
-                        truncateId(adSpendDetailModal.campaignId)
+                      ? getCampaignName(adSpendDetailModal.campaignId)
                       : '\u2014'}
                   </p>
                 )}
@@ -945,7 +988,7 @@ export function MarketingAdSpendPage({
               <p className="text-xs text-app-fg-muted mb-2">Orders and indicative CPA use the same window as Log Ad Spend.</p>
               <StatRowGroup divided>
                 <StatRow label="Orders in window" value={(adSpendDetailModal.orderCount ?? 0).toLocaleString()} />
-                {adSpendDetailModal.indicativeCpa != null && (adSpendDetailModal.orderCount ?? 0) > 0 ? (
+                {adSpendDetailModal.indicativeCpa != null ? (
                   <StatRow label="Indicative CPA" value="" amount={adSpendDetailModal.indicativeCpa} />
                 ) : (
                   <StatRow
@@ -977,8 +1020,7 @@ export function MarketingAdSpendPage({
                         <>
                           {' · '}
                           By{' '}
-                          {resolvedUsers.find((u) => u.id === adSpendDetailModal.rejectedBy)?.name ??
-                            truncateId(adSpendDetailModal.rejectedBy)}
+                          {getUserName(adSpendDetailModal.rejectedBy, resolvedUsers)}
                         </>
                       ) : null}
                     </p>

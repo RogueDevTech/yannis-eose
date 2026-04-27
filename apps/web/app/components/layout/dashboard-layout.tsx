@@ -22,6 +22,7 @@ import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
+import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
 
 interface Notification {
   id: string;
@@ -41,6 +42,7 @@ interface DashboardLayoutProps {
     role: string;
     email: string;
     permissions?: string[];
+    isFinanceOfficer?: boolean;
     currentBranchId?: string | null;
     /**
      * When set, the layout renders the Mirror Mode chrome (green border + Exit pill in the
@@ -171,7 +173,7 @@ const navStructure: NavGroupDef[] = [
     group: 'LOGISTICS',
     items: [
       {
-        label: 'Partners',
+        label: 'Logistics companies',
         href: '/admin/logistics/partners',
         icon: SidebarIcons.logistics,
         permission: 'logistics.read',
@@ -223,6 +225,13 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/finance/disbursements',
         icon: SidebarIcons.disbursements,
         permission: 'finance.disburse',
+      },
+      {
+        label: 'Staff Accounts',
+        href: '/admin/finance/staff-accounts',
+        icon: SidebarIcons.users,
+        permission: 'users.read',
+        roles: ['HR_MANAGER', 'FINANCE_OFFICER'],
       },
     ],
   },
@@ -358,7 +367,7 @@ function getDisplayLabelMobile(item: NavItemDef, user: { role: string } | null):
 }
 
 function getNavGroupsForUser(
-  user: { role: string; permissions?: string[] } | null,
+  user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean } | null,
   options?: { forMobile?: boolean },
 ): SidebarGroup[] {
   const result: SidebarGroup[] = [];
@@ -385,6 +394,9 @@ function getNavGroupsForUser(
 
     const visibleItems = groupDef.items
       .filter((item) => {
+        if (item.href === '/admin/finance/staff-accounts') {
+          if ((user?.isFinanceOfficer ?? false) === true) return true;
+        }
         // Disbursements: Finance → HoM only; HoM must not see this (they use Marketing → Funding).
         if (item.href === '/admin/finance/disbursements' && role === 'HEAD_OF_MARKETING')
           return false;
@@ -1048,7 +1060,13 @@ export function DashboardLayout(props: DashboardLayoutProps) {
         actionUrl={props.notificationsActionUrl ?? '/admin'}
         readOnly={isMirroring}
       >
-        <DashboardLayoutInner {...props} />
+        <BranchScopeGuardProvider
+          role={props.user?.role}
+          currentBranchId={props.user?.currentBranchId ?? null}
+          branches={props.branches ?? []}
+        >
+          <DashboardLayoutInner {...props} />
+        </BranchScopeGuardProvider>
       </NotificationsStateProvider>
     </ToastProvider>
   );

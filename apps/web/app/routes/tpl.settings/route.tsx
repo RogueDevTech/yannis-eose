@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { SettingsPage } from '~/features/settings/SettingsPage';
 
 export const meta: MetaFunction = () => [
@@ -46,8 +47,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update profile' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update profile') }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Profile updated' });
   }
@@ -70,8 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { currentPassword, newPassword },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to change password' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to change password') }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Password changed' });
   }

@@ -45,6 +45,56 @@ export class MarketingService {
     return rows.map((row) => row.userId);
   }
 
+  /**
+   * Strict same-branch guard for funding mutations (Pillar 4: Absolute Accountability,
+   * multi-branch isolation). Both `actor` and `otherUserId` must be members of
+   * `currentBranchId` for the transfer to proceed.
+   *
+   * Bypass: admin-class actors operating in global mode (`currentBranchId == null`)
+   * skip the check — that is the explicit "All branches" mode the branch switcher
+   * grants to SuperAdmin / Admin and is the only path for cross-branch ledger writes.
+   *
+   * Non-admin actors with no active branch are rejected — every regular user must
+   * have an active branch when initiating a funding transfer.
+   */
+  private async assertSameBranchOrAdmin(
+    actor: { id: string; role: string },
+    otherUserId: string,
+    currentBranchId: string | null,
+  ): Promise<void> {
+    if (currentBranchId === null) {
+      if (isAdminLevel(actor)) return;
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'No active branch — switch to a branch before initiating a funding transfer',
+      });
+    }
+
+    const memberships = await this.db
+      .select({ userId: schema.userBranches.userId })
+      .from(schema.userBranches)
+      .where(
+        and(
+          eq(schema.userBranches.branchId, currentBranchId),
+          inArray(schema.userBranches.userId, [actor.id, otherUserId]),
+        ),
+      );
+
+    const memberSet = new Set(memberships.map((m) => m.userId));
+    if (!memberSet.has(actor.id)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You are not a member of the active branch',
+      });
+    }
+    if (!memberSet.has(otherUserId)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Recipient is not a member of your active branch',
+      });
+    }
+  }
+
   private async getBranchCampaignIds(branchId?: string | null): Promise<string[] | null> {
     if (!branchId) return null;
     const rows = await this.db
@@ -151,7 +201,7 @@ export class MarketingService {
     const orderCount = Number(countRow?.c ?? 0);
     const spendAmt = params.spendAmount;
     const indicativeCpa =
-      spendAmt !== undefined && spendAmt > 0 && orderCount > 0 ? spendAmt / orderCount : null;
+      spendAmt !== undefined && spendAmt > 0 ? spendAmt / Math.max(orderCount, 1) : null;
 
     const priorSpendDate =
       priorSpend != null
@@ -207,7 +257,17 @@ export class MarketingService {
   // Marketing Funding
   // ============================================
 
-  async createFunding(input: CreateFundingInput, senderId: string) {
+  async createFunding(
+    input: CreateFundingInput,
+    actor: { id: string; role: string },
+    currentBranchId: string | null,
+  ) {
+    // Branch isolation: sender + receiver must share the active branch.
+    // Admin-class in global mode (currentBranchId = NULL) bypasses for cross-branch
+    // disbursements from /admin via "All branches" view.
+    await this.assertSameBranchOrAdmin(actor, input.receiverId, currentBranchId);
+
+    const senderId = actor.id;
     const funding = await withActor(this.db, { id: senderId }, async (tx) => {
       const [sender, receiver] = await Promise.all([
         tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, senderId)).limit(1),
@@ -975,8 +1035,10 @@ export class MarketingService {
   async approveFundingRequest(
     requestId: string,
     receiptUrl: string,
-    approverId: string,
+    actor: { id: string; role: string },
+    currentBranchId: string | null,
   ) {
+    const approverId = actor.id;
     const [existing] = await this.db
       .select()
       .from(schema.marketingFundingRequests)
@@ -989,6 +1051,11 @@ export class MarketingService {
     if (existing.status !== 'PENDING') {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
     }
+
+    // Branch isolation: approver + requester must share the active branch.
+    // Admin-class in global mode (currentBranchId = NULL) bypasses for cross-branch
+    // approvals from /admin via "All branches" view.
+    await this.assertSameBranchOrAdmin(actor, existing.requesterId, currentBranchId);
 
     const [ledgerDup] = await this.db
       .select({ id: schema.marketingFunding.id })

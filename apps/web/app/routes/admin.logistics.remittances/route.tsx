@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { RemittancesAdminPage } from '~/features/remittances/RemittancesAdminPage';
 import type { RemittanceAdminRecord } from '~/features/remittances/RemittancesAdminPage';
 
@@ -53,7 +54,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to mark as received';
+      const err = extractApiErrorMessage(res.data, 'Failed to mark as received');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
