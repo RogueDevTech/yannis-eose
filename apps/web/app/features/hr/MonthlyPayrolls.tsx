@@ -3,6 +3,7 @@ import { useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -114,6 +115,7 @@ export function MonthlyPayrolls({
   const [batchDetail, setBatchDetail] = useState<BatchDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generateBranchId, setGenerateBranchId] = useState<string>('');
   // Tracks whether the most recent fetcher transition was a generate submit — so the close-on-success
   // effect doesn't fire for OTHER actions sharing this fetcher (approve, reject, mark paid, etc.).
   const generateInFlightRef = useRef(false);
@@ -138,6 +140,12 @@ export function MonthlyPayrolls({
     const own = branches.find((b) => b.id === viewer.currentBranchId);
     return own ? [own] : [];
   }, [viewer, branches]);
+
+  useEffect(() => {
+    if (showGenerate && !generateBranchId) {
+      setGenerateBranchId(generatableBranches[0]?.id ?? '');
+    }
+  }, [showGenerate, generateBranchId, generatableBranches]);
 
   // Open / close detail modal — fetch on open
   useEffect(() => {
@@ -260,12 +268,15 @@ export function MonthlyPayrolls({
           </p>
           <fetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="generateBatch" />
-            <FormSelect
+            <input type="hidden" name="branchId" value={generateBranchId} />
+            <SearchableSelect
+              id="payroll-generate-branchId"
               label="Branch"
-              name="branchId"
               required
+              value={generateBranchId}
+              onChange={setGenerateBranchId}
               options={generatableBranches.map((b) => ({ value: b.id, label: b.name }))}
-              defaultValue={generatableBranches[0]?.id}
+              searchPlaceholder="Search branches..."
             />
             <FormSelect
               label="Department"

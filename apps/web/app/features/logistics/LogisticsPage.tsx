@@ -13,6 +13,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import type {
@@ -131,6 +132,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('providers');
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
+  const [addLocationProviderId, setAddLocationProviderId] = useState('');
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [viewingProvider, setViewingProvider] = useState<Provider | null>(null);
 
@@ -170,7 +172,14 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(true)}>
               + Logistics company
             </Button>
-            <Button variant="primary" size="sm" onClick={() => setShowAddLocation(true)}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setAddLocationProviderId('');
+                setShowAddLocation(true);
+              }}
+            >
               + Location
             </Button>
           </div>
@@ -219,12 +228,24 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
 
       {/* Add Location Modal */}
       {showAddLocation && (
-        <Modal open onClose={() => setShowAddLocation(false)} maxWidth="max-w-2xl" backdropBlur contentClassName="p-0">
+        <Modal
+          open
+          onClose={() => {
+            setShowAddLocation(false);
+            setAddLocationProviderId('');
+          }}
+          maxWidth="max-w-2xl"
+          backdropBlur
+          contentClassName="p-0"
+        >
           <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
             <h3 className="text-lg font-semibold text-app-fg">Add Location</h3>
             <button
               type="button"
-              onClick={() => setShowAddLocation(false)}
+              onClick={() => {
+                setShowAddLocation(false);
+                setAddLocationProviderId('');
+              }}
               className="text-app-fg-muted hover:text-app-fg transition-colors"
               aria-label="Close"
             >
@@ -235,12 +256,17 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           </div>
           <fetcher.Form method="post" className="px-6 py-4 space-y-3">
             <input type="hidden" name="intent" value="createLocation" />
+            <input type="hidden" name="providerId" value={addLocationProviderId} />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <FormSelect
-                name="providerId"
+              <SearchableSelect
+                id="add-location-provider"
+                label="Logistics company"
                 required
+                value={addLocationProviderId}
+                onChange={setAddLocationProviderId}
                 options={providers.map((p: Provider) => ({ value: p.id, label: p.name }))}
                 placeholder="Select logistics company…"
+                searchPlaceholder="Search companies…"
               />
               <TextInput name="name" type="text" required placeholder="Location name" />
               <TextInput name="address" type="text" required placeholder="Address" />
@@ -254,8 +280,25 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddLocation(false)}>Cancel</Button>
-              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setShowAddLocation(false);
+                  setAddLocationProviderId('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                disabled={!addLocationProviderId}
+                loading={fetcher.state === 'submitting'}
+                loadingText="Creating..."
+              >
                 Create Location
               </Button>
             </div>

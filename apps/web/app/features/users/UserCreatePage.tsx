@@ -10,6 +10,7 @@ import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { RadioGroup } from '~/components/ui/radio-group';
 import type {
   UserCreateLoaderData,
@@ -77,6 +78,8 @@ export function UserCreatePage({
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
   const [assignFinanceHat, setAssignFinanceHat] = useState(false);
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  const [logisticsLocationId, setLogisticsLocationId] = useState('');
+  const [commissionPlanId, setCommissionPlanId] = useState('');
 
   const conflictingHead =
     HEAD_ROLES.includes(selectedRole) && selectedBranchId
@@ -97,6 +100,14 @@ export function UserCreatePage({
   const is3PLRole = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const showProductAssignment = selectedRole === 'MEDIA_BUYER';
   const showCompensation = !!selectedRole;
+
+  useEffect(() => {
+    if (!showLogisticsLocation) setLogisticsLocationId('');
+  }, [showLogisticsLocation]);
+
+  useEffect(() => {
+    if (compensationMode !== 'existing') setCommissionPlanId('');
+  }, [compensationMode]);
 
   const toggleProduct = (id: string) => {
     setSelectedProductIds((prev) =>
@@ -151,6 +162,11 @@ export function UserCreatePage({
         {showProductAssignment && selectedProductIds.length > 0 && (
           <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
         )}
+        <input type="hidden" name="primaryBranchId" value={selectedBranchId} />
+        {showLogisticsLocation ? <input type="hidden" name="logisticsLocationId" value={logisticsLocationId} /> : null}
+        {compensationMode === 'existing' && filteredPlans.length > 0 ? (
+          <input type="hidden" name="commissionPlanId" value={commissionPlanId} />
+        ) : null}
 
         {/* Section 1: Account Details */}
         <div className="card space-y-4">
@@ -200,19 +216,20 @@ export function UserCreatePage({
             </div>
 
             <div>
-              <FormSelect
+              <SearchableSelect
                 id="primaryBranchId"
-                name="primaryBranchId"
                 label="Primary Branch"
                 required
                 placeholder="Select primary branch"
+                searchPlaceholder="Search branches..."
                 value={selectedBranchId}
-                onChange={(e) => setSelectedBranchId(e.target.value)}
+                onChange={setSelectedBranchId}
                 options={branches
                   .filter((branch: UserCreateBranch) => branch.status === 'ACTIVE')
                   .map((branch: UserCreateBranch) => ({
                     value: branch.id,
-                    label: `${branch.name} (${branch.code})`,
+                    label: branch.name,
+                    description: branch.code,
                   }))}
               />
               <p className="text-xs text-app-fg-muted mt-1">
@@ -266,14 +283,17 @@ export function UserCreatePage({
             {/* Logistics Location (TPL roles) */}
             {showLogisticsLocation && (
               <div>
-                <FormSelect
+                <SearchableSelect
                   id="logisticsLocationId"
-                  name="logisticsLocationId"
                   label="Logistics Location"
+                  value={logisticsLocationId}
+                  onChange={setLogisticsLocationId}
                   placeholder="Select location"
+                  searchPlaceholder="Search locations..."
                   options={locations.map((loc: UserCreateLocation) => ({
                     value: loc.id,
-                    label: `${loc.name} — ${loc.address}`,
+                    label: loc.name,
+                    description: loc.address,
                   }))}
                 />
                 {locations.length === 0 && (
@@ -354,11 +374,13 @@ export function UserCreatePage({
             {/* Existing plan selector — dropdown when plans exist */}
             {compensationMode === 'existing' && filteredPlans.length > 0 && (
               <div>
-                <FormSelect
+                <SearchableSelect
                   id="commissionPlanId"
-                  name="commissionPlanId"
                   label="Commission Plan"
+                  value={commissionPlanId}
+                  onChange={setCommissionPlanId}
                   placeholder="Select a plan"
+                  searchPlaceholder="Search plans..."
                   options={filteredPlans.map((plan: UserCreateCommissionPlan) => ({
                     value: plan.id,
                     label: plan.planName,

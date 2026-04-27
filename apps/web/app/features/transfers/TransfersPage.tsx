@@ -7,7 +7,7 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
-import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { DataTable, type TableColumn } from '~/components/ui/data-table';
 import { DescriptionList } from '~/components/ui/description-list';
@@ -30,6 +30,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
   const [viewTransfer, setViewTransfer] = useState<Transfer | null>(null);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedFromLocation, setSelectedFromLocation] = useState('');
+  const [selectedToLocationId, setSelectedToLocationId] = useState('');
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
@@ -43,6 +44,18 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
   useEffect(() => {
     if (actionSuccess && showForm) setShowForm(false);
   }, [actionSuccess, showForm]);
+
+  useEffect(() => {
+    if (actionSuccess) {
+      setSelectedProductId('');
+      setSelectedFromLocation('');
+      setSelectedToLocationId('');
+    }
+  }, [actionSuccess]);
+
+  useEffect(() => {
+    setSelectedToLocationId((prev) => (prev === selectedFromLocation ? '' : prev));
+  }, [selectedFromLocation]);
 
   const getLocationName = (id: string) => {
     const loc = locations.find((l: Location) => l.id === id);
@@ -58,7 +71,16 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
         description="Record stock movements between your warehouse and other locations. Receipt is confirmed in Logistics → Stock Transfer Confirmations."
         actions={
           canInitiate ? (
-            <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setSelectedProductId('');
+                setSelectedFromLocation('');
+                setSelectedToLocationId('');
+                setShowForm(true);
+              }}
+            >
               + Record transfer
             </Button>
           ) : undefined
@@ -81,7 +103,17 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
       />
 
       {canInitiate && (
-        <Modal open={showForm} onClose={() => setShowForm(false)} maxWidth="max-w-2xl" aria-labelledby="transfer-form-title">
+        <Modal
+          open={showForm}
+          onClose={() => {
+            setShowForm(false);
+            setSelectedProductId('');
+            setSelectedFromLocation('');
+            setSelectedToLocationId('');
+          }}
+          maxWidth="max-w-2xl"
+          aria-labelledby="transfer-form-title"
+        >
           <div className="card border-0 shadow-none space-y-4 p-4 sm:p-6">
             <DeferredSection resolve={products} skeleton="card">
               {(resolvedProducts) => (
@@ -100,7 +132,17 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                           <h3 id="transfer-form-title" className="text-lg font-semibold text-app-fg">
                             Record stock transfer
                           </h3>
-                          <button type="button" onClick={() => setShowForm(false)} className="text-app-fg-muted hover:text-app-fg shrink-0" aria-label="Close">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowForm(false);
+                              setSelectedProductId('');
+                              setSelectedFromLocation('');
+                              setSelectedToLocationId('');
+                            }}
+                            className="text-app-fg-muted hover:text-app-fg shrink-0"
+                            aria-label="Close"
+                          >
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                             </svg>
@@ -108,51 +150,56 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                         </div>
 
                         <input type="hidden" name="intent" value="initiateTransfer" />
+                        <input type="hidden" name="productId" value={selectedProductId} />
+                        <input type="hidden" name="fromLocationId" value={selectedFromLocation} />
+                        <input type="hidden" name="toLocationId" value={selectedToLocationId} />
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <FormSelect
-                            name="productId"
+                          <SearchableSelect
+                            id="transfer-product"
                             label="Product"
                             required
                             value={selectedProductId}
-                            onChange={(e) => setSelectedProductId(e.target.value)}
-                            options={[
-                              { value: '', label: 'Select product...' },
-                              ...activeProducts.map((p: Product) => ({
-                                value: p.id,
-                                label: p.name,
-                              })),
-                            ]}
+                            onChange={setSelectedProductId}
+                            placeholder="Select product..."
+                            searchPlaceholder="Search products..."
+                            options={activeProducts.map((p: Product) => ({
+                              value: p.id,
+                              label: p.name,
+                            }))}
                           />
 
-                          <FormSelect
-                            name="fromLocationId"
+                          <SearchableSelect
+                            id="transfer-from-location"
                             label="From location"
                             required
                             value={selectedFromLocation}
-                            onChange={(e) => setSelectedFromLocation(e.target.value)}
-                            options={[
-                              { value: '', label: 'Select source...' },
-                              ...activeLocations.map((l: Location) => ({
-                                value: l.id,
-                                label: `${l.name}${selectedProductId ? ` (${getAvailableStock(selectedProductId, l.id)} avail.)` : ''}`,
-                              })),
-                            ]}
+                            onChange={setSelectedFromLocation}
+                            placeholder="Select source..."
+                            searchPlaceholder="Search locations..."
+                            options={activeLocations.map((l: Location) => ({
+                              value: l.id,
+                              label: l.name,
+                              description: selectedProductId
+                                ? `${getAvailableStock(selectedProductId, l.id)} available`
+                                : undefined,
+                            }))}
                           />
 
-                          <FormSelect
-                            name="toLocationId"
+                          <SearchableSelect
+                            id="transfer-to-location"
                             label="To location"
                             required
-                            options={[
-                              { value: '', label: 'Select destination...' },
-                              ...activeLocations
-                                .filter((l: Location) => l.id !== selectedFromLocation)
-                                .map((l: Location) => ({
-                                  value: l.id,
-                                  label: l.name,
-                                })),
-                            ]}
+                            value={selectedToLocationId}
+                            onChange={setSelectedToLocationId}
+                            placeholder="Select destination..."
+                            searchPlaceholder="Search locations..."
+                            options={activeLocations
+                              .filter((l: Location) => l.id !== selectedFromLocation)
+                              .map((l: Location) => ({
+                                value: l.id,
+                                label: l.name,
+                              }))}
                           />
 
                           <TextInput
@@ -181,10 +228,27 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                         )}
 
                         <div className="flex flex-wrap gap-2 pt-1">
-                          <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            size="sm"
+                            disabled={!selectedProductId || !selectedFromLocation || !selectedToLocationId}
+                            loading={fetcher.state === 'submitting'}
+                            loadingText="Saving..."
+                          >
                             Save transfer
                           </Button>
-                          <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => {
+                              setShowForm(false);
+                              setSelectedProductId('');
+                              setSelectedFromLocation('');
+                              setSelectedToLocationId('');
+                            }}
+                          >
                             Cancel
                           </Button>
                         </div>

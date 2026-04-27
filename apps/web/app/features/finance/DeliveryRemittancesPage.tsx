@@ -3,7 +3,7 @@ import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
-import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -177,11 +177,13 @@ export function DeliveryRemittancesPage({
           tabs={STATUS_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
           variant="pill"
         />
-        <FormSelect
+        <SearchableSelect
+          id="delivery-remittance-location-filter"
           value={filters.location}
-          onChange={(e) => handleLocationChange(e.target.value)}
-          aria-label="Filter by location"
-          className="w-full sm:w-52"
+          onChange={handleLocationChange}
+          wrapperClassName="w-full sm:w-52"
+          placeholder="All locations"
+          searchPlaceholder="Search locations..."
           options={[
             { value: '', label: 'All locations' },
             ...locations.map((loc) => ({ value: loc.id, label: loc.name })),

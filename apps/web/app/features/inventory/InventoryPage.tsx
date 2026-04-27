@@ -18,6 +18,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -348,25 +349,27 @@ export function InventoryPage({
               className="grid grid-cols-1 sm:grid-cols-2 gap-4"
             >
               <input type="hidden" name="intent" value="stockIntake" />
-              <FormSelect
+              <input type="hidden" name="productId" value={intakeProductId} />
+              <input type="hidden" name="locationId" value={intakeLocationId} />
+              <SearchableSelect
                 label="Product"
                 id="intake-productId"
-                name="productId"
                 required
                 value={intakeProductId}
-                onChange={(e) => setIntakeProductId(e.target.value)}
+                onChange={setIntakeProductId}
                 placeholder="Select product..."
+                searchPlaceholder="Search products..."
                 options={products.map((p: ProductOption) => ({ value: p.id, label: p.name }))}
                 wrapperClassName="sm:col-span-2"
               />
-              <FormSelect
+              <SearchableSelect
                 label="Location"
                 id="intake-locationId"
-                name="locationId"
                 required
                 value={intakeLocationId}
-                onChange={(e) => setIntakeLocationId(e.target.value)}
+                onChange={setIntakeLocationId}
                 placeholder="Select location..."
+                searchPlaceholder="Search locations..."
                 options={locations.map((l: LocationOption) => ({ value: l.id, label: l.name }))}
                 wrapperClassName="sm:col-span-2"
               />
@@ -421,6 +424,7 @@ export function InventoryPage({
                 <Button
                   type="submit"
                   variant="primary"
+                  disabled={!intakeProductId || !intakeLocationId}
                   loading={fetcher.state !== 'idle'}
                   loadingText="Adding..."
                 >
@@ -688,31 +692,29 @@ export function InventoryPage({
         {/* Filter + search + sort row. Hidden only when there is no data AND no active filter. */}
         {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentLocationFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <FormSelect
-              label=""
+            <SearchableSelect
               id="levels-product-filter"
-              name="productFilter"
               value={currentProductFilter}
-              onChange={(e) => updateLevelsParam('productId', e.target.value)}
+              onChange={(v) => updateLevelsParam('productId', v)}
               wrapperClassName="w-full sm:w-48"
+              placeholder="All products"
+              searchPlaceholder="Search products..."
               options={[
                 { value: 'ALL', label: 'All products' },
                 ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
               ]}
-              aria-label="Filter by product"
             />
-            <FormSelect
-              label=""
+            <SearchableSelect
               id="levels-location-filter"
-              name="locationFilter"
               value={currentLocationFilter}
-              onChange={(e) => updateLevelsParam('locationId', e.target.value)}
+              onChange={(v) => updateLevelsParam('locationId', v)}
               wrapperClassName="w-full sm:w-48"
+              placeholder="All locations"
+              searchPlaceholder="Search locations..."
               options={[
                 { value: 'ALL', label: 'All locations' },
                 ...locations.map((l: LocationOption) => ({ value: l.id, label: l.name })),
               ]}
-              aria-label="Filter by location"
             />
             <form
               method="get"
@@ -1290,6 +1292,8 @@ function ReconciliationTab({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [reconciliationLocationId, setReconciliationLocationId] = useState('');
+  const [reconciliationProductId, setReconciliationProductId] = useState('');
 
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
   if (actionSuccess && showForm) setShowForm(false);
@@ -1301,37 +1305,74 @@ function ReconciliationTab({
   return (
     <>
       <div className="flex justify-end">
-        <Button variant="secondary" size="sm" onClick={() => setShowForm(!showForm)}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            if (showForm) {
+              setShowForm(false);
+            } else {
+              setReconciliationLocationId('');
+              setReconciliationProductId('');
+              setShowForm(true);
+            }
+          }}
+        >
           {showForm ? 'Close' : '+ Stock Reconciliation'}
         </Button>
       </div>
 
       {/* Reconciliation Form */}
-      <ResponsiveFormPanel open={showForm} onClose={() => setShowForm(false)}>
+      <ResponsiveFormPanel
+        open={showForm}
+        onClose={() => {
+          setShowForm(false);
+          setReconciliationLocationId('');
+          setReconciliationProductId('');
+        }}
+      >
         <fetcher.Form method="post" className="card space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-app-fg">Stock Reconciliation Report</h3>
-            <button type="button" onClick={() => setShowForm(false)} className="text-app-fg-muted hover:text-app-fg">
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                setReconciliationLocationId('');
+                setReconciliationProductId('');
+              }}
+              className="text-app-fg-muted hover:text-app-fg"
+            >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
           <input type="hidden" name="intent" value="createReconciliation" />
+          <input type="hidden" name="locationId" value={reconciliationLocationId} />
+          <input type="hidden" name="productId" value={reconciliationProductId} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FormSelect
+            <SearchableSelect
+              id="reconciliation-location"
               label="Location"
-              name="locationId"
               required
+              value={reconciliationLocationId}
+              onChange={setReconciliationLocationId}
               placeholder="Select location..."
+              searchPlaceholder="Search locations..."
               options={activeLocations.map((l) => ({
                 value: l.id,
-                label: `${l.name}${l.dispatchLocked ? ' (LOCKED)' : ''}`,
+                label: l.name,
+                disabled: l.dispatchLocked,
+                description: l.dispatchLocked ? 'Dispatch locked' : undefined,
               }))}
             />
-            <FormSelect
+            <SearchableSelect
+              id="reconciliation-product"
               label="Product"
-              name="productId"
               required
+              value={reconciliationProductId}
+              onChange={setReconciliationProductId}
               placeholder="Select product..."
+              searchPlaceholder="Search products..."
               options={products.map((p) => ({ value: p.id, label: p.name }))}
             />
             <TextInput
@@ -1369,8 +1410,32 @@ function ReconciliationTab({
             </p>
           </div>
           <div className="flex gap-2">
-            <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Submitting...">Submit Reconciliation</Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={
+                !reconciliationLocationId ||
+                !reconciliationProductId ||
+                activeLocations.find((l) => l.id === reconciliationLocationId)?.dispatchLocked === true
+              }
+              loading={fetcher.state === 'submitting'}
+              loadingText="Submitting..."
+            >
+              Submit Reconciliation
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setShowForm(false);
+                setReconciliationLocationId('');
+                setReconciliationProductId('');
+              }}
+            >
+              Cancel
+            </Button>
           </div>
         </fetcher.Form>
       </ResponsiveFormPanel>

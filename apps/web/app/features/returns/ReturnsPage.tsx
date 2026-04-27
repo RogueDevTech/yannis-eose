@@ -11,6 +11,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Textarea } from '~/components/ui/textarea';
@@ -48,6 +49,8 @@ export function ReturnsPage({
   const [activeTab, setActiveTab] = useState<'returns' | 'reconciliation'>('returns');
   const [writeOffOrderId, setWriteOffOrderId] = useState<string | null>(null);
   const [showReconciliationForm, setShowReconciliationForm] = useState(false);
+  const [reconciliationLocationId, setReconciliationLocationId] = useState('');
+  const [reconciliationProductId, setReconciliationProductId] = useState('');
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
@@ -308,27 +311,36 @@ export function ReturnsPage({
                   </div>
 
                   <input type="hidden" name="intent" value="createReconciliation" />
+                  <input type="hidden" name="locationId" value={reconciliationLocationId} />
+                  <input type="hidden" name="productId" value={reconciliationProductId} />
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <FormSelect
-                      name="locationId"
+                    <SearchableSelect
+                      id="returns-reconciliation-location"
                       label="Location"
                       required
+                      value={reconciliationLocationId}
+                      onChange={setReconciliationLocationId}
+                      placeholder="Select location..."
+                      searchPlaceholder="Search locations..."
                       options={[
-                        { value: '', label: 'Select location...' },
                         ...locations.filter((l: Location) => l.status === 'ACTIVE').map((l: Location) => ({
                           value: l.id,
                           label: `${l.name}${l.dispatchLocked ? ' (LOCKED)' : ''}`,
+                          disabled: Boolean(l.dispatchLocked),
                         })),
                       ]}
                     />
 
-                    <FormSelect
-                      name="productId"
+                    <SearchableSelect
+                      id="returns-reconciliation-product"
                       label="Product"
                       required
+                      value={reconciliationProductId}
+                      onChange={setReconciliationProductId}
+                      placeholder="Select product..."
+                      searchPlaceholder="Search products..."
                       options={[
-                        { value: '', label: 'Select product...' },
                         ...resolvedProducts.filter((p: Product) => p.status === 'ACTIVE').map((p: Product) => ({
                           value: p.id,
                           label: p.name,

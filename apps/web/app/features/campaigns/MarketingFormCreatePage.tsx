@@ -3,7 +3,7 @@ import { Link, useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
-import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import type { CustomFormField, Product, StandardFieldConfig } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
@@ -33,6 +33,7 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
   const [formSubtitle, setFormSubtitle] = useState('');
   const [formButtonText, setFormButtonText] = useState('');
   const [successCallbackUrl, setSuccessCallbackUrl] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState('');
 
   const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
   const standardFieldsJson = useMemo(() => JSON.stringify(standardFields), [standardFields]);
@@ -90,12 +91,21 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
+            <input type="hidden" name="productId" value={selectedProductId} readOnly />
 
             <div className="card space-y-3">
               <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <TextInput name="name" required placeholder="Form name" />
-                <FormSelect name="productId" required options={productOptions} placeholder="Select product..." />
+                <SearchableSelect
+                  id="marketing-form-product"
+                  value={selectedProductId}
+                  onChange={setSelectedProductId}
+                  required
+                  options={productOptions}
+                  placeholder="Select product..."
+                  searchPlaceholder="Search products..."
+                />
               </div>
 
               <div className="border-t border-app-border pt-3">
