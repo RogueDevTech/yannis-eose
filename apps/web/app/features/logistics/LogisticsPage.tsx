@@ -86,10 +86,10 @@ function AddProviderForm({
             <TextInput
               name={rows.length > 1 ? `provider_${idx}_name` : 'name'}
               type="text"
-              label={idx === 0 ? 'Provider name' : undefined}
+              label={idx === 0 ? 'Logistics company name' : undefined}
               value={row.name}
               onChange={(e) => updateRow(idx, 'name', e.target.value)}
-              placeholder="Provider name"
+              placeholder="Logistics company name"
               required={idx === 0}
             />
             <TextInput
@@ -129,7 +129,7 @@ function AddProviderForm({
       </div>
       <div className="flex gap-2">
         <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
-          Create {filledCount > 1 ? `${filledCount} Providers` : 'Provider'}
+          {filledCount > 1 ? `Create ${filledCount} logistics companies` : 'Create logistics company'}
         </Button>
         <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
           Cancel
@@ -368,12 +368,12 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     <div className="space-y-4">
       <PageHeader
         title="Logistics"
-        description="Manage 3PL providers, locations, and delivery operations"
+        description="Manage 3PL logistics companies, locations, and delivery operations"
         actions={
           <div className="flex gap-2">
             <PageRefreshButton />
             <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(true)}>
-              + Provider
+              + Logistics company
             </Button>
             <Button variant="primary" size="sm" onClick={() => setShowAddLocation(true)}>
               + Location
@@ -396,7 +396,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           {(resolvedHealth) => (
             <OverviewStatStrip
               items={[
-                { label: 'Providers', value: totalProviders, valueClassName: 'text-app-fg' },
+                { label: 'Logistics companies', value: totalProviders, valueClassName: 'text-app-fg' },
                 { label: 'Locations', value: totalLocations, valueClassName: 'text-app-fg' },
                 {
                   label: 'Escalations',
@@ -414,17 +414,17 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         <OverviewStatStrip
           showScrollControls={false}
           items={[
-            { label: 'Providers', value: totalProviders, valueClassName: 'text-app-fg' },
+            { label: 'Logistics companies', value: totalProviders, valueClassName: 'text-app-fg' },
             { label: 'Locations', value: totalLocations, valueClassName: 'text-app-fg' },
           ]}
         />
       )}
 
-      {/* Add Provider Modal */}
+      {/* Add logistics company modal */}
       {showAddProvider && (
         <Modal open onClose={() => setShowAddProvider(false)} maxWidth="max-w-2xl" backdropBlur contentClassName="p-0">
           <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
-            <h3 className="text-lg font-semibold text-app-fg">Add Provider</h3>
+            <h3 className="text-lg font-semibold text-app-fg">Add logistics company</h3>
             <button
               type="button"
               onClick={() => setShowAddProvider(false)}
@@ -466,7 +466,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 name="providerId"
                 required
                 options={providers.map((p: Provider) => ({ value: p.id, label: p.name }))}
-                placeholder="Select provider..."
+                placeholder="Select logistics company…"
               />
               <TextInput name="name" type="text" required placeholder="Location name" />
               <TextInput name="address" type="text" required placeholder="Address" />
@@ -489,11 +489,11 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         </Modal>
       )}
 
-      {/* Edit Provider Modal */}
+      {/* Edit logistics company modal */}
       {editingProvider && (
         <Modal open onClose={() => setEditingProvider(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-0">
             <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
-              <h3 className="text-lg font-semibold text-app-fg">Edit Provider</h3>
+              <h3 className="text-lg font-semibold text-app-fg">Edit logistics company</h3>
               <button
                 type="button"
                 onClick={() => setEditingProvider(null)}
@@ -510,10 +510,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               <TextInput
                 name="name"
                 type="text"
-                label="Provider name"
+                label="Logistics company name"
                 defaultValue={editingProvider.name}
                 required
-                placeholder="Provider name"
+                placeholder="Logistics company name"
               />
               <TextInput
                 name="contactInfo"
@@ -554,7 +554,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {viewingProvider && (
         <Modal open onClose={() => setViewingProvider(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-0">
           <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
-            <h3 className="text-lg font-semibold text-app-fg">Partner details</h3>
+            <h3 className="text-lg font-semibold text-app-fg">Logistics company details</h3>
             <button
               type="button"
               onClick={() => setViewingProvider(null)}
@@ -637,7 +637,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         value={activeTab}
         onChange={(v) => setActiveTab(v as typeof activeTab)}
         tabs={[
-          { value: 'providers', label: `Providers (${totalProviders})` },
+          { value: 'providers', label: `Logistics companies (${totalProviders})` },
           { value: 'locations', label: `Locations (${totalLocations})` },
           ...(canViewEscalations
             ? [
@@ -709,7 +709,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 {providers.length === 0 && (
                   <tr>
                     <td colSpan={5}>
-                      <EmptyState title="No logistics providers yet" />
+                      <EmptyState title="No logistics companies yet" />
                     </td>
                   </tr>
                 )}
@@ -718,7 +718,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           </div>
           <div className="md:hidden space-y-3 px-1">
             {providers.length === 0 ? (
-              <EmptyState title="No logistics providers yet" />
+              <EmptyState title="No logistics companies yet" />
             ) : (
               providers.map((p: Provider) => (
                 <div key={p.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
@@ -763,7 +763,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 <tr>
                   <th className="table-header">Location</th>
                   <th className="table-header">Address</th>
-                  <th className="table-header">Provider</th>
+                  <th className="table-header">Logistics company</th>
                   <th className="table-header">Status</th>
                 </tr>
               </thead>
@@ -784,7 +784,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 {locations.length === 0 && (
                   <tr>
                     <td colSpan={4}>
-                      <EmptyState title="No locations yet" description="Add a provider first, then add locations." />
+                      <EmptyState title="No locations yet" description="Add a logistics company first, then add locations." />
                     </td>
                   </tr>
                 )}
@@ -793,7 +793,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           </div>
           <div className="md:hidden space-y-3 px-1">
             {locations.length === 0 ? (
-              <EmptyState title="No locations yet" description="Add a provider first, then add locations." />
+              <EmptyState title="No locations yet" description="Add a logistics company first, then add locations." />
             ) : (
               locations.map((l: Location) => {
                 const provider = providers.find((p: Provider) => p.id === l.providerId);
@@ -805,7 +805,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                     </div>
                     <div className="text-sm text-app-fg-muted space-y-0.5">
                       <div>Address: {l.address}</div>
-                      <div>Provider: {provider?.name ?? l.providerId.slice(0, 8)}</div>
+                      <div>Logistics company: {provider?.name ?? l.providerId.slice(0, 8)}</div>
                     </div>
                   </div>
                 );

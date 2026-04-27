@@ -5,21 +5,8 @@ import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { Checkbox } from '~/components/ui/checkbox';
+import { FIELD_TYPE_META } from './form-config-custom-preview';
 import type { CustomFormField, CustomFormFieldType } from './types';
-
-/** UI label + sample placeholder for each field type. */
-const FIELD_TYPE_META: Record<CustomFormFieldType, { label: string; icon: string; needsOptions: boolean; description: string }> = {
-  text: { label: 'Short text', icon: 'Aa', needsOptions: false, description: 'Single-line text input' },
-  textarea: { label: 'Long text', icon: '¶', needsOptions: false, description: 'Multi-line text area' },
-  email: { label: 'Email', icon: '@', needsOptions: false, description: 'Email address with validation' },
-  phone: { label: 'Phone', icon: '☎', needsOptions: false, description: 'Phone number' },
-  number: { label: 'Number', icon: '#', needsOptions: false, description: 'Numeric input' },
-  date: { label: 'Date', icon: '📅', needsOptions: false, description: 'Date picker' },
-  dropdown: { label: 'Dropdown', icon: '▾', needsOptions: true, description: 'Pick one from a list' },
-  radio: { label: 'Radio', icon: '◉', needsOptions: true, description: 'Pick one (radio buttons)' },
-  checkbox_group: { label: 'Checkboxes', icon: '☑', needsOptions: true, description: 'Pick many' },
-  toggle: { label: 'Yes / No', icon: '🔘', needsOptions: false, description: 'Single yes/no toggle' },
-};
 
 const ALL_FIELD_TYPES = Object.keys(FIELD_TYPE_META) as CustomFormFieldType[];
 
@@ -50,16 +37,15 @@ export function makeBlankField(type: CustomFormFieldType, order: number): Custom
 export interface CustomFieldsEditorProps {
   fields: CustomFormField[];
   onFieldsChange: (next: CustomFormField[]) => void;
-  accentColor: string;
   /** Shown under the field list (e.g. link to forms list vs create-page hint). */
   footnote?: ReactNode;
 }
 
 /**
- * Two-pane custom field builder: editable list + live preview. Controlled via `fields` /
- * `onFieldsChange` so parents can mirror into a form hidden input or persist on save.
+ * Custom field builder: editable list. Live full-form preview is rendered in the page layout.
+ * Controlled via `fields` / `onFieldsChange` for hidden JSON on save.
  */
-export function CustomFieldsEditor({ fields, onFieldsChange, accentColor, footnote }: CustomFieldsEditorProps) {
+export function CustomFieldsEditor({ fields, onFieldsChange, footnote }: CustomFieldsEditorProps) {
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
 
@@ -96,60 +82,51 @@ export function CustomFieldsEditor({ fields, onFieldsChange, accentColor, footno
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="space-y-3">
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-app-fg">Custom fields</h2>
-              <span className="text-xs text-app-fg-muted">{fields.length} of 50</span>
-            </div>
-
-            {fields.length === 0 ? (
-              <div className="border border-dashed border-app-border rounded-lg p-8 text-center">
-                <p className="text-sm font-medium text-app-fg mb-1">No custom fields yet</p>
-                <p className="text-xs text-app-fg-muted mb-4">
-                  Add fields like Shirt size, Newsletter sign-up, or Special instructions.
-                </p>
-                <Button variant="primary" size="sm" type="button" onClick={() => setShowAddPicker(true)}>
-                  + Add a field
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {fields.map((field, index) => (
-                  <FieldRow
-                    key={field.id}
-                    field={field}
-                    index={index}
-                    onEdit={() => setEditingFieldId(field.id)}
-                    onDelete={() => handleDeleteField(field.id)}
-                    onReorder={handleReorder}
-                  />
-                ))}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="w-full mt-3"
-                  onClick={() => setShowAddPicker(true)}
-                  disabled={fields.length >= 50}
-                >
-                  + Add another field
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {footnote ? <div className="text-xs text-app-fg-muted px-2">{footnote}</div> : null}
-        </div>
-
+      <div className="space-y-3">
         <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-app-fg">Preview</h2>
-            <span className="text-xs text-app-fg-muted">As your customers will see it</span>
+            <h2 className="text-sm font-semibold text-app-fg">Custom fields</h2>
+            <span className="text-xs text-app-fg-muted">{fields.length} of 50</span>
           </div>
-          <FormPreview fields={fields} accentColor={accentColor} />
+
+          {fields.length === 0 ? (
+            <div className="border border-dashed border-app-border rounded-lg p-8 text-center">
+              <p className="text-sm font-medium text-app-fg mb-1">No custom fields yet</p>
+              <p className="text-xs text-app-fg-muted mb-4">
+                Add fields like Shirt size, Newsletter sign-up, or Special instructions.
+              </p>
+              <Button variant="primary" size="sm" type="button" onClick={() => setShowAddPicker(true)}>
+                + Add a field
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {fields.map((field, index) => (
+                <FieldRow
+                  key={field.id}
+                  field={field}
+                  index={index}
+                  onEdit={() => setEditingFieldId(field.id)}
+                  onDelete={() => handleDeleteField(field.id)}
+                  onReorder={handleReorder}
+                  onUpdateRequired={(id, required) => handleUpdateField(id, { required })}
+                />
+              ))}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full mt-3"
+                onClick={() => setShowAddPicker(true)}
+                disabled={fields.length >= 50}
+              >
+                + Add another field
+              </Button>
+            </div>
+          )}
         </div>
+
+        {footnote ? <div className="text-xs text-app-fg-muted px-2">{footnote}</div> : null}
       </div>
 
       {showAddPicker && (
@@ -179,6 +156,7 @@ export function CustomFieldsEditor({ fields, onFieldsChange, accentColor, footno
 
       {editingField && (
         <FieldEditorModal
+          key={editingField.id}
           field={editingField}
           onClose={() => setEditingFieldId(null)}
           onSave={(patch) => {
@@ -197,12 +175,14 @@ function FieldRow({
   onEdit,
   onDelete,
   onReorder,
+  onUpdateRequired,
 }: {
   field: CustomFormField;
   index: number;
   onEdit: () => void;
   onDelete: () => void;
   onReorder: (fromId: string, toIndex: number) => void;
+  onUpdateRequired: (id: string, required: boolean) => void;
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -249,6 +229,18 @@ function FieldRow({
         </p>
         <p className="text-xs text-app-fg-muted">{FIELD_TYPE_META[field.type].label}</p>
       </div>
+      <label
+        className="flex items-center gap-1.5 shrink-0 text-app-fg-muted"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        title="Require this field on the public form"
+      >
+        <Checkbox
+          checked={!!field.required}
+          onChange={(e) => onUpdateRequired(field.id, e.target.checked)}
+        />
+        <span className="text-xs">Required</span>
+      </label>
       <div className="flex items-center gap-1 shrink-0">
         <Button type="button" variant="secondary" size="sm" className="text-xs" onClick={onEdit}>
           Edit
@@ -270,7 +262,10 @@ function FieldEditorModal({
   onClose: () => void;
   onSave: (patch: Partial<CustomFormField>) => void;
 }) {
-  const [draft, setDraft] = useState<CustomFormField>(field);
+  const [draft, setDraft] = useState<CustomFormField>(() => ({
+    ...field,
+    required: field.required === true,
+  }));
   const meta = FIELD_TYPE_META[draft.type];
 
   function update<K extends keyof CustomFormField>(key: K, value: CustomFormField[K]) {
@@ -380,7 +375,7 @@ function FieldEditorModal({
       />
 
       <label className="flex items-center gap-2 cursor-pointer">
-        <Checkbox checked={draft.required} onChange={(e) => update('required', e.target.checked)} />
+        <Checkbox checked={!!draft.required} onChange={(e) => update('required', e.target.checked)} />
         <span className="text-sm text-app-fg">Required — customer must fill this in</span>
       </label>
 
@@ -394,124 +389,4 @@ function FieldEditorModal({
       </div>
     </Modal>
   );
-}
-
-function FormPreview({ fields, accentColor }: { fields: CustomFormField[]; accentColor: string }) {
-  if (fields.length === 0) {
-    return (
-      <div className="border border-dashed border-app-border rounded-lg p-8 text-center text-sm text-app-fg-muted">
-        Add a field to see it here.
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-4 rounded-lg bg-app-canvas p-4 border border-app-border">
-      {fields.map((field) => (
-        <PreviewField key={field.id} field={field} accentColor={accentColor} />
-      ))}
-    </div>
-  );
-}
-
-function PreviewField({ field, accentColor }: { field: CustomFormField; accentColor: string }) {
-  const labelEl = (
-    <label className="block text-sm font-medium text-app-fg mb-1">
-      {field.label}
-      {field.required && <span className="text-danger-500 ml-0.5">*</span>}
-    </label>
-  );
-  const helpEl = field.helpText ? <p className="mt-1 text-xs text-app-fg-muted">{field.helpText}</p> : null;
-  switch (field.type) {
-    case 'text':
-    case 'email':
-    case 'phone':
-    case 'number':
-    case 'date':
-      return (
-        <div>
-          {labelEl}
-          <TextInput
-            type={
-              field.type === 'phone'
-                ? 'tel'
-                : field.type === 'date'
-                  ? 'date'
-                  : field.type === 'number'
-                    ? 'number'
-                    : field.type === 'email'
-                      ? 'email'
-                      : 'text'
-            }
-            placeholder={field.placeholder}
-            disabled
-            readOnly
-            wrapperClassName="pointer-events-none"
-          />
-          {helpEl}
-        </div>
-      );
-    case 'textarea':
-      return (
-        <div>
-          {labelEl}
-          <Textarea rows={3} placeholder={field.placeholder} disabled readOnly wrapperClassName="pointer-events-none" />
-          {helpEl}
-        </div>
-      );
-    case 'dropdown':
-      return (
-        <div>
-          {labelEl}
-          <FormSelect
-            disabled
-            placeholder="Select..."
-            options={(field.options ?? []).map((opt, i) => ({ value: `opt-${i}`, label: opt }))}
-            defaultValue=""
-            wrapperClassName="pointer-events-none"
-          />
-          {helpEl}
-        </div>
-      );
-    case 'radio':
-      return (
-        <div>
-          {labelEl}
-          <div className="space-y-1">
-            {(field.options ?? []).map((opt, i) => (
-              <label key={i} className="flex items-center gap-2 text-sm text-app-fg">
-                <input type="radio" name={field.id} disabled style={{ accentColor }} />
-                {opt}
-              </label>
-            ))}
-          </div>
-          {helpEl}
-        </div>
-      );
-    case 'checkbox_group':
-      return (
-        <div>
-          {labelEl}
-          <div className="space-y-1">
-            {(field.options ?? []).map((opt, i) => (
-              <label key={i} className="flex items-center gap-2 text-sm text-app-fg">
-                <input type="checkbox" disabled style={{ accentColor }} />
-                {opt}
-              </label>
-            ))}
-          </div>
-          {helpEl}
-        </div>
-      );
-    case 'toggle':
-      return (
-        <div>
-          <label className="flex items-center gap-2 text-sm text-app-fg">
-            <input type="checkbox" disabled style={{ accentColor }} />
-            {field.label}
-            {field.required && <span className="text-danger-500 ml-0.5">*</span>}
-          </label>
-          {helpEl}
-        </div>
-      );
-  }
 }

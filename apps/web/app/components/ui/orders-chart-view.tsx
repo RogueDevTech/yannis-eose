@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import {
   ResponsiveContainer,
   PieChart,
@@ -42,11 +42,11 @@ interface OrdersChartViewProps {
   /** Heading prefix shown above each chart card (e.g. "Marketing orders" → "Marketing orders by status"). */
   scopeLabel?: string;
   /**
-   * Daily order count series sorted ascending by date. Drives the "Orders over time" trend
-   * line. Source: `orders.timeSeriesByCreated` tRPC scoped to the same filters as the page.
-   * When omitted (or empty), the trend chart card is replaced with an empty-state message.
+   * Daily series from `orders.timeSeriesByCreated`: `orderCount` by creation day,
+   * `deliveredCount` by delivery day (DELIVERED only). When omitted or empty, the trend card
+   * shows an empty state.
    */
-  dailyCounts?: Array<{ date: string; orderCount: number }>;
+  dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
 }
 
 /** Render children only after first client paint — Recharts complains about 0×0 dims during SSR. */
@@ -56,7 +56,13 @@ function ClientOnly({ children, fallback }: { children: ReactNode; fallback?: Re
   return <>{mounted ? children : fallback}</>;
 }
 
+const CREATED_SERIES_LABEL = 'Orders (created)';
+const DELIVERED_SERIES_LABEL = 'Delivered';
+
 export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', dailyCounts = [] }: OrdersChartViewProps) {
+  const chartUid = useId().replace(/:/g, '');
+  const deliveredStroke = STATUS_HEX.DELIVERED;
+
   const data = Object.entries(statusCounts)
     .filter(([, n]) => n > 0)
     .map(([status, n]) => ({
@@ -87,6 +93,7 @@ export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', da
   const trendData = dailyCounts.map((d) => ({
     date: d.date,
     orderCount: d.orderCount,
+    deliveredCount: d.deliveredCount ?? 0,
     // Friendly label for the X-axis (`Apr 5`). Done client-side so the server returns
     // raw ISO dates and the chart can re-localise without a round-trip.
     label: new Date(`${d.date}T00:00:00Z`).toLocaleDateString(undefined, {
@@ -95,10 +102,16 @@ export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', da
     }),
   }));
 
+  const maxPoint =
+    trendData.length === 0
+      ? 0
+      : Math.max(...trendData.map((row) => Math.max(row.orderCount, row.deliveredCount)));
+  const yTop = Math.max(50, Math.ceil(maxPoint / 10) * 10);
+  const yTicks = Array.from({ length: yTop / 10 + 1 }, (_, i) => i * 10);
+
   return (
     <div className="space-y-4">
-      {/* Trend line — orders over time (by created date). Spans full width because a wide
-          time-series is the most informative shape; the other two charts split below. */}
+      {/* Trend: created (indigo) vs delivered (green, by delivered_at). Y-axis min height 50, step 10. */}
       <div className="card">
         <h3 className="text-sm font-semibold text-app-fg mb-3">{scopeLabel} over time</h3>
         {trendData.length === 0 ? (
@@ -111,25 +124,55 @@ export function OrdersChartView({ statusCounts, total, scopeLabel = 'Orders', da
             <ResponsiveContainer width="100%" height={280}>
               <AreaChart data={trendData} margin={{ top: 8, right: 16, left: 4, bottom: 4 }}>
                 <defs>
-                  <linearGradient id="ordersTrendGradient" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id={`${chartUid}-ordersCreated`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
                     <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id={`${chartUid}-ordersDelivered`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={deliveredStroke} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={deliveredStroke} stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" minTickGap={24} />
-                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={32} />
+                <YAxis
+                  domain={[0, yTop]}
+                  ticks={yTicks}
+                  tick={{ fontSize: 11 }}
+                  allowDecimals={false}
+                  width={40}
+                />
                 <Tooltip
-                  formatter={(v) => [Number(v).toLocaleString(), 'Orders']}
+                  formatter={(value, name) => {
+                    const n = typeof value === 'number' ? value : Number(value ?? 0);
+                    const label: string =
+                      name === 'orderCount' || name === CREATED_SERIES_LABEL
+                        ? CREATED_SERIES_LABEL
+                        : DELIVERED_SERIES_LABEL;
+                    const formatted = Number.isFinite(n) ? n.toLocaleString() : String(value ?? '');
+                    return [formatted, label];
+                  }}
                   labelFormatter={(label) => String(label)}
                 />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Area
                   type="monotone"
                   dataKey="orderCount"
+                  name={CREATED_SERIES_LABEL}
                   stroke="#6366f1"
                   strokeWidth={2}
-                  fill="url(#ordersTrendGradient)"
+                  fill={`url(#${chartUid}-ordersCreated)`}
                   dot={trendData.length <= 31 ? { r: 3, fill: '#6366f1' } : false}
+                  activeDot={{ r: 5 }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="deliveredCount"
+                  name={DELIVERED_SERIES_LABEL}
+                  stroke={deliveredStroke}
+                  strokeWidth={2}
+                  fill={`url(#${chartUid}-ordersDelivered)`}
+                  dot={trendData.length <= 31 ? { r: 3, fill: deliveredStroke } : false}
                   activeDot={{ r: 5 }}
                 />
               </AreaChart>

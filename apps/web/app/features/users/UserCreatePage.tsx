@@ -37,7 +37,7 @@ const ROLES = [
   { value: 'HEAD_OF_CS', label: 'Head of CS', description: 'Manages customer service team and order processing' },
   { value: 'CS_AGENT', label: 'CS Agent', description: 'Handles customer calls and order confirmation' },
   { value: 'FINANCE_OFFICER', label: 'Finance Officer', description: 'Manages financials, invoices, and payouts' },
-  { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics', description: 'Oversees all logistics and 3PL partners' },
+  { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics', description: 'Oversees logistics operations, logistics companies, 3PL partners, and transfers' },
   { value: 'STOCK_MANAGER', label: 'Stock Manager', description: 'Manages inventory and stock movements' },
   { value: 'TPL_MANAGER', label: '3PL Manager', description: 'Manages a third-party logistics location' },
   { value: 'TPL_RIDER', label: '3PL Rider', description: 'Handles deliveries for a 3PL location' },

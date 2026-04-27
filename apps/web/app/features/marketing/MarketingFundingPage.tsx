@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, type ReactNode } from 'react';
-import { Link, useFetcher, useRevalidator, useNavigation, useSearchParams } from '@remix-run/react';
-import { useFetcherToast } from '~/components/ui/toast';
+import { Link, useFetcher, useRevalidator, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
+import { useFetcherToast, useToast } from '~/components/ui/toast';
+import { createFundingSchema, approveFundingRequestSchema } from '@yannis/shared/validators';
 import { PageNotification } from '~/components/ui/page-notification';
-import { HighCpaWarningBanner } from '~/features/marketing/HighCpaWarningBanner';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -20,6 +20,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Pagination } from '~/components/ui/pagination';
 import { Textarea } from '~/components/ui/textarea';
+import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
   FundingRecord,
   FundingRequestRecord,
@@ -27,7 +28,6 @@ import type {
   FundingTab,
   FundingSliceData,
   FundingRequestsSliceData,
-  LeaderboardEntry,
   MarketingFundingLoaderData,
   User,
 } from './types';
@@ -46,11 +46,20 @@ const REQUEST_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'REJECTED', label: 'Rejected' },
 ];
 
-// Marketing high-CPA banner threshold (Naira). Kept on this page because the banner
-// is the only marketing-performance signal a HoM needs while reviewing funding flows.
-const HIGH_CPA_THRESHOLD = 5000;
-
 const truncId = (id: string) => id.slice(0, 8) + '...';
+
+function parseSectionTab(
+  search: string,
+  canDistribute: boolean,
+): { section: FundingSection; tab: FundingTab } {
+  const u = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  const sectionParam = u.get('section');
+  const section: FundingSection =
+    sectionParam === 'distributing' && canDistribute ? 'distributing' : 'received';
+  const tabParam = u.get('tab');
+  const tab: FundingTab = tabParam === 'requests' ? 'requests' : 'transfers';
+  return { section, tab };
+}
 
 /**
  * `/admin/marketing/funding` — two-tier funding model as **primary tabs** + **sub-tabs**:
@@ -58,8 +67,9 @@ const truncId = (id: string) => id.slice(0, 8) + '...';
  *   Primary — "Funds I've Received" / "Incoming Funding" | "Funds I Distribute" (HoM/Admin)
  *   Sub — Transfers | My Requests (received) or MB Requests (distribute)
  *
- * URL: `?section=received|distributing&tab=transfers|requests` — loader revalidates on change;
- * content area shows a loading overlay while `navigation.state === 'loading'` for this route.
+ * URL: `?section=received|distributing&tab=transfers|requests` — loader revalidates on change.
+ * Tabs read the **pending** URL from `navigation.location` so they update immediately; the ledger
+ * table area shows an inline loading state until the new slice data is ready.
  */
 export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const {
@@ -78,24 +88,34 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     mbRequests,
     directionSummary,
     fundingBalance,
-    leaderboard,
     users,
   } = props;
 
   const isMediaBuyer = viewMode === 'media_buyer';
   const fetcher = useFetcher();
+  const { toast } = useToast();
   const revalidator = useRevalidator();
   const navigation = useNavigation();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   /** Loader revalidation for this route (date range, section/tab, filters, pagination). */
   const isFundingRouteLoading =
     navigation.state === 'loading' &&
     (navigation.location?.pathname ?? '').includes('/admin/marketing/funding');
 
+  const { section: displaySection, tab: displayTab } = useMemo(() => {
+    const pending =
+      navigation.state === 'loading' && navigation.location?.pathname.includes('/admin/marketing/funding');
+    const search = (pending && navigation.location ? navigation.location.search : location.search) || '';
+    return parseSectionTab(search, canDistribute);
+  }, [navigation.state, navigation.location, location.search, canDistribute]);
+
   // ── Modal state ─────────────────────────────────────────
   const [showSendForm, setShowSendForm] = useState(false);
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [disputingFundingId, setDisputingFundingId] = useState<string | null>(null);
+  const [markReceivedTarget, setMarkReceivedTarget] = useState<FundingRecord | null>(null);
+  const [notReceivedTarget, setNotReceivedTarget] = useState<FundingRecord | null>(null);
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
   const [fundingReceiptModal, setFundingReceiptModal] = useState<FundingRecord | null>(null);
@@ -112,6 +132,25 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     if (approvingRequestId && !approvingRequest) setApprovingRequestId(null);
   }, [approvingRequestId, approvingRequest]);
 
+  const [createFundingReceiptUrl, setCreateFundingReceiptUrl] = useState('');
+  const [createFundingUploadState, setCreateFundingUploadState] = useState<FileUploadUploadState>('idle');
+  const [approveFundingReceiptUrl, setApproveFundingReceiptUrl] = useState('');
+  const [approveFundingUploadState, setApproveFundingUploadState] = useState<FileUploadUploadState>('idle');
+
+  useEffect(() => {
+    if (!showSendForm) {
+      setCreateFundingReceiptUrl('');
+      setCreateFundingUploadState('idle');
+    }
+  }, [showSendForm]);
+
+  useEffect(() => {
+    if (!approvingRequestId) {
+      setApproveFundingReceiptUrl('');
+      setApproveFundingUploadState('idle');
+    }
+  }, [approvingRequestId]);
+
   // ── Action results ──────────────────────────────────────
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
@@ -122,16 +161,31 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     if (actionError) setDismissedError(false);
   }, [actionError]);
 
-  // Auto-close modals on success.
-  if (actionSuccess && showSendForm) setShowSendForm(false);
-  if (actionSuccess && showRequestForm) setShowRequestForm(false);
-  if (actionSuccess && disputingFundingId) setDisputingFundingId(null);
-  if (actionSuccess && approvingRequestId) setApprovingRequestId(null);
-  if (actionSuccess && rejectingRequestId) setRejectingRequestId(null);
+  useEffect(() => {
+    if (actionSuccess && showSendForm) setShowSendForm(false);
+  }, [actionSuccess, showSendForm]);
+  useEffect(() => {
+    if (actionSuccess && showRequestForm) setShowRequestForm(false);
+  }, [actionSuccess, showRequestForm]);
+  useEffect(() => {
+    if (actionSuccess && disputingFundingId) setDisputingFundingId(null);
+  }, [actionSuccess, disputingFundingId]);
+  useEffect(() => {
+    if (actionSuccess && approvingRequestId) setApprovingRequestId(null);
+  }, [actionSuccess, approvingRequestId]);
+  useEffect(() => {
+    if (actionSuccess && rejectingRequestId) setRejectingRequestId(null);
+  }, [actionSuccess, rejectingRequestId]);
 
   useEffect(() => {
     if (actionSuccess && revalidator.state === 'idle') revalidator.revalidate();
   }, [actionSuccess, revalidator.state, revalidator]);
+
+  useEffect(() => {
+    if (fetcher.state === 'idle' && (fetcher.data as { success?: boolean } | undefined)?.success && markReceivedTarget) {
+      setMarkReceivedTarget(null);
+    }
+  }, [fetcher.state, fetcher.data, markReceivedTarget]);
 
   // ── URL helpers ─────────────────────────────────────────
   /**
@@ -182,12 +236,51 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     updateSliceParam('search', searchQuery.trim() || undefined);
   };
 
+  const handleCreateFundingSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formEl = e.currentTarget;
+    const fdRead = new FormData(formEl);
+    const parsed = createFundingSchema.safeParse({
+      receiverId: fdRead.get('receiverId')?.toString() ?? '',
+      amount: fdRead.get('amount')?.toString() ?? '',
+      receiptUrl: createFundingReceiptUrl.trim(),
+    });
+    if (!parsed.success) {
+      toast.error('Cannot send funding', parsed.error.issues[0]?.message ?? 'Check the form.');
+      return;
+    }
+    const fd = new FormData(formEl);
+    fd.set('receiptUrl', parsed.data.receiptUrl);
+    fetcher.submit(fd, { method: 'post' });
+  };
+
+  const handleApproveFundingRequestSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!approvingRequest) return;
+    const parsed = approveFundingRequestSchema.safeParse({
+      requestId: approvingRequest.id,
+      receiptUrl: approveFundingReceiptUrl.trim(),
+    });
+    if (!parsed.success) {
+      toast.error('Cannot approve request', parsed.error.issues[0]?.message ?? 'Attach a valid receipt image.');
+      return;
+    }
+    const fd = new FormData(e.currentTarget);
+    fd.set('receiptUrl', parsed.data.receiptUrl);
+    fetcher.submit(fd, { method: 'post' });
+  };
+
+  const createFundingSubmitDisabled =
+    createFundingUploadState === 'uploading' || !createFundingReceiptUrl.trim();
+  const approveFundingSubmitDisabled =
+    approveFundingUploadState === 'uploading' || !approveFundingReceiptUrl.trim();
+
   const transfersSlice: FundingSliceData =
     activeSection === 'distributing' && outgoingTransfers ? outgoingTransfers : receivedTransfers;
   const requestsSlice: FundingRequestsSliceData =
     activeSection === 'distributing' && mbRequests ? mbRequests : myRequests;
-  const sectionDescription = activeSection === 'received' ? receivedDescription : distributingDescription;
-  const requestsSubLabel = activeSection === 'received' ? 'My Requests' : 'MB Requests';
+  const sectionDescriptionDisplay = displaySection === 'received' ? receivedDescription : distributingDescription;
+  const requestsSubLabel = displaySection === 'received' ? 'My Requests' : 'MB Requests';
   const transferEmptyMessage =
     activeSection === 'received'
       ? isMediaBuyer
@@ -292,23 +385,13 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         </div>
       )}
 
-      {/* High-CPA marketing alert — admin only. Funding work overlaps spend efficiency. */}
-      {!isMediaBuyer && (
-        <HighCpaWarningBanner
-          buyers={leaderboard
-            .filter((b: LeaderboardEntry) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0)
-            .map((b: LeaderboardEntry) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
-          threshold={HIGH_CPA_THRESHOLD}
-        />
-      )}
-
       {/* ─── Ledger: primary tabs (received | distribute) + sub-tabs (transfers | requests) ─ */}
       <div className="card p-0 overflow-hidden" id="funding-ledger">
         {canDistribute && (
-          <div className="px-4 pt-4 pb-2 border-b border-app-border">
+          <div className="px-4 pt-2">
             <Tabs
-              variant="pill"
-              value={activeSection}
+              variant="underline"
+              value={displaySection}
               onChange={(v) => navigateToSlice(v as FundingSection, 'transfers')}
               tabs={[
                 { value: 'received', label: receivedTitle },
@@ -322,16 +405,16 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <div className="min-w-0">
             {!canDistribute && <h2 className="text-base font-semibold text-app-fg">{receivedTitle}</h2>}
             <p className={`text-xs text-app-fg-muted leading-relaxed ${!canDistribute ? 'mt-0.5' : ''}`}>
-              {sectionDescription}
+              {sectionDescriptionDisplay}
             </p>
           </div>
           <div className="shrink-0 flex flex-wrap gap-2 justify-end">
-            {activeSection === 'received' && canRequestFunding && (
+            {displaySection === 'received' && canRequestFunding && (
               <Button variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
                 + Request Funds
               </Button>
             )}
-            {activeSection === 'distributing' && canSendFunding && (
+            {displaySection === 'distributing' && canSendFunding && (
               <Button variant="primary" size="sm" onClick={() => setShowSendForm(true)}>
                 + Send Funding
               </Button>
@@ -341,15 +424,15 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
         <div className="px-4">
           <Tabs
-            value={activeTab}
-            onChange={(v) => navigateToSlice(activeSection, v as FundingTab)}
+            value={displayTab}
+            onChange={(v) => navigateToSlice(displaySection, v as FundingTab)}
             tabs={[
               {
                 value: 'transfers',
                 label: 'Transfers',
                 badge:
                   transfersSlice.statusCounts.ALL > 0 ? (
-                    <CountPill active={activeTab === 'transfers'}>{transfersSlice.statusCounts.ALL}</CountPill>
+                    <CountPill active={displayTab === 'transfers'}>{transfersSlice.statusCounts.ALL}</CountPill>
                   ) : undefined,
               },
               {
@@ -357,7 +440,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 label: requestsSubLabel,
                 badge:
                   requestsSlice.statusCounts.ALL > 0 ? (
-                    <CountPill active={activeTab === 'requests'}>{requestsSlice.statusCounts.ALL}</CountPill>
+                    <CountPill active={displayTab === 'requests'}>{requestsSlice.statusCounts.ALL}</CountPill>
                   ) : undefined,
               },
             ]}
@@ -365,19 +448,19 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         </div>
 
         <div className="relative min-h-[14rem]" aria-busy={isFundingRouteLoading} aria-live="polite">
-          {isFundingRouteLoading && (
+          {isFundingRouteLoading ? (
             <div
-              className="pointer-events-auto absolute inset-0 z-10 flex items-start justify-center pt-14 sm:pt-20 bg-app-bg/65 dark:bg-app-bg/75 backdrop-blur-[1px]"
+              className="flex min-h-[14rem] items-center justify-center py-10 px-4"
               role="status"
               aria-label="Loading funding data"
             >
               <div className="flex items-center gap-2.5 rounded-lg border border-app-border bg-app-elevated px-4 py-3 shadow-sm">
                 <Spinner size="md" className="shrink-0 text-brand-500" />
-                <span className="text-sm font-medium text-app-fg-muted">Loading…</span>
+                <span className="text-sm font-medium text-app-fg-muted">Loading this tab…</span>
               </div>
             </div>
-          )}
-
+          ) : (
+            <>
           <SliceFilterBar
             tab={activeTab}
             transfers={transfersSlice}
@@ -395,9 +478,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               users={users}
               currentUserId={currentUserId}
               direction={activeSection === 'received' ? 'incoming' : 'outgoing'}
-              fetcher={fetcher}
               onViewReceipt={setFundingReceiptModal}
-              onDispute={setDisputingFundingId}
+              onOpenMarkReceived={setMarkReceivedTarget}
+              onOpenNotReceived={setNotReceivedTarget}
               emptyMessage={transferEmptyMessage}
             />
           )}
@@ -412,6 +495,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               onReject={activeSection === 'distributing' ? setRejectingRequestId : () => {}}
               emptyMessage={requestsEmptyMessage}
             />
+          )}
+            </>
           )}
         </div>
       </div>
@@ -460,7 +545,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <p className="text-sm text-app-fg-muted">
             Select the recipient, amount, and upload the receipt. The Media Buyer will be notified and can mark as received.
           </p>
-          <fetcher.Form method="post" className="space-y-4">
+          <fetcher.Form method="post" className="space-y-4" onSubmit={handleCreateFundingSubmit} noValidate>
             <input type="hidden" name="intent" value="createFunding" />
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">Media Buyer</label>
@@ -483,10 +568,18 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               name="receiptUrl"
               label="Receipt Upload"
               required
-              onUpload={() => {}}
+              onUpload={(url) => setCreateFundingReceiptUrl(url)}
+              onUploadStateChange={setCreateFundingUploadState}
             />
             <div className="flex gap-2 pt-1">
-              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Sending...">
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                loading={fetcher.state === 'submitting'}
+                loadingText="Sending..."
+                disabled={createFundingSubmitDisabled}
+              >
                 Send Funding
               </Button>
               <Button type="button" variant="secondary" size="sm" onClick={() => setShowSendForm(false)}>
@@ -494,6 +587,126 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               </Button>
             </div>
           </fetcher.Form>
+        </Modal>
+      )}
+
+      {/* Confirm mark as received (transfer tab, incoming SENT) */}
+      {markReceivedTarget && (
+        <Modal
+          open
+          onClose={() => setMarkReceivedTarget(null)}
+          maxWidth="max-w-md"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">Mark as received?</h3>
+          <p className="text-sm text-app-fg-muted">
+            This confirms the funds arrived. You can only do this once for this transfer.
+          </p>
+          <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm">
+            <p className="font-medium text-app-fg">
+              <NairaPrice amount={Number(markReceivedTarget.amount)} />
+            </p>
+            <p className="text-app-fg-muted text-xs mt-1">
+              {markReceivedTarget.senderName ?? users.find((u) => u.id === markReceivedTarget.senderId)?.name ?? truncId(markReceivedTarget.senderId)}
+              {' → '}
+              {markReceivedTarget.receiverName ?? users.find((u) => u.id === markReceivedTarget.receiverId)?.name ?? truncId(markReceivedTarget.receiverId)}
+            </p>
+            <p className="text-xs text-app-fg-muted mt-1">
+              {new Date(markReceivedTarget.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </p>
+          </div>
+          {markReceivedTarget.receiptUrl ? (
+            <div>
+              <p className="text-xs font-medium text-app-fg-muted mb-1">Receipt</p>
+              <div className="rounded-lg border border-app-border overflow-hidden bg-app-canvas max-h-48">
+                <img
+                  src={markReceivedTarget.receiptUrl}
+                  alt="Transfer receipt"
+                  className="w-full h-full max-h-48 object-contain"
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-app-fg-muted">No receipt image on file for this transfer.</p>
+          )}
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setMarkReceivedTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="success"
+              size="sm"
+              loading={fetcher.state === 'submitting' && markReceivedTarget !== null}
+              loadingText="Submitting…"
+              onClick={() => {
+                if (!markReceivedTarget) return;
+                const fd = new FormData();
+                fd.set('intent', 'verifyFunding');
+                fd.set('fundingId', markReceivedTarget.id);
+                fd.set('action', 'COMPLETED');
+                fetcher.submit(fd, { method: 'post' });
+              }}
+            >
+              Mark as received
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Confirm not received — then dispute reason (transfer tab) */}
+      {notReceivedTarget && (
+        <Modal
+          open
+          onClose={() => setNotReceivedTarget(null)}
+          maxWidth="max-w-md"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">Not received?</h3>
+          <p className="text-sm text-app-fg-muted">
+            You are about to flag this transfer as not received. The CEO and Head of Marketing will be notified. You will be asked for a short reason next.
+          </p>
+          <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm">
+            <p className="font-medium text-app-fg">
+              <NairaPrice amount={Number(notReceivedTarget.amount)} />
+            </p>
+            <p className="text-app-fg-muted text-xs mt-1">
+              {notReceivedTarget.senderName ?? users.find((u) => u.id === notReceivedTarget.senderId)?.name ?? truncId(notReceivedTarget.senderId)}
+              {' → '}
+              {notReceivedTarget.receiverName ?? users.find((u) => u.id === notReceivedTarget.receiverId)?.name ?? truncId(notReceivedTarget.receiverId)}
+            </p>
+          </div>
+          {notReceivedTarget.receiptUrl ? (
+            <div>
+              <p className="text-xs font-medium text-app-fg-muted mb-1">Sender receipt (reference)</p>
+              <div className="rounded-lg border border-app-border overflow-hidden bg-app-canvas max-h-48">
+                <img
+                  src={notReceivedTarget.receiptUrl}
+                  alt="Transfer receipt"
+                  className="w-full h-full max-h-48 object-contain"
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-app-fg-muted">No receipt image on file.</p>
+          )}
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setNotReceivedTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const id = notReceivedTarget.id;
+                setNotReceivedTarget(null);
+                setDisputingFundingId(id);
+              }}
+            >
+              Continue
+            </Button>
+          </div>
         </Modal>
       )}
 
@@ -526,21 +739,27 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <p className="text-sm text-app-fg-muted">
             Send the money manually (e.g. bank transfer), then attach the receipt below. The requester will be notified and can preview the receipt.
           </p>
-          <fetcher.Form method="post" className="space-y-3">
+          <fetcher.Form method="post" className="space-y-3" onSubmit={handleApproveFundingRequestSubmit} noValidate>
             <input type="hidden" name="intent" value="approveFundingRequest" />
             <input type="hidden" name="requestId" value={approvingRequest.id} />
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">
                 Amount ({'₦'})<span className="text-app-fg-muted/70"> — requested {'₦'}{Number(approvingRequest.amount).toLocaleString()}</span>
               </label>
-              <AmountInput name="amount" required defaultValue={Number(approvingRequest.amount)} className="input w-full" />
+              <AmountInput
+                name="amount"
+                required
+                defaultValue={String(approvingRequest.amount)}
+                className="input w-full"
+              />
             </div>
             <FileUpload
               folder={S3_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Receipt image"
               required
-              onUpload={() => {}}
+              onUpload={(url) => setApproveFundingReceiptUrl(url)}
+              onUploadStateChange={setApproveFundingUploadState}
             />
             <Textarea
               label="Reason (optional)"
@@ -550,7 +769,14 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               placeholder="Optional note for the requester (e.g. why the amount was adjusted)"
             />
             <div className="flex gap-2">
-              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Approving...">
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                loading={fetcher.state === 'submitting'}
+                loadingText="Approving..."
+                disabled={approveFundingSubmitDisabled}
+              >
                 Approve & notify
               </Button>
               <Button type="button" variant="secondary" size="sm" onClick={() => setApprovingRequestId(null)}>
@@ -665,23 +891,23 @@ function FundingMetricsStrip({
   fundingBalance?: MarketingFundingLoaderData['fundingBalance'];
 }) {
   const items = [
-    {
-      label: 'Total Received',
-      value: <NairaPrice amount={Number(summary.totalReceived)} />,
-      valueClassName: 'text-success-600 dark:text-success-400',
-      title: 'Sum of incoming ledger transfers (any status) in the selected period — same data as the Transfers tab',
-    },
     ...(fundingBalance
       ? [
           {
             label: 'Current balance',
             value: <NairaPrice amount={Number(fundingBalance.balance)} />,
-            valueClassName: 'text-app-fg',
+            valueClassName: 'text-success-600 dark:text-success-400',
             title:
               'COMPLETED funding received (all time) minus APPROVED ad spend on your campaigns. Can be lower than Total Received until you mark incoming transfers as Received.',
           },
         ]
       : []),
+    {
+      label: 'Total Received',
+      value: <NairaPrice amount={Number(summary.totalReceived)} />,
+      valueClassName: 'text-app-fg',
+      title: 'Sum of incoming ledger transfers (any status) in the selected period — same data as the Transfers tab',
+    },
     ...(canDistribute
       ? [
           {
@@ -790,18 +1016,18 @@ function TransfersTable({
   users,
   currentUserId,
   direction,
-  fetcher,
   onViewReceipt,
-  onDispute,
+  onOpenMarkReceived,
+  onOpenNotReceived,
   emptyMessage,
 }: {
   slice: FundingSliceData;
   users: User[];
   currentUserId: string;
   direction: 'incoming' | 'outgoing';
-  fetcher: ReturnType<typeof useFetcher>;
   onViewReceipt: (rec: FundingRecord) => void;
-  onDispute: (id: string) => void;
+  onOpenMarkReceived: (rec: FundingRecord) => void;
+  onOpenNotReceived: (rec: FundingRecord) => void;
   emptyMessage: string;
 }) {
   const nameOf = (id: string) =>
@@ -852,22 +1078,16 @@ function TransfersTable({
                 <td className="table-cell">
                   {direction === 'incoming' && f.status === 'SENT' && f.receiverId === currentUserId ? (
                     <div className="flex flex-wrap gap-1.5">
-                      <fetcher.Form method="post" className="inline">
-                        <input type="hidden" name="intent" value="verifyFunding" />
-                        <input type="hidden" name="fundingId" value={f.id} />
-                        <input type="hidden" name="action" value="COMPLETED" />
-                        <Button
-                          type="submit"
-                          variant="success"
-                          size="sm"
-                          className="text-xs"
-                          loading={fetcher.state === 'submitting'}
-                          loadingText="..."
-                        >
-                          Received
-                        </Button>
-                      </fetcher.Form>
-                      <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => onDispute(f.id)}>
+                      <Button
+                        type="button"
+                        variant="success"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => onOpenMarkReceived(f)}
+                      >
+                        Received
+                      </Button>
+                      <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => onOpenNotReceived(f)}>
                         Not Received
                       </Button>
                     </div>
@@ -915,15 +1135,10 @@ function TransfersTable({
             )}
             {direction === 'incoming' && f.status === 'SENT' && f.receiverId === currentUserId && (
               <div className="flex flex-wrap gap-2 pt-1">
-                <fetcher.Form method="post" className="inline">
-                  <input type="hidden" name="intent" value="verifyFunding" />
-                  <input type="hidden" name="fundingId" value={f.id} />
-                  <input type="hidden" name="action" value="COMPLETED" />
-                  <Button type="submit" variant="success" size="sm" className="text-xs">
-                    Received
-                  </Button>
-                </fetcher.Form>
-                <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => onDispute(f.id)}>
+                <Button type="button" variant="success" size="sm" className="text-xs" onClick={() => onOpenMarkReceived(f)}>
+                  Received
+                </Button>
+                <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => onOpenNotReceived(f)}>
                   Not Received
                 </Button>
               </div>
@@ -1018,7 +1233,7 @@ function RequestsTable({
                   <td className="table-cell">
                     <div className="flex items-center justify-end gap-2">
                       {canResend && (
-                        <fetcher.Form method="post" replace>
+                        <fetcher.Form method="post">
                           <input type="hidden" name="intent" value="resendFundingRequest" />
                           <input type="hidden" name="requestId" value={r.id} />
                           <Button
@@ -1089,7 +1304,7 @@ function RequestsTable({
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 {canResend && (
-                  <fetcher.Form method="post" replace>
+                  <fetcher.Form method="post">
                     <input type="hidden" name="intent" value="resendFundingRequest" />
                     <input type="hidden" name="requestId" value={r.id} />
                     <Button type="submit" variant="secondary" size="sm" className="text-xs">

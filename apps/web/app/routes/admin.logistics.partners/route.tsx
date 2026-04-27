@@ -84,7 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
     if (providers.length === 0) {
-      return json({ error: 'At least one provider with a name is required' }, { status: 400 });
+      return json({ error: 'At least one logistics company with a name is required' }, { status: 400 });
     }
     const errors: string[] = [];
     for (const p of providers) {
@@ -94,7 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
         body: { name: p.name, contactInfo: p.contactInfo, coverageArea: p.coverageArea },
       });
       if (!res.ok) {
-        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to create provider';
+        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to create logistics company';
         errors.push(`${p.name}: ${err}`);
       }
     }
@@ -118,7 +118,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update provider' }, { status: safeStatus(res.status) });
+      return json({ error: errorData?.error?.message ?? 'Failed to update logistics company' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

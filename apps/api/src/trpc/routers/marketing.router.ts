@@ -13,6 +13,8 @@ import {
   listAdSpendSchema,
   adSpendStatusCountsSchema,
   approveAdSpendSchema,
+  rejectAdSpendSchema,
+  updateAdSpendSchema,
   previewAdSpendIntervalSchema,
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
@@ -213,6 +215,21 @@ export const marketingRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can approve ad spend' });
       }
       return getMarketingService().approveAdSpend(input.adSpendId, ctx.user.id);
+    }),
+
+  rejectAdSpend: authedProcedure
+    .input(rejectAdSpendSchema)
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can reject ad spend' });
+      }
+      return getMarketingService().rejectAdSpend(input.adSpendId, input.reason, ctx.user.id);
+    }),
+
+  updateAdSpend: authedProcedure
+    .input(updateAdSpendSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getMarketingService().updateAdSpend(input, { id: ctx.user.id, role: ctx.user.role }, ctx.currentBranchId);
     }),
 
   // ── Performance Metrics ──────────────────────────

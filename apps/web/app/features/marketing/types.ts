@@ -49,6 +49,12 @@ export interface AdSpendRecord {
   status: string;
   approvedAt: string | null;
   approvedBy: string | null;
+  rejectionReason?: string | null;
+  rejectedAt?: string | null;
+  rejectedBy?: string | null;
+  /** Populated by `listAdSpend` — same window as Log Ad Spend preview. */
+  orderCount?: number;
+  indicativeCpa?: number | null;
 }
 
 /** `marketing.previewAdSpendInterval` — form helper, not the same window as dashboard CPA. */
@@ -63,6 +69,7 @@ export interface AdSpendIntervalPreview {
 export interface AdSpendStatusCounts {
   PENDING: number;
   APPROVED: number;
+  REJECTED: number;
   ALL: number;
 }
 
@@ -215,14 +222,11 @@ export interface MarketingFundingLoaderData {
   directionSummary: FundingDirectionSummary;
   /** Media Buyer / HoM: running balance (COMPLETED transfers in minus APPROVED ad spend). */
   fundingBalance?: { totalReceived: string; totalSpend: string; balance: string };
-  /** Used by the HighCpaWarningBanner (HoM/Admin only). */
-  leaderboard: LeaderboardEntry[];
-  leaderboardPeriod: 'this_month' | 'all_time';
   users: User[];
   balancesList?: FundingBalanceRow[];
 }
 
-export type AdSpendStatusFilter = 'PENDING' | 'APPROVED';
+export type AdSpendStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 /** `/admin/marketing/ad-spend` loader + component props */
 export interface MarketingAdSpendLoaderData {

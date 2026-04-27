@@ -20,7 +20,7 @@ import {
 } from '~/lib/marketing-pages.server';
 
 const AD_SPEND_PER_PAGE = 20;
-const AD_SPEND_STATUSES = ['PENDING', 'APPROVED'] as const;
+const AD_SPEND_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 
 export const meta: MetaFunction = () => [{ title: 'Ad spend — Marketing — Yannis EOSE' }];
 
@@ -101,6 +101,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   for (const row of adSpendData?.records ?? []) {
     if (row.mediaBuyerId) userIdsOnPage.add(row.mediaBuyerId);
     if (row.approvedBy) userIdsOnPage.add(row.approvedBy);
+    if (row.rejectedBy) userIdsOnPage.add(row.rejectedBy);
   }
   const usersP = isFundingAdmin && userIdsOnPage.size > 0
     ? apiRequest<unknown>(
@@ -162,6 +163,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
+  if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
   const formData = await request.formData();
   const result = await runMarketingAdSpendAction(cookie, formData);
   if (result) return result;

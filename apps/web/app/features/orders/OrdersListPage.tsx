@@ -70,7 +70,7 @@ interface OrdersListPageProps {
   /** Products list for offline order form (when canCreateOffline). */
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
-  dailyCounts?: Array<{ date: string; orderCount: number }>;
+  dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
 }
 
 export function OrdersListPage({

@@ -51,7 +51,7 @@ const PERMISSIONS: Array<{ code: string; resource: string; action: string; descr
   { code: 'transfers.read', resource: 'transfers', action: 'read', description: 'View transfers' },
   { code: 'returns.read', resource: 'returns', action: 'read', description: 'View returns' },
   { code: 'logistics.read', resource: 'logistics', action: 'read', description: 'View logistics' },
-  { code: 'logistics.write', resource: 'logistics', action: 'write', description: 'Create/update logistics providers and locations' },
+  { code: 'logistics.write', resource: 'logistics', action: 'write', description: 'Create/update logistics companies and locations' },
   { code: 'logistics.remit', resource: 'logistics', action: 'remit', description: 'Submit transfer remittance to warehouse (3PL)' },
   { code: 'marketing.read', resource: 'marketing', action: 'read', description: 'View marketing' },
   { code: 'marketing.funding', resource: 'marketing', action: 'funding', description: 'Create funding records' },
@@ -99,6 +99,12 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'inventory.read',
     'inventory.verifyTransfer',
     'inventory.lowStockAlerts',
+    // Returns & reconciliation live under Logistics in the admin nav; HoLogistics approves submissions.
+    'returns.read',
+    'inventory.returnedOrders',
+    'inventory.reconciliations',
+    'inventory.createReconciliation',
+    'inventory.resolveReconciliation',
   ],
   STOCK_MANAGER: [
     'inventory.read',

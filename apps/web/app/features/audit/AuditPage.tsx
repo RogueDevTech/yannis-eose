@@ -75,7 +75,7 @@ const TABLE_LABELS: Record<string, string> = {
   products: 'Products',
   product_categories: 'Product Categories',
   stock_batches: 'Stock Batches',
-  logistics_providers: 'Logistics Providers',
+  logistics_providers: 'Logistics companies',
   logistics_locations: 'Logistics Locations',
   inventory_levels: 'Inventory Levels',
   offer_templates: 'Offer Templates',
@@ -709,7 +709,7 @@ function getDescriptionParts(
   }
 
   if (table === 'logistics_providers') {
-    return { prefix: `${actor} updated logistics provider `, entityLabel: recordLabel, suffix: '' };
+    return { prefix: `${actor} updated logistics company `, entityLabel: recordLabel, suffix: '' };
   }
 
   if (table === 'logistics_locations') {

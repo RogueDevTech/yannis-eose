@@ -36,13 +36,6 @@ export interface InventoryLevel {
   status: string;
 }
 
-export const STATUS_BADGE: Record<string, string> = {
-  PENDING: 'badge',
-  IN_TRANSIT: 'badge-warning',
-  RECEIVED: 'badge-success',
-  DISPUTED: 'badge-danger',
-};
-
 /** Streaming loader shape — products and levels arrive as deferred promises */
 export interface TransfersStreamData {
   transfers: Transfer[];

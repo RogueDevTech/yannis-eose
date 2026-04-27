@@ -11,6 +11,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import type { Campaign, CustomFormField } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
 import { sortAndReindexCustomFields } from './custom-fields-order';
+import { FormFullPreview } from './form-full-preview';
 
 export interface MarketingFormEditPageProps {
   campaign: Campaign;
@@ -38,7 +39,11 @@ const DeactivateIcon = (
 
 const ArchiveIcon = (
   <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"
+    />
   </svg>
 );
 
@@ -58,19 +63,36 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
   useFetcherToast(statusFetcher.data, { successMessage: 'Status updated' });
 
   const cfg = campaign.formConfig;
+  const multiProduct = (campaign.productIds?.length ?? 0) > 1;
 
-  const initialFields = useMemo(
-    () => sortAndReindexCustomFields((cfg?.customFields ?? []) as CustomFormField[]),
-    [cfg?.customFields],
+  const [fields, setFields] = useState<CustomFormField[]>(() =>
+    sortAndReindexCustomFields((cfg?.customFields ?? []) as CustomFormField[]),
   );
-
-  const [fields, setFields] = useState<CustomFormField[]>(initialFields);
   const [accentColor, setAccentColor] = useState(() => cfg?.accentColor ?? DEFAULT_ACCENT);
+  const [formHeading, setFormHeading] = useState(() => cfg?.heading ?? '');
+  const [formSubtitle, setFormSubtitle] = useState(() => cfg?.subtitle ?? '');
+  const [formButtonText, setFormButtonText] = useState(() => cfg?.buttonText ?? '');
+  const [showDeliveryAddress, setShowDeliveryAddress] = useState(() => isOptionOn(cfg?.showDeliveryAddress));
+  const [showDeliveryNotes, setShowDeliveryNotes] = useState(() => isOptionOn(cfg?.showDeliveryNotes));
+  const [showDeliveryState, setShowDeliveryState] = useState(() => isOptionOn(cfg?.showDeliveryState));
+  const [showGender, setShowGender] = useState(() => isOptionOn(cfg?.showGender));
+  const [showPreferredDeliveryDate, setShowPreferredDeliveryDate] = useState(() => isOptionOn(cfg?.showPreferredDeliveryDate));
+  const [showPaymentMethod, setShowPaymentMethod] = useState(() => isOptionOn(cfg?.showPaymentMethod));
 
   useEffect(() => {
-    setFields(sortAndReindexCustomFields((cfg?.customFields ?? []) as CustomFormField[]));
-    setAccentColor(cfg?.accentColor ?? DEFAULT_ACCENT);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset when switching forms; avoid wiping edits on revalidate
+    const c = campaign.formConfig;
+    setFields(sortAndReindexCustomFields((c?.customFields ?? []) as CustomFormField[]));
+    setAccentColor(c?.accentColor ?? DEFAULT_ACCENT);
+    setFormHeading(c?.heading ?? '');
+    setFormSubtitle(c?.subtitle ?? '');
+    setFormButtonText(c?.buttonText ?? '');
+    setShowDeliveryAddress(isOptionOn(c?.showDeliveryAddress));
+    setShowDeliveryNotes(isOptionOn(c?.showDeliveryNotes));
+    setShowDeliveryState(isOptionOn(c?.showDeliveryState));
+    setShowGender(isOptionOn(c?.showGender));
+    setShowPreferredDeliveryDate(isOptionOn(c?.showPreferredDeliveryDate));
+    setShowPaymentMethod(isOptionOn(c?.showPaymentMethod));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset when switching form
   }, [campaign.id]);
 
   const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
@@ -100,18 +122,63 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
     [campaign.id, statusFetcher],
   );
 
+  const statusActions = (
+    <>
+      {campaign.status === 'ACTIVE' && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="gap-1.5 text-warning-700 dark:text-warning-400 border-warning-200 dark:border-warning-800"
+          onClick={() => setConfirmAction({ type: 'deactivate' })}
+        >
+          {DeactivateIcon}
+          Deactivate
+        </Button>
+      )}
+      {campaign.status === 'INACTIVE' && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="gap-1.5 text-success-700 dark:text-success-400"
+          onClick={() => submitStatusChange('ACTIVE')}
+          loading={statusFetcher.state === 'submitting'}
+          loadingText="Activating…"
+        >
+          {ActivateIcon}
+          Activate
+        </Button>
+      )}
+      {campaign.status !== 'ARCHIVED' && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="gap-1.5 text-danger-700 dark:text-danger-400 border-danger-200 dark:border-danger-800"
+          onClick={() => setConfirmAction({ type: 'archive' })}
+        >
+          {ArchiveIcon}
+          Archive
+        </Button>
+      )}
+    </>
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Edit form"
         description={
           <>
-            Update settings for <span className="font-medium text-app-fg">{campaign.name}</span>.{' '}
+            Update settings for <span className="font-medium text-app-fg">{campaign.name}</span>. Quick Deactivate/Archive
+            use the top-right (immediate). You can also change status under Basic settings and Save.{' '}
             <Link to="/admin/marketing/forms" className="text-brand-600 dark:text-brand-400 hover:underline">
               Back to all forms
             </Link>
           </>
         }
+        actions={statusActions}
       />
 
       {actionError && !dismissedActionError && (
@@ -123,151 +190,165 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
         />
       )}
 
-      <fetcher.Form method="post" className="space-y-6" key={campaign.id}>
-        <input type="hidden" name="intent" value="updateForm" />
-        <input type="hidden" name="id" value={campaign.id} />
-        <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
-        <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
+      <div className="grid grid-cols-1 lg:grid-cols-[7fr_3fr] gap-6 items-start">
+        <div className="min-w-0">
+          <fetcher.Form method="post" className="space-y-6" key={campaign.id}>
+            <input type="hidden" name="intent" value="updateForm" />
+            <input type="hidden" name="id" value={campaign.id} />
+            <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
+            <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
+            {showDeliveryAddress && <input type="hidden" name="showDeliveryAddress" value="on" />}
+            {showDeliveryNotes && <input type="hidden" name="showDeliveryNotes" value="on" />}
+            {showDeliveryState && <input type="hidden" name="showDeliveryState" value="on" />}
+            {showGender && <input type="hidden" name="showGender" value="on" />}
+            {showPreferredDeliveryDate && <input type="hidden" name="showPreferredDeliveryDate" value="on" />}
+            {showPaymentMethod && <input type="hidden" name="showPaymentMethod" value="on" />}
 
-        <div className="card space-y-4">
-          <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
-          <TextInput label="Form Name" name="name" required defaultValue={campaign.name} />
-          <FormSelect
-            label="Status"
-            name="status"
-            defaultValue={campaign.status}
-            options={[
-              { value: 'ACTIVE', label: 'Active' },
-              { value: 'INACTIVE', label: 'Inactive' },
-              { value: 'ARCHIVED', label: 'Archived' },
-            ]}
-          />
+            <div className="card space-y-4">
+              <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
+              <TextInput label="Form Name" name="name" required defaultValue={campaign.name} />
+              <FormSelect
+                key={`status-${campaign.id}`}
+                label="Status"
+                name="status"
+                defaultValue={campaign.status}
+                options={[
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'INACTIVE', label: 'Inactive' },
+                  { value: 'ARCHIVED', label: 'Archived' },
+                ]}
+              />
 
-          <div className="border-t border-app-border pt-3">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-2">Form customization</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <TextInput name="formHeading" placeholder="Form heading" defaultValue={cfg?.heading ?? ''} />
-              <TextInput name="formSubtitle" placeholder="Form subtitle" defaultValue={cfg?.subtitle ?? ''} />
-              <TextInput name="formButtonText" placeholder="Button text" defaultValue={cfg?.buttonText ?? ''} />
-              <div className="flex items-center gap-2 sm:col-span-1">
-                <input
-                  type="color"
-                  aria-label="Accent color"
-                  value={accentColor}
-                  onChange={(e) => setAccentColor(e.target.value)}
-                  className="w-10 h-9 rounded border border-app-border cursor-pointer shrink-0"
-                />
-                <span className="text-sm text-app-fg-muted">Accent color (preview updates below)</span>
+              <div className="border-t border-app-border pt-3">
+                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-2">Form customization</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <TextInput
+                    name="formHeading"
+                    label="Form heading"
+                    placeholder="Form heading"
+                    value={formHeading}
+                    onChange={(e) => setFormHeading(e.target.value)}
+                  />
+                  <TextInput
+                    name="formSubtitle"
+                    label="Form subtitle"
+                    placeholder="Form subtitle"
+                    value={formSubtitle}
+                    onChange={(e) => setFormSubtitle(e.target.value)}
+                  />
+                  <TextInput
+                    name="formButtonText"
+                    label="Button text"
+                    placeholder="Button text"
+                    value={formButtonText}
+                    onChange={(e) => setFormButtonText(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2 sm:col-span-1">
+                    <input
+                      type="color"
+                      aria-label="Accent color"
+                      value={accentColor}
+                      onChange={(e) => setAccentColor(e.target.value)}
+                      className="w-10 h-9 rounded border border-app-border cursor-pointer shrink-0"
+                    />
+                    <span className="text-sm text-app-fg-muted">Accent color (preview updates on the right)</span>
+                  </div>
+                  <TextInput
+                    name="successCallbackUrl"
+                    type="url"
+                    label="Success URL (optional)"
+                    placeholder="e.g. https://funnel.example.com/thank-you"
+                    hint="Full URL of your thank-you page. Skips the inline success message when set."
+                    defaultValue={cfg?.successCallbackUrl ?? ''}
+                    className="sm:col-span-2"
+                  />
+                </div>
+                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">Optional standard fields</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={showDeliveryAddress}
+                      onChange={(e) => setShowDeliveryAddress(e.target.checked)}
+                    />
+                    <span className="text-sm text-app-fg-muted">Delivery Address</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={showDeliveryNotes}
+                      onChange={(e) => setShowDeliveryNotes(e.target.checked)}
+                    />
+                    <span className="text-sm text-app-fg-muted">Delivery Notes</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={showDeliveryState}
+                      onChange={(e) => setShowDeliveryState(e.target.checked)}
+                    />
+                    <span className="text-sm text-app-fg-muted">Delivery State</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox checked={showGender} onChange={(e) => setShowGender(e.target.checked)} />
+                    <span className="text-sm text-app-fg-muted">Gender</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={showPreferredDeliveryDate}
+                      onChange={(e) => setShowPreferredDeliveryDate(e.target.checked)}
+                    />
+                    <span className="text-sm text-app-fg-muted">Preferred Delivery Date</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={showPaymentMethod}
+                      onChange={(e) => setShowPaymentMethod(e.target.checked)}
+                    />
+                    <span className="text-sm text-app-fg-muted">Payment method (Pay on delivery / Pay online)</span>
+                  </label>
+                </div>
               </div>
-              <TextInput
-                name="successCallbackUrl"
-                type="url"
-                placeholder="Success URL (e.g. https://funnel.example.com/thank-you)"
-                hint="Optional — full URL of your funnel's thank-you page. Skips the inline success message."
-                defaultValue={cfg?.successCallbackUrl ?? ''}
-                className="sm:col-span-2"
+            </div>
+
+            <div>
+              <h2 className="text-sm font-semibold text-app-fg mb-2">Custom fields</h2>
+              <CustomFieldsEditor
+                fields={fields}
+                onFieldsChange={setFields}
+                footnote={
+                  <span>
+                    Standard field toggles are in <strong className="text-app-fg">Basic settings</strong> above. Submit once
+                    to save the form with these custom fields.
+                  </span>
+                }
               />
             </div>
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mt-4 mb-2">Optional standard fields</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showDeliveryAddress" defaultChecked={isOptionOn(cfg?.showDeliveryAddress)} />
-                <span className="text-sm text-app-fg-muted">Delivery Address</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showDeliveryNotes" defaultChecked={isOptionOn(cfg?.showDeliveryNotes)} />
-                <span className="text-sm text-app-fg-muted">Delivery Notes</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showDeliveryState" defaultChecked={isOptionOn(cfg?.showDeliveryState)} />
-                <span className="text-sm text-app-fg-muted">Delivery State</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showGender" defaultChecked={isOptionOn(cfg?.showGender)} />
-                <span className="text-sm text-app-fg-muted">Gender</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showPreferredDeliveryDate" defaultChecked={isOptionOn(cfg?.showPreferredDeliveryDate)} />
-                <span className="text-sm text-app-fg-muted">Preferred Delivery Date</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox name="showPaymentMethod" defaultChecked={isOptionOn(cfg?.showPaymentMethod)} />
-                <span className="text-sm text-app-fg-muted">Payment method (Pay on delivery / Pay online)</span>
-              </label>
+
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving…">
+                Save changes
+              </Button>
+              <Link to="/admin/marketing/forms" className="btn-secondary btn-sm inline-flex items-center justify-center">
+                Cancel
+              </Link>
             </div>
-          </div>
+          </fetcher.Form>
         </div>
 
-        <div>
-          <h2 className="text-sm font-semibold text-app-fg mb-2">Custom fields</h2>
-          <CustomFieldsEditor
-            fields={fields}
-            onFieldsChange={setFields}
+        <div className="min-w-0 space-y-2 self-start static lg:sticky lg:top-[calc(var(--header-height,3.5rem)+0.5rem)] z-[1] max-lg:mb-2">
+          <p className="text-xs text-app-fg-muted font-medium">Live preview (hosted form)</p>
+          <FormFullPreview
+            heading={formHeading}
+            subtitle={formSubtitle}
+            buttonText={formButtonText}
             accentColor={accentColor}
-            footnote={
-              <span>
-                Standard field toggles are in <strong className="text-app-fg">Basic settings</strong> above. Submit once to
-                save the form with these custom fields.
-              </span>
-            }
+            multiProduct={multiProduct}
+            showGender={showGender}
+            showDeliveryState={showDeliveryState}
+            showDeliveryAddress={showDeliveryAddress}
+            showDeliveryNotes={showDeliveryNotes}
+            showPreferredDeliveryDate={showPreferredDeliveryDate}
+            showPaymentMethod={showPaymentMethod}
+            customFields={fields}
           />
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving…">
-            Save changes
-          </Button>
-          <Link to="/admin/marketing/forms" className="btn-secondary btn-sm inline-flex items-center justify-center">
-            Cancel
-          </Link>
-        </div>
-      </fetcher.Form>
-
-      <div className="card space-y-3">
-        <h2 className="text-sm font-semibold text-app-fg">Form availability</h2>
-        <p className="text-sm text-app-fg-muted">
-          Quick actions apply immediately. You can also change status in <strong className="text-app-fg">Basic settings</strong>{' '}
-          and use <strong className="text-app-fg">Save changes</strong>.
-        </p>
-        <div className="flex flex-wrap gap-2 pt-1">
-          {campaign.status === 'ACTIVE' && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="gap-1.5 text-warning-700 dark:text-warning-400 border-warning-200 dark:border-warning-800"
-              onClick={() => setConfirmAction({ type: 'deactivate' })}
-            >
-              {DeactivateIcon}
-              Deactivate
-            </Button>
-          )}
-          {campaign.status === 'INACTIVE' && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="gap-1.5 text-success-700 dark:text-success-400"
-              onClick={() => submitStatusChange('ACTIVE')}
-              loading={statusFetcher.state === 'submitting'}
-              loadingText="Activating…"
-            >
-              {ActivateIcon}
-              Activate
-            </Button>
-          )}
-          {campaign.status !== 'ARCHIVED' && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="gap-1.5 text-danger-700 dark:text-danger-400 border-danger-200 dark:border-danger-800"
-              onClick={() => setConfirmAction({ type: 'archive' })}
-            >
-              {ArchiveIcon}
-              Archive
-            </Button>
-          )}
         </div>
       </div>
 

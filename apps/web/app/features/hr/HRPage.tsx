@@ -5,7 +5,7 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
-import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
+import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
@@ -42,7 +42,6 @@ export function HRPage({
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
-  const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
   const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'HR action completed' });
 
@@ -50,7 +49,12 @@ export function HRPage({
     if (actionError) setDismissedError(false);
   }, [actionError]);
 
-  if (actionSuccess && showAddAdjustment) setShowAddAdjustment(false);
+  /** Close add-on modal after a successful mutation (same fetcher as approve actions). */
+  useEffect(() => {
+    if (fetcher.state !== 'idle') return;
+    const data = fetcher.data as { success?: boolean } | undefined;
+    if (data?.success && showAddAdjustment) setShowAddAdjustment(false);
+  }, [fetcher.state, fetcher.data, showAddAdjustment]);
 
   const isAdmin = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN';
   const isHrOrFinance = isAdmin || viewer.role === 'HR_MANAGER' || viewer.role === 'FINANCE_OFFICER' || viewer.isFinanceOfficer;
@@ -65,22 +69,12 @@ export function HRPage({
             <PageRefreshButton />
             {isHrOrFinance && (
               <Button
-                variant="secondary"
+                variant="primary"
                 size="sm"
-                onClick={() => { setShowAddAdjustment((v) => !v); setActiveTab('adjustments'); }}
+                onClick={() => setShowAddAdjustment(true)}
               >
-                {showAddAdjustment ? 'Close' : '+ Add-on'}
+                + Add-on
               </Button>
-            )}
-            {(isAdmin || viewer.role === 'HR_MANAGER' || viewer.role.startsWith('HEAD_OF_')) && (
-              <a href="/hr/plans" className="btn-secondary btn-sm inline-flex items-center">
-                Commission Plans →
-              </a>
-            )}
-            {isHrOrFinance && (
-              <a href="/hr/payouts" className="btn-primary btn-sm inline-flex items-center">
-                Payouts →
-              </a>
             )}
           </div>
         }
@@ -124,18 +118,33 @@ export function HRPage({
         </DeferredSection>
       )}
 
-      {/* Add Adjustment form — only mounted when HR/Finance opens it */}
-      {isHrOrFinance && (
-        <ResponsiveFormPanel open={showAddAdjustment} onClose={() => setShowAddAdjustment(false)}>
-          <fetcher.Form method="post" className="card space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-app-fg">Add Earning Adjustment</h3>
-              <button type="button" onClick={() => setShowAddAdjustment(false)} className="text-app-fg-muted hover:text-app-fg">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+      {/* Add-on (earning adjustment) — modal for HR / Finance */}
+      {isHrOrFinance && showAddAdjustment && (
+        <Modal
+          open
+          onClose={() => {
+            if (fetcher.state !== 'idle') return;
+            setShowAddAdjustment(false);
+          }}
+          maxWidth="max-w-lg"
+          backdropBlur
+          contentClassName="p-5 space-y-4"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="text-lg font-semibold text-app-fg">Add Earning Adjustment</h3>
+            <button
+              type="button"
+              onClick={() => setShowAddAdjustment(false)}
+              disabled={fetcher.state !== 'idle'}
+              className="text-app-fg-muted hover:text-app-fg p-1 shrink-0 disabled:opacity-50"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <fetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="createAdjustment" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -175,16 +184,22 @@ export function HRPage({
                 />
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 pt-1">
               <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
                 Create Adjustment
               </Button>
-              <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddAdjustment(false)}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={fetcher.state !== 'idle'}
+                onClick={() => setShowAddAdjustment(false)}
+              >
                 Cancel
               </Button>
             </div>
           </fetcher.Form>
-        </ResponsiveFormPanel>
+        </Modal>
       )}
 
       {isHrOrFinance ? (

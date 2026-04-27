@@ -45,6 +45,8 @@ test.describe('Marketing Campaign Flow', () => {
     await page.goto('/admin/marketing/ad-spend');
     await page.waitForLoadState('networkidle');
     await expect(page.locator('body')).not.toContainText(/something went wrong/i);
+    // HoM Preview / Approve / Reject / MB resubmit flows are covered by API + unit tests;
+    // extend here with a stable HoM login if CI needs full UI coverage.
   });
 
   test('forms (campaigns) page loads without errors', async ({ page }) => {

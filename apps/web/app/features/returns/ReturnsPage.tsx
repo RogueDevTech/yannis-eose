@@ -73,7 +73,7 @@ export function ReturnsPage({
       {/* Page header */}
       <PageHeader
         title="Returns & Restock"
-        description="Process returned items and manage stock reconciliation"
+        description="Process returned items at each location. Approve or reject stock reconciliation submissions here — dispatch stays locked until pending reconciliations are cleared."
         actions={
           <Button variant="secondary" size="sm" onClick={() => { setShowReconciliationForm(!showReconciliationForm); setActiveTab('reconciliation'); }}>
             {showReconciliationForm ? 'Close' : '+ Stock Reconciliation'}

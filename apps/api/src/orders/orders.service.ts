@@ -6,13 +6,16 @@ import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray } from 'dr
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
-import type {
-  CreateOrderInput,
-  CreateOfflineOrderInput,
-  TransitionOrderInput,
-  UpdateOrderInput,
-  ListOrdersInput,
-  OrderStatus,
+import {
+  type CreateOrderInput,
+  type CreateOfflineOrderInput,
+  type TransitionOrderInput,
+  type UpdateOrderInput,
+  type ListOrdersInput,
+  type OrderStatus,
+  customFormFieldSchema,
+  getMissingRequiredCustomFormLabels,
+  z,
 } from '@yannis/shared';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
@@ -97,6 +100,32 @@ export class OrdersService {
         code: 'BAD_REQUEST',
         message: 'Email is required for Pay online. Please provide a valid email address.',
       });
+    }
+
+    if (orderInput.campaignId) {
+      const [campaignRow] = await this.db
+        .select({ formConfig: schema.campaigns.formConfig })
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, orderInput.campaignId))
+        .limit(1);
+      const customFieldsRaw = (campaignRow?.formConfig as { customFields?: unknown } | null | undefined)?.customFields;
+      if (Array.isArray(customFieldsRaw) && customFieldsRaw.length > 0) {
+        const parsed = z.array(customFormFieldSchema).safeParse(customFieldsRaw);
+        if (parsed.success) {
+          const missing = getMissingRequiredCustomFormLabels(parsed.data, orderInput.customFields);
+          if (missing.length > 0) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: `Please complete: ${missing.join(', ')}`,
+            });
+          }
+        } else {
+          this.logger.debug(
+            { campaignId: orderInput.campaignId, zodError: parsed.error.flatten() },
+            'Campaign formConfig.customFields failed schema — skipping required-field API check',
+          );
+        }
+      }
     }
 
     const branchId = await this.resolveBranchIdForNewOrder({
@@ -2078,14 +2107,73 @@ export class OrdersService {
   }
 
   /**
-   * Get order volume by creation date — used by the CEO overview time-series chart and the
-   * "View data in chart" toggle on the per-role order list pages.
+   * Daily delivered count by `delivered_at` (status DELIVERED only — same as CEO
+   * `getDeliveredOrdersTimeSeries`), with the same scope filters as `getOrdersTimeSeriesByCreated`.
+   */
+  private async getOrdersTimeSeriesByDelivered(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+    extra?: {
+      mediaBuyerId?: string;
+      csAgentId?: string;
+      logisticsLocationId?: string;
+      status?: string;
+      statuses?: Array<(typeof schema.orders.$inferSelect)['status']>;
+    },
+  ): Promise<{ date: string; deliveredCount: number }[]> {
+    const conditions: Parameters<typeof and>[0][] = [
+      eq(schema.orders.status, 'DELIVERED'),
+      sql`${schema.orders.deliveredAt} IS NOT NULL`,
+    ];
+    if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.orders.deliveredAt, end));
+    }
+    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (extra?.mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, extra.mediaBuyerId));
+    if (extra?.csAgentId) conditions.push(eq(schema.orders.assignedCsId, extra.csAgentId));
+    if (extra?.logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, extra.logisticsLocationId));
+    if (extra?.status) {
+      conditions.push(eq(schema.orders.status, extra.status as (typeof schema.orders.$inferSelect)['status']));
+    }
+    if (extra?.statuses?.length) {
+      conditions.push(inArray(schema.orders.status, extra.statuses));
+    }
+    const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.deliveredAt})::date`;
+
+    const rows = await this.db
+      .select({
+        date: dateTrunc,
+        deliveredCount: count(),
+      })
+      .from(schema.orders)
+      .where(and(...conditions))
+      .groupBy(dateTrunc)
+      .orderBy(asc(dateTrunc));
+
+    return rows.map((r) => ({
+      date: typeof r.date === 'string' ? r.date.split('T')[0]! : (r.date as Date).toISOString().split('T')[0]!,
+      deliveredCount: r.deliveredCount ?? 0,
+    }));
+  }
+
+  /**
+   * Get order volume by creation date plus delivered count by delivery date — used by the CEO
+   * overview time-series chart and the "View data in chart" toggle on the per-role order list
+   * pages (Marketing / CS / Logistics).
    *
    * Optional `mediaBuyerId` / `csAgentId` / `status` filters mirror the matching filters on
-   * `listOrders` so each list page (Marketing / CS / Logistics) can request a daily count
-   * scoped to exactly what the table is showing.
+   * `listOrders` so each list page can request a daily series scoped to the table filters.
    *
-   * Returns { date: YYYY-MM-DD, orderCount }[] for the date range (by created_at).
+   * - `orderCount`: grouped by `created_at` (unchanged).
+   * - `deliveredCount`: grouped by `delivered_at`, `status = DELIVERED`, same filters and date
+   *   window on `delivered_at` (CEO-style delivery throughput; can differ from rows created in
+   *   the same window).
+   *
+   * Returns merged `{ date, orderCount, deliveredCount }[]` sorted ascending by date.
    */
   async getOrdersTimeSeriesByCreated(
     startDate?: string,
@@ -2098,7 +2186,7 @@ export class OrdersService {
       status?: string;
       statuses?: Array<(typeof schema.orders.$inferSelect)['status']>;
     },
-  ): Promise<{ date: string; orderCount: number }[]> {
+  ): Promise<{ date: string; orderCount: number; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [];
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
@@ -2128,12 +2216,29 @@ export class OrdersService {
     if (conditions.length > 0) {
       query = query.where(and(...conditions));
     }
-    const rows = await query.groupBy(dateTrunc).orderBy(asc(dateTrunc));
+    const createdRows = await query.groupBy(dateTrunc).orderBy(asc(dateTrunc));
 
-    return rows.map((r) => ({
+    const created = createdRows.map((r) => ({
       date: typeof r.date === 'string' ? r.date.split('T')[0]! : (r.date as Date).toISOString().split('T')[0]!,
       orderCount: r.orderCount ?? 0,
     }));
+
+    const delivered = await this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra);
+
+    const byDate = new Map<string, { date: string; orderCount: number; deliveredCount: number }>();
+    for (const row of created) {
+      byDate.set(row.date, { date: row.date, orderCount: row.orderCount, deliveredCount: 0 });
+    }
+    for (const row of delivered) {
+      const existing = byDate.get(row.date);
+      if (existing) {
+        existing.deliveredCount = row.deliveredCount;
+      } else {
+        byDate.set(row.date, { date: row.date, orderCount: 0, deliveredCount: row.deliveredCount });
+      }
+    }
+
+    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
   }
 
   /**

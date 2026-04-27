@@ -613,6 +613,63 @@ export function InventoryPage({
         )}
       </DeferredSection>
 
+      {/* Low-stock alert — compact summary + small cards in a responsive grid (not bound to current page). */}
+      {lowStockAlerts && (
+        <DeferredSection resolve={lowStockAlerts} skeleton="card">
+          {(alerts) => {
+            const a = alerts as LowStockAlertsResult;
+            if (a.items.length === 0) return null;
+            const preview = a.items.slice(0, 8);
+            const extra = a.items.length - preview.length;
+            return (
+              <div className="rounded-lg border border-warning-300 dark:border-warning-700 bg-warning-50 dark:bg-warning-900/20 px-3 py-3 sm:px-4">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-warning-600 dark:text-warning-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                  <p className="text-sm font-medium text-warning-800 dark:text-warning-200 min-w-0">
+                    {a.items.length} {a.items.length === 1 ? 'product is' : 'products are'} below the{' '}
+                    <span className="tabular-nums">{a.threshold}</span>-unit alert threshold
+                  </p>
+                </div>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                  {preview.map((item) => (
+                    <Link
+                      key={item.levelId}
+                      to={`/admin/inventory/${item.levelId}`}
+                      prefetch="intent"
+                      className="rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 min-w-0 shadow-sm hover:border-warning-400 dark:hover:border-warning-600 hover:bg-app-elevated dark:hover:bg-warning-950/40 transition-colors"
+                      title={`${item.productName} — ${item.locationName}`}
+                    >
+                      <p className="text-xs font-semibold text-app-fg leading-snug line-clamp-2">{item.productName}</p>
+                      <p className="text-[11px] text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
+                      <p
+                        className={`text-xs font-bold tabular-nums mt-1.5 ${
+                          item.availableCount <= 0
+                            ? 'text-danger-600 dark:text-danger-400'
+                            : 'text-warning-800 dark:text-warning-200'
+                        }`}
+                      >
+                        {item.availableCount} avail
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+                {extra > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => updateLevelsParam('sort', 'lowestAvailable')}
+                    className="mt-2.5 w-full sm:w-auto text-left text-xs font-medium text-warning-800 dark:text-warning-200 underline underline-offset-2 hover:text-warning-900 dark:hover:text-warning-100"
+                  >
+                    + {extra} more — sort table by lowest available →
+                  </button>
+                )}
+              </div>
+            );
+          }}
+        </DeferredSection>
+      )}
+
       <Tabs
         value={activeTab}
         onChange={(v) => setActiveTab(v as TabValue)}
@@ -628,63 +685,6 @@ export function InventoryPage({
       {/* Content */}
       {activeTab === 'levels' ? (
         <>
-        {/* Low-stock alert — compact summary + small cards in a responsive grid (not bound to current page). */}
-        {lowStockAlerts && (
-          <DeferredSection resolve={lowStockAlerts} skeleton="card">
-            {(alerts) => {
-              const a = alerts as LowStockAlertsResult;
-              if (a.items.length === 0) return null;
-              const preview = a.items.slice(0, 8);
-              const extra = a.items.length - preview.length;
-              return (
-                <div className="rounded-lg border border-warning-300 dark:border-warning-700 bg-warning-50 dark:bg-warning-900/20 px-3 py-3 sm:px-4">
-                  <div className="flex items-center gap-2">
-                    <svg className="w-5 h-5 text-warning-600 dark:text-warning-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                    </svg>
-                    <p className="text-sm font-medium text-warning-800 dark:text-warning-200 min-w-0">
-                      {a.items.length} {a.items.length === 1 ? 'product is' : 'products are'} below the{' '}
-                      <span className="tabular-nums">{a.threshold}</span>-unit alert threshold
-                    </p>
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-                    {preview.map((item) => (
-                      <Link
-                        key={item.levelId}
-                        to={`/admin/inventory/${item.levelId}`}
-                        prefetch="intent"
-                        className="rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 min-w-0 shadow-sm hover:border-warning-400 dark:hover:border-warning-600 hover:bg-app-elevated dark:hover:bg-warning-950/40 transition-colors"
-                        title={`${item.productName} — ${item.locationName}`}
-                      >
-                        <p className="text-xs font-semibold text-app-fg leading-snug line-clamp-2">{item.productName}</p>
-                        <p className="text-[11px] text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
-                        <p
-                          className={`text-xs font-bold tabular-nums mt-1.5 ${
-                            item.availableCount <= 0
-                              ? 'text-danger-600 dark:text-danger-400'
-                              : 'text-warning-800 dark:text-warning-200'
-                          }`}
-                        >
-                          {item.availableCount} avail
-                        </p>
-                      </Link>
-                    ))}
-                  </div>
-                  {extra > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => updateLevelsParam('sort', 'lowestAvailable')}
-                      className="mt-2.5 w-full sm:w-auto text-left text-xs font-medium text-warning-800 dark:text-warning-200 underline underline-offset-2 hover:text-warning-900 dark:hover:text-warning-100"
-                    >
-                      + {extra} more — sort table by lowest available →
-                    </button>
-                  )}
-                </div>
-              );
-            }}
-          </DeferredSection>
-        )}
-
         {/* Filter + search + sort row. Hidden only when there is no data AND no active filter. */}
         {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentLocationFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -1085,37 +1085,25 @@ function TransfersTab({
               <th className="table-header">To</th>
               <th className="table-header text-right">Qty</th>
               <th className="table-header">Recorded</th>
-              <th className="table-header w-0"> </th>
             </tr>
           </thead>
           <tbody>
-            {transfers.map((t) => {
-              const legacy = t.transferStatus && t.transferStatus !== 'RECEIVED';
-              return (
+            {transfers.map((t) => (
                 <tr key={t.id} className="table-row">
                   <td className="table-cell font-medium text-app-fg">{productName(t.productId)}</td>
                   <td className="table-cell text-app-fg-muted">{locationName(t.fromLocationId)}</td>
                   <td className="table-cell text-app-fg-muted">{locationName(t.toLocationId)}</td>
-                  <td className="table-cell text-right font-medium">
-                    {t.transferStatus === 'DISPUTED' && t.quantityReceived !== null
-                      ? `${t.quantityReceived} / ${t.quantitySent}`
-                      : t.quantityReceived ?? t.quantitySent}
-                  </td>
+                  <td className="table-cell text-right font-medium">{t.quantityReceived ?? t.quantitySent}</td>
                   <td className="table-cell text-app-fg-muted text-sm">
                     {t.verifiedAt
                       ? new Date(t.verifiedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                       : new Date(t.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </td>
-                  <td className="table-cell text-xs text-app-fg-muted max-w-[8rem]">
-                    {legacy && t.transferStatus === 'IN_TRANSIT' && 'Legacy: awaiting completion'}
-                    {legacy && t.transferStatus === 'DISPUTED' && t.shrinkageReason ? `Discrepancy: ${t.shrinkageReason}` : null}
-                  </td>
                 </tr>
-              );
-            })}
+              ))}
             {transfers.length === 0 && (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={5}>
                   <EmptyState title="No transfers" description="No transfer records for your scope." />
                 </td>
               </tr>
@@ -1125,9 +1113,7 @@ function TransfersTab({
       </div>
 
       <div className="md:hidden space-y-3 px-1 pb-3">
-        {transfers.map((t) => {
-          const legacy = t.transferStatus && t.transferStatus !== 'RECEIVED';
-          return (
+        {transfers.map((t) => (
             <div key={t.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
               <div className="font-medium text-app-fg text-sm">{productName(t.productId)}</div>
               <div className="flex items-center gap-2 text-sm text-app-fg-muted">
@@ -1137,26 +1123,15 @@ function TransfersTab({
               </div>
               <p className="text-sm text-app-fg">
                 Qty:{' '}
-                <span className="font-medium">
-                  {t.transferStatus === 'DISPUTED' && t.quantityReceived !== null
-                    ? `${t.quantityReceived} / ${t.quantitySent}`
-                    : t.quantityReceived ?? t.quantitySent}
-                </span>
+                <span className="font-medium">{t.quantityReceived ?? t.quantitySent}</span>
               </p>
               <p className="text-xs text-app-fg-muted">
                 {t.verifiedAt
                   ? new Date(t.verifiedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                   : new Date(t.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
               </p>
-              {legacy && t.transferStatus === 'IN_TRANSIT' && (
-                <p className="text-xs text-warning-600 dark:text-warning-400">Legacy: awaiting completion</p>
-              )}
-              {legacy && t.transferStatus === 'DISPUTED' && t.shrinkageReason && (
-                <p className="text-xs text-danger-600 dark:text-danger-400">Discrepancy: {t.shrinkageReason}</p>
-              )}
             </div>
-          );
-        })}
+          ))}
         {transfers.length === 0 && <EmptyState title="No transfers" />}
       </div>
     </div>

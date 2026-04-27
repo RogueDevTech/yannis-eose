@@ -89,6 +89,14 @@ export interface DeliveryConfirmationRequest {
   requesterName?: string | null;
 }
 
+/** Orders already in ALLOCATED and eligible for direct delivery confirmation. */
+export interface AllocatedDeliveryOrder {
+  id: string;
+  status: string;
+  customerName: string;
+  deliveryAddress: string | null;
+}
+
 /** Streaming-aware loader shape for the logistics route */
 export interface LogisticsStreamData {
   providers: Provider[];

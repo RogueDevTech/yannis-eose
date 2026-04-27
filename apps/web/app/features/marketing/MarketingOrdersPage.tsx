@@ -39,7 +39,7 @@ interface MarketingOrdersPageProps {
   /** Total approved ad spend in the period — from marketing.metrics. */
   totalAdSpend?: number | null;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
-  dailyCounts?: Array<{ date: string; orderCount: number }>;
+  dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
 }
 
 export function MarketingOrdersPage({

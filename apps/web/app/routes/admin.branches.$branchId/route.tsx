@@ -115,7 +115,6 @@ interface BranchOverview {
     deliveredOrders: number;
     activeOrders: number;
     campaigns: number;
-    messageTemplates: number;
   };
   csTeam: OverviewMember[];
   marketingTeam: OverviewMember[];
@@ -463,7 +462,7 @@ export default function BranchOverviewRoute() {
       </div>
 
       {/* ── KPI strip ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <BranchOverviewStat label="Total Orders" value={counts.totalOrders} sub="All statuses" />
         <BranchOverviewStat label="Active" value={counts.activeOrders} sub="In pipeline" accent="blue" />
         <BranchOverviewStat label="Delivered" value={counts.deliveredOrders} sub="Completed" accent="green" />
@@ -474,7 +473,6 @@ export default function BranchOverviewRoute() {
           accent={deliveryRate !== null && deliveryRate >= 70 ? 'green' : deliveryRate !== null && deliveryRate >= 40 ? 'yellow' : undefined}
         />
         <BranchOverviewStat label="Campaigns" value={counts.campaigns} sub="Marketing" />
-        <BranchOverviewStat label="CS Templates" value={counts.messageTemplates} sub="SMS / WhatsApp" />
       </div>
 
       {/* Shared global Tabs component — matches the look used elsewhere in the app
@@ -562,29 +560,16 @@ export default function BranchOverviewRoute() {
               </button>
             </div>
 
-            {/* Marketing & comms */}
+            {/* Marketing */}
             <div className="card p-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
-                Marketing & Comms
+                Marketing
               </p>
               <div className="space-y-2">
-                {[
-                  { label: 'Campaigns', value: counts.campaigns },
-                  { label: 'Message templates', value: counts.messageTemplates },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex items-center justify-between text-sm">
-                    <span className="text-app-fg-muted">{label}</span>
-                    <span className="font-semibold text-app-fg tabular-nums">{value}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="pt-2 border-t border-app-border flex flex-col gap-1.5">
-                <Link
-                  to={`/admin/cs/message-templates?branchId=${branch.id}`}
-                  className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                >
-                  View CS templates →
-                </Link>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-app-fg-muted">Campaigns</span>
+                  <span className="font-semibold text-app-fg tabular-nums">{counts.campaigns}</span>
+                </div>
               </div>
             </div>
           </div>

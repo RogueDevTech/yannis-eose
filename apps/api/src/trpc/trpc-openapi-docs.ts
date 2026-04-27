@@ -109,10 +109,10 @@ const ENDPOINTS: TrpcEndpoint[] = [
   { procedure: 'inventory.dispatchLockStatus', method: 'GET', summary: 'Dispatch lock status', tag: 'Inventory' },
 
   // Logistics
-  { procedure: 'logistics.listProviders', method: 'GET', summary: 'List 3PL providers', tag: 'Logistics' },
-  { procedure: 'logistics.getProvider', method: 'GET', summary: 'Get provider by ID', tag: 'Logistics' },
-  { procedure: 'logistics.createProvider', method: 'POST', summary: 'Create provider', tag: 'Logistics' },
-  { procedure: 'logistics.updateProvider', method: 'POST', summary: 'Update provider', tag: 'Logistics' },
+  { procedure: 'logistics.listProviders', method: 'GET', summary: 'List logistics companies', tag: 'Logistics' },
+  { procedure: 'logistics.getProvider', method: 'GET', summary: 'Get logistics company by ID', tag: 'Logistics' },
+  { procedure: 'logistics.createProvider', method: 'POST', summary: 'Create logistics company', tag: 'Logistics' },
+  { procedure: 'logistics.updateProvider', method: 'POST', summary: 'Update logistics company', tag: 'Logistics' },
   { procedure: 'logistics.listLocations', method: 'GET', summary: 'List locations', tag: 'Logistics' },
   { procedure: 'logistics.createLocation', method: 'POST', summary: 'Create location', tag: 'Logistics' },
   { procedure: 'logistics.updateLocation', method: 'POST', summary: 'Update location', tag: 'Logistics' },

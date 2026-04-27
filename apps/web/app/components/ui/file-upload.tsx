@@ -1,5 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { uploadToS3, type S3Folder } from '~/lib/s3-upload';
+
+export type FileUploadUploadState = 'idle' | 'uploading' | 'done' | 'error';
 
 interface FileUploadProps {
   folder: S3Folder;
@@ -7,11 +9,19 @@ interface FileUploadProps {
   accept?: string;
   maxSizeMB?: number;
   label?: string;
+  /**
+   * When set, a hidden input submits the uploaded URL with the form.
+   * HTML5 `required` does not apply to hidden inputs — parents must validate the URL
+   * (e.g. Zod + intercept submit) or disable submit until `onUpload` receives a non-empty URL.
+   */
   name?: string;
+  /** Visual-only asterisk; does not enable browser validation for `name` hidden fields. */
   required?: boolean;
+  /** Fires whenever internal upload phase changes (use to disable submit while uploading). */
+  onUploadStateChange?: (state: FileUploadUploadState) => void;
 }
 
-type UploadState = 'idle' | 'uploading' | 'done' | 'error';
+type UploadState = FileUploadUploadState;
 
 export function FileUpload({
   folder,
@@ -21,6 +31,7 @@ export function FileUpload({
   label,
   name,
   required,
+  onUploadStateChange,
 }: FileUploadProps) {
   const [state, setState] = useState<UploadState>('idle');
   const [progress, setProgress] = useState(0);
@@ -30,6 +41,10 @@ export function FileUpload({
   const [error, setError] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    onUploadStateChange?.(state);
+  }, [state, onUploadStateChange]);
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;

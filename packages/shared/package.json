@@ -21,6 +21,7 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts --",
     "db:seed:boost": "tsx src/db/seed-boost.ts",
+    "db:seed:delivery-remittance-disputed": "tsx src/db/seed-delivery-remittance-disputed.ts",
     "db:seed-permissions": "tsx scripts/seed-permissions.ts",
     "db:baseline": "tsx scripts/baseline-migrations.ts",
     "simulate:orders": "tsx test-script/order-simulate.ts",
