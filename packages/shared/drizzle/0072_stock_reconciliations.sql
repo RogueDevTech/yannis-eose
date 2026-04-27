@@ -9,17 +9,17 @@ EXCEPTION
 END $$;
 
 CREATE TABLE IF NOT EXISTS stock_reconciliations (
-  id                    TEXT PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-  location_id           TEXT NOT NULL REFERENCES logistics_locations (id),
-  product_id            TEXT NOT NULL REFERENCES products (id),
+  id                    uuid PRIMARY KEY NOT NULL,
+  location_id           uuid NOT NULL REFERENCES logistics_locations (id),
+  product_id            uuid NOT NULL REFERENCES products (id),
   digital_count         INTEGER NOT NULL,
   physical_count        INTEGER NOT NULL,
   discrepancy           INTEGER NOT NULL,
   reason_code           TEXT NOT NULL,
   notes                 TEXT,
   reconciliation_status reconciliation_status NOT NULL DEFAULT 'PENDING'::reconciliation_status,
-  submitted_by          TEXT NOT NULL REFERENCES users (id),
-  approved_by           TEXT REFERENCES users (id),
+  submitted_by          uuid NOT NULL REFERENCES users (id),
+  approved_by           uuid REFERENCES users (id),
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   resolved_at           TIMESTAMPTZ,
   valid_from            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
