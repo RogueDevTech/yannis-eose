@@ -5,12 +5,12 @@ ALTER TYPE ad_spend_status ADD VALUE IF NOT EXISTS 'REJECTED';
 ALTER TABLE ad_spend_logs
   ADD COLUMN IF NOT EXISTS rejection_reason text,
   ADD COLUMN IF NOT EXISTS rejected_at timestamp with time zone,
-  ADD COLUMN IF NOT EXISTS rejected_by text REFERENCES users (id);
+  ADD COLUMN IF NOT EXISTS rejected_by uuid REFERENCES users (id);
 
 ALTER TABLE ad_spend_logs_history
   ADD COLUMN IF NOT EXISTS rejection_reason text,
   ADD COLUMN IF NOT EXISTS rejected_at timestamp with time zone,
-  ADD COLUMN IF NOT EXISTS rejected_by text;
+  ADD COLUMN IF NOT EXISTS rejected_by uuid;
 
 CREATE OR REPLACE FUNCTION yannis_capture_history_insert_ad_spend_logs()
 RETURNS TRIGGER AS $$

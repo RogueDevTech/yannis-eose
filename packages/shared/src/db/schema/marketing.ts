@@ -96,7 +96,7 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
   approvedBy: text('approved_by').references(() => users.id),
   rejectionReason: text('rejection_reason'),
   rejectedAt: timestamp('rejected_at', { withTimezone: true }),
-  rejectedBy: text('rejected_by').references(() => users.id),
+  rejectedBy: uuid('rejected_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,
 });

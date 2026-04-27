@@ -54,10 +54,10 @@ export const stockReconciliations = pgTable('stock_reconciliations', {
   reasonCode: text('reason_code').notNull(),
   notes: text('notes'),
   reconciliationStatus: reconciliationStatusEnum('reconciliation_status').default('PENDING').notNull(),
-  submittedBy: text('submitted_by')
+  submittedBy: uuid('submitted_by')
     .notNull()
     .references(() => users.id),
-  approvedBy: text('approved_by').references(() => users.id),
+  approvedBy: uuid('approved_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   ...temporalColumns,
