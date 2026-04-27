@@ -266,6 +266,9 @@ importers:
       vite-tsconfig-paths:
         specifier: ^5.1.4
         version: 5.1.4(typescript@5.9.3)(vite@6.4.1(@types/node@22.19.13)(jiti@1.21.7)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.19.13)(terser@5.46.0)
 
   packages/config: {}
 

@@ -195,6 +195,12 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.logistics,
         permission: 'logistics.write',
       },
+      {
+        label: 'Returns & Restock',
+        href: '/admin/returns',
+        icon: SidebarIcons.returns,
+        permission: 'returns.read',
+      },
     ],
   },
   {
@@ -236,12 +242,6 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/transfers',
         icon: SidebarIcons.transfers,
         permission: 'transfers.read',
-      },
-      {
-        label: 'Returns',
-        href: '/admin/returns',
-        icon: SidebarIcons.returns,
-        permission: 'returns.read',
       },
     ],
   },

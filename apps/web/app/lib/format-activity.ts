@@ -17,7 +17,7 @@ function formatTableName(name: string): string {
     products: 'Product',
     product_categories: 'Product Category',
     stock_batches: 'Stock Batch',
-    logistics_providers: 'Logistics Provider',
+    logistics_providers: 'Logistics company',
     logistics_locations: 'Logistics Location',
     inventory_levels: 'Inventory Level',
     offer_templates: 'Offer Template',
@@ -185,7 +185,7 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     return `Updated inventory level${qty ? ` — ${qty} units` : ''}`;
   }
 
-  if (table === 'logistics_providers') return `Updated logistics provider${label}`;
+  if (table === 'logistics_providers') return `Updated logistics company${label}`;
   if (table === 'logistics_locations') return `Updated logistics location${label}`;
 
   if (table === 'invoices') {

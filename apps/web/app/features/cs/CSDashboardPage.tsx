@@ -723,7 +723,6 @@ export function CSDashboardPage({
   );
   // Track which order is being claimed (to show per-row loading state)
   const [claimingOrderId, setClaimingOrderId] = useState<string | null>(null);
-  const [assignAgent, setAssignAgent] = useState<Record<string, string>>({});
   const [hotSwapFrom, setHotSwapFrom] = useState(initialHotSwapFrom ?? '');
   const [hotSwapTo, setHotSwapTo] = useState('');
   const [hotSwapOrderIds, setHotSwapOrderIds] = useState<string[]>([]);
@@ -742,8 +741,10 @@ export function CSDashboardPage({
   const [selectedQueueOrder, setSelectedQueueOrder] = useState<CSOrder | null>(null);
   /** Multi-select for bulk-assign on the Unassigned Queue tab. */
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
+  /** Chosen closer inside the Unassigned "Assign" modal (assignable only). */
   const [bulkAssignAgentId, setBulkAssignAgentId] = useState<string>('');
-  const bulkAssignFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const [assignCloserModalOpen, setAssignCloserModalOpen] = useState(false);
+  const bulkAssignFetcher = useFetcher<{ success?: boolean; error?: string; assigned?: number }>();
   const isBulkAssigning = bulkAssignFetcher.state !== 'idle';
 
   const toggleQueueSelection = (orderId: string) => {
@@ -757,11 +758,12 @@ export function CSDashboardPage({
 
   const clearQueueSelection = () => setSelectedQueueIds(new Set());
 
-  // Clear selection after successful bulk assign.
+  // Clear selection and close the assign modal after successful bulk assign.
   useEffect(() => {
     if (bulkAssignFetcher.state === 'idle' && bulkAssignFetcher.data?.success) {
       setBulkAssignAgentId('');
       clearQueueSelection();
+      setAssignCloserModalOpen(false);
     }
   }, [bulkAssignFetcher.state, bulkAssignFetcher.data]);
   const [selectedAgent, setSelectedAgent] = useState<AgentWorkload | null>(null);
@@ -786,6 +788,7 @@ export function CSDashboardPage({
   const overviewScrollRef = useRef<HTMLDivElement>(null);
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const activityScrollRef = useRef<HTMLDivElement>(null);
+  const unassignedQueueScrollRef = useRef<HTMLDivElement>(null);
   const [viewAllActivityOpen, setViewAllActivityOpen] = useState(false);
   const [viewAllActivityPage, setViewAllActivityPage] = useState(1);
   const scrollOverviewStrip = useCallback((delta: number) => {
@@ -796,6 +799,9 @@ export function CSDashboardPage({
   }, []);
   const scrollActivityStrip = useCallback((delta: number) => {
     activityScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  }, []);
+  const scrollUnassignedQueueStrip = useCallback((delta: number) => {
+    unassignedQueueScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
 
   const overviewStripOverflowKey = useMemo(() => {
@@ -859,6 +865,7 @@ export function CSDashboardPage({
   useFetcherToast(fetcher.data, { successMessage });
   useFetcherToast(claimFetcher.data, { successMessage: claimFetcher.data?.message ?? 'Order claimed' });
   useFetcherToast(deleteCartFetcher.data, { successMessage: 'Cart deleted' });
+  useFetcherToast(bulkAssignFetcher.data, { successMessage: 'Order(s) assigned to closer' });
 
   // Close delete modal and refresh carts list after successful delete
   useEffect(() => {
@@ -980,24 +987,11 @@ export function CSDashboardPage({
         })),
     [workloads],
   );
-  const assigningOrderId =
-    fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'assign'
-      ? fetcher.formData?.get('orderId')?.toString() ?? null
-      : null;
 
   // Get orders assigned to the hotswap source agent
   const hotSwapSourceOrders = activeOrders.filter(
     (o: CSOrder) => o.assignedCsId === hotSwapFrom,
   );
-
-  function handleAssign(orderId: string) {
-    const agentId = assignAgent[orderId];
-    if (!agentId) return;
-    fetcher.submit(
-      { intent: 'assign', orderId, csAgentId: agentId },
-      { method: 'post' },
-    );
-  }
 
   function handleHotSwap() {
     if (hotSwapOrderIds.length === 0 || !hotSwapFrom || !hotSwapTo) return;
@@ -1618,41 +1612,26 @@ export function CSDashboardPage({
                     </>
                   )}
                 </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <FormSelect
-                    id="bulk-assign-closer-inline"
-                    value={bulkAssignAgentId}
-                    onChange={(e) => setBulkAssignAgentId(e.target.value)}
-                    placeholder="Select closer..."
-                    options={assignableCloserOptions}
-                    controlSize="sm"
-                    wrapperClassName="min-w-[13rem]"
-                  />
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                   <Button
+                    type="button"
                     variant="primary"
                     size="sm"
-                    disabled={selectedQueueIds.size === 0 || !bulkAssignAgentId || isBulkAssigning}
-                    loading={isBulkAssigning}
-                    loadingText="Assigning…"
+                    disabled={selectedQueueIds.size === 0}
                     onClick={() => {
-                      bulkAssignFetcher.submit(
-                        {
-                          intent: 'bulkAssignToCS',
-                          orderIds: JSON.stringify(Array.from(selectedQueueIds)),
-                          csAgentId: bulkAssignAgentId,
-                        },
-                        { method: 'post' },
-                      );
+                      setBulkAssignAgentId('');
+                      setAssignCloserModalOpen(true);
                     }}
                   >
-                    Assign selected{selectedQueueIds.size > 0 ? ` (${selectedQueueIds.size})` : ''}
+                    Assign{selectedQueueIds.size > 0 ? ` (${selectedQueueIds.size})` : ''}
                   </Button>
                 </div>
               </div>
-              <div className="text-[11px] text-app-fg-muted">
-                Only closers with capacity are listed. If everyone is at limit, free up capacity first.
-              </div>
-              {bulkAssignFetcher.data?.error && (
+              <p className="text-[11px] text-app-fg-muted">
+                Click cards to select. Use <span className="font-medium">Assign</span> to open the closer list. Only
+                closers with free capacity are shown. If everyone is at limit, free up capacity first.
+              </p>
+              {bulkAssignFetcher.data?.error && !bulkAssignFetcher.data?.success && (
                 <p className="text-xs text-danger-600 dark:text-danger-400">{bulkAssignFetcher.data.error}</p>
               )}
             </div>
@@ -1663,109 +1642,197 @@ export function CSDashboardPage({
               No unassigned orders in queue
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {unassignedOrders.map((order: CSOrder) => {
-                const isSelected = selectedQueueIds.has(order.id);
-                return (
-                  <div
-                    key={order.id}
-                    onClick={() => setSelectedQueueOrder(order)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setSelectedQueueOrder(order);
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    className={`group relative w-full text-left rounded-xl border bg-app-elevated transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-                      isSelected
-                        ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
-                        : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
-                    }`}
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <p className="text-xs text-app-fg-muted">
+                  Unassigned orders — click a card to select, or use View for details
+                </p>
+                <div className="hidden md:flex items-center gap-1 sm:gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => scrollUnassignedQueueStrip(-280)}
+                    className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+                    aria-label="Scroll unassigned queue left"
                   >
-                    {/* Selection checkbox — top-left, stops propagation so the card click stays open-detail */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleQueueSelection(order.id);
+                    <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollUnassignedQueueStrip(280)}
+                    className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+                    aria-label="Scroll unassigned queue right"
+                  >
+                    <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div
+                ref={unassignedQueueScrollRef}
+                className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
+              >
+                {unassignedOrders.map((order: CSOrder) => {
+                  const isSelected = selectedQueueIds.has(order.id);
+                  return (
+                    <div
+                      key={order.id}
+                      onClick={() => toggleQueueSelection(order.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          toggleQueueSelection(order.id);
+                        }
                       }}
-                      aria-label={isSelected ? 'Deselect order' : 'Select order'}
-                      aria-pressed={isSelected}
-                      className={`absolute top-3 left-3 flex h-5 w-5 items-center justify-center rounded border transition-colors ${
+                      role="checkbox"
+                      aria-checked={isSelected}
+                      tabIndex={0}
+                      className={`group relative shrink-0 w-64 text-left rounded-xl border bg-app-elevated transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
                         isSelected
-                          ? 'bg-brand-500 border-brand-500 text-white'
-                          : 'bg-app-elevated border-app-border hover:border-brand-400'
+                          ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
+                          : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
                       }`}
                     >
-                      {isSelected && (
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </button>
+                      <span className="absolute top-3 right-3 flex h-2.5 w-2.5 pointer-events-none">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning-400 opacity-60" />
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning-500" />
+                      </span>
 
-                    {/* Pulsing dot */}
-                    <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning-400 opacity-60" />
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning-500" />
-                    </span>
-
-                    <div className="p-3.5 pl-10 pr-8">
-                      <div className="mb-2">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
-                          Unassigned
-                        </span>
-                      </div>
-                      <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2">
-                        {order.customerName}
-                      </p>
-                      {order.totalAmount && (
+                      <div className="p-3.5 pr-8">
                         <div className="mb-2">
-                          <span className="text-[11px] font-bold text-app-fg">
-                            &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
+                            Unassigned
                           </span>
                         </div>
-                      )}
-                      <div className="text-[11px] font-medium text-app-fg-muted">
-                        {new Date(order.createdAt).toLocaleString('en-NG', {
-                          month: 'short', day: 'numeric',
-                          hour: '2-digit', minute: '2-digit',
-                        })}
-                      </div>
+                        <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2 pr-1">
+                          {order.customerName}
+                        </p>
+                        {order.totalAmount && (
+                          <div className="mb-2">
+                            <span className="text-[11px] font-bold text-app-fg">
+                              &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
+                            </span>
+                          </div>
+                        )}
+                        <div className="text-[11px] font-medium text-app-fg-muted">
+                          {new Date(order.createdAt).toLocaleString('en-NG', {
+                            month: 'short', day: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
+                          })}
+                        </div>
 
-                      <div className="mt-3 flex gap-2" onClick={(e) => e.stopPropagation()}>
-                        <FormSelect
-                          id={`assign-inline-${order.id}`}
-                          value={assignAgent[order.id] ?? ''}
-                          onChange={(e) => setAssignAgent((prev) => ({ ...prev, [order.id]: e.target.value }))}
-                          placeholder="Select closer..."
-                          options={assignableCloserOptions}
-                          controlSize="sm"
-                          wrapperClassName="flex-1 min-w-0"
-                          className="py-1.5 text-xs"
-                        />
-                        <Button
-                          type="button"
-                          variant="primary"
-                          size="sm"
-                          onClick={() => handleAssign(order.id)}
-                          disabled={!assignAgent[order.id] || assigningOrderId !== null}
-                          loading={assigningOrderId === order.id}
-                          loadingText="..."
-                        >
-                          Assign
-                        </Button>
+                        <div className="mt-2 pt-2 border-t border-app-border/80">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedQueueOrder(order);
+                            }}
+                            className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          >
+                            View details
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
       )}
+
+      {/* Unassigned: pick closer in modal (no dropdowns on cards or toolbar) */}
+      <Modal
+        open={assignCloserModalOpen}
+        onClose={() => {
+          if (isBulkAssigning) return;
+          setAssignCloserModalOpen(false);
+          setBulkAssignAgentId('');
+        }}
+        maxWidth="max-w-md"
+        aria-labelledby="assign-closer-title"
+        backdropBlur
+        contentClassName="p-0 max-h-[min(32rem,90dvh)] overflow-hidden flex flex-col"
+      >
+        <div className="shrink-0 border-b border-app-border px-4 py-3">
+          <h2 id="assign-closer-title" className="text-lg font-semibold text-app-fg">
+            Assign to closer
+          </h2>
+          <p className="text-sm text-app-fg-muted mt-0.5">
+            {selectedQueueIds.size} order{selectedQueueIds.size !== 1 ? 's' : ''} selected
+          </p>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-1.5">
+          {assignableCloserOptions.length === 0 ? (
+            <p className="text-sm text-app-fg-muted">
+              No closers with free capacity. Free a slot or wait for a confirmation, then try again.
+            </p>
+          ) : (
+            assignableCloserOptions.map((opt) => {
+              const isPick = bulkAssignAgentId === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setBulkAssignAgentId(opt.value)}
+                  className={`w-full text-left rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    isPick
+                      ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40 text-app-fg ring-1 ring-brand-500/30'
+                      : 'border-app-border bg-app-elevated hover:border-brand-300 dark:hover:border-brand-700'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })
+          )}
+        </div>
+        {bulkAssignFetcher.data?.error && !bulkAssignFetcher.data?.success && (
+          <div className="shrink-0 px-4 pb-2">
+            <p className="text-xs text-danger-600 dark:text-danger-400">{bulkAssignFetcher.data.error}</p>
+          </div>
+        )}
+        <div className="shrink-0 flex items-center justify-end gap-2 border-t border-app-border px-4 py-3">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={isBulkAssigning}
+            onClick={() => {
+              setAssignCloserModalOpen(false);
+              setBulkAssignAgentId('');
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={
+              selectedQueueIds.size === 0 || !bulkAssignAgentId || assignableCloserOptions.length === 0 || isBulkAssigning
+            }
+            loading={isBulkAssigning}
+            loadingText="Assigning…"
+            onClick={() => {
+              bulkAssignFetcher.submit(
+                {
+                  intent: 'bulkAssignToCS',
+                  orderIds: JSON.stringify(Array.from(selectedQueueIds)),
+                  csAgentId: bulkAssignAgentId,
+                },
+                { method: 'post' },
+              );
+            }}
+          >
+            Assign
+          </Button>
+        </div>
+      </Modal>
 
       {/* ── Queue Order Detail Modal ── */}
       {selectedQueueOrder && (() => {

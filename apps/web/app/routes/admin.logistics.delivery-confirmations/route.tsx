@@ -3,14 +3,14 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { DeliveryConfirmationsPage } from '~/features/logistics/DeliveryConfirmationsPage';
-import type { DeliveryConfirmationRequest } from '~/features/logistics/types';
+import type { AllocatedDeliveryOrder, DeliveryConfirmationRequest } from '~/features/logistics/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Delivery confirmations — Yannis EOSE' },
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'logistics.read');
+  const user = await requirePermission(request, ['logistics.read', 'orders.read']);
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const statusParam = url.searchParams.get('status');
@@ -35,7 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate) countsInput.startDate = startDate;
   if (endDate) countsInput.endDate = endDate;
 
-  const [res, countsRes] = await Promise.all([
+  const [res, countsRes, allocatedRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/logistics.listDeliveryConfirmationRequests?input=${encodeURIComponent(JSON.stringify({
         status: statusApi,
@@ -46,6 +46,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
     apiRequest<unknown>(
       `/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify(countsInput))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({
+        page: 1,
+        limit: 200,
+        status: 'ALLOCATED',
+      }))}`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -61,6 +69,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const result = data?.result?.data;
   const requests = result?.requests ?? [];
   const total = result?.pagination?.total ?? 0;
+  const allocatedOrders: AllocatedDeliveryOrder[] = allocatedRes.ok
+    ? (((allocatedRes.data as {
+        result?: {
+          data?: {
+            orders?: Array<{ id: string; status: string; customerName: string; deliveryAddress?: string | null }>;
+          };
+        };
+      })?.result?.data?.orders ?? []).map((order) => ({
+        id: order.id,
+        status: order.status,
+        customerName: order.customerName,
+        deliveryAddress: order.deliveryAddress ?? null,
+      })))
+    : [];
 
   const orderCounts = countsRes.ok
     ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
@@ -73,15 +95,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit,
     statusFilter,
     orderCounts,
+    allocatedOrders,
+    canAdjustOrder: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'].includes(user.role),
   });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  await requirePermission(request, ['logistics.read', 'orders.read']);
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
   const requestId = formData.get('requestId')?.toString();
+  const orderId = formData.get('orderId')?.toString();
   const reason = formData.get('reason')?.toString();
+
+  if (intent === 'markDelivered') {
+    if (!orderId) {
+      return json({ error: 'Order ID required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.transition', {
+      method: 'POST',
+      cookie,
+      body: { orderId, newStatus: 'DELIVERED', metadata: {} },
+    });
+    if (!res.ok) {
+      const errData = res.data as { error?: { message?: string } };
+      return json(
+        { error: errData?.error?.message ?? 'Failed to mark delivered' },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
 
   if (!requestId) {
     return json({ error: 'Request ID required' }, { status: 400 });
@@ -132,6 +177,8 @@ export default function DeliveryConfirmationsRoute() {
       limit={data.limit}
       statusFilter={data.statusFilter}
       orderCounts={data.orderCounts ?? {}}
+      allocatedOrders={data.allocatedOrders ?? []}
+      canAdjustOrder={data.canAdjustOrder}
     />
   );
 }

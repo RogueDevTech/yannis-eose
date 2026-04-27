@@ -68,7 +68,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   HEAD_OF_CS: 'Manages CS team performance, order processing, and agent workloads.',
   CS_AGENT: 'Handles customer calls, confirms orders, and processes cancellations.',
   FINANCE_OFFICER: 'Manages invoices, approvals, budgets, and financial reporting.',
-  HEAD_OF_LOGISTICS: 'Oversees all logistics operations, 3PL partners, and transfers.',
+  HEAD_OF_LOGISTICS: 'Oversees logistics operations, logistics companies, 3PL partners, and transfers.',
   STOCK_MANAGER: 'Manages inventory, stock movements, and procurement.',
   TPL_MANAGER: 'Manages a third-party logistics location and its riders.',
   TPL_RIDER: 'Handles last-mile deliveries and order fulfillment.',

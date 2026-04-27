@@ -1,6 +1,6 @@
 import type { LinksFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import {
   Links,
@@ -12,7 +12,6 @@ import {
   useLocation,
   useLoaderData,
   useNavigate,
-  useNavigation,
   useRouteError,
 } from '@remix-run/react';
 import { PwaInstallPrompt } from '~/components/ui/pwa-install-prompt';
@@ -24,6 +23,7 @@ import { ScrollToTopButton } from '~/components/ui/scroll-to-top-button';
 import stylesheet from '~/tailwind.css?url';
 import { getThemeBootScript } from '~/lib/theme';
 import { getFontScaleBootScript } from '~/lib/font-scale';
+import { useScrollToTopOnRouteChange } from '~/hooks/useScrollToTopOnRouteChange';
 
 declare global {
   interface Window {
@@ -122,12 +122,10 @@ export const links: LinksFunction = () => [
 export default function App() {
   const { ENV } = useLoaderData<typeof loader>();
   const location = useLocation();
-  const navigation = useNavigation();
   const { install, canPromptInstall, isIosManualInstall } = usePwaInstall();
   const envScript = JSON.stringify(ENV).replace(/<\/script>/gi, '<\\/script>');
   const [isBooting, setIsBooting] = useState(true);
   const [installPromptOpen, setInstallPromptOpen] = useState(false);
-  const pendingScrollResetPathRef = useRef<string | null>(null);
   const isAuthPage = location.pathname.startsWith('/auth');
   const isLoggedInArea =
     location.pathname.startsWith('/admin') ||
@@ -138,6 +136,7 @@ export default function App() {
   useRevalidateOnAppResume(isLoggedInArea);
   useServerAppThemeSync(isLoggedInArea);
   useServerFontScaleSync(isLoggedInArea);
+  useScrollToTopOnRouteChange();
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
@@ -148,29 +147,6 @@ export default function App() {
       window.cancelAnimationFrame(id);
     };
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const nextLocation = navigation.location;
-    const isRouteChange =
-      navigation.state !== 'idle' &&
-      nextLocation != null &&
-      nextLocation.pathname !== location.pathname;
-
-    if (!isRouteChange) {
-      pendingScrollResetPathRef.current = null;
-      return;
-    }
-
-    // Let hash-targeted navigation land on anchors naturally.
-    if (nextLocation.hash) return;
-
-    if (pendingScrollResetPathRef.current === nextLocation.pathname) return;
-    pendingScrollResetPathRef.current = nextLocation.pathname;
-
-    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-  }, [location.pathname, navigation.location, navigation.state]);
 
   useEffect(() => {
     if (isAuthPage || !isLoggedInArea || !canPromptInstall) {
@@ -227,7 +203,7 @@ export default function App() {
           onClose={() => setInstallPromptOpen(false)}
         />
         <ScrollToTopButton />
-        <ScrollRestoration getKey={(location) => location.pathname} />
+        <ScrollRestoration getKey={(loc) => loc.key} />
         <script dangerouslySetInnerHTML={{ __html: `window.__ENV = ${envScript};` }} />
         <Scripts />
         <script

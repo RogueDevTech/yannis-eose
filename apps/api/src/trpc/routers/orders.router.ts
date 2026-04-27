@@ -120,7 +120,10 @@ export const ordersRouter = router({
 
   /**
    * List orders with filtering and pagination.
-   * Allows orders.read (full access) or marketing.orders (scoped: Media Buyer = own only, Head of Marketing = all).
+   * Allows:
+   * - orders.read (full access)
+   * - marketing.orders (scoped: Media Buyer = own only, Head of Marketing = all)
+   * - logistics.read (logistics lists)
    */
   list: authedProcedure
     .input(listOrdersSchema)
@@ -132,10 +135,11 @@ export const ordersRouter = router({
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
       const hasMarketingOrders = perms.includes('marketing.orders');
-      if (!hasOrdersRead && !hasMarketingOrders) {
+      const hasLogisticsRead = perms.includes('logistics.read');
+      if (!hasOrdersRead && !hasMarketingOrders && !hasLogisticsRead) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Missing orders.read or marketing.orders permission',
+          message: 'Missing orders.read, marketing.orders, or logistics.read permission',
         });
       }
       let effectiveInput = input;
@@ -272,10 +276,10 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Daily order volume for the "View data in chart" trend line on the role-specific
-   * order list pages (Marketing / CS / Logistics). Mirrors the same scoping filters as
-   * `statusCounts` so the chart series matches what the page table is showing.
-   * Returns: [{ date: 'YYYY-MM-DD', orderCount }] sorted ascending by date.
+   * Daily order volume (by `created_at`) plus delivered count (by `delivered_at`, DELIVERED only)
+   * for the "View data in chart" trend on Marketing / CS / Logistics order lists. Mirrors the
+   * same scoping filters as `statusCounts`.
+   * Returns: [{ date: 'YYYY-MM-DD', orderCount, deliveredCount }] sorted ascending by date.
    */
   timeSeriesByCreated: authedProcedure
     .input(

@@ -208,6 +208,7 @@ export const permissionRequestStatusEnum = pgEnum('permission_request_status', [
 export const adSpendStatusEnum = pgEnum('ad_spend_status', [
   'PENDING',
   'APPROVED',
+  'REJECTED',
 ]);
 
 /** Status of a 3PL→warehouse transfer remittance (receipt upload, HoL marks received). */

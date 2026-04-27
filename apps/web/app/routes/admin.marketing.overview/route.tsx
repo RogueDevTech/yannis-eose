@@ -7,8 +7,6 @@ import type {
   Metrics,
   LeaderboardEntry,
   FundingBalanceRow,
-  FundingRequestRecord,
-  AdSpendRecord,
   MarketingOverviewRecentOrder,
 } from '~/features/marketing/types';
 
@@ -107,35 +105,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(recentOrdersListInput))}`,
     { method: 'GET', cookie },
   );
-  const todayRange = defaultTodayRange();
-  const fundingRequestsP = apiRequest<unknown>(
-    `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(JSON.stringify({ limit: 50, page: 1, startDate: todayRange.startDate, endDate: todayRange.endDate }))}`,
-    { method: 'GET', cookie },
-  );
-  const adSpendP = apiRequest<unknown>(
-    `/trpc/marketing.listAdSpend?input=${encodeURIComponent(JSON.stringify({ limit: 50, page: 1, ...(startDate && { startDate }), ...(endDate && { endDate }) }))}`,
-    { method: 'GET', cookie },
-  );
-
-  const [metricsRes, leaderboardRes, balancesRes, recentOrdersRes, fundingRequestsRes, adSpendRes] = await Promise.all([
+  const [metricsRes, leaderboardRes, balancesRes, recentOrdersRes] = await Promise.all([
     metricsP,
     leaderboardP,
     balancesP,
     recentOrdersP,
-    fundingRequestsP,
-    adSpendP,
   ]);
 
   const metrics = parseMetrics(metricsRes);
   const leaderboard = parseLeaderboard(leaderboardRes);
   const balancesList = parseBalancesList(balancesRes);
   const recentOrders = parseRecentOrders(recentOrdersRes);
-  const fundingRequests: FundingRequestRecord[] = fundingRequestsRes.ok
-    ? ((fundingRequestsRes.data as { result?: { data?: { records?: FundingRequestRecord[] } } })?.result?.data?.records ?? []).filter((r) => r.status === 'PENDING')
-    : [];
-  const adSpendLogs: AdSpendRecord[] = adSpendRes.ok
-    ? ((adSpendRes.data as { result?: { data?: { records?: AdSpendRecord[] } } })?.result?.data?.records ?? [])
-    : [];
 
   return {
     metrics,
@@ -143,8 +123,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     balancesList,
     leaderboardPeriod,
     recentOrders,
-    fundingRequests,
-    adSpendLogs,
     liveEvents: [...MARKETING_OVERVIEW_LIVE_EVENTS],
     filters: {
       startDate: startDate ?? '',

@@ -95,7 +95,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
 
   const dailyCounts = trendRes.ok
-    ? ((trendRes.data as { result?: { data?: Array<{ date: string; orderCount: number }> } })?.result?.data ?? [])
+    ? ((trendRes.data as {
+        result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
+      })?.result?.data ?? [])
     : [];
 
   const total = trpcData?.pagination?.total ?? 0;

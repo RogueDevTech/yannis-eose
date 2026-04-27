@@ -97,15 +97,66 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : m;
   });
 
+  const SORT_BY_VALUES = new Set(['name', 'balance', 'received', 'spent', 'confirm', 'delivery']);
+  const q = (url.searchParams.get('q') ?? '').trim();
+  const qLower = q.toLowerCase();
+  const sortByRaw = url.searchParams.get('sortBy') ?? 'name';
+  const sortBy = SORT_BY_VALUES.has(sortByRaw) ? sortByRaw : 'name';
+  const sortDirParam = url.searchParams.get('sortDir');
+  const sortDir: 'asc' | 'desc' =
+    sortDirParam === 'asc' || sortDirParam === 'desc'
+      ? sortDirParam
+      : sortBy === 'name'
+        ? 'asc'
+        : 'desc';
+
+  const unfilteredCount = teamMembersWithMetrics.length;
+  let afterSearch = teamMembersWithMetrics;
+  if (qLower.length > 0) {
+    afterSearch = teamMembersWithMetrics.filter((m) => {
+      const name = m.name.toLowerCase();
+      const role = m.role.toLowerCase().replaceAll('_', ' ');
+      if (name.includes(qLower) || m.role.toLowerCase().includes(qLower) || role.includes(qLower)) {
+        return true;
+      }
+      return false;
+    });
+  }
+
+  const sorted = [...afterSearch];
+  if (sortBy === 'name') {
+    sorted.sort((a, b) => {
+      const c = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      return sortDir === 'asc' ? c : -c;
+    });
+  } else {
+    const num = (m: FundingBalanceRow) => (sortBy === 'balance' ? Number(m.balance) : sortBy === 'received' ? Number(m.totalReceived) : Number(m.totalSpend));
+    const rate = (m: FundingBalanceRow, k: 'confirmationRate' | 'deliveryRate') => m[k];
+    sorted.sort((a, b) => {
+      if (sortBy === 'balance' || sortBy === 'received' || sortBy === 'spent') {
+        return sortDir === 'asc' ? num(a) - num(b) : num(b) - num(a);
+      }
+      const k = sortBy === 'confirm' ? 'confirmationRate' : 'deliveryRate';
+      const av = rate(a, k);
+      const bv = rate(b, k);
+      const aNull = av == null;
+      const bNull = bv == null;
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+  }
+
   // Client-side pagination — `marketing.listFundingBalances` returns all members. With 20/page
   // the loader is the single source of truth for which slice is shown.
   const PAGE_SIZE = 20;
   const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
-  const totalCount = teamMembersWithMetrics.length;
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const totalCount = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(Math.max(0, totalCount) / PAGE_SIZE));
   const page = Math.min(Math.max(1, Number.isFinite(pageRaw) ? pageRaw : 1), totalPages);
   const start = (page - 1) * PAGE_SIZE;
-  const pagedMembers = teamMembersWithMetrics.slice(start, start + PAGE_SIZE);
+  const pagedMembers = sorted.slice(start, start + PAGE_SIZE);
 
   return {
     teamMembers: pagedMembers,
@@ -115,6 +166,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     page,
     totalPages,
     totalCount,
+    q,
+    sortBy,
+    sortDir,
+    unfilteredCount,
   };
 }
 
@@ -128,6 +183,11 @@ export default function MarketingTeamRoute() {
       leaderboardPeriod={data.leaderboardPeriod}
       page={data.page}
       totalPages={data.totalPages}
+      totalCount={data.totalCount}
+      q={data.q}
+      sortBy={data.sortBy}
+      sortDir={data.sortDir}
+      unfilteredCount={data.unfilteredCount}
     />
   );
 }

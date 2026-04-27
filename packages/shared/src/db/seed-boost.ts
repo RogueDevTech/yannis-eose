@@ -10,7 +10,7 @@
  * then inserts high-margin delivered/completed orders with proper:
  *   - order_items + batch references
  *   - call logs
- *   - delivery confirmation requests
+ *   - delivery confirmation requests (approved + pending demo rows for HoL QA)
  *   - delivery remittances
  *   - invoices (PAID)
  *   - ad spend entries (low, profitable)
@@ -33,6 +33,8 @@ const BOOST_COUNT = Math.min(
   2000,
   Math.max(50, parseInt(process.env['BOOST_COUNT'] ?? '200', 10) || 200)
 );
+const PENDING_CONFIRMATION_DEMO_COUNT = 5;
+const DISPUTED_REMITTANCE_DEMO_COUNT = 4;
 
 async function boostSeed() {
   const connectionString = process.env['DATABASE_URL'];
@@ -163,6 +165,7 @@ async function boostSeed() {
   console.log(`  Creating ${BOOST_COUNT} profitable delivered orders...`);
 
   const deliveredOrderInfos: Array<{ orderId: string; riderId: string; locationId: string; totalAmount: number }> = [];
+  const pendingConfirmationInfos: Array<{ orderId: string; riderId: string }> = [];
   let totalRevenue = 0;
   let totalLandedCostSum = 0;
   let totalDeliveryFees = 0;
@@ -277,11 +280,81 @@ async function boostSeed() {
       totalRevenue += totalAmount;
       totalLandedCostSum += totalLandedCost;
       totalDeliveryFees += deliveryFee;
+    } else {
+      pendingConfirmationInfos.push({ orderId, riderId });
     }
 
     if ((i + 1) % 50 === 0) process.stdout.write(`  Progress: ${i + 1}/${BOOST_COUNT} orders...\r`);
   }
   console.log(`  Created ${BOOST_COUNT} orders.                    `);
+
+  // ── Deterministic pending confirmation demo rows ────────────────
+  console.log(`  Adding ${PENDING_CONFIRMATION_DEMO_COUNT} in-transit demo orders with pending confirmations...`);
+  for (let i = 0; i < PENDING_CONFIRMATION_DEMO_COUNT; i++) {
+    const orderId = randomUUID();
+    const product = faker.helpers.arrayElement(products);
+    const productId = product.id as string;
+    const pricing = productPricing[productId]!;
+    const quantity = faker.number.int({ min: 1, max: 2 });
+    const unitPrice = Math.round(pricing.salePrice * (0.9 + Math.random() * 0.2));
+    const totalAmount = unitPrice * quantity;
+    const landedCostPerUnit = pricing.landedCost;
+    const totalLandedCost = landedCostPerUnit * quantity;
+    const deliveryFee = faker.helpers.arrayElement([1500, 2000, 2500]);
+
+    const campaign = faker.helpers.arrayElement(campaigns);
+    const mediaBuyerId = campaign.media_buyer_id as string;
+    const campaignId = campaign.id as string;
+    const csAgent = faker.helpers.arrayElement(csAgents);
+    const csAgentId = csAgent.id as string;
+
+    const tplLocation = faker.helpers.arrayElement(tplLocations);
+    const locationId = tplLocation.id as string;
+    const providerId = tplLocation.provider_id as string;
+    const locationRiders = ridersByLocation[locationId] ?? riders.map((r: Record<string, unknown>) => r.id as string);
+    const riderId = faker.helpers.arrayElement(locationRiders);
+
+    const daysAgo = faker.number.int({ min: 1, max: 14 });
+    const createdAt = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+    const prefDeliveryDate = new Date(createdAt.getTime() + faker.number.int({ min: 1, max: 3 }) * 24 * 60 * 60 * 1000);
+    const isAbuja = (tplLocation.name as string).includes('Abuja') || (tplLocation.name as string).includes('Wuse');
+    const area = isAbuja ? faker.helpers.arrayElement(abujaAreas) : faker.helpers.arrayElement(lagosAreas);
+    const streetNo = faker.number.int({ min: 1, max: 120 });
+    const street = faker.location.street();
+    const address = `${streetNo} ${street}, ${area}, ${isAbuja ? 'Abuja' : 'Lagos'}`;
+    const customerName = faker.person.fullName();
+    const customerPhone = '0' + faker.helpers.arrayElement(['7', '8', '9']) + faker.string.numeric(9);
+    const phoneHash = 'hash_boost_pending_' + faker.string.alphanumeric(10);
+    const deliveryOtp = faker.string.numeric(4);
+    const items = JSON.stringify([{ productId, quantity, unitPrice }]);
+
+    await sql`
+      INSERT INTO orders (
+        id, branch_id, campaign_id, media_buyer_id, assigned_cs_id, logistics_provider_id, logistics_location_id,
+        rider_id, status, customer_name, customer_phone_hash, customer_phone, customer_address, delivery_address,
+        total_amount, landed_cost, delivery_fee, delivery_otp, items, created_at, delivered_at, preferred_delivery_date
+      ) VALUES (
+        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csAgentId},
+        ${providerId}, ${locationId}, ${riderId}, 'IN_TRANSIT',
+        ${customerName}, ${phoneHash}, ${customerPhone}, ${address}, ${address},
+        ${String(totalAmount)}, ${String(totalLandedCost)}, ${String(deliveryFee)},
+        ${deliveryOtp}, ${items}::jsonb, ${createdAt}, ${null}, ${prefDeliveryDate}
+      )
+    `;
+
+    await sql`
+      INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, batch_id)
+      VALUES (gen_random_uuid(), ${orderId}, ${productId}, ${quantity}, ${String(unitPrice)}, ${pricing.batchId || null})
+    `;
+
+    await sql`
+      INSERT INTO call_logs (id, order_id, agent_id, call_token, call_status, duration_seconds)
+      VALUES (gen_random_uuid(), ${orderId}, ${csAgentId}, ${randomUUID()}, 'COMPLETED', ${faker.number.int({ min: 20, max: 180 })})
+    `;
+
+    pendingConfirmationInfos.push({ orderId, riderId });
+  }
+  console.log(`  Added ${PENDING_CONFIRMATION_DEMO_COUNT} in-transit demo orders.`);
 
   // ── Delivery confirmation requests ──────────────────────────────
   console.log('  Creating delivery confirmation requests...');
@@ -296,6 +369,18 @@ async function boostSeed() {
     await sql`
       INSERT INTO delivery_confirmation_requests (id, order_id, requested_by, status, approved_by, approved_at, payload)
       VALUES (gen_random_uuid(), ${info.orderId}, ${info.riderId}, 'APPROVED', ${headOfLogistics?.id ?? superAdmin.id}, NOW() - INTERVAL '1 day', ${payload}::jsonb)
+    `;
+  }
+  for (const info of pendingConfirmationInfos) {
+    const payload = JSON.stringify({
+      newStatus: 'DELIVERED',
+      gpsLat: 6.4541,
+      gpsLng: 3.4754,
+      deliveredQuantity: 1,
+    });
+    await sql`
+      INSERT INTO delivery_confirmation_requests (id, order_id, requested_by, status, payload)
+      VALUES (gen_random_uuid(), ${info.orderId}, ${info.riderId}, 'PENDING', ${payload}::jsonb)
     `;
   }
 
@@ -331,6 +416,97 @@ async function boostSeed() {
     await sql`
       INSERT INTO delivery_remittance_orders (id, delivery_remittance_id, order_id)
       VALUES (gen_random_uuid(), ${remittanceId}, ${orderId})
+    `;
+  }
+
+  // ── Disputed remittance demo fixtures (exactly 4 by default) ────────
+  // These rows let Finance QA verify disputed-state rendering on /admin/finance/delivery-remittances.
+  // We use a recognizable dispute reason prefix and skip if enough fixtures already exist.
+  const disputeReasonPrefix = '[SEED] Demo disputed remittance';
+  const existingDisputedSeedRows = await sql`
+    SELECT id
+    FROM delivery_remittances
+    WHERE status = 'DISPUTED'
+      AND dispute_reason LIKE ${disputeReasonPrefix + '%'}
+    ORDER BY sent_at DESC
+  `;
+  const disputedFixturesToCreate = Math.max(
+    0,
+    DISPUTED_REMITTANCE_DEMO_COUNT - existingDisputedSeedRows.length,
+  );
+
+  if (disputedFixturesToCreate > 0) {
+    console.log(`  Creating ${disputedFixturesToCreate} disputed delivery remittance fixture(s)...`);
+  }
+
+  for (let i = 0; i < disputedFixturesToCreate; i++) {
+    const orderId = randomUUID();
+    const product = faker.helpers.arrayElement(products);
+    const productId = product.id as string;
+    const pricing = productPricing[productId]!;
+    const quantity = faker.number.int({ min: 1, max: 2 });
+    const unitPrice = Math.round(pricing.salePrice * (0.9 + Math.random() * 0.2));
+    const totalAmount = unitPrice * quantity;
+    const totalLandedCost = pricing.landedCost * quantity;
+    const deliveryFee = faker.helpers.arrayElement([1500, 2000, 2500]);
+
+    const campaign = faker.helpers.arrayElement(campaigns);
+    const mediaBuyerId = campaign.media_buyer_id as string;
+    const campaignId = campaign.id as string;
+    const csAgent = faker.helpers.arrayElement(csAgents);
+    const csAgentId = csAgent.id as string;
+    const tplLocation = faker.helpers.arrayElement(tplLocations);
+    const locationId = tplLocation.id as string;
+    const providerId = tplLocation.provider_id as string;
+    const locationRiders = ridersByLocation[locationId] ?? riders.map((r: Record<string, unknown>) => r.id as string);
+    const riderId = faker.helpers.arrayElement(locationRiders);
+    const tplManagerId = tplManagerByLocation[locationId] ?? tplManagers[0]?.id as string;
+
+    const createdAt = new Date(Date.now() - faker.number.int({ min: 2, max: 20 }) * 24 * 60 * 60 * 1000);
+    const deliveredAt = new Date(createdAt.getTime() + faker.number.int({ min: 8, max: 30 }) * 60 * 60 * 1000);
+    const prefDeliveryDate = new Date(createdAt.getTime() + faker.number.int({ min: 1, max: 4 }) * 24 * 60 * 60 * 1000);
+    const customerName = faker.person.fullName();
+    const customerPhone = '0' + faker.helpers.arrayElement(['7', '8', '9']) + faker.string.numeric(9);
+    const phoneHash = 'hash_boost_disputed_' + faker.string.alphanumeric(10);
+    const deliveryOtp = faker.string.numeric(4);
+    const items = JSON.stringify([{ productId, quantity, unitPrice }]);
+    const address = `${faker.number.int({ min: 1, max: 180 })} ${faker.location.street()}, Lagos`;
+
+    await sql`
+      INSERT INTO orders (
+        id, branch_id, campaign_id, media_buyer_id, assigned_cs_id, logistics_provider_id, logistics_location_id,
+        rider_id, status, customer_name, customer_phone_hash, customer_phone, customer_address, delivery_address,
+        total_amount, landed_cost, delivery_fee, delivery_otp, items, created_at, delivered_at, preferred_delivery_date
+      ) VALUES (
+        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csAgentId},
+        ${providerId}, ${locationId}, ${riderId}, 'DELIVERED',
+        ${customerName}, ${phoneHash}, ${customerPhone}, ${address}, ${address},
+        ${String(totalAmount)}, ${String(totalLandedCost)}, ${String(deliveryFee)},
+        ${deliveryOtp}, ${items}::jsonb, ${createdAt}, ${deliveredAt}, ${prefDeliveryDate}
+      )
+    `;
+
+    await sql`
+      INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, batch_id)
+      VALUES (gen_random_uuid(), ${orderId}, ${productId}, ${quantity}, ${String(unitPrice)}, ${pricing.batchId || null})
+    `;
+
+    const disputedRemittanceId = randomUUID();
+    const disputeReason = `${disputeReasonPrefix} #${existingDisputedSeedRows.length + i + 1}`;
+    await sql`
+      INSERT INTO delivery_remittances (
+        id, logistics_location_id, sent_by, receipt_urls, status, sent_at, received_at, received_by, dispute_reason
+      ) VALUES (
+        ${disputedRemittanceId}, ${locationId}, ${tplManagerId},
+        ${JSON.stringify(['https://storage.example.com/receipts/boost-disputed-remit.jpg'])}::jsonb,
+        'DISPUTED', ${deliveredAt}, ${new Date(deliveredAt.getTime() + 2 * 60 * 60 * 1000)},
+        ${financeOfficer?.id ?? superAdmin.id}, ${disputeReason}
+      )
+    `;
+
+    await sql`
+      INSERT INTO delivery_remittance_orders (id, delivery_remittance_id, order_id)
+      VALUES (gen_random_uuid(), ${disputedRemittanceId}, ${orderId})
     `;
   }
 

@@ -54,8 +54,8 @@ export function InlineNotification({
       className={`rounded-lg px-4 py-3 ${classes.container} ${className}`}
       role="alert"
     >
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
-        <p className={`text-sm ${classes.text}`}>{message}</p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+        <p className={`text-sm min-w-0 break-words ${classes.text}`}>{message}</p>
         {items.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
             {items.map((item, index) =>

@@ -6,10 +6,12 @@ import { FileUpload } from '~/components/ui/file-upload';
 import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { S3_FOLDERS } from '~/lib/s3-upload';
-import { useFetcherToast } from '~/components/ui/toast';
+import { useFetcherToast, useToast } from '~/components/ui/toast';
+import { createRemittanceSchema, createDeliveryRemittanceSchema } from '@yannis/shared/validators';
 import { FormSelect } from '~/components/ui/form-select';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { TextInput } from '~/components/ui/text-input';
+import type { FileUploadUploadState } from '~/components/ui/file-upload';
 
 export interface RemittanceRecord {
   id: string;
@@ -75,7 +77,10 @@ export function RemitPage({
   eligibleOrders,
 }: RemitPageProps) {
   const fetcher = useFetcher();
-  const [receiptUploaded, setReceiptUploaded] = useState(false);
+  const { toast } = useToast();
+  const [transferReceiptUrl, setTransferReceiptUrl] = useState('');
+  const [transferReceiptUploadState, setTransferReceiptUploadState] = useState<FileUploadUploadState>('idle');
+  const [deliveryReceiptUploadState, setDeliveryReceiptUploadState] = useState<FileUploadUploadState>('idle');
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [deliveryReceiptUrls, setDeliveryReceiptUrls] = useState<string[]>([]);
   const [remittanceReceiptModal, setRemittanceReceiptModal] = useState<RemittanceRecord | null>(null);
@@ -91,6 +96,14 @@ export function RemitPage({
     if (fetcher.data && (fetcher.data as { success?: boolean }).success && fetcher.formData?.get('intent') === 'createDeliveryRemittance') {
       setSelectedOrderIds(new Set());
       setDeliveryReceiptUrls([]);
+      setDeliveryReceiptUploadState('idle');
+    }
+  }, [fetcher.data, fetcher.formData?.get('intent')]);
+
+  useEffect(() => {
+    if (fetcher.data && (fetcher.data as { success?: boolean }).success && fetcher.formData?.get('intent') === 'createRemittance') {
+      setTransferReceiptUrl('');
+      setTransferReceiptUploadState('idle');
     }
   }, [fetcher.data, fetcher.formData?.get('intent')]);
 
@@ -123,6 +136,51 @@ export function RemitPage({
 
   const isSubmittingDelivery = fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'createDeliveryRemittance';
 
+  const handleCreateDeliveryRemittanceSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formEl = e.currentTarget;
+    const fdRead = new FormData(formEl);
+    let orderIds: unknown;
+    let receiptUrls: unknown;
+    try {
+      orderIds = JSON.parse(fdRead.get('orderIds')?.toString() ?? '[]');
+      receiptUrls = JSON.parse(fdRead.get('receiptUrls')?.toString() ?? '[]');
+    } catch {
+      toast.error('Cannot submit remittance', 'Invalid order or receipt data.');
+      return;
+    }
+    const parsed = createDeliveryRemittanceSchema.safeParse({ orderIds, receiptUrls });
+    if (!parsed.success) {
+      toast.error('Cannot submit remittance', parsed.error.issues[0]?.message ?? 'Check orders and receipts.');
+      return;
+    }
+    const fd = new FormData(formEl);
+    fd.set('orderIds', JSON.stringify(parsed.data.orderIds));
+    fd.set('receiptUrls', JSON.stringify(parsed.data.receiptUrls));
+    fetcher.submit(fd, { method: 'post' });
+  };
+
+  const handleCreateRemittanceSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formEl = e.currentTarget;
+    const fdRead = new FormData(formEl);
+    const qtyRaw = fdRead.get('quantitySent')?.toString().trim() ?? '';
+    const parsed = createRemittanceSchema.safeParse({
+      productId: fdRead.get('productId')?.toString() ?? '',
+      toLocationId: fdRead.get('toLocationId')?.toString() ?? '',
+      quantitySent: qtyRaw === '' ? NaN : Number(qtyRaw),
+      receiptUrl: transferReceiptUrl.trim(),
+    });
+    if (!parsed.success) {
+      toast.error('Cannot submit remittance', parsed.error.issues[0]?.message ?? 'Check the form.');
+      return;
+    }
+    const fd = new FormData(formEl);
+    fd.set('receiptUrl', parsed.data.receiptUrl);
+    fd.set('quantitySent', String(parsed.data.quantitySent));
+    fetcher.submit(fd, { method: 'post' });
+  };
+
   return (
     <div className="space-y-8">
       <div>
@@ -138,7 +196,12 @@ export function RemitPage({
         <p className="text-sm text-app-fg-muted mb-4">
           Select the delivered orders you want to include in this remittance and attach payment receipt(s). Finance will review and mark as received (end of day).
         </p>
-        <fetcher.Form method="post" className="space-y-4">
+        <fetcher.Form
+          method="post"
+          className="space-y-4"
+          onSubmit={handleCreateDeliveryRemittanceSubmit}
+          noValidate
+        >
           <input type="hidden" name="intent" value="createDeliveryRemittance" />
           <input type="hidden" name="orderIds" value={JSON.stringify([...selectedOrderIds])} />
           <input type="hidden" name="receiptUrls" value={JSON.stringify(deliveryReceiptUrls)} />
@@ -231,6 +294,7 @@ export function RemitPage({
               label="Upload receipt"
               required={deliveryReceiptUrls.length === 0}
               onUpload={addDeliveryReceipt}
+              onUploadStateChange={setDeliveryReceiptUploadState}
             />
             {deliveryReceiptUrls.length > 0 && (
               <p className="text-xs text-success-600 dark:text-success-400 mt-1">
@@ -245,7 +309,10 @@ export function RemitPage({
             loading={isSubmittingDelivery}
             loadingText="Submitting..."
             disabled={
-              isSubmittingDelivery || selectedOrderIds.size === 0 || deliveryReceiptUrls.length === 0
+              isSubmittingDelivery ||
+              deliveryReceiptUploadState === 'uploading' ||
+              selectedOrderIds.size === 0 ||
+              deliveryReceiptUrls.length === 0
             }
           >
             Submit delivery remittance
@@ -296,7 +363,7 @@ export function RemitPage({
       {/* Stock transfer to warehouse */}
       <div className="card p-6 max-w-lg">
         <h2 className="text-lg font-semibold text-app-fg mb-4">Stock transfer to warehouse</h2>
-        <fetcher.Form method="post" className="space-y-4">
+        <fetcher.Form method="post" className="space-y-4" onSubmit={handleCreateRemittanceSubmit} noValidate>
           <input type="hidden" name="intent" value="createRemittance" />
           <FormSelect
             name="productId"
@@ -329,7 +396,8 @@ export function RemitPage({
             name="receiptUrl"
             label="Receipt (required)"
             required
-            onUpload={(url) => setReceiptUploaded(!!url)}
+            onUpload={(url) => setTransferReceiptUrl(url)}
+            onUploadStateChange={setTransferReceiptUploadState}
           />
           <Button
             type="submit"
@@ -337,7 +405,11 @@ export function RemitPage({
             size="sm"
             loading={isSubmitting}
             loadingText="Submitting..."
-            disabled={isSubmitting || !receiptUploaded}
+            disabled={
+              isSubmitting ||
+              transferReceiptUploadState === 'uploading' ||
+              !transferReceiptUrl.trim()
+            }
           >
             Submit remittance
           </Button>

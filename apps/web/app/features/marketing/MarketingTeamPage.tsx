@@ -1,9 +1,13 @@
-import { Link } from '@remix-run/react';
+import { useState, useEffect } from 'react';
+import { Link, useSearchParams } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
 import { formatNaira } from '~/lib/format-amount';
 import { MediaBuyerBalanceCard } from './MediaBuyerBalanceCard';
@@ -16,6 +20,11 @@ export interface MarketingTeamPageProps {
   leaderboardPeriod: 'this_month' | 'all_time';
   page?: number;
   totalPages?: number;
+  totalCount?: number;
+  unfilteredCount?: number;
+  q?: string;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
 }
 
 /** Build the query string to forward the active date filter to /admin/marketing/orders. */
@@ -43,7 +52,62 @@ function memberInitials(name: string): string {
     .toUpperCase();
 }
 
-export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters, page = 1, totalPages = 1 }: MarketingTeamPageProps) {
+const TEAM_SORT_BY_OPTIONS = [
+  { value: 'name', label: 'Name' },
+  { value: 'balance', label: 'Balance' },
+  { value: 'received', label: 'Received' },
+  { value: 'spent', label: 'Ad spend' },
+  { value: 'confirm', label: 'Confirm %' },
+  { value: 'delivery', label: 'Delivery %' },
+];
+
+export function MarketingTeamPage({
+  teamMembers,
+  fundingSummary,
+  dateFilters,
+  page = 1,
+  totalPages = 1,
+  totalCount = 0,
+  unfilteredCount = 0,
+  q = '',
+  sortBy: sortByFromLoader = 'name',
+  sortDir: sortDirFromLoader = 'asc',
+}: MarketingTeamPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(q);
+
+  useEffect(() => {
+    setSearchQuery(q);
+  }, [q]);
+
+  const mergeListParams = (overrides: {
+    q?: string;
+    sortBy?: string;
+    sortDir?: 'asc' | 'desc';
+    page?: number;
+  }) => {
+    const params = new URLSearchParams(searchParams);
+    if (overrides.q !== undefined) {
+      const trimmed = overrides.q.trim();
+      if (trimmed) params.set('q', trimmed);
+      else params.delete('q');
+    }
+    if (overrides.sortBy !== undefined) params.set('sortBy', overrides.sortBy);
+    if (overrides.sortDir !== undefined) params.set('sortDir', overrides.sortDir);
+    if (overrides.page !== undefined) {
+      if (overrides.page <= 1) params.delete('page');
+      else params.set('page', String(overrides.page));
+    }
+    setSearchParams(params);
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    mergeListParams({ q: searchQuery, page: 1 });
+  };
+
+  const showSearchEmpty = unfilteredCount > 0 && teamMembers.length === 0;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -94,14 +158,68 @@ export function MarketingTeamPage({ teamMembers, fundingSummary, dateFilters, pa
             <p className="text-sm text-app-fg-muted mt-0.5">
               Funding received (confirmed) minus approved ad spend
             </p>
+            {totalCount > 0 && (q || sortByFromLoader !== 'name' || sortDirFromLoader !== 'asc') && (
+              <p className="text-xs text-app-fg-muted mt-1" aria-live="polite">
+                {totalCount} member{totalCount === 1 ? '' : 's'}
+                {q ? ` matching "${q}"` : ''}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-2 w-full sm:w-auto sm:min-w-[20rem]">
+            <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto sm:min-w-0">
+              <SearchInput
+                value={searchQuery}
+                onChange={(v) => setSearchQuery(v)}
+                placeholder="Search by name or role…"
+                wrapperClassName="flex-1 min-w-0 w-full"
+                controlSize="sm"
+                name="q"
+                autoComplete="off"
+              />
+              <Button type="submit" variant="secondary" size="sm" className="shrink-0 self-stretch sm:self-auto">
+                Search
+              </Button>
+            </form>
+            <div className="flex flex-wrap items-end gap-2">
+              <FormSelect
+                aria-label="Sort team list by"
+                value={sortByFromLoader}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  const nextDir: 'asc' | 'desc' = next === 'name' ? 'asc' : 'desc';
+                  mergeListParams({ sortBy: next, sortDir: nextDir, page: 1 });
+                }}
+                options={TEAM_SORT_BY_OPTIONS}
+                controlSize="sm"
+                wrapperClassName="flex-1 min-w-[7.5rem]"
+              />
+              <FormSelect
+                aria-label="Sort order"
+                value={sortDirFromLoader}
+                onChange={(e) => mergeListParams({ sortDir: e.target.value as 'asc' | 'desc', page: 1 })}
+                options={[
+                  { value: 'asc', label: 'Ascending' },
+                  { value: 'desc', label: 'Descending' },
+                ]}
+                controlSize="sm"
+                wrapperClassName="w-full sm:w-32 min-w-0"
+              />
+            </div>
           </div>
         </div>
 
-        {teamMembers.length === 0 ? (
+        {teamMembers.length === 0 && !showSearchEmpty ? (
           <div className="card">
             <EmptyState
               title="No team members yet"
               description="Manage staff from HR → Users."
+            />
+          </div>
+        ) : showSearchEmpty ? (
+          <div className="card">
+            <EmptyState
+              title="No matching team members"
+              description="Try a different name, role, or clear the search field."
             />
           </div>
         ) : (

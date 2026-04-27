@@ -1,5 +1,5 @@
 import { useLoaderData } from '@remix-run/react';
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { FinancePage } from '~/features/finance/FinancePage';
@@ -93,7 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .reduce((sum, r) => sum + Number(r.amount ?? 0), 0),
   );
 
-  return {
+  return defer({
     invoices: invoicesData?.invoices ?? [],
     totalInvoices: invoicesData?.pagination?.total ?? 0,
     profit: profitData ?? { revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0, trueProfit: 0, orderCount: 0, margin: 0 },
@@ -104,7 +104,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     pendingApprovals,
     pendingApprovalsValue,
     budgets,
-  };
+  });
 }
 
 export async function action({ request }: ActionFunctionArgs) {

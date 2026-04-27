@@ -8,7 +8,8 @@ import { PageHeader } from '~/components/ui/page-header';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Textarea } from '~/components/ui/textarea';
-import { FilterPills } from '~/components/ui/filter-pills';
+import { Tabs } from '~/components/ui/tabs';
+import { DescriptionList } from '~/components/ui/description-list';
 import type { PermissionRequest, PermissionRequestStatusFilter } from './types';
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
@@ -17,7 +18,7 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
   PERMISSION_GRANT: 'Permission Grant',
 };
 
-const STATUS_FILTERS: Array<{ value: PermissionRequestStatusFilter; label: string }> = [
+const STATUS_TABS: Array<{ value: PermissionRequestStatusFilter; label: string }> = [
   { value: 'PENDING', label: 'Pending' },
   { value: 'APPROVED', label: 'Approved' },
   { value: 'REJECTED', label: 'Rejected' },
@@ -34,6 +35,21 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
+function requestedSummary(req: PermissionRequest): string {
+  if (req.requestedRole) return req.requestedRole.replace(/_/g, ' ');
+  if (req.permissionCode) return req.permissionCode;
+  return '—';
+}
+
+function targetSummary(req: PermissionRequest): string {
+  if (req.type === 'USER_CREATION' && req.payload) {
+    const name = (req.payload as { name?: string }).name;
+    if (name) return name;
+  }
+  if (req.targetUserName) return req.targetUserName;
+  return '—';
+}
+
 export function PermissionRequestsPage({
   requests,
   canApprove = false,
@@ -44,6 +60,7 @@ export function PermissionRequestsPage({
   activeStatus?: PermissionRequestStatusFilter;
 }) {
   const fetcher = useFetcher();
+  const [viewing, setViewing] = useState<PermissionRequest | null>(null);
   const [modal, setModal] = useState<{ requestId: string; action: 'APPROVED' | 'REJECTED' } | null>(null);
   const [reason, setReason] = useState('');
   const fetcherError = (fetcher.data as { error?: string })?.error;
@@ -82,119 +99,68 @@ export function PermissionRequestsPage({
         />
       )}
 
-      <FilterPills
-        options={STATUS_FILTERS}
+      <Tabs
         value={activeStatus}
         onChange={handleStatusChange}
+        tabs={STATUS_TABS.map((t) => ({ value: t.value, label: t.label }))}
       />
 
-      <div className="card p-0 overflow-hidden">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
+      <div className="card p-0 overflow-hidden flex flex-col">
+        <div className="hidden md:block overflow-auto max-h-[min(60vh,22rem)] overscroll-contain">
+          <table className="w-full min-w-[640px]">
+            <thead className="sticky top-0 z-[1] bg-app-elevated border-b border-app-border">
               <tr>
-                <th className="table-header">Type</th>
                 <th className="table-header">Status</th>
                 <th className="table-header">Requester</th>
                 <th className="table-header">Target</th>
                 <th className="table-header">Requested</th>
-                <th className="table-header">Reason</th>
                 <th className="table-header">Submitted</th>
-                <th className="table-header">Decision</th>
-                {canApprove && <th className="table-header">Actions</th>}
+                <th className="table-header w-[100px] text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {requests.map((req) => (
                 <tr key={req.id} className="table-row">
-                  <td className="table-cell">
-                    <StatusBadge status={REQUEST_TYPE_LABELS[req.type] ?? req.type} />
-                  </td>
-                  <td className="table-cell">
+                  <td className="table-cell w-0 whitespace-nowrap">
                     <StatusBadge status={req.status} />
                   </td>
-                  <td className="table-cell text-sm">
-                    <span className="font-medium text-app-fg">{req.requesterName}</span>
-                    <span className="block text-xs text-app-fg-muted">{req.requesterEmail}</span>
+                  <td className="table-cell text-sm max-w-[10rem]">
+                    <span className="font-medium text-app-fg line-clamp-1" title={req.requesterName}>
+                      {req.requesterName}
+                    </span>
+                    <span className="block text-xs text-app-fg-muted line-clamp-1" title={req.requesterEmail}>
+                      {req.requesterEmail}
+                    </span>
                   </td>
-                  <td className="table-cell text-sm">
-                    {req.type === 'USER_CREATION' && req.payload ? (
-                      <span>
-                        {(req.payload as { name?: string }).name ?? '—'}
-                        <span className="block text-xs text-app-fg-muted">
-                          {(req.payload as { email?: string }).email ?? ''}
-                        </span>
-                      </span>
-                    ) : req.targetUserName ? (
-                      <span>
-                        {req.targetUserName}
-                        <span className="block text-xs text-app-fg-muted">{req.targetUserEmail ?? ''}</span>
-                      </span>
-                    ) : (
-                      '—'
-                    )}
+                  <td className="table-cell text-sm max-w-[9rem]">
+                    <span className="line-clamp-2 text-app-fg" title={targetSummary(req)}>
+                      {targetSummary(req)}
+                    </span>
                   </td>
-                  <td className="table-cell text-sm">
-                    {req.requestedRole && (
-                      <span className="font-medium text-app-fg">{req.requestedRole.replace(/_/g, ' ')}</span>
-                    )}
-                    {req.permissionCode && (
-                      <span className="font-mono text-xs text-app-fg-muted">{req.permissionCode}</span>
-                    )}
-                    {!req.requestedRole && !req.permissionCode && '—'}
+                  <td className="table-cell text-sm max-w-[8rem]">
+                    <span className="line-clamp-2" title={requestedSummary(req)}>
+                      {requestedSummary(req)}
+                    </span>
                   </td>
-                  <td className="table-cell text-sm text-app-fg-muted max-w-xs truncate">
-                    {req.reason}
-                  </td>
-                  <td className="table-cell text-app-fg-muted text-sm">
+                  <td className="table-cell text-app-fg-muted text-sm whitespace-nowrap">
                     {formatDateTime(req.createdAt)}
                   </td>
-                  <td className="table-cell text-sm">
-                    {req.status === 'PENDING' ? (
-                      <span className="text-app-fg-muted">—</span>
-                    ) : (
-                      <div className="space-y-0.5">
-                        <span className="block text-app-fg font-medium">{req.approverName ?? 'Unknown'}</span>
-                        <span className="block text-xs text-app-fg-muted">{formatDateTime(req.approvedAt)}</span>
-                        {req.approvalReason && (
-                          <span className="block text-xs text-app-fg-muted line-clamp-2 max-w-xs">{req.approvalReason}</span>
-                        )}
-                      </div>
-                    )}
+                  <td className="table-cell text-right">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => setViewing(req)}
+                    >
+                      View
+                    </Button>
                   </td>
-                  {canApprove && (
-                    <td className="table-cell">
-                      {req.status === 'PENDING' ? (
-                        <div className="flex gap-1.5">
-                          <Button
-                            type="button"
-                            variant="success"
-                            size="sm"
-                            className="text-xs"
-                            onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            className="text-xs"
-                            onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-app-fg-muted">—</span>
-                      )}
-                    </td>
-                  )}
                 </tr>
               ))}
               {requests.length === 0 && (
                 <tr>
-                  <td colSpan={canApprove ? 9 : 8} className="px-4 py-8">
+                  <td colSpan={6} className="px-4 py-8">
                     <EmptyState
                       title={
                         activeStatus === 'PENDING'
@@ -204,7 +170,7 @@ export function PermissionRequestsPage({
                       description={
                         activeStatus === 'PENDING'
                           ? 'New requests from HR will appear here for your review.'
-                          : 'Try switching the filter to see requests in other states.'
+                          : 'Try switching the tab to see requests in other states.'
                       }
                       variant="inline"
                     />
@@ -215,54 +181,28 @@ export function PermissionRequestsPage({
           </table>
         </div>
 
-        {/* Mobile */}
-        <div className="md:hidden space-y-3 px-1">
+        <div className="md:hidden space-y-3 p-3 max-h-[min(70vh,24rem)] overflow-y-auto overscroll-contain">
           {requests.map((req) => (
-            <div key={req.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+            <div
+              key={req.id}
+              className="rounded-lg border border-app-border bg-app-elevated p-3 space-y-2"
+            >
               <div className="flex items-center justify-between gap-2">
-                <StatusBadge status={REQUEST_TYPE_LABELS[req.type] ?? req.type} />
                 <StatusBadge status={req.status} />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="text-xs shrink-0"
+                  onClick={() => setViewing(req)}
+                >
+                  View
+                </Button>
               </div>
-              <p className="text-sm font-medium text-app-fg">
-                {req.requesterName} → {req.requestedRole?.replace(/_/g, ' ') ?? req.permissionCode ?? '—'}
+              <p className="text-sm font-medium text-app-fg line-clamp-1">
+                {req.requesterName} · {requestedSummary(req)}
               </p>
-              <p className="text-sm text-app-fg-muted">{req.reason}</p>
               <p className="text-xs text-app-fg-muted">Submitted {formatDateTime(req.createdAt)}</p>
-              {req.status !== 'PENDING' && (
-                <div className="rounded-md bg-app-hover px-3 py-2 space-y-0.5">
-                  <p className="text-xs text-app-fg-muted">
-                    {req.status === 'APPROVED' ? 'Approved' : 'Rejected'} by{' '}
-                    <span className="font-medium text-app-fg">{req.approverName ?? 'Unknown'}</span>
-                    {' · '}
-                    {formatDateTime(req.approvedAt)}
-                  </p>
-                  {req.approvalReason && (
-                    <p className="text-xs text-app-fg-muted">{req.approvalReason}</p>
-                  )}
-                </div>
-              )}
-              {canApprove && req.status === 'PENDING' && (
-                <div className="flex gap-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="success"
-                    size="sm"
-                    className="text-xs flex-1"
-                    onClick={() => { setModal({ requestId: req.id, action: 'APPROVED' }); setReason(''); }}
-                  >
-                    Approve
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    className="text-xs flex-1"
-                    onClick={() => { setModal({ requestId: req.id, action: 'REJECTED' }); setReason(''); }}
-                  >
-                    Reject
-                  </Button>
-                </div>
-              )}
             </div>
           ))}
           {requests.length === 0 && (
@@ -276,7 +216,7 @@ export function PermissionRequestsPage({
                 description={
                   activeStatus === 'PENDING'
                     ? 'New requests from HR will appear here for your review.'
-                    : 'Try switching the filter to see requests in other states.'
+                    : 'Try switching the tab to see requests in other states.'
                 }
                 variant="inline"
               />
@@ -284,6 +224,148 @@ export function PermissionRequestsPage({
           )}
         </div>
       </div>
+
+      {viewing && (
+        <Modal
+          open
+          onClose={() => setViewing(null)}
+          maxWidth="max-w-lg"
+          backdropBlur
+          contentClassName="p-6 flex flex-col max-h-[85dvh] overflow-hidden border border-app-border bg-app-elevated"
+        >
+          <h3 className="text-lg font-semibold text-app-fg shrink-0 pr-8">Request details</h3>
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4">
+            <DescriptionList
+              layout="grid"
+              divided
+              items={[
+                {
+                  label: 'Type',
+                  value: REQUEST_TYPE_LABELS[viewing.type] ?? viewing.type,
+                },
+                {
+                  label: 'Status',
+                  value: <StatusBadge status={viewing.status} />,
+                },
+                {
+                  label: 'Requester',
+                  value: (
+                    <span>
+                      <span className="font-medium">{viewing.requesterName}</span>
+                      <span className="block text-xs text-app-fg-muted">{viewing.requesterEmail}</span>
+                    </span>
+                  ),
+                  fullWidth: true,
+                },
+                {
+                  label: 'Target',
+                  value:
+                    viewing.type === 'USER_CREATION' && viewing.payload ? (
+                      <span>
+                        <span className="font-medium">
+                          {(viewing.payload as { name?: string }).name ?? '—'}
+                        </span>
+                        <span className="block text-xs text-app-fg-muted">
+                          {(viewing.payload as { email?: string }).email ?? ''}
+                        </span>
+                      </span>
+                    ) : viewing.targetUserName ? (
+                      <span>
+                        <span className="font-medium">{viewing.targetUserName}</span>
+                        <span className="block text-xs text-app-fg-muted">{viewing.targetUserEmail ?? ''}</span>
+                      </span>
+                    ) : (
+                      '—'
+                    ),
+                  fullWidth: true,
+                },
+                {
+                  label: 'Requested',
+                  value: requestedSummary(viewing),
+                  hideIfEmpty: true,
+                },
+                {
+                  label: 'Reason (request)',
+                  value: <p className="whitespace-pre-wrap text-sm">{viewing.reason}</p>,
+                  fullWidth: true,
+                },
+                {
+                  label: 'Submitted',
+                  value: formatDateTime(viewing.createdAt),
+                },
+                ...(viewing.status !== 'PENDING'
+                  ? [
+                      {
+                        label: 'Decision',
+                        value: (
+                          <div className="space-y-1">
+                            <p className="text-sm">
+                              <span className="font-medium text-app-fg">
+                                {viewing.status === 'APPROVED' ? 'Approved' : 'Rejected'}
+                              </span>
+                              {' by '}
+                              <span className="font-medium">{viewing.approverName ?? 'Unknown'}</span>
+                            </p>
+                            <p className="text-xs text-app-fg-muted">{formatDateTime(viewing.approvedAt)}</p>
+                            {viewing.approvalReason ? (
+                              <p className="text-sm text-app-fg-muted whitespace-pre-wrap pt-1">
+                                {viewing.approvalReason}
+                              </p>
+                            ) : null}
+                          </div>
+                        ),
+                        fullWidth: true as const,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+            {viewing.type === 'USER_CREATION' && viewing.payload ? (
+              <div>
+                <p className="text-xs font-medium text-app-fg-muted mb-1.5">Creation payload</p>
+                <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words border border-app-border">
+                  {JSON.stringify(viewing.payload, null, 2)}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2 justify-end shrink-0 pt-2 border-t border-app-border pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setViewing(null)}>
+              Close
+            </Button>
+            {canApprove && viewing.status === 'PENDING' && (
+              <>
+                <Button
+                  type="button"
+                  variant="success"
+                  size="sm"
+                  onClick={() => {
+                    const id = viewing.id;
+                    setViewing(null);
+                    setModal({ requestId: id, action: 'APPROVED' });
+                    setReason('');
+                  }}
+                >
+                  Approve
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    const id = viewing.id;
+                    setViewing(null);
+                    setModal({ requestId: id, action: 'REJECTED' });
+                    setReason('');
+                  }}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
 
       {/* Approve/Reject Modal */}
       {modal && (

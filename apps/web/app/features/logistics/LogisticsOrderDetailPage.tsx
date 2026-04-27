@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -8,7 +8,7 @@ import { FileUpload } from '~/components/ui/file-upload';
 import { Tabs } from '~/components/ui/tabs';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { useFetcherToast } from '~/components/ui/toast';
+import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -16,6 +16,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { STATUS_DOT_CLASS, STATUS_LABELS } from '~/features/shared/order-status';
 import { S3_FOLDERS } from '~/lib/s3-upload';
+import { buildOrderSummaryClipboardText } from '~/features/orders/build-order-summary-clipboard';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
 
@@ -444,7 +445,22 @@ export function LogisticsOrderDetailPage({
   allocatableLocations: allocatableLocationsProp,
 }: LogisticsOrderDetailPageProps) {
   const fetcher = useFetcher();
+  const { toast } = useToast();
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
+
+  const handleCopyOrderSummary = useCallback(async () => {
+    const text = buildOrderSummaryClipboardText(order);
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+        toast.error('Copy failed', 'Clipboard is not available in this browser.');
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied', 'Order summary ready to paste into WhatsApp or your 3PL group.');
+    } catch {
+      toast.error('Copy failed', 'Could not write to the clipboard.');
+    }
+  }, [order, toast]);
 
   const [activeTab, setActiveTab] = useState('overview');
   const [deliveryProofUrl, setDeliveryProofUrl] = useState('');
@@ -524,6 +540,9 @@ export function LogisticsOrderDetailPage({
         actions={
           <>
             <PageRefreshButton />
+            <Button type="button" variant="secondary" size="sm" onClick={() => void handleCopyOrderSummary()}>
+              Copy for WhatsApp
+            </Button>
             {isOverdue && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                 <ClockIcon /> OVERDUE
@@ -641,7 +660,7 @@ export function LogisticsOrderDetailPage({
                 <InfoRow icon={<MapPinIcon />} label="Hub / Location" value={order.logisticsLocationName} valueClass="font-medium text-violet-600 dark:text-violet-400" />
               )}
               {order.logisticsProviderName && (
-                <InfoRow icon={<CubeIcon />} label="Provider" value={order.logisticsProviderName} />
+                <InfoRow icon={<CubeIcon />} label="Logistics company" value={order.logisticsProviderName} />
               )}
               {order.riderName && (
                 <InfoRow icon={<UserIcon />} label="Rider" value={order.riderName} valueClass="font-medium text-brand-600 dark:text-brand-400" />

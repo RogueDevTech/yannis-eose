@@ -1,13 +1,12 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
-import { isAdminLevel } from '~/lib/rbac';
+import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
-import type { DeliveryRemittanceListItem, DeliveryRemittanceDetail } from '~/features/finance/DeliveryRemittancesPage';
+import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
 
 export const meta: MetaFunction = () => [
-  { title: 'Delivery Cash Remittances — Finance — Yannis EOSE' },
+  { title: 'Cash Remittances — Finance — Yannis EOSE' },
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -15,19 +14,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
 
-  // If _detail param is present, this is a client-side fetcher call for modal data only
-  const detailOnlyId = url.searchParams.get('_detail');
-  if (detailOnlyId) {
-    const detailRes = await apiRequest<unknown>(
-      '/trpc/logistics.getDeliveryRemittance?input=' +
-        encodeURIComponent(JSON.stringify({ deliveryRemittanceId: detailOnlyId })),
-      { method: 'GET', cookie },
-    );
-    const detail = detailRes.ok
-      ? (detailRes.data as { result?: { data?: DeliveryRemittanceDetail } })?.result?.data ?? null
-      : null;
-    return json({ _detailOnly: true, detail });
-  }
   const pageParam = parseInt(url.searchParams.get('page') ?? '1', 10);
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
   const statusFilter = url.searchParams.get('status') ?? undefined;
@@ -104,9 +90,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  // SA + ADMIN carry an empty permissions array (bypass at middleware); include them explicitly.
-  const hasApprovePermission = isAdminLevel(user) || (user?.permissions?.includes('finance.approve') ?? false);
-
   return {
     remittances,
     pagination: { total, totalPages, page },
@@ -118,57 +101,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       endDate: endDate ?? '',
       periodAllTime,
     },
-    hasApprovePermission,
     userMap,
     summary,
   };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermission(request, 'finance.approve');
-  const cookie = getSessionCookie(request);
-  const formData = await request.formData();
-  const intent = formData.get('intent')?.toString();
-
-  const deliveryRemittanceId = formData.get('deliveryRemittanceId')?.toString();
-  if (!deliveryRemittanceId) {
-    return json({ error: 'Missing delivery remittance ID' }, { status: 400 });
-  }
-
-  if (intent === 'markReceived') {
-    const res = await apiRequest<unknown>('/trpc/logistics.markDeliveryRemittanceReceived', {
-      method: 'POST',
-      cookie,
-      body: { deliveryRemittanceId },
-    });
-
-    if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to mark received';
-      return json({ error: err }, { status: safeStatus(res.status) });
-    }
-    return json({ success: true });
-  }
-
-  if (intent === 'dispute') {
-    const disputeReason = formData.get('disputeReason')?.toString();
-    if (!disputeReason || disputeReason.length < 10) {
-      return json({ error: 'Dispute reason must be at least 10 characters' }, { status: 400 });
-    }
-
-    const res = await apiRequest<unknown>('/trpc/logistics.disputeDeliveryRemittance', {
-      method: 'POST',
-      cookie,
-      body: { deliveryRemittanceId, disputeReason },
-    });
-
-    if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to dispute remittance';
-      return json({ error: err }, { status: safeStatus(res.status) });
-    }
-    return json({ success: true });
-  }
-
-  return json({ error: 'Unknown action' }, { status: 400 });
+  return json({ error: 'Use remittance detail page for actions' }, { status: 400 });
 }
 
 export default function AdminFinanceDeliveryRemittancesRoute() {
@@ -179,7 +118,6 @@ export default function AdminFinanceDeliveryRemittancesRoute() {
       pagination={data.pagination}
       locations={data.locations}
       filters={data.filters}
-      hasApprovePermission={data.hasApprovePermission}
       userMap={data.userMap}
       summary={data.summary}
     />

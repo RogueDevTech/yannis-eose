@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
-import { useFetcherToast } from '~/components/ui/toast';
+import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { Spinner } from '~/components/ui/spinner';
 import { Modal } from '~/components/ui/modal';
@@ -22,7 +22,27 @@ import { Textarea } from '~/components/ui/textarea';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { shareOrderToLogistics } from '~/lib/trpc-browser';
 import { isAdminLevel } from '~/lib/rbac';
+import { buildOrderSummaryClipboardText } from './build-order-summary-clipboard';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
+
+function canCopyOrderSummaryForChat(
+  userRole: string,
+  currentBranchId: string | null | undefined,
+  order: OrderDetail,
+): boolean {
+  if (
+    ['CS_AGENT', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS', 'LOGISTICS_MANAGER', 'TPL_MANAGER'].includes(userRole)
+  ) {
+    return true;
+  }
+  if (isAdminLevel({ role: userRole })) return true;
+  return (
+    userRole === 'BRANCH_ADMIN' &&
+    !!order.branchId &&
+    !!currentBranchId &&
+    order.branchId === currentBranchId
+  );
+}
 
 // ── Constants ────────────────────────────────────────────────────
 
@@ -247,7 +267,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     ddClassName: DETAIL_PERSON_CLASS,
   },
   {
-    label: 'Logistics provider',
+    label: 'Logistics company',
     getValue: (o) => o.logisticsProviderName ?? o.logisticsProviderId,
     format: (v) => (v ? String(v) : ''),
     ddClassName: DETAIL_PERSON_CLASS,
@@ -584,6 +604,23 @@ export function OrderDetailPage({
   }, [actionError]);
   useFetcherToast(adjustItemsFetcher.data, { successMessage: 'Order items updated' });
 
+  const { toast } = useToast();
+  const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
+
+  const handleCopyOrderSummary = useCallback(async () => {
+    const text = buildOrderSummaryClipboardText(order);
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+        toast.error('Copy failed', 'Clipboard is not available in this browser.');
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied', 'Order summary ready to paste into WhatsApp or your 3PL group.');
+    } catch {
+      toast.error('Copy failed', 'Could not write to the clipboard.');
+    }
+  }, [order, toast]);
+
   // When user submits again, clear dismissed so the next response error will show
   useEffect(() => {
     if (fetcher.state === 'submitting') setDismissedError(false);
@@ -802,6 +839,11 @@ export function OrderDetailPage({
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <PageRefreshButton />
+          {showCopyOrderSummary && (
+            <Button type="button" variant="secondary" size="sm" onClick={() => void handleCopyOrderSummary()}>
+              Copy for WhatsApp
+            </Button>
+          )}
           {!canEditOrder && (
             <span className="inline-flex items-center rounded-full bg-app-hover px-2.5 py-1 text-xs font-medium text-app-fg-muted">
               View only

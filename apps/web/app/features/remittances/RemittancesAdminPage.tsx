@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -8,6 +8,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { Tabs } from '~/components/ui/tabs';
 
 export interface RemittanceAdminRecord {
   id: string;
@@ -32,19 +33,34 @@ export interface RemittancesAdminPageProps {
 export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'pending' | 'processed'>('pending');
   const [quantityReceived, setQuantityReceived] = useState<Record<string, string>>({});
   const [shrinkageReason, setShrinkageReason] = useState<Record<string, string>>({});
   const [remittanceReceiptModal, setRemittanceReceiptModal] = useState<RemittanceAdminRecord | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<RemittanceAdminRecord | null>(null);
 
   useFetcherToast(fetcher.data, { successMessage: 'Remittance marked as received' });
 
   const sentRemittances = remittances.filter((r) => r.status === 'SENT');
   const receivedOrDisputed = remittances.filter((r) => r.status === 'RECEIVED' || r.status === 'DISPUTED');
 
+  useEffect(() => {
+    if (activeTab === 'pending' && sentRemittances.length === 0 && receivedOrDisputed.length > 0) {
+      setActiveTab('processed');
+    }
+  }, [activeTab, sentRemittances.length, receivedOrDisputed.length]);
+
+  useEffect(() => {
+    if (fetcher.state === 'idle' && (fetcher.data as { success?: boolean } | undefined)?.success) {
+      setConfirmTarget(null);
+      setMarkingId(null);
+    }
+  }, [fetcher.state, fetcher.data]);
+
   const handleMarkReceived = (remittance: RemittanceAdminRecord) => {
     const qty = quantityReceived[remittance.id] ?? String(remittance.quantitySent);
     const qtyNum = parseInt(qty, 10);
-    if (Number.isNaN(qtyNum) || qtyNum < 0) return;
+    if (Number.isNaN(qtyNum) || qtyNum < 0 || qtyNum > remittance.quantitySent) return;
     setMarkingId(remittance.id);
     const formData = new FormData();
     formData.set('intent', 'markRemittanceReceived');
@@ -53,7 +69,6 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
     const reason = shrinkageReason[remittance.id]?.trim();
     if (reason) formData.set('shrinkageReason', reason);
     fetcher.submit(formData, { method: 'post' });
-    setMarkingId(null);
   };
 
   return (
@@ -63,9 +78,17 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
         description="Incoming remittances from 3PL locations. Mark as received when stock arrives at the warehouse."
       />
 
-      {sentRemittances.length > 0 && (
+      <Tabs
+        value={activeTab}
+        onChange={(value) => setActiveTab(value as 'pending' | 'processed')}
+        tabs={[
+          { value: 'pending', label: `Pending receipt (${sentRemittances.length})` },
+          { value: 'processed', label: 'Received / Disputed' },
+        ]}
+      />
+
+      {activeTab === 'pending' && sentRemittances.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-app-fg mb-3">Pending receipt ({sentRemittances.length})</h2>
           <div className="space-y-4">
             {sentRemittances.map((r) => (
               <div
@@ -108,7 +131,7 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
                     type="button"
                     variant="primary"
                     size="sm"
-                    onClick={() => handleMarkReceived(r)}
+                    onClick={() => setConfirmTarget(r)}
                     loading={markingId === r.id || fetcher.state === 'submitting'}
                     loadingText="Saving..."
                   >
@@ -121,7 +144,7 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
         </div>
       )}
 
-      {sentRemittances.length === 0 && (
+      {activeTab === 'pending' && sentRemittances.length === 0 && (
         <EmptyState
           title="No remittances pending receipt"
           description="All incoming remittances have been processed."
@@ -129,9 +152,8 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
         />
       )}
 
-      {receivedOrDisputed.length > 0 && (
+      {activeTab === 'processed' && receivedOrDisputed.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-app-fg mb-3">Received / Disputed</h2>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -180,6 +202,70 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
             ))}
           </div>
         </div>
+      )}
+
+      {activeTab === 'processed' && receivedOrDisputed.length === 0 && (
+        <EmptyState
+          title="No processed remittances yet"
+          description="Received or disputed transfers will appear here."
+          variant="inline"
+        />
+      )}
+
+      {confirmTarget && (
+        <Modal
+          open
+          onClose={() => setConfirmTarget(null)}
+          maxWidth="max-w-md"
+          role="dialog"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">Confirm mark received</h3>
+          <p className="text-sm text-app-fg-muted">
+            You are about to confirm this transfer as received.
+          </p>
+          <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm space-y-1.5">
+            <p className="font-medium text-app-fg">{confirmTarget.productName}</p>
+            <p className="text-app-fg-muted">
+              {confirmTarget.fromLocationName} → {confirmTarget.toLocationName}
+            </p>
+            <p className="text-app-fg-muted">
+              Quantity sent: {confirmTarget.quantitySent}
+            </p>
+            <p className="text-app-fg-muted">
+              Quantity to mark as received:{' '}
+              <span className="font-medium text-app-fg">
+                {quantityReceived[confirmTarget.id] ?? confirmTarget.quantitySent}
+              </span>
+            </p>
+            {(shrinkageReason[confirmTarget.id] ?? '').trim() && (
+              <p className="text-app-fg-muted">
+                Shrinkage reason: {(shrinkageReason[confirmTarget.id] ?? '').trim()}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setConfirmTarget(null)}
+              disabled={fetcher.state === 'submitting' && markingId === confirmTarget.id}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => handleMarkReceived(confirmTarget)}
+              loading={fetcher.state === 'submitting' && markingId === confirmTarget.id}
+              loadingText="Saving..."
+            >
+              Confirm mark received
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {/* Transfer remittance receipt modal */}

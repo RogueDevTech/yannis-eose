@@ -98,6 +98,27 @@ const ALLOWED_PLACEHOLDER_SET = new Set<string>(ALLOWED_PLACEHOLDER_KEYS);
 const ALLOWED_UI_TOKENS = ALLOWED_PLACEHOLDER_KEYS.map((key) => `${UI_TOKEN_PREFIX}${key}`);
 const PLACEHOLDER_HELP = ALLOWED_UI_TOKENS.join(', ');
 
+/** Sample values for “Preview all” — same placeholders as live sends use from order data. */
+const PREVIEW_SAMPLE_BY_KEY: Record<(typeof ALLOWED_PLACEHOLDER_KEYS)[number], string> = {
+  customer_name: 'Jane Customer',
+  order_id: 'A1B2C3D4',
+  product_name: '2L Mineral Water (Pack of 12)',
+  delivery_address: '15 Admiralty Way, Lekki Phase 1, Lagos',
+  estimated_date: 'Mon, 28 Apr 2026',
+};
+
+function renderTemplateWithSampleData(body: string): string {
+  let out = body;
+  for (const key of ALLOWED_PLACEHOLDER_KEYS) {
+    const sample = PREVIEW_SAMPLE_BY_KEY[key];
+    const brace = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'gi');
+    out = out.replace(brace, sample);
+    const atTok = new RegExp(`@${key}\\b`, 'g');
+    out = out.replace(atTok, sample);
+  }
+  return out;
+}
+
 function toUiBody(value: string): string {
   return value.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (fullToken, key: string) => {
     if (!ALLOWED_PLACEHOLDER_SET.has(key)) return fullToken;
@@ -268,6 +289,7 @@ export default function MessageTemplatesRoute() {
   const fetcherResult = fetcher.data as { success?: boolean; error?: string } | undefined;
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [previewAllOpen, setPreviewAllOpen] = useState(false);
   const [editTemplate, setEditTemplate] = useState<MessageTemplate | null>(null);
   const [filterChannel, setFilterChannel] = useState<'ALL' | 'SMS' | 'WHATSAPP'>('ALL');
   const [createBody, setCreateBody] = useState('');
@@ -316,9 +338,21 @@ export default function MessageTemplatesRoute() {
         title="Message Templates"
         description="Pre-configured SMS and WhatsApp templates for closers. Type plain variable tokens like @customer_name."
         actions={
-          <Button variant="primary" size="sm" onClick={() => { setCreateBody(''); setCreateOpen(true); }}>
-            + New Template
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setPreviewAllOpen(true)}
+              disabled={filtered.length === 0}
+              title={filtered.length === 0 ? 'No templates to preview' : 'See every template with sample data'}
+            >
+              Preview all
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => { setCreateBody(''); setCreateOpen(true); }}>
+              + New Template
+            </Button>
+          </>
         }
       />
 
@@ -439,6 +473,57 @@ export default function MessageTemplatesRoute() {
           ))}
         </div>
       </div>
+
+      {/* Preview all templates */}
+      {previewAllOpen && (
+        <Modal
+          open
+          onClose={() => setPreviewAllOpen(false)}
+          maxWidth="max-w-2xl"
+          contentClassName="p-5 max-h-[85vh] overflow-y-auto"
+          aria-labelledby="preview-all-templates-title"
+          aria-describedby="preview-all-templates-desc"
+        >
+          <h3 id="preview-all-templates-title" className="text-lg font-semibold text-app-fg">
+            Preview all templates
+          </h3>
+          <p id="preview-all-templates-desc" className="mt-1 text-xs text-app-fg-muted">
+            Sample values stand in for variables (same placeholders as on orders). Live sends use real order fields.
+          </p>
+          <div className="mt-4 space-y-4">
+            {filtered.map((tpl) => (
+              <div
+                key={tpl.id}
+                className="rounded-lg border border-app-border bg-app-elevated p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium text-app-fg">{tpl.name}</p>
+                  <span
+                    className={`inline-flex shrink-0 items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      tpl.channel === 'WHATSAPP'
+                        ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                        : 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                    }`}
+                  >
+                    {tpl.channel}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-app-fg-muted">
+                  Status: <span className="font-medium text-app-fg">{tpl.status}</span>
+                </p>
+                <div className="mt-3 rounded-md border border-app-border bg-app-canvas px-3 py-2.5 text-sm text-app-fg whitespace-pre-wrap break-words leading-relaxed">
+                  {renderTemplateWithSampleData(tpl.body)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 flex justify-end border-t border-app-border pt-4">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setPreviewAllOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
 
       {/* Create Modal */}
       {createOpen && (

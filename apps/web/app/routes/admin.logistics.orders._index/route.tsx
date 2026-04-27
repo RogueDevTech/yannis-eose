@@ -43,7 +43,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const status = url.searchParams.get('status') || 'CONFIRMED';
+  const status = url.searchParams.get('status') || 'ALL';
   const search = url.searchParams.get('search') || undefined;
   const scopedStatuses = status === 'ALL' ? [...LOGISTICS_STATUS_SCOPE] : undefined;
 
@@ -115,13 +115,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ]);
 
   const dailyCounts = trendRes.ok
-    ? ((trendRes.data as { result?: { data?: Array<{ date: string; orderCount: number }> } })?.result?.data ?? [])
+    ? ((trendRes.data as {
+        result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
+      })?.result?.data ?? [])
     : [];
 
   const ordersData = ordersRes.ok
     ? (ordersRes.data as { result?: { data?: { orders: LogisticsOrder[]; pagination: { total: number; totalPages: number } } } })
         ?.result?.data
     : null;
+  const listErrorMessage = !ordersRes.ok
+    ? (ordersRes.data as { error?: { message?: string } })?.error?.message ?? 'Could not load logistics orders'
+    : undefined;
   const countsData = countsRes.ok
     ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
     : {};
@@ -156,6 +161,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusCounts: countsData,
     statusFilter: status,
     searchFilter: search ?? '',
+    listErrorMessage,
     locations,
     riders: ridersData,
     dailyCounts,

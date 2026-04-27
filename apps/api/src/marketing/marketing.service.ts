@@ -14,6 +14,7 @@ import type {
   ListAdSpendInput,
   AdSpendStatusCountsInput,
   PreviewAdSpendIntervalInput,
+  UpdateAdSpendInput,
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
   ListOfferTemplatesInput,
@@ -25,6 +26,7 @@ import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
+import { isAdminLevel } from '../common/authz';
 
 @Injectable()
 export class MarketingService {
@@ -50,6 +52,118 @@ export class MarketingService {
       .from(schema.campaigns)
       .where(eq(schema.campaigns.branchId, branchId));
     return rows.map((row) => row.id);
+  }
+
+  private spendDateToYmd(spendDate: Date | string): string {
+    if (typeof spendDate === 'string') {
+      return spendDate.length >= 10 ? spendDate.slice(0, 10) : spendDate;
+    }
+    const y = spendDate.getUTCFullYear();
+    const m = String(spendDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(spendDate.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  /**
+   * Orders (all statuses) for buyer + campaign + product since the UTC calendar day after the
+   * latest APPROVED prior spend strictly before `spendDate`, through now. Indicative CPA =
+   * spendAmount / count. Same semantics as the Log Ad Spend preview.
+   * When `branchCampaignIds` would exclude the campaign, returns zeros (list enrichment).
+   * Callers that need a hard error (wrong campaign in branch) should validate before calling.
+   */
+  private async getAdSpendIntervalSnapshot(params: {
+    mediaBuyerId: string;
+    campaignId: string;
+    productId: string;
+    spendDate: string;
+    spendAmount: number;
+    branchId?: string | null;
+  }): Promise<{
+    orderCount: number;
+    priorSpendDate: string | null;
+    windowStartExclusive: string | null;
+    indicativeCpa: number | null;
+  }> {
+    const branchCampaignIds = await this.getBranchCampaignIds(params.branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      return { orderCount: 0, priorSpendDate: null, windowStartExclusive: null, indicativeCpa: null };
+    }
+    if (branchCampaignIds && !branchCampaignIds.includes(params.campaignId)) {
+      return { orderCount: 0, priorSpendDate: null, windowStartExclusive: null, indicativeCpa: null };
+    }
+
+    const priorDateLt = sql`${schema.adSpendLogs.spendDate}::date < ${params.spendDate}::date`;
+
+    const [prior] = await this.db
+      .select({
+        spendDate: schema.adSpendLogs.spendDate,
+      })
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          eq(schema.adSpendLogs.mediaBuyerId, params.mediaBuyerId),
+          eq(schema.adSpendLogs.campaignId, params.campaignId),
+          eq(schema.adSpendLogs.productId, params.productId),
+          eq(schema.adSpendLogs.status, 'APPROVED'),
+          priorDateLt,
+        ),
+      )
+      .orderBy(desc(schema.adSpendLogs.spendDate), desc(schema.adSpendLogs.createdAt))
+      .limit(1);
+
+    const priorSpend = prior?.spendDate;
+    let windowStartExclusive: Date | null = null;
+    if (priorSpend) {
+      const y = priorSpend.getUTCFullYear();
+      const m = priorSpend.getUTCMonth();
+      const d = priorSpend.getUTCDate();
+      windowStartExclusive = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0));
+    }
+
+    const now = new Date();
+    const hasProductLine = exists(
+      this.db
+        .select({ id: schema.orderItems.id })
+        .from(schema.orderItems)
+        .where(
+          and(eq(schema.orderItems.orderId, schema.orders.id), eq(schema.orderItems.productId, params.productId)),
+        ),
+    );
+
+    const orderConditions: SQL[] = [
+      eq(schema.orders.mediaBuyerId, params.mediaBuyerId),
+      eq(schema.orders.campaignId, params.campaignId),
+      hasProductLine,
+      lte(schema.orders.createdAt, now),
+    ];
+    if (windowStartExclusive) {
+      orderConditions.push(gt(schema.orders.createdAt, windowStartExclusive));
+    }
+    if (params.branchId) {
+      orderConditions.push(eq(schema.orders.branchId, params.branchId));
+    }
+
+    const [countRow] = await this.db
+      .select({ c: count() })
+      .from(schema.orders)
+      .where(and(...orderConditions));
+
+    const orderCount = Number(countRow?.c ?? 0);
+    const spendAmt = params.spendAmount;
+    const indicativeCpa =
+      spendAmt !== undefined && spendAmt > 0 && orderCount > 0 ? spendAmt / orderCount : null;
+
+    const priorSpendDate =
+      priorSpend != null
+        ? `${priorSpend.getUTCFullYear()}-${String(priorSpend.getUTCMonth() + 1).padStart(2, '0')}-${String(priorSpend.getUTCDate()).padStart(2, '0')}`
+        : null;
+
+    return {
+      orderCount,
+      priorSpendDate,
+      windowStartExclusive: windowStartExclusive ? windowStartExclusive.toISOString() : null,
+      indicativeCpa,
+    };
   }
 
   /**
@@ -1078,6 +1192,9 @@ export class MarketingService {
           status: 'APPROVED',
           approvedAt: new Date(),
           approvedBy: approverId,
+          rejectionReason: null,
+          rejectedAt: null,
+          rejectedBy: null,
         })
         .where(eq(schema.adSpendLogs.id, adSpendId))
         .returning();
@@ -1088,6 +1205,128 @@ export class MarketingService {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to approve ad spend' });
     }
     return updated;
+  }
+
+  /** Head of Marketing / SuperAdmin / Admin: reject a PENDING ad spend entry. */
+  async rejectAdSpend(adSpendId: string, reason: string | undefined, rejectorId: string) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.adSpendLogs)
+      .where(eq(schema.adSpendLogs.id, adSpendId))
+      .limit(1);
+
+    if (!existing) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
+    }
+    if (existing.status !== 'PENDING') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only PENDING ad spend can be rejected' });
+    }
+
+    const updated = await withActor(this.db, { id: rejectorId }, async (tx) => {
+      const [row] = await tx
+        .update(schema.adSpendLogs)
+        .set({
+          status: 'REJECTED',
+          rejectionReason: reason?.trim() ? reason.trim() : null,
+          rejectedAt: new Date(),
+          rejectedBy: rejectorId,
+          approvedAt: null,
+          approvedBy: null,
+        })
+        .where(eq(schema.adSpendLogs.id, adSpendId))
+        .returning();
+      return row;
+    });
+
+    if (!updated) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to reject ad spend' });
+    }
+    return updated;
+  }
+
+  /**
+   * Media Buyer (own rows) or Head of Marketing / admin-class: update PENDING or REJECTED log.
+   * Resubmit from REJECTED clears rejection metadata and sets status back to PENDING.
+   */
+  async updateAdSpend(
+    input: UpdateAdSpendInput,
+    actor: { id: string; role: string },
+    branchId?: string | null,
+  ) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.adSpendLogs)
+      .where(eq(schema.adSpendLogs.id, input.adSpendId))
+      .limit(1);
+
+    if (!existing) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
+    }
+    if (existing.status !== 'PENDING' && existing.status !== 'REJECTED') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only PENDING or REJECTED ad spend can be edited' });
+    }
+
+    const canUpdate =
+      actor.role === 'MEDIA_BUYER' || actor.role === 'HEAD_OF_MARKETING' || isAdminLevel(actor);
+    if (!canUpdate) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to update ad spend' });
+    }
+    if (actor.role === 'MEDIA_BUYER' && existing.mediaBuyerId !== actor.id) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only edit your own ad spend' });
+    }
+
+    const nextCampaignId = input.campaignId ?? existing.campaignId;
+    const nextProductId = input.productId ?? existing.productId;
+
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'No campaigns in your active branch' });
+    }
+    if (branchCampaignIds && !branchCampaignIds.includes(nextCampaignId)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+    }
+
+    if (branchId) {
+      const [campaign] = await this.db
+        .select({ id: schema.campaigns.id })
+        .from(schema.campaigns)
+        .where(and(eq(schema.campaigns.id, nextCampaignId), eq(schema.campaigns.branchId, branchId)))
+        .limit(1);
+      if (!campaign) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+      }
+    }
+
+    const clearingRejection = existing.status === 'REJECTED';
+
+    return withActor(this.db, { id: actor.id }, async (tx) => {
+      const [row] = await tx
+        .update(schema.adSpendLogs)
+        .set({
+          productId: nextProductId,
+          campaignId: nextCampaignId,
+          spendAmount: String(input.spendAmount),
+          screenshotUrl: input.screenshotUrl,
+          spendDate: new Date(input.spendDate),
+          ...(clearingRejection
+            ? {
+                status: 'PENDING' as const,
+                rejectionReason: null,
+                rejectedAt: null,
+                rejectedBy: null,
+                approvedAt: null,
+                approvedBy: null,
+              }
+            : {}),
+        })
+        .where(eq(schema.adSpendLogs.id, input.adSpendId))
+        .returning();
+
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update ad spend' });
+      }
+      return row;
+    });
   }
 
   /**
@@ -1124,78 +1363,14 @@ export class MarketingService {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
     }
 
-    const priorDateLt = sql`${schema.adSpendLogs.spendDate}::date < ${input.spendDate}::date`;
-
-    const [prior] = await this.db
-      .select({
-        spendDate: schema.adSpendLogs.spendDate,
-      })
-      .from(schema.adSpendLogs)
-      .where(
-        and(
-          eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId),
-          eq(schema.adSpendLogs.campaignId, input.campaignId),
-          eq(schema.adSpendLogs.productId, input.productId),
-          eq(schema.adSpendLogs.status, 'APPROVED'),
-          priorDateLt,
-        ),
-      )
-      .orderBy(desc(schema.adSpendLogs.spendDate), desc(schema.adSpendLogs.createdAt))
-      .limit(1);
-
-    const priorSpend = prior?.spendDate;
-    let windowStartExclusive: Date | null = null;
-    if (priorSpend) {
-      const y = priorSpend.getUTCFullYear();
-      const m = priorSpend.getUTCMonth();
-      const d = priorSpend.getUTCDate();
-      windowStartExclusive = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0));
-    }
-
-    const now = new Date();
-    const hasProductLine = exists(
-      this.db
-        .select({ id: schema.orderItems.id })
-        .from(schema.orderItems)
-        .where(
-          and(eq(schema.orderItems.orderId, schema.orders.id), eq(schema.orderItems.productId, input.productId)),
-        ),
-    );
-
-    const orderConditions: SQL[] = [
-      eq(schema.orders.mediaBuyerId, mediaBuyerId),
-      eq(schema.orders.campaignId, input.campaignId),
-      hasProductLine,
-      lte(schema.orders.createdAt, now),
-    ];
-    if (windowStartExclusive) {
-      orderConditions.push(gt(schema.orders.createdAt, windowStartExclusive));
-    }
-    if (branchId) {
-      orderConditions.push(eq(schema.orders.branchId, branchId));
-    }
-
-    const [countRow] = await this.db
-      .select({ c: count() })
-      .from(schema.orders)
-      .where(and(...orderConditions));
-
-    const orderCount = Number(countRow?.c ?? 0);
-    const spendAmt = input.spendAmount;
-    const indicativeCpa =
-      spendAmt !== undefined && spendAmt > 0 && orderCount > 0 ? spendAmt / orderCount : null;
-
-    const priorSpendDate =
-      priorSpend != null
-        ? `${priorSpend.getUTCFullYear()}-${String(priorSpend.getUTCMonth() + 1).padStart(2, '0')}-${String(priorSpend.getUTCDate()).padStart(2, '0')}`
-        : null;
-
-    return {
-      orderCount,
-      priorSpendDate,
-      windowStartExclusive: windowStartExclusive ? windowStartExclusive.toISOString() : null,
-      indicativeCpa,
-    };
+    return this.getAdSpendIntervalSnapshot({
+      mediaBuyerId,
+      campaignId: input.campaignId,
+      productId: input.productId,
+      spendDate: input.spendDate,
+      spendAmount: input.spendAmount ?? 0,
+      branchId,
+    });
   }
 
   async listAdSpend(input: ListAdSpendInput, branchId?: string | null) {
@@ -1276,8 +1451,24 @@ export class MarketingService {
         .where(whereClause),
     ]);
 
+    // One snapshot query per row (limit ≤ 100). Batched SQL could reduce round-trips later.
+    const enriched = await Promise.all(
+      records.map(async (r) => {
+        const spendYmd = this.spendDateToYmd(r.spendDate);
+        const snap = await this.getAdSpendIntervalSnapshot({
+          mediaBuyerId: r.mediaBuyerId,
+          campaignId: r.campaignId,
+          productId: r.productId,
+          spendDate: spendYmd,
+          spendAmount: Number(r.spendAmount),
+          branchId,
+        });
+        return { ...r, orderCount: snap.orderCount, indicativeCpa: snap.indicativeCpa };
+      }),
+    );
+
     return {
-      records,
+      records: enriched,
       totalSpend: totalSpendRows[0]?.total ?? '0',
       pagination: { page: input.page, limit: input.limit, total: Number(totalRows[0]?.count ?? 0) },
     };
@@ -1308,7 +1499,7 @@ export class MarketingService {
     }
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
-      return { PENDING: 0, APPROVED: 0, ALL: 0 };
+      return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
     }
     if (branchCampaignIds) {
       conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
@@ -1337,11 +1528,12 @@ export class MarketingService {
       .where(whereClause)
       .groupBy(schema.adSpendLogs.status);
 
-    const out = { PENDING: 0, APPROVED: 0, ALL: 0 };
+    const out = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
     for (const r of rows) {
       const n = Number(r.c);
       if (r.status === 'PENDING') out.PENDING = n;
       else if (r.status === 'APPROVED') out.APPROVED = n;
+      else if (r.status === 'REJECTED') out.REJECTED = n;
       out.ALL += n;
     }
     return out;

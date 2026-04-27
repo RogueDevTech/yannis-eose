@@ -110,13 +110,22 @@ export const createAdSpendSchema = z.object({
 });
 export type CreateAdSpendInput = z.infer<typeof createAdSpendSchema>;
 
+/** Log ad spend from the admin UI — campaign and product required (stricter than optional API fields). */
+export const createAdSpendLogFormSchema = createAdSpendSchema.merge(
+  z.object({
+    campaignId: z.string().uuid(),
+    productId: z.string().uuid(),
+  }),
+);
+export type CreateAdSpendLogFormInput = z.infer<typeof createAdSpendLogFormSchema>;
+
 export const listAdSpendSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
-  status: z.enum(['PENDING', 'APPROVED']).optional(),
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
@@ -138,6 +147,22 @@ export const approveAdSpendSchema = z.object({
   adSpendId: z.string().uuid(),
 });
 export type ApproveAdSpendInput = z.infer<typeof approveAdSpendSchema>;
+
+export const rejectAdSpendSchema = z.object({
+  adSpendId: z.string().uuid(),
+  reason: z.string().max(500).optional(),
+});
+export type RejectAdSpendInput = z.infer<typeof rejectAdSpendSchema>;
+
+export const updateAdSpendSchema = z.object({
+  adSpendId: z.string().uuid(),
+  spendAmount: z.coerce.number().min(0).multipleOf(0.01),
+  screenshotUrl: z.string().url().min(1),
+  spendDate: z.string().date(),
+  productId: z.string().uuid().optional(),
+  campaignId: z.string().uuid().optional(),
+});
+export type UpdateAdSpendInput = z.infer<typeof updateAdSpendSchema>;
 
 /** Preview: orders since last APPROVED spend (calendar day before spendDate) + indicative CPA. */
 export const previewAdSpendIntervalSchema = z.object({
@@ -220,6 +245,50 @@ export const customFormFieldSchema = z.object({
   max: z.union([z.number(), z.string()]).optional(),
 });
 export type CustomFormField = z.infer<typeof customFormFieldSchema>;
+
+/**
+ * When a field is `required`, the submitted answer must be non-empty in the type-specific sense.
+ * Aligns with Edge `required` + checkbox-group / toggle checks; used on `orders.create` as a
+ * backstop when API clients skip browser validation.
+ */
+export function getMissingRequiredCustomFormLabels(
+  fields: CustomFormField[],
+  answers: Record<string, unknown> | null | undefined,
+): string[] {
+  const a = answers ?? {};
+  const missing: string[] = [];
+  for (const f of fields) {
+    if (f.required !== true) continue;
+    if (customFormAnswerSatisfied(f.type, a[f.id])) continue;
+    missing.push(f.label);
+  }
+  return missing;
+}
+
+function customFormAnswerSatisfied(type: FormFieldType, value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  switch (type) {
+    case 'text':
+    case 'textarea':
+    case 'email':
+    case 'phone':
+    case 'date':
+    case 'dropdown':
+    case 'radio':
+      return typeof value === 'string' && value.trim().length > 0;
+    case 'number': {
+      if (typeof value === 'number' && Number.isFinite(value)) return true;
+      if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) return true;
+      return false;
+    }
+    case 'checkbox_group':
+      return Array.isArray(value) && value.length > 0;
+    case 'toggle':
+      return value === true;
+    default:
+      return false;
+  }
+}
 
 /** Shared formConfig shape — used by both create and update. Pulled out so the route loader,
  *  the edge-worker public endpoint, and the builder UI all infer the same type. */

@@ -12,14 +12,12 @@ import type {
   MarketingFundingLoaderData,
 } from '~/features/marketing/types';
 import {
-  buildLeaderboardInput,
   getMarketingRoleFlags,
   parseFunding,
   parseFundingDirectionSummary,
   parseFundingRequestsPage,
   parseFundingRequestStatusCounts,
   parseFundingStatusCounts,
-  parseLeaderboard,
   parseUsers,
   parseBalancesList,
   parseFundingBalance,
@@ -46,7 +44,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.read');
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
+  const { startDate, endDate, periodAllTime, filters } = resolveMarketingDateFilters(url);
   const { isMediaBuyer, isFundingAdmin, canRequestFunding } = getMarketingRoleFlags(user.role);
 
   // HoM/Admin can disburse to MBs; Media Buyers cannot. Drives whether Section 2 renders.
@@ -144,12 +142,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { method: 'GET', cookie },
   );
 
-  const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
-  const leaderboardP = apiRequest<unknown>(
-    `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
-    { method: 'GET', cookie },
-  ).catch(() => ({ ok: false, data: { result: { data: [] } } }));
-
   const usersP = isFundingAdmin
     ? apiRequest<unknown>('/trpc/users.list', { method: 'GET', cookie })
     : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
@@ -198,7 +190,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     outgoingCountsRes,
     mbRequestsCountsRes,
     directionSummaryRes,
-    leaderboardRes,
     usersRes,
     balancesList,
     fundingBalanceRes,
@@ -209,7 +200,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     outgoingCountsP,
     mbRequestsCountsP,
     directionSummaryP,
-    leaderboardP,
     usersP,
     balancesListP,
     fundingBalanceP,
@@ -279,7 +269,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const directionSummary = parseFundingDirectionSummary(directionSummaryRes);
   const fundingBalance = showFundingBalance ? parseFundingBalance(fundingBalanceRes) : undefined;
-  const leaderboard = parseLeaderboard(leaderboardRes);
   const usersList = parseUsers(usersRes);
 
   const data: MarketingFundingLoaderData = {
@@ -298,8 +287,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     mbRequests,
     directionSummary,
     fundingBalance,
-    leaderboard,
-    leaderboardPeriod,
     users: usersList,
     balancesList,
   };

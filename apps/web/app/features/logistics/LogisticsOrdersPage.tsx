@@ -50,6 +50,7 @@ interface LogisticsOrdersPageProps {
   statusCounts: Record<string, number>;
   statusFilter?: string;
   searchFilter?: string;
+  listErrorMessage?: string;
   locations: Location[];
   /** When provided (e.g. TPL), only these locations in allocate dropdown; else locations where !dispatchLocked */
   allocatableLocations?: Location[];
@@ -67,7 +68,7 @@ interface LogisticsOrdersPageProps {
   /** Label for DISPATCHED → IN_TRANSIT button (e.g. "Mark In Transit" for TPL, default "Start Delivery") */
   markInTransitLabel?: string;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
-  dailyCounts?: Array<{ date: string; orderCount: number }>;
+  dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
 }
 
 export function LogisticsOrdersPage({
@@ -79,6 +80,7 @@ export function LogisticsOrdersPage({
   statusCounts,
   statusFilter,
   searchFilter,
+  listErrorMessage,
   locations,
   allocatableLocations: allocatableLocationsProp,
   riders,
@@ -95,7 +97,7 @@ export function LogisticsOrdersPage({
   const [showChartView, setShowChartView] = useState(false);
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
-  const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'CONFIRMED');
+  const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -150,7 +152,7 @@ export function LogisticsOrdersPage({
   }, [fetcher.state, fetcher.data, editDeliveryDateOrder]);
 
   useEffect(() => {
-    setSelectedStatus(statusFilter || 'CONFIRMED');
+    setSelectedStatus(statusFilter || 'ALL');
     setSearchQuery(searchFilter || '');
   }, [statusFilter, searchFilter]);
 
@@ -594,8 +596,8 @@ export function LogisticsOrdersPage({
         </div>
         {orders.length === 0 && (
           <EmptyState
-            title="No orders found"
-            description="Try changing the status filter or date range."
+            title={listErrorMessage ? 'Could not load orders' : 'No orders found'}
+            description={listErrorMessage ?? 'Try changing the status filter or date range.'}
           />
         )}
 

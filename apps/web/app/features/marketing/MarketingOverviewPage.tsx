@@ -7,11 +7,10 @@ import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
-import { Tabs } from '~/components/ui/tabs';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
 import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
-import type { LeaderboardEntry, Metrics, FundingBalanceRow, FundingRequestRecord, AdSpendRecord, MarketingOverviewRecentOrder } from './types';
+import type { LeaderboardEntry, Metrics, FundingBalanceRow, MarketingOverviewRecentOrder } from './types';
 
 function renderMediaBuyerLeaderboardCard(
   buyer: LeaderboardEntry,
@@ -97,8 +96,6 @@ export interface MarketingOverviewPageProps {
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
   liveEvents?: string[];
   recentOrders?: MarketingOverviewRecentOrder[];
-  fundingRequests?: FundingRequestRecord[];
-  adSpendLogs?: AdSpendRecord[];
 }
 
 export function MarketingOverviewPage({
@@ -109,8 +106,6 @@ export function MarketingOverviewPage({
   filters,
   liveEvents,
   recentOrders = [],
-  fundingRequests = [],
-  adSpendLogs = [],
 }: MarketingOverviewPageProps) {
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [liveOrdersPage, setLiveOrdersPage] = useState(1);
@@ -164,7 +159,6 @@ export function MarketingOverviewPage({
     }
   }, [leaderboard]);
 
-  const [bottomTab, setBottomTab] = useState<'funding' | 'adspend'>('funding');
   const statsScrollRef = useRef<HTMLDivElement>(null);
   const mediaBuyerScrollRef = useRef<HTMLDivElement>(null);
   const [viewAllMediaBuyersOpen, setViewAllMediaBuyersOpen] = useState(false);
@@ -664,100 +658,6 @@ export function MarketingOverviewPage({
         );
       })()}
 
-      {/* Funding Requests + Ad Spend tabs */}
-      <div>
-        <div className="flex items-center justify-between gap-3 border-b border-app-border mb-4">
-          <Tabs
-            value={bottomTab}
-            onChange={(v) => setBottomTab(v as typeof bottomTab)}
-            tabs={[
-              { value: 'funding', label: `Pending Requests (${fundingRequests.length})` },
-              { value: 'adspend', label: `Ad Spend (${adSpendLogs.length})` },
-            ]}
-          />
-          <Link
-            to={bottomTab === 'funding' ? '/admin/marketing/funding' : '/admin/marketing/ad-spend'}
-            prefetch="intent"
-            className="text-xs font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 shrink-0 mb-2"
-          >
-            View all →
-          </Link>
-        </div>
-
-        {bottomTab === 'funding' && (
-          fundingRequests.length === 0 ? (
-            <div className="card text-center py-8">
-              <p className="text-sm text-app-fg-muted">No pending funding requests today</p>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-app-border overflow-hidden bg-app-elevated divide-y divide-app-border">
-              {fundingRequests.slice(0, 10).map((req) => (
-                <div key={req.id} className="flex items-center gap-3 px-4 py-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-app-fg">
-                        {formatNaira(Number(req.amount))}
-                      </p>
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide text-warning-600 dark:text-warning-400 bg-warning-50 dark:bg-warning-900/20">
-                        PENDING
-                      </span>
-                    </div>
-                    <p className="text-xs text-app-fg-muted truncate mt-0.5">
-                      {req.requesterName ? `From ${req.requesterName}` : ''}{req.reason ? ` · ${req.reason}` : ''}
-                    </p>
-                  </div>
-                  <Link
-                    to="/admin/marketing/funding"
-                    prefetch="intent"
-                    className="text-xs font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 shrink-0"
-                  >
-                    Review →
-                  </Link>
-                </div>
-              ))}
-            </div>
-          )
-        )}
-
-        {bottomTab === 'adspend' && (
-          adSpendLogs.length === 0 ? (
-            <div className="card text-center py-8">
-              <p className="text-sm text-app-fg-muted">No ad spend logged today</p>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-app-border overflow-hidden bg-app-elevated divide-y divide-app-border">
-              {adSpendLogs.slice(0, 10).map((log) => {
-                const statusColor =
-                  log.status === 'APPROVED' ? 'text-success-600 dark:text-success-400 bg-success-50 dark:bg-success-900/20' :
-                  log.status === 'REJECTED' ? 'text-danger-600 dark:text-danger-400 bg-danger-50 dark:bg-danger-900/20' :
-                  'text-warning-600 dark:text-warning-400 bg-warning-50 dark:bg-warning-900/20';
-                return (
-                  <div key={log.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-semibold text-app-fg">
-                          {formatNaira(Number(log.spendAmount))}
-                        </p>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${statusColor}`}>
-                          {log.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-app-fg-muted mt-0.5">
-                        {new Date(log.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </p>
-                    </div>
-                    {log.screenshotUrl && (
-                      <a href={log.screenshotUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-500 hover:text-brand-600 dark:text-brand-400 shrink-0">
-                        Receipt ↗
-                      </a>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )
-        )}
-      </div>
     </div>
   );
 }

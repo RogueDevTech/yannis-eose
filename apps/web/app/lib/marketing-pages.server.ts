@@ -56,6 +56,7 @@ export function parseAdSpend(res: { ok: boolean; data: unknown }) {
 const emptyAdSpendStatusCounts = (): AdSpendStatusCounts => ({
   PENDING: 0,
   APPROVED: 0,
+  REJECTED: 0,
   ALL: 0,
 });
 
@@ -373,6 +374,51 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
     if (!res.ok) {
       const errorData = res.data as { error?: { message?: string } };
       return json({ error: errorData?.error?.message ?? 'Failed to approve ad spend' }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'rejectAdSpend') {
+    const adSpendId = formData.get('adSpendId')?.toString() ?? '';
+    if (!adSpendId) {
+      return json({ error: 'Ad spend ID is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/marketing.rejectAdSpend', {
+      method: 'POST',
+      cookie,
+      body: {
+        adSpendId,
+        reason: formData.get('reason')?.toString() || undefined,
+      },
+    });
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to reject ad spend' }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'updateAdSpend') {
+    const adSpendId = formData.get('adSpendId')?.toString() ?? '';
+    const screenshotUrl = formData.get('screenshotUrl')?.toString() ?? '';
+    if (!adSpendId || !screenshotUrl) {
+      return json({ error: 'Ad spend ID and screenshot URL are required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/marketing.updateAdSpend', {
+      method: 'POST',
+      cookie,
+      body: {
+        adSpendId,
+        spendAmount: formData.get('spendAmount')?.toString() ?? '',
+        screenshotUrl,
+        spendDate: formData.get('spendDate')?.toString() ?? '',
+        productId: formData.get('productId')?.toString() || undefined,
+        campaignId: formData.get('campaignId')?.toString() || undefined,
+      },
+    });
+    if (!res.ok) {
+      const errorData = res.data as { error?: { message?: string } };
+      return json({ error: errorData?.error?.message ?? 'Failed to update ad spend' }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

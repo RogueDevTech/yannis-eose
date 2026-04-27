@@ -55,7 +55,7 @@ export class LogisticsService {
 
       const provider = rows[0];
       if (!provider) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create provider' });
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create logistics company' });
       }
       return provider;
     });
@@ -77,7 +77,7 @@ export class LogisticsService {
         .returning();
 
       if (!rows[0]) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Provider not found' });
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics company not found' });
       }
       return rows[0];
     });
@@ -91,7 +91,7 @@ export class LogisticsService {
       .limit(1);
 
     if (!rows[0]) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Provider not found' });
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics company not found' });
     }
 
     // Get location count
@@ -142,7 +142,7 @@ export class LogisticsService {
         .limit(1);
 
       if (!providerRows[0]) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Provider not found' });
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics company not found' });
       }
 
       const rows = await tx
@@ -764,14 +764,36 @@ export class LogisticsService {
         this.db
           .select({ count: count() })
           .from(schema.deliveryRemittanceOrders)
+          .innerJoin(
+            schema.orders,
+            and(
+              eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId),
+              eq(schema.orders.status, 'DELIVERED'),
+            ),
+          )
           .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, r.id)),
       ),
     );
 
-    // Summary aggregation: total remitted amounts by status (across all matching remittances, not just current page)
-    // Build conditions without status filter for summary (we want all statuses)
-    const summaryConditions = conditions.filter((c) => c !== (input.status ? eq(schema.deliveryRemittances.status, input.status) : undefined));
+    // Summary aggregation: total remitted amounts by status (across all matching remittances, not just current page).
+    // Keep location/date/role scoping but intentionally ignore status filter so all buckets are visible.
+    const summaryConditions = [];
+    if (actor.role === 'TPL_MANAGER' && actor.logisticsLocationId) {
+      summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, actor.logisticsLocationId));
+    } else if (input.logisticsLocationId) {
+      summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
+    }
+    if (input.startDate) {
+      summaryConditions.push(gte(schema.deliveryRemittances.sentAt, new Date(input.startDate + 'T00:00:00')));
+    }
+    if (input.endDate) {
+      summaryConditions.push(lte(schema.deliveryRemittances.sentAt, new Date(input.endDate + 'T23:59:59')));
+    }
     const summaryWhere = summaryConditions.length > 0 ? and(...summaryConditions) : undefined;
+
+    const deliveredSummaryWhere = summaryWhere
+      ? and(summaryWhere, eq(schema.orders.status, 'DELIVERED'))
+      : eq(schema.orders.status, 'DELIVERED');
 
     const summaryRows = await this.db
       .select({
@@ -787,7 +809,7 @@ export class LogisticsService {
       .from(schema.deliveryRemittances)
       .innerJoin(schema.deliveryRemittanceOrders, eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id))
       .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
-      .where(summaryWhere);
+      .where(deliveredSummaryWhere);
 
     const summary = summaryRows[0] ?? {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
@@ -1009,7 +1031,7 @@ export class LogisticsService {
           deliveredAt: schema.orders.deliveredAt,
         })
         .from(schema.orders)
-        .where(inArray(schema.orders.id, orderIds));
+        .where(and(inArray(schema.orders.id, orderIds), eq(schema.orders.status, 'DELIVERED')));
       orders = orderRows.map((o) => ({
         id: o.id,
         customerName: o.customerName,
