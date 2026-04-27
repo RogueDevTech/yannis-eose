@@ -22,6 +22,7 @@ import {
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
@@ -230,7 +231,7 @@ export class OrdersService {
       .where(
         and(
           eq(schema.permissionRequests.status, 'PENDING'),
-          eq(schema.permissionRequests.type, 'ORDER_LINE_PRICE_CHANGE'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_LINE_PRICE_CHANGE'),
           sql`(${schema.permissionRequests.payload}->>'orderId') = ${orderId}`,
         ),
       )
@@ -246,7 +247,7 @@ export class OrdersService {
       .where(
         and(
           eq(schema.permissionRequests.status, 'PENDING'),
-          eq(schema.permissionRequests.type, 'ORDER_DELETION'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_DELETION'),
           sql`(${schema.permissionRequests.payload}->>'orderId') = ${orderId}`,
         ),
       )
@@ -445,7 +446,7 @@ export class OrdersService {
       .where(
         and(
           eq(schema.permissionRequests.status, 'PENDING'),
-          eq(schema.permissionRequests.type, 'ORDER_LINE_PRICE_CHANGE'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_LINE_PRICE_CHANGE'),
           sql`(${schema.permissionRequests.payload}->>'orderId') = ${input.orderId}`,
         ),
       )
@@ -536,7 +537,7 @@ export class OrdersService {
       .where(
         and(
           eq(schema.permissionRequests.status, 'PENDING'),
-          eq(schema.permissionRequests.type, 'ORDER_DELETION'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ORDER_DELETION'),
           sql`(${schema.permissionRequests.payload}->>'orderId') = ${input.orderId}`,
         ),
       )

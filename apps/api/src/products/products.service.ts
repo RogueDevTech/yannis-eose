@@ -12,6 +12,7 @@ import type {
   RequestProductArchiveInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
+import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -410,7 +411,7 @@ export class ProductsService {
       .from(schema.permissionRequests)
       .where(
         and(
-          eq(schema.permissionRequests.type, 'PRODUCT_ARCHIVE'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'PRODUCT_ARCHIVE'),
           eq(schema.permissionRequests.status, 'PENDING'),
           sql`${schema.permissionRequests.payload}->>'productId' = ${input.productId}`,
         ),

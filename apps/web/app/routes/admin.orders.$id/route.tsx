@@ -7,7 +7,15 @@ import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, getCurrentUse
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
-import type { CallLogEntry, OrderDetail, OrderDetailStreamData, OrderInvoice, TimelineEvent } from '~/features/orders/types';
+import type {
+  CallLogEntry,
+  OrderDetail,
+  OrderDetailLoaderResult,
+  OrderDetailStreamData,
+  OrderInvoice,
+  TimelineEvent,
+} from '~/features/orders/types';
+import { trpcOrderGetByIdIsNotFound } from '~/lib/trpc-http-response';
 
 export const meta: MetaFunction = () => [
   { title: 'Order Detail — Yannis EOSE' },
@@ -33,7 +41,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
-  const orderDetailPromise = (async (): Promise<OrderDetailStreamData | { notFound: true }> => {
+  const orderDetailPromise = (async (): Promise<OrderDetailLoaderResult> => {
     const [orderRes, voipRes] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
@@ -46,7 +54,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
-    if (!orderRes.ok) return { notFound: true };
+    if (!orderRes.ok) {
+      if (trpcOrderGetByIdIsNotFound(orderRes.status, orderRes.data)) {
+        return { notFound: true };
+      }
+      return {
+        loadError: extractApiErrorMessage(
+          orderRes.data,
+          'This order could not be loaded. Try again in a moment. If it keeps failing, the API database may need pending migrations applied.',
+        ),
+      };
+    }
 
     const trpcData = orderRes.data as { result?: { data?: OrderDetail } };
     const order = trpcData?.result?.data;
@@ -708,7 +726,20 @@ export default function OrderDetailRoute() {
   return (
     <DeferredSection resolve={orderDetail} skeleton="card">
       {(data) =>
-        'notFound' in data && data.notFound ? (
+        'loadError' in data && typeof data.loadError === 'string' ? (
+          <div className="card text-center py-12">
+            <p className="text-6xl font-bold text-warning-500/80 mb-4">!</p>
+            <h2 className="text-xl font-bold text-app-fg">Could not load this order</h2>
+            <p className="mt-2 text-sm text-app-fg-muted max-w-lg mx-auto">{data.loadError}</p>
+            <p className="mt-3 text-xs text-app-fg-muted max-w-md mx-auto">
+              A server or database error can look like a missing order. If you just deployed, run pending
+              migrations on the API database, then redeploy the API.
+            </p>
+            <a href="/admin/cs/orders" className="btn-primary mt-6 inline-block">
+              Back to Orders
+            </a>
+          </div>
+        ) : 'notFound' in data && data.notFound ? (
           <div className="card text-center py-12">
             <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
             <h2 className="text-xl font-bold text-app-fg">Order not found</h2>

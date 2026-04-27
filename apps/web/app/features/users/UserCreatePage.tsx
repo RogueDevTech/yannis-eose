@@ -81,6 +81,15 @@ export function UserCreatePage({
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
   const [logisticsLocationId, setLogisticsLocationId] = useState('');
   const [commissionPlanId, setCommissionPlanId] = useState('');
+  // Local 10-digit phone (the part after +234). Validated to start with 7/8/9
+  // so we never submit a number outside the Nigerian mobile prefix range.
+  const [phoneLocal, setPhoneLocal] = useState('');
+  const phoneIsComplete = /^[789]\d{9}$/.test(phoneLocal);
+  const phoneError = phoneLocal.length > 0 && !phoneIsComplete
+    ? phoneLocal.length < 10
+      ? 'Enter all 10 digits.'
+      : 'Number must start with 7, 8, or 9.'
+    : undefined;
 
   const conflictingHead = HEAD_ROLES.includes(selectedRole)
     ? activeHeads.find((h) => {
@@ -490,16 +499,35 @@ export function UserCreatePage({
           <div className="card space-y-4">
             <h2 className="text-lg font-semibold text-app-fg">Contact</h2>
             <div className="sm:w-1/2">
+              {/* Visible input is the 10-digit local part. We always submit
+                  +234XXXXXXXXXX through a hidden field — keeps the API regex
+                  happy regardless of what the user typed. */}
               <TextInput
-                id="phone"
-                name="phone"
+                id="phone-local"
                 type="tel"
+                inputMode="numeric"
+                autoComplete="tel-national"
                 label="WhatsApp / Phone Number"
-                placeholder="08031234567 or +2348031234567"
-                pattern="^(0[789]\d{9}|\+234[789]\d{9})$"
-                title="Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)"
-                hint="Must be unique across all staff. Never displayed publicly; masked in all views."
+                placeholder="8031234567"
+                value={phoneLocal}
+                onChange={(e) => {
+                  // Strip non-digits, drop a leading 0 if pasted (so 08031234567
+                  // becomes 8031234567), then cap at 10.
+                  let digits = e.target.value.replace(/\D/g, '');
+                  if (digits.startsWith('234')) digits = digits.slice(3);
+                  if (digits.startsWith('0')) digits = digits.slice(1);
+                  setPhoneLocal(digits.slice(0, 10));
+                }}
+                leftAddon="+234"
+                hint="10 digits, starting with 7, 8, or 9. Must be unique across all staff. Never displayed publicly; masked in all views."
+                error={phoneError}
                 required
+                maxLength={10}
+              />
+              <input
+                type="hidden"
+                name="phone"
+                value={phoneIsComplete ? `+234${phoneLocal}` : ''}
               />
             </div>
           </div>
@@ -510,7 +538,7 @@ export function UserCreatePage({
           <Link to={usersBasePath} className="btn-secondary w-full sm:w-auto">
             Cancel
           </Link>
-          <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isSubmitting} loadingText="Creating..." disabled={!selectedRole}>
+          <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isSubmitting} loadingText="Creating..." disabled={!selectedRole || !phoneIsComplete}>
             Create User
           </Button>
         </div>
@@ -523,11 +551,24 @@ export function UserCreatePage({
           maxWidth="max-w-md"
           contentClassName="p-6"
         >
-          <h3 className="text-lg font-semibold text-app-fg mb-2">Role already taken in this branch</h3>
+          <h3 className="text-lg font-semibold text-app-fg mb-2">
+            {ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
+              ? 'Role already taken (organization-wide)'
+              : 'Role already taken in this branch'}
+          </h3>
           <p className="text-sm text-app-fg-muted mb-3">
-            Only one active <strong>{formatRole(selectedRole)}</strong> is allowed per branch.{' '}
-            <strong>{conflictingBranch ? conflictingBranch.name : 'This branch'}</strong> already has{' '}
-            <strong>{conflictingHead.name}</strong> in that role.
+            {ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole) ? (
+              <>
+                Only one active <strong>{formatRole(selectedRole)}</strong> is allowed in the
+                organization. <strong>{conflictingHead.name}</strong> already holds that role.
+              </>
+            ) : (
+              <>
+                Only one active <strong>{formatRole(selectedRole)}</strong> is allowed per branch.{' '}
+                <strong>{conflictingBranch ? conflictingBranch.name : 'This branch'}</strong>{' '}
+                already has <strong>{conflictingHead.name}</strong> in that role.
+              </>
+            )}
           </p>
           <p className="text-sm text-app-fg-muted mb-4">
             To add a new {formatRole(selectedRole)}, first change {conflictingHead.name}&apos;s role

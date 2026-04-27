@@ -150,6 +150,12 @@ export interface OrderDetailPageProps {
   latestCall: CallLogEntry | null;
 }
 
+/** `admin.orders.$id` deferred payload: loaded order, missing order, or API error (not a fake 404). */
+export type OrderDetailLoaderResult =
+  | OrderDetailStreamData
+  | { notFound: true }
+  | { loadError: string };
+
 /** What the loader returns — mix of resolved data + streaming promises */
 export interface OrderDetailStreamData {
   // Critical (resolved immediately) — 404 check requires await
