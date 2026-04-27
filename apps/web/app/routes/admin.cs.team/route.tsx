@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { resolveMarketingDateFilters, buildLeaderboardInput } from '~/lib/marketing-pages.server';
 import { CSTeamPage } from '~/features/cs/CSTeamPage';
 import type { CSTeamMemberOverview } from '~/features/cs/types';
@@ -153,8 +154,7 @@ export async function action({ request }: ActionFunctionArgs) {
   );
 
   if (!res.ok) {
-    const errorData = res.data as { error?: { message?: string } };
-    return json({ success: false, error: errorData?.error?.message ?? 'Redistribute failed' }, { status: safeStatus(res.status) });
+    return json({ success: false, error: extractApiErrorMessage(res.data, 'Redistribute failed') }, { status: safeStatus(res.status) });
   }
 
   const redistributed = res.data?.result?.data?.redistributed ?? 0;

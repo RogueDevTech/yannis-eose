@@ -28,7 +28,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.read');
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
+  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(
+    url,
+    'last_48_hours',
+  );
   const { isMediaBuyer, isFundingAdmin } = getMarketingRoleFlags(user.role);
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));

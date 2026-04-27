@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getCurrentUser, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { redirect } from '@remix-run/node';
 import { CommissionPlansPage } from '~/features/hr/CommissionPlansPage';
 import type { CommissionPlan } from '~/features/hr/types';
@@ -83,7 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to create plan';
+      const err = extractApiErrorMessage(res.data, 'Failed to create plan');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
@@ -108,7 +109,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const res = await apiRequest<unknown>('/trpc/hr.updatePlan', { method: 'POST', cookie, body });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to update plan';
+      const err = extractApiErrorMessage(res.data, 'Failed to update plan');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });

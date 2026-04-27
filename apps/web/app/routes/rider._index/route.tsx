@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { RiderDashboardPage } from '~/features/rider/RiderDashboardPage';
 import type { Order } from '~/features/rider/types';
 
@@ -84,9 +85,8 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { orderId, newStatus, metadata },
     });
     if (!res.ok) {
-      const errData = res.data as { error?: { message?: string } };
       return json(
-        { error: errData?.error?.message ?? 'Submit failed', success: false },
+        { error: extractApiErrorMessage(res.data, 'Submit failed'), success: false },
         { status: 400 },
       );
     }
@@ -100,9 +100,8 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 
   if (!res.ok) {
-    const errData = res.data as { error?: { message?: string } };
     return json(
-      { error: errData?.error?.message ?? 'Transition failed', success: false },
+      { error: extractApiErrorMessage(res.data, 'Transition failed'), success: false },
       { status: 400 },
     );
   }

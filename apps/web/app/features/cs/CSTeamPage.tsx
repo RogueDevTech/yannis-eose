@@ -140,7 +140,7 @@ function CSTeamMemberCard({
           </Button>
         )}
         <Link
-          to={`/admin/cs/orders?csAgentId=${member.id}`}
+          to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}
           prefetch="intent"
           className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
         >
@@ -358,7 +358,7 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
                                 </Button>
                               )}
                               <Link
-                                to={`/admin/cs/orders?csAgentId=${member.id}`}
+                                to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}
                                 prefetch="intent"
                                 className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
                               >

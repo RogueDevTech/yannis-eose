@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
 import { UsersListPage } from '~/features/users/UsersListPage';
 import type { User } from '~/features/users/types';
 
@@ -38,11 +38,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // /hr/users is HR's org-wide directory — gated on `hr.read` (HR_MANAGER + admins). Head of
-  // Marketing / Head of CS still hold `users.read` for team overview lookups + push target
-  // search, but they must NOT see the full staff list here. They can still open individual
-  // profiles of their own team members via /hr/users/:id (see that route for the carve-out).
-  await requirePermission(request, 'hr.read');
+  await requireStaffAccountsAccess(request);
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);

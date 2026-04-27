@@ -12,6 +12,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -550,10 +551,10 @@ export function OrdersListPage({
             wrapperClassName="w-full sm:w-48"
           />
           {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && (
-            <FormSelect
+            <SearchableSelect
+              id="orders-filter-closer"
               value={searchParams.get('csAgentId') || 'ALL'}
-              onChange={(e) => {
-                const v = e.target.value;
+              onChange={(v) => {
                 setSelectedIds(new Set());
                 setBulkResult(null);
                 setSearchParams((p) => {
@@ -566,7 +567,8 @@ export function OrdersListPage({
               }}
               options={csAgentOptions}
               wrapperClassName="w-full sm:w-48"
-              aria-label="Filter by closer"
+              placeholder="All closers"
+              searchPlaceholder="Search closers..."
             />
           )}
         </div>
@@ -597,7 +599,6 @@ export function OrdersListPage({
                 <th className="table-header">Order ID</th>
                 <th className="table-header">Customer</th>
                 {showCSAgentColumn && <th className="table-header">Assigned closer</th>}
-                <th className="table-header">Phone</th>
                 <th className="table-header">Status</th>
                 <th className="table-header text-right">Amount</th>
                 <th className="table-header">Created</th>
@@ -638,9 +639,6 @@ export function OrdersListPage({
                       )}
                     </td>
                   )}
-                  <td className="table-cell font-mono text-sm">
-                    {order.customerPhoneDisplay}
-                  </td>
                   <td className="table-cell">
                     <OrderStatusBadge status={order.status} />
                   </td>
@@ -669,7 +667,7 @@ export function OrdersListPage({
               ))}
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={(canBulkAction ? 1 : 0) + 6 + (showCSAgentColumn ? 1 : 0)}>
+                  <td colSpan={(canBulkAction ? 1 : 0) + 5 + (showCSAgentColumn ? 1 : 0)}>
                     <EmptyState
                       title={orders.length === 0 ? 'No orders yet' : 'No orders found'}
                       description={orders.length === 0 ? undefined : 'Try adjusting your filters or search query'}

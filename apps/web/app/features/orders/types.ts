@@ -167,6 +167,14 @@ export interface OrderDetailPageExtraProps {
   permissions: string[];
   csAgentsForAssign?: Array<{ id: string; name: string }>;
   logisticsLocations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }>;
+  allocatableLocations?: Array<{
+    id: string;
+    name: string;
+    address: string | null;
+    whatsappGroupLink?: string | null;
+    eligible: boolean;
+    reason: string | null;
+  }>;
   /** WhatsApp group dispatch templates — loaded for the CS "Share to 3PL" flow. */
   logisticsDispatchTemplates?: Array<{ id: string; name: string; body: string }>;
   /** Auto-generated invoice for the order (CONFIRMED side effect). null if none yet. Streamed. */

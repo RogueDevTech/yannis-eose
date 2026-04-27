@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { APP_THEME_IDS } from '@yannis/shared';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { SettingsPage } from '~/features/settings/SettingsPage';
 
 export const meta: MetaFunction = () => [
@@ -111,8 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update profile' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update profile') }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Profile updated' });
   }
@@ -135,8 +135,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { currentPassword, newPassword },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to change password' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to change password') }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Password changed' });
   }
@@ -165,8 +164,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { enabled: voipEnabled },
     });
     if (!voipRes.ok) {
-      const errorData = voipRes.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update VOIP setting' }, { status: safeStatus(voipRes.status) });
+      return json({ error: extractApiErrorMessage(voipRes.data, 'Failed to update VOIP setting') }, { status: safeStatus(voipRes.status) });
     }
 
     // 2. CS dispatch strategy
@@ -176,8 +174,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { key: 'CS_DISPATCH_STRATEGY', value: { strategy: csDispatchStrategy } },
     });
     if (!csRes.ok) {
-      const errorData = csRes.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update CS order distribution' }, { status: safeStatus(csRes.status) });
+      return json({ error: extractApiErrorMessage(csRes.data, 'Failed to update CS order distribution') }, { status: safeStatus(csRes.status) });
     }
 
     // 3. Claim cap (saved regardless of mode — used when claim mode is active)
@@ -187,8 +184,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { key: 'CS_CLAIM_CAP', value: { cap: claimCap } },
     });
     if (!capRes.ok) {
-      const errorData = capRes.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update claim cap' }, { status: safeStatus(capRes.status) });
+      return json({ error: extractApiErrorMessage(capRes.data, 'Failed to update claim cap') }, { status: safeStatus(capRes.status) });
     }
 
     const defaultAppTheme = formData.get('defaultAppTheme')?.toString() ?? 'system';
@@ -201,9 +197,8 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { defaultAppTheme },
     });
     if (!uiRes.ok) {
-      const errorData = uiRes.data as { error?: { message?: string } };
       return json(
-        { error: errorData?.error?.message ?? 'Failed to update default appearance' },
+        { error: extractApiErrorMessage(uiRes.data, 'Failed to update default appearance') },
         { status: safeStatus(uiRes.status) },
       );
     }
@@ -232,8 +227,7 @@ export async function action({ request }: ActionFunctionArgs) {
         body: { enabled },
       });
       if (!res.ok) {
-        const errorData = res.data as { error?: { message?: string } };
-        return json({ error: errorData?.error?.message ?? 'Failed to update VOIP setting' }, { status: safeStatus(res.status) });
+        return json({ error: extractApiErrorMessage(res.data, 'Failed to update VOIP setting') }, { status: safeStatus(res.status) });
       }
       return json({ success: true, message: enabled ? 'VOIP enabled' : 'VOIP disabled' });
     }
@@ -244,8 +238,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { key, value },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update setting' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update setting') }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Setting updated' });
   }
@@ -261,8 +254,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { provider },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to switch VOIP provider' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to switch VOIP provider') }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: `VOIP provider switched to Africa's Talking` });
   }
@@ -282,8 +274,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { enabledTypes },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update notification config' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update notification config') }, { status: safeStatus(res.status) });
     }
     return json({ success: true, message: 'Notification email settings updated' });
   }

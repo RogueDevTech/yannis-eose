@@ -121,87 +121,108 @@ export class InventoryService {
    * Creates a stock_batch, updates inventory_levels, logs the movement.
    */
   async intake(input: StockIntakeInput, actor: SessionUser) {
-    const totalLandedCost = (input.factoryCost + input.landingCost).toFixed(2);
+    const totalLandedCost = input.factoryCost + input.landingCost;
+    const reasonUnitCost = totalLandedCost.toFixed(2);
 
-    // All writes wrapped in a single transaction with SET LOCAL yannis.current_user_id so the
-    // temporal-history triggers can attribute every row to the actor. A bare
-    // `pgClient\`SELECT set_config(..., true)\`` on a 5-connection pool does NOT persist across
-    // the follow-up drizzle queries (they land on different pooled connections), which is why
-    // stock movements were showing "System" as the actor in the audit trail.
-    const batch = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
-
-      // Create the FIFO batch
-      const batchRows = await tx
-        .insert(schema.stockBatches)
-        .values({
-          productId: input.productId,
-          factoryCost: String(input.factoryCost),
-          landingCost: String(input.landingCost),
-          totalLandedCost,
-          quantity: input.quantity,
-          remainingQuantity: input.quantity,
-        })
-        .returning();
-
-      const createdBatch = batchRows[0];
-      if (!createdBatch) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create stock batch' });
-      }
-
-      // Upsert inventory level at the location
-      const existingLevel = await tx
-        .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, input.productId),
-            eq(schema.inventoryLevels.locationId, input.locationId),
-          ),
-        )
-        .limit(1);
-
-      if (existingLevel[0]) {
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantity}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.inventoryLevels.id, existingLevel[0].id));
-      } else {
-        await tx
-          .insert(schema.inventoryLevels)
+    try {
+      const batch = await withActor(this.db, actor, async (tx) => {
+        // Create the FIFO batch. Numeric fields are explicitly cast to avoid trigger/history
+        // failures where numeric values can degrade to text through dynamic SQL paths.
+        const batchRows = await tx
+          .insert(schema.stockBatches)
           .values({
             productId: input.productId,
-            locationId: input.locationId,
-            batchId: createdBatch.id,
-            stockCount: input.quantity,
-            reservedCount: 0,
-            status: 'AVAILABLE',
-          });
-      }
+            factoryCost: sql`${input.factoryCost}::numeric`,
+            landingCost: sql`${input.landingCost}::numeric`,
+            totalLandedCost: sql`${totalLandedCost}::numeric`,
+            quantity: input.quantity,
+            remainingQuantity: input.quantity,
+          })
+          .returning();
 
-      // Log the movement
-      await tx.insert(schema.stockMovements).values({
-        productId: input.productId,
-        movementType: 'INTAKE',
-        quantity: input.quantity,
-        toLocationId: input.locationId,
-        referenceId: createdBatch.id,
-        reason: `Stock intake: ${input.quantity} units at ${totalLandedCost}/unit landed cost`,
-        actorId: actor.id,
+        const createdBatch = batchRows[0];
+        if (!createdBatch) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create stock batch' });
+        }
+
+        // Upsert inventory level at the location
+        const existingLevel = await tx
+          .select()
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, input.productId),
+              eq(schema.inventoryLevels.locationId, input.locationId),
+            ),
+          )
+          .limit(1);
+
+        if (existingLevel[0]) {
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantity}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.inventoryLevels.id, existingLevel[0].id));
+        } else {
+          await tx
+            .insert(schema.inventoryLevels)
+            .values({
+              productId: input.productId,
+              locationId: input.locationId,
+              batchId: createdBatch.id,
+              stockCount: input.quantity,
+              reservedCount: 0,
+              status: 'AVAILABLE',
+            });
+        }
+
+        // Log the movement
+        await tx.insert(schema.stockMovements).values({
+          productId: input.productId,
+          movementType: 'INTAKE',
+          quantity: input.quantity,
+          toLocationId: input.locationId,
+          referenceId: createdBatch.id,
+          reason: `Stock intake: ${input.quantity} units at ${reasonUnitCost}/unit landed cost`,
+          actorId: actor.id,
+        });
+
+        return createdBatch;
       });
 
-      return createdBatch;
-    });
+      this.events.emitToRoom('inventory', 'stock:updated', {
+        productId: input.productId,
+        locationId: input.locationId,
+      });
 
-    this.events.emitToRoom('inventory', 'stock:updated', {
-      productId: input.productId,
-      locationId: input.locationId,
-    });
+      return batch;
+    } catch (error) {
+      if (error instanceof TRPCError) {
+        throw error;
+      }
 
-    return batch;
+      const dbError = error as { code?: string };
+      if (dbError.code === '23503') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid product or location selected for stock intake.',
+        });
+      }
+
+      if (dbError.code === '22P02' || dbError.code === '23514') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid stock intake values. Please check quantity and costs.',
+        });
+      }
+
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to complete stock intake.',
+      });
+    }
   }
 
   // ============================================

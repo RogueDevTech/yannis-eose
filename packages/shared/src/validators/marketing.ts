@@ -246,6 +246,19 @@ export const customFormFieldSchema = z.object({
 });
 export type CustomFormField = z.infer<typeof customFormFieldSchema>;
 
+export const STANDARD_FIELD_KEYS = [
+  'deliveryAddress',
+  'deliveryNotes',
+  'deliveryState',
+  'gender',
+  'preferredDeliveryDate',
+  'paymentMethod',
+] as const;
+export const standardFormFieldSchema = z.object({
+  key: z.enum(STANDARD_FIELD_KEYS),
+  required: z.boolean().default(false),
+});
+
 /**
  * When a field is `required`, the submitted answer must be non-empty in the type-specific sense.
  * Aligns with Edge `required` + checkbox-group / toggle checks; used on `orders.create` as a
@@ -306,9 +319,16 @@ export const formConfigSchema = z.object({
   showGender: z.boolean().optional(),
   showPreferredDeliveryDate: z.boolean().optional(),
   showPaymentMethod: z.boolean().optional(),
+  requireDeliveryAddress: z.boolean().optional(),
+  requireDeliveryNotes: z.boolean().optional(),
+  requireDeliveryState: z.boolean().optional(),
+  requireGender: z.boolean().optional(),
+  requirePreferredDeliveryDate: z.boolean().optional(),
+  requirePaymentMethod: z.boolean().optional(),
   // Custom options for select fields
   deliveryStateOptions: z.array(z.string().max(100)).max(50).optional(),
   preferredDeliveryDateOptions: z.array(z.string().max(100)).max(20).optional(),
+  standardFields: z.array(standardFormFieldSchema).max(STANDARD_FIELD_KEYS.length).optional(),
   // Legacy: pre-builder advanced field array. Kept for backward compatibility — the new
   // builder writes to `customFields` instead.
   fields: z.array(z.object({

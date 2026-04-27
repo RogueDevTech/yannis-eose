@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { FormsPage } from '~/features/campaigns/CampaignsPage';
 import type { Campaign, Product, FormsStreamData } from '~/features/campaigns/types';
 
@@ -86,8 +87,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { id, status },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update status' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update status') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

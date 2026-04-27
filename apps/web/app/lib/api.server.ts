@@ -1,4 +1,5 @@
 import { redirect } from '@remix-run/node';
+import { isNetworkErrorLike } from './network-error';
 
 /**
  * Server-side API helper for Remix loaders/actions.
@@ -50,6 +51,11 @@ interface ApiResponse<T> {
   data: T;
   /** `Set-Cookie` header(s) from the API — use `getSetCookie()` because `headers.get('set-cookie')` is often null in Node fetch. */
   setCookies: string[];
+}
+
+/** Convenience guard for apiRequest fallbacks (503/504) and network-like payload text. */
+export function isApiNetworkFailure(res: { status: number; data?: unknown }): boolean {
+  return isNetworkErrorLike(res.data, res.status);
 }
 
 /** Collect Set-Cookie lines from a fetch Response (Node undici). */
@@ -176,7 +182,15 @@ export async function requireRole(request: Request, allowedRoles: string[]) {
 export async function requirePermission(
   request: Request,
   permissionCode: string | string[],
-): Promise<{ id: string; email: string; name: string; role: string; permissions?: string[]; logisticsLocationId?: string | null }> {
+): Promise<{
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  permissions?: string[];
+  logisticsLocationId?: string | null;
+  currentBranchId?: string | null;
+}> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   // SUPER_ADMIN and ADMIN bypass all permission checks.
@@ -206,6 +220,34 @@ export async function requirePermissionOrRoles(
   const hasAny = codes.some((c) => perms.includes(c));
   if (!hasAny) throw redirect('/admin/unauthorized');
   return user;
+}
+
+/**
+ * Guard for staff-account management pages.
+ * Allowed:
+ * - Admin-level users (SUPER_ADMIN / ADMIN)
+ * - HR manager
+ * - Finance officer primary role
+ * - Finance hat holders (isFinanceOfficer = true)
+ */
+export async function requireStaffAccountsAccess(
+  request: Request,
+): Promise<{
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  permissions?: string[];
+  logisticsLocationId?: string | null;
+  isFinanceOfficer?: boolean;
+}> {
+  const user = await getCurrentUser(request);
+  if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return user;
+  if (user.role === 'HR_MANAGER' || user.role === 'FINANCE_OFFICER' || user.isFinanceOfficer === true) {
+    return user;
+  }
+  throw redirect('/admin/unauthorized');
 }
 
 /**

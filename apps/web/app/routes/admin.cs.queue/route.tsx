@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultTodayRange } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
 import {
@@ -218,8 +219,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Assignment failed' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Assignment failed') }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true });
@@ -250,8 +250,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { orderIds, csAgentId },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Bulk assignment failed' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Bulk assignment failed') }, { status: safeStatus(res.status) });
     }
     const data = res.data as { result?: { data?: { assigned?: number } } };
     return json({ success: true, assigned: data?.result?.data?.assigned ?? orderIds.length });
@@ -284,8 +283,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Reassignment failed' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Reassignment failed') }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true });
@@ -298,8 +296,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Distribute order failed' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Distribute order failed') }, { status: safeStatus(res.status) });
     }
 
     const distributed = res.data?.result?.data?.distributed ?? 0;
@@ -322,8 +319,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to schedule callback' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to schedule callback') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -343,8 +339,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to merge orders' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to merge orders') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -363,8 +358,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to dismiss duplicate' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to dismiss duplicate') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -413,8 +407,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
-      return json({ error: err?.error?.message ?? 'Failed to create offline order' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create offline order') }, { status: safeStatus(res.status) });
     }
     const orderId = res.data?.result?.data?.id;
     return json({ success: true, orderId });
@@ -431,8 +424,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { orderId },
     });
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to claim order' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to claim order') }, { status: safeStatus(res.status) });
     }
     const data = res.data as { result?: { data?: { success: boolean; message?: string } } };
     const result = data?.result?.data;
@@ -464,8 +456,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Transition failed' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Transition failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

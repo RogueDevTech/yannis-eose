@@ -1,7 +1,8 @@
 import { useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requireStaffAccountsAccess, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { canMirror } from '~/lib/rbac';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { UserDetailPage } from '~/features/users/UserDetailPage';
@@ -73,7 +74,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('This user is not on your team.', { status: 403 });
   }
   if (!isSelfView && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
-    await requirePermission(request, ['hr.read', 'users.update']);
+    await requireStaffAccountsAccess(request);
   }
 
   const user = profileUser;
@@ -495,8 +496,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to update user' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update user') }, { status: safeStatus(res.status) });
     }
 
     const result = res.data as { result?: { data?: { emailChangePending?: boolean; requiresApproval?: boolean; requestId?: string; message?: string } } };
@@ -544,8 +544,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to deactivate user' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to deactivate user') }, { status: safeStatus(res.status) });
     }
 
     return redirect('/hr/users');
@@ -566,8 +565,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reactivate user' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to reactivate user') }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true, message: 'User reactivated successfully' });
@@ -587,8 +585,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to process email change' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to process email change') }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true, message: action === 'APPROVED' ? 'Email updated successfully' : 'Email change rejected' });
@@ -615,8 +612,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errorData = res.data as { error?: { message?: string } };
-      return json({ error: errorData?.error?.message ?? 'Failed to reset password' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to reset password') }, { status: safeStatus(res.status) });
     }
 
     return json({ success: true, message: 'Password reset successfully' });

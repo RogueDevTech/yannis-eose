@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type LogisticsOrderRow } from '~/features/logistics/LogisticsOrdersPage';
 import type { Location } from '~/features/logistics/types';
@@ -180,8 +181,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Allocation failed';
-      return json({ success: false, error: err }, { status: safeStatus(res.status) });
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Allocation failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -203,8 +203,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Dispatch failed';
-      return json({ success: false, error: err }, { status: safeStatus(res.status) });
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Dispatch failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -236,8 +235,7 @@ export async function action({ request }: ActionFunctionArgs) {
         results.push({ orderId, success: true });
       } else {
         failed++;
-        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Dispatch failed';
-        results.push({ orderId, success: false, error: err });
+        results.push({ orderId, success: false, error: extractApiErrorMessage(res.data, 'Dispatch failed') });
       }
     }
     return json({ success: true, succeeded, failed, results });
@@ -272,8 +270,7 @@ export async function action({ request }: ActionFunctionArgs) {
           results.push({ orderId, success: true });
         } else {
           failed++;
-          const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Submit failed';
-          results.push({ orderId, success: false, error: err });
+          results.push({ orderId, success: false, error: extractApiErrorMessage(res.data, 'Submit failed') });
         }
       } else {
         const res = await apiRequest<unknown>('/trpc/orders.transition', {
@@ -286,8 +283,7 @@ export async function action({ request }: ActionFunctionArgs) {
           results.push({ orderId, success: true });
         } else {
           failed++;
-          const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Mark delivered failed';
-          results.push({ orderId, success: false, error: err });
+          results.push({ orderId, success: false, error: extractApiErrorMessage(res.data, 'Mark delivered failed') });
         }
       }
     }
@@ -331,8 +327,7 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
       if (!res.ok) {
-        const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Submit failed';
-        return json({ success: false, error: err }, { status: safeStatus(res.status) });
+        return json({ success: false, error: extractApiErrorMessage(res.data, 'Submit failed') }, { status: safeStatus(res.status) });
       }
       return json({ success: true, deliveryConfirmation: true });
     }
@@ -348,8 +343,7 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
     if (!res.ok) {
-      const err = (res.data as { error?: { message?: string } })?.error?.message ?? 'Transition failed';
-      return json({ success: false, error: err }, { status: safeStatus(res.status) });
+      return json({ success: false, error: extractApiErrorMessage(res.data, 'Transition failed') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -390,8 +384,7 @@ export async function action({ request }: ActionFunctionArgs) {
       result?: { data?: { status: string; logisticsLocationId?: string | null; riderId?: string | null } };
     }>('/trpc/orders.update', { method: 'POST', cookie, body });
     if (!updateRes.ok) {
-      const err = (updateRes.data as { error?: { message?: string } })?.error?.message ?? 'Update failed';
-      return json({ success: false, error: err, intent: 'updateDeliveryDate' }, { status: safeStatus(updateRes.status) });
+      return json({ success: false, error: extractApiErrorMessage(updateRes.data, 'Update failed'), intent: 'updateDeliveryDate' }, { status: safeStatus(updateRes.status) });
     }
     let current = updateRes.data?.result?.data;
     let status = current?.status;
@@ -409,15 +402,8 @@ export async function action({ request }: ActionFunctionArgs) {
       const data = (res.data as { result?: { data?: OrderSnapshot } })?.result?.data;
       return data ?? null;
     };
-    const transitionError = (res: { data: unknown }, fallback: string): string => {
-      const d = res.data as Record<string, unknown> | null | undefined;
-      if (!d || typeof d !== 'object') return fallback;
-      const err = d['error'] as Record<string, unknown> | undefined;
-      if (err && typeof err === 'object' && typeof err['message'] === 'string') return err['message'];
-      const msg = d['message'];
-      if (typeof msg === 'string') return msg;
-      return fallback;
-    };
+    const transitionError = (res: { data: unknown }, fallback: string): string =>
+      extractApiErrorMessage(res.data, fallback);
 
     while (status && status !== 'DELIVERED') {
       if (status === 'CONFIRMED') {

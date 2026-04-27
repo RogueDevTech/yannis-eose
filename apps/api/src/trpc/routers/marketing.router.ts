@@ -44,13 +44,16 @@ function getMarketingService(): MarketingService {
 export const marketingRouter = router({
   // ── Funding ──────────────────────────────────────
   createFunding: permissionProcedure('marketing.funding', 'finance.disburse')
-    .input(createFundingSchema)
+    .meta({ branchScopedMutation: true })
+    .input(createFundingSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().createFunding(input, ctx.user.id);
+      const { branchId, ...fundingInput } = input;
+      return getMarketingService().createFunding(fundingInput, ctx.user, branchId ?? ctx.currentBranchId);
     }),
 
   verifyFunding: authedProcedure
-    .input(verifyFundingSchema)
+    .meta({ branchScopedMutation: true })
+    .input(verifyFundingSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getMarketingService().verifyFunding(input, ctx.user.id);
     }),
@@ -113,10 +116,12 @@ export const marketingRouter = router({
 
   /** Media Buyer or Head of Marketing: submit a funding request. MB notifies HoM; HoM notifies SuperAdmin + Finance. */
   requestFunding: authedProcedure
+    .meta({ branchScopedMutation: true })
     .input(
       z.object({
         amount: z.coerce.number().min(0),
         reason: z.string().max(500).optional().default(''),
+        branchId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -128,7 +133,7 @@ export const marketingRouter = router({
         input.reason ?? '',
         ctx.user.id,
         ctx.user.role as 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
-        ctx.currentBranchId,
+        input.branchId ?? ctx.currentBranchId,
       );
     }),
 
@@ -158,17 +163,24 @@ export const marketingRouter = router({
 
   /** HoM/SuperAdmin/Finance: approve a funding request (after sending money manually) by attaching receipt. Notifies Media Buyer. */
   approveFundingRequest: authedProcedure
-    .input(approveFundingRequestSchema)
+    .meta({ branchScopedMutation: true })
+    .input(approveFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.role !== 'FINANCE_OFFICER') {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing, Finance Officer, or Super Admin can approve funding requests' });
       }
-      return getMarketingService().approveFundingRequest(input.requestId, input.receiptUrl, ctx.user.id);
+      return getMarketingService().approveFundingRequest(
+        input.requestId,
+        input.receiptUrl,
+        ctx.user,
+        input.branchId ?? ctx.currentBranchId,
+      );
     }),
 
   /** HoM/SuperAdmin/Finance: reject a funding request. Notifies Media Buyer. */
   rejectFundingRequest: authedProcedure
-    .input(rejectFundingRequestSchema)
+    .meta({ branchScopedMutation: true })
+    .input(rejectFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.role !== 'FINANCE_OFFICER') {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing, Finance Officer, or Super Admin can reject funding requests' });
@@ -178,9 +190,11 @@ export const marketingRouter = router({
 
   // ── Ad Spend ─────────────────────────────────────
   createAdSpend: permissionProcedure('marketing.adSpend')
-    .input(createAdSpendSchema)
+    .meta({ branchScopedMutation: true })
+    .input(createAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().createAdSpend(input, ctx.user.id, ctx.currentBranchId);
+      const { branchId, ...adSpendInput } = input;
+      return getMarketingService().createAdSpend(adSpendInput, ctx.user.id, branchId ?? ctx.currentBranchId);
     }),
 
   listAdSpend: authedProcedure
@@ -209,7 +223,8 @@ export const marketingRouter = router({
     }),
 
   approveAdSpend: authedProcedure
-    .input(approveAdSpendSchema)
+    .meta({ branchScopedMutation: true })
+    .input(approveAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can approve ad spend' });
@@ -218,7 +233,8 @@ export const marketingRouter = router({
     }),
 
   rejectAdSpend: authedProcedure
-    .input(rejectAdSpendSchema)
+    .meta({ branchScopedMutation: true })
+    .input(rejectAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can reject ad spend' });
@@ -227,9 +243,11 @@ export const marketingRouter = router({
     }),
 
   updateAdSpend: authedProcedure
-    .input(updateAdSpendSchema)
+    .meta({ branchScopedMutation: true })
+    .input(updateAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().updateAdSpend(input, { id: ctx.user.id, role: ctx.user.role }, ctx.currentBranchId);
+      const { branchId, ...adSpendInput } = input;
+      return getMarketingService().updateAdSpend(adSpendInput, { id: ctx.user.id, role: ctx.user.role }, branchId ?? ctx.currentBranchId);
     }),
 
   // ── Performance Metrics ──────────────────────────
@@ -277,15 +295,19 @@ export const marketingRouter = router({
 
   // ── Offer Templates ──────────────────────────────
   createOfferTemplate: permissionProcedure('marketing.offerTemplate')
-    .input(createOfferTemplateSchema)
+    .meta({ branchScopedMutation: true })
+    .input(createOfferTemplateSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().createOfferTemplate(input, ctx.user.id);
+      const { branchId: _branchId, ...offerTemplateInput } = input;
+      return getMarketingService().createOfferTemplate(offerTemplateInput, ctx.user.id);
     }),
 
   updateOfferTemplate: permissionProcedure('marketing.offerTemplate')
-    .input(updateOfferTemplateSchema)
+    .meta({ branchScopedMutation: true })
+    .input(updateOfferTemplateSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().updateOfferTemplate(input, ctx.user.id);
+      const { branchId: _branchId, ...offerTemplateInput } = input;
+      return getMarketingService().updateOfferTemplate(offerTemplateInput, ctx.user.id);
     }),
 
   getOfferTemplate: authedProcedure
@@ -302,15 +324,19 @@ export const marketingRouter = router({
 
   // ── Campaigns ────────────────────────────────────
   createCampaign: permissionProcedure('marketing.campaigns')
-    .input(createCampaignSchema)
+    .meta({ branchScopedMutation: true })
+    .input(createCampaignSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().createCampaign(input, ctx.user.id, ctx.currentBranchId);
+      const { branchId, ...campaignInput } = input;
+      return getMarketingService().createCampaign(campaignInput, ctx.user.id, branchId ?? ctx.currentBranchId);
     }),
 
   updateCampaign: permissionProcedure('marketing.campaigns')
-    .input(updateCampaignSchema)
+    .meta({ branchScopedMutation: true })
+    .input(updateCampaignSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().updateCampaign(input, ctx.user.id);
+      const { branchId: _branchId, ...campaignInput } = input;
+      return getMarketingService().updateCampaign(campaignInput, ctx.user.id);
     }),
 
   getCampaign: authedProcedure

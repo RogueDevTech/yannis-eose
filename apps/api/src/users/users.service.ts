@@ -646,6 +646,7 @@ export class UsersService {
   async list(
     input: ListUsersInput,
     actor: { id: string; role: string; permissions?: string[] } | null = null,
+    currentBranchId: string | null = null,
   ) {
     const conditions = [];
 
@@ -664,6 +665,30 @@ export class UsersService {
     }
     if (input.status) {
       conditions.push(eq(schema.users.status, input.status));
+    }
+    // Branch scoping (CEO directive 2026-04-26: branch isolation):
+    //  - userIds set        → skip branch filter (name-resolution path)
+    //  - allBranches + admin → skip branch filter (admin opt-in for /admin/branches/:id picker)
+    //  - input.branchId     → filter to that branch (legacy explicit override)
+    //  - ctx.currentBranchId → auto-scope to caller's active branch
+    //  - admin in global mode (currentBranchId = NULL) → unscoped
+    const isAdmin = actor && (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
+    const skipBranchScope =
+      (input.userIds && input.userIds.length > 0) ||
+      (input.allBranches === true && isAdmin);
+    const branchFilter = skipBranchScope
+      ? input.branchId
+      : (input.branchId ?? currentBranchId ?? undefined);
+
+    if (branchFilter) {
+      conditions.push(
+        sql<boolean>`EXISTS (
+          SELECT 1
+          FROM user_branches ub
+          WHERE ub.user_id = ${schema.users.id}
+            AND ub.branch_id = ${branchFilter}
+        )`,
+      );
     }
     if (input.search) {
       conditions.push(

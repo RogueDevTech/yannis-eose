@@ -5,6 +5,7 @@ import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 
 export interface ProductOption {
@@ -338,15 +339,16 @@ export function CreateOfflineOrderModal({
                 return (
                   <div key={index} className="flex flex-wrap items-end gap-2 p-3 rounded-lg bg-app-hover">
                     <div className="flex-1 min-w-[140px]">
-                      <FormSelect
+                      <SearchableSelect
                         id={`offline-item-product-${index}`}
                         label="Product"
                         required
                         value={item.productId}
-                        onChange={(e) => onProductSelect(index, e.target.value)}
+                        onChange={(val) => onProductSelect(index, val)}
                         placeholder="Select product"
                         options={products.map((p) => ({ value: p.id, label: p.name }))}
                         controlSize="sm"
+                        searchPlaceholder="Search products..."
                         wrapperClassName="w-full"
                       />
                     </div>

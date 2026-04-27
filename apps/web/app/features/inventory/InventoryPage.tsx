@@ -89,8 +89,8 @@ export function InventoryPage({
   const navigation = useNavigation();
   const isLoadingLevels = navigation.state === 'loading';
 
-  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
-  const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…') : '—';
+  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
+  const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? 'Unknown location') : '—';
 
   const displayedLevels = levels;
   const currentProductFilter = serverProductFilter || 'ALL';
@@ -1068,8 +1068,8 @@ function TransfersTab({
   products: ProductOption[];
   locations: LocationOption[];
 }) {
-  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
-  const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…';
+  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
+  const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'Unknown location';
 
   return (
     <div className="card p-0 overflow-hidden">
@@ -1156,7 +1156,7 @@ function ReturnsTab({
 
   const locationName = (id: string | null) => {
     if (!id) return '\u2014';
-    return locationsWithLock.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…';
+    return locationsWithLock.find((l) => l.id === id)?.name ?? 'Unknown location';
   };
 
   const lockedLocations = locationsWithLock.filter((l) => l.dispatchLocked);
@@ -1294,8 +1294,8 @@ function ReconciliationTab({
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
   if (actionSuccess && showForm) setShowForm(false);
 
-  const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id.slice(0, 8) + '…';
-  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? id.slice(0, 8) + '…';
+  const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'Unknown location';
+  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
   const activeLocations = locationsWithLock.filter((l) => l.status === 'ACTIVE');
 
   return (

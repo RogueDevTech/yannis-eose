@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useActionData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { CategoriesPage } from '~/features/categories/CategoriesPage';
 
 export const meta: MetaFunction = () => [
@@ -81,8 +82,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errData = res.data as { error?: { message?: string } };
-      return json({ error: errData?.error?.message ?? 'Failed to create category', success: false });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create category'), success: false });
     }
 
     return json({ success: true, error: null });
@@ -111,8 +111,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!res.ok) {
-      const errData = res.data as { error?: { message?: string } };
-      return json({ error: errData?.error?.message ?? 'Failed to update category', success: false });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to update category'), success: false });
     }
 
     return json({ success: true, error: null });

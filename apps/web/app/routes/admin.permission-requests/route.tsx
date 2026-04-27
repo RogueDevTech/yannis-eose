@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { redirect } from '@remix-run/node';
 import { PermissionRequestsPage } from '~/features/permission-requests/PermissionRequestsPage';
 import type { PermissionRequest } from '~/features/permission-requests/types';
@@ -59,8 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { requestId, reason },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
-      return json({ error: err?.error?.message ?? 'Failed to approve' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to approve') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
@@ -72,8 +72,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: { requestId, reason },
     });
     if (!res.ok) {
-      const err = res.data as { error?: { message?: string } };
-      return json({ error: err?.error?.message ?? 'Failed to reject' }, { status: safeStatus(res.status) });
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to reject') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

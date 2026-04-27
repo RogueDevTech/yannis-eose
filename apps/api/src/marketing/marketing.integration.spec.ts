@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
-import { createTestUser } from '../test/factories/order.factory';
+import { createTestUser, createTestBranch } from '../test/factories/order.factory';
 import { MarketingService } from './marketing.service';
 import type { EventsService } from '../events/events.service';
 import type { NotificationsService } from '../notifications/notifications.service';
@@ -41,8 +41,16 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
   });
 
   it('inserts marketing_funding with source_funding_request_id when HoM approves MB request', async () => {
+    const branch = await createTestBranch(db as any);
     const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
     const mb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+
+    // Branch isolation guard requires both approver and requester to be members
+    // of the active branch unless the caller is admin-class in global mode.
+    await db.insert(schema.userBranches).values([
+      { userId: hom.id, branchId: branch.id, isPrimary: true },
+      { userId: mb.id, branchId: branch.id, isPrimary: true },
+    ]);
     await setSessionActor(pgClient, hom.id);
 
     const [req] = await db
@@ -58,7 +66,12 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
     const requestId = req!.id;
 
     const svc = new MarketingService(db as any, eventsStub, notificationsStub);
-    await svc.approveFundingRequest(requestId, 'https://example.com/receipt-test.png', hom.id);
+    await svc.approveFundingRequest(
+      requestId,
+      'https://example.com/receipt-test.png',
+      { id: hom.id, role: 'HEAD_OF_MARKETING' },
+      branch.id,
+    );
 
     const [ledger] = await db
       .select({
@@ -82,5 +95,139 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
       .from(schema.marketingFundingRequests)
       .where(eq(schema.marketingFundingRequests.id, requestId));
     expect(reqAfter!.status).toBe('APPROVED');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Branch isolation: createFunding + approveFundingRequest reject cross-branch
+  // transfers unless the caller is admin-class in global mode (currentBranchId = NULL).
+  // ---------------------------------------------------------------------------
+
+  it('createFunding rejects cross-branch transfer with FORBIDDEN', async () => {
+    const lagos = await createTestBranch(db as any);
+    const main = await createTestBranch(db as any);
+    const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
+    const mbMain = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+
+    // HoM is on Lagos, MB is on Main — different branches.
+    await db.insert(schema.userBranches).values([
+      { userId: hom.id, branchId: lagos.id, isPrimary: true },
+      { userId: mbMain.id, branchId: main.id, isPrimary: true },
+    ]);
+    await setSessionActor(pgClient, hom.id, lagos.id);
+
+    const svc = new MarketingService(db as any, eventsStub, notificationsStub);
+    await expect(
+      svc.createFunding(
+        { receiverId: mbMain.id, amount: 50000, receiptUrl: 'https://x.test/r.png' },
+        { id: hom.id, role: 'HEAD_OF_MARKETING' },
+        lagos.id,
+      ),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      message: expect.stringContaining('not a member'),
+    });
+  });
+
+  it('createFunding allows same-branch transfer', async () => {
+    const branch = await createTestBranch(db as any);
+    const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
+    const mb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+
+    await db.insert(schema.userBranches).values([
+      { userId: hom.id, branchId: branch.id, isPrimary: true },
+      { userId: mb.id, branchId: branch.id, isPrimary: true },
+    ]);
+    await setSessionActor(pgClient, hom.id, branch.id);
+
+    const svc = new MarketingService(db as any, eventsStub, notificationsStub);
+    await expect(
+      svc.createFunding(
+        { receiverId: mb.id, amount: 25000, receiptUrl: 'https://x.test/r.png' },
+        { id: hom.id, role: 'HEAD_OF_MARKETING' },
+        branch.id,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('createFunding allows admin in global mode (currentBranchId = NULL) cross-branch', async () => {
+    const lagos = await createTestBranch(db as any);
+    const main = await createTestBranch(db as any);
+    const admin = await createTestUser(db as any, { role: 'SUPER_ADMIN' });
+    const mbMain = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+
+    await db.insert(schema.userBranches).values([
+      { userId: mbMain.id, branchId: main.id, isPrimary: true },
+    ]);
+    await setSessionActor(pgClient, admin.id, null);
+
+    const svc = new MarketingService(db as any, eventsStub, notificationsStub);
+    await expect(
+      svc.createFunding(
+        { receiverId: mbMain.id, amount: 75000, receiptUrl: 'https://x.test/r.png' },
+        { id: admin.id, role: 'SUPER_ADMIN' },
+        null,
+      ),
+    ).resolves.toBeDefined();
+    // Suppress unused-var lint for `lagos` — used to seed both-branch context.
+    expect(lagos.id).toBeTruthy();
+  });
+
+  it('createFunding rejects non-admin with no active branch (BAD_REQUEST)', async () => {
+    const branch = await createTestBranch(db as any);
+    const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
+    const mb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    await db.insert(schema.userBranches).values([
+      { userId: hom.id, branchId: branch.id, isPrimary: true },
+      { userId: mb.id, branchId: branch.id, isPrimary: true },
+    ]);
+    await setSessionActor(pgClient, hom.id, null);
+
+    const svc = new MarketingService(db as any, eventsStub, notificationsStub);
+    await expect(
+      svc.createFunding(
+        { receiverId: mb.id, amount: 10000, receiptUrl: 'https://x.test/r.png' },
+        { id: hom.id, role: 'HEAD_OF_MARKETING' },
+        null,
+      ),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining('No active branch'),
+    });
+  });
+
+  it('approveFundingRequest rejects cross-branch approver/requester pair', async () => {
+    const lagos = await createTestBranch(db as any);
+    const main = await createTestBranch(db as any);
+    const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
+    const mbMain = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+
+    await db.insert(schema.userBranches).values([
+      { userId: hom.id, branchId: lagos.id, isPrimary: true },
+      { userId: mbMain.id, branchId: main.id, isPrimary: true },
+    ]);
+    await setSessionActor(pgClient, hom.id, lagos.id);
+
+    const [req] = await db
+      .insert(schema.marketingFundingRequests)
+      .values({
+        requesterId: mbMain.id,
+        amount: '50000.00',
+        status: 'PENDING',
+        reason: 'Cross-branch test',
+      })
+      .returning({ id: schema.marketingFundingRequests.id });
+
+    const svc = new MarketingService(db as any, eventsStub, notificationsStub);
+    await expect(
+      svc.approveFundingRequest(
+        req!.id,
+        'https://x.test/r.png',
+        { id: hom.id, role: 'HEAD_OF_MARKETING' },
+        lagos.id,
+      ),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      message: expect.stringContaining('not a member'),
+    });
   });
 });

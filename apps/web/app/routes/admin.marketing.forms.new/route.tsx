@@ -2,8 +2,10 @@ import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { MarketingFormCreatePage } from '~/features/campaigns/MarketingFormCreatePage';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
+import { parseStandardFieldsPayload, toLegacyStandardFieldFlags } from '~/features/campaigns/standard-fields';
 import type { Product } from '~/features/campaigns/types';
 
 export const meta: MetaFunction = () => [{ title: 'New form — Yannis EOSE' }];
@@ -56,19 +58,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const buttonText = formData.get('formButtonText')?.toString();
   const accentColor = formData.get('formAccentColor')?.toString();
   const successCallbackUrl = formData.get('successCallbackUrl')?.toString()?.trim() || undefined;
-  const showDeliveryAddress = formData.get('showDeliveryAddress') === 'on';
-  const showDeliveryNotes = formData.get('showDeliveryNotes') === 'on';
-  const showDeliveryState = formData.get('showDeliveryState') === 'on';
-  const showGender = formData.get('showGender') === 'on';
-  const showPreferredDeliveryDate = formData.get('showPreferredDeliveryDate') === 'on';
-  const showPaymentMethod = formData.get('showPaymentMethod') === 'on';
-  const hasToggles =
-    showDeliveryAddress ||
-    showDeliveryNotes ||
-    showDeliveryState ||
-    showGender ||
-    showPreferredDeliveryDate ||
-    showPaymentMethod;
+  const parsedStandard = parseStandardFieldsPayload(formData.get('standardFields')?.toString());
+  if (!parsedStandard.ok) {
+    return json({ error: parsedStandard.error }, { status: 400 });
+  }
+  const standardFields = parsedStandard.fields;
+  const legacyStandardFlags = toLegacyStandardFieldFlags(standardFields);
+  const hasStandardFields = standardFields.length > 0;
 
   const parsedFields = parseCustomFieldsPayload(formData.get('customFields')?.toString());
   if (!parsedFields.ok) {
@@ -83,7 +79,7 @@ export async function action({ request }: ActionFunctionArgs) {
     buttonText ||
     accentColor ||
     successCallbackUrl ||
-    hasToggles ||
+    hasStandardFields ||
     hasCustomFields
       ? {
           ...(heading ? { heading } : {}),
@@ -91,12 +87,8 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(buttonText ? { buttonText } : {}),
           ...(accentColor ? { accentColor } : {}),
           ...(successCallbackUrl ? { successCallbackUrl } : {}),
-          showDeliveryAddress,
-          showDeliveryNotes,
-          showDeliveryState,
-          showGender,
-          showPreferredDeliveryDate,
-          showPaymentMethod,
+          standardFields,
+          ...legacyStandardFlags,
           ...(hasCustomFields ? { customFields } : {}),
         }
       : undefined;
@@ -112,8 +104,7 @@ export async function action({ request }: ActionFunctionArgs) {
     },
   });
   if (!res.ok) {
-    const errorData = res.data as { error?: { message?: string } };
-    return json({ error: errorData?.error?.message ?? 'Failed to create form' }, { status: safeStatus(res.status) });
+    return json({ error: extractApiErrorMessage(res.data, 'Failed to create form') }, { status: safeStatus(res.status) });
   }
   return redirect('/admin/marketing/forms?saved=1');
 }

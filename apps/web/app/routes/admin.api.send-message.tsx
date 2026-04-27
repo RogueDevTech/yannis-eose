@@ -1,6 +1,7 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getCurrentUser(request);
@@ -33,8 +34,10 @@ export async function action({ request }: ActionFunctionArgs) {
         body: { orderId, newStatus: 'CS_ENGAGED' },
       });
       if (!transitionRes.ok) {
-        const err = transitionRes.data as { error?: { message?: string } };
-        return json({ error: err?.error?.message ?? 'Unable to engage order before messaging' }, { status: safeStatus(transitionRes.status) });
+        return json(
+          { error: extractApiErrorMessage(transitionRes.data, 'Unable to engage order before messaging') },
+          { status: safeStatus(transitionRes.status) },
+        );
       }
     }
   }
@@ -46,8 +49,7 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 
   if (!res.ok) {
-    const err = res.data as { error?: { message?: string } };
-    return json({ error: err?.error?.message ?? 'Failed to send message' }, { status: safeStatus(res.status) });
+    return json({ error: extractApiErrorMessage(res.data, 'Failed to send message') }, { status: safeStatus(res.status) });
   }
 
   return json({ success: true });

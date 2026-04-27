@@ -46,7 +46,15 @@ const ROLES = [
 
 // ─── Component ──────────────────────────────────────────
 
-export function UserCreatePage({ products, locations, plans, branches, activeHeads, currentFinanceOfficer }: UserCreateLoaderData) {
+export function UserCreatePage({
+  products,
+  locations,
+  plans,
+  branches,
+  activeHeads,
+  currentFinanceOfficer,
+  usersBasePath = '/hr/users',
+}: UserCreateLoaderData & { usersBasePath?: string }) {
   const actionData = useActionData<{ error?: string; success?: boolean; requiresApproval?: boolean; message?: string }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
@@ -100,7 +108,7 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
 
   return (
     <div className="w-full space-y-6">
-      <Breadcrumb items={[{ label: 'Users', to: '/hr/users' }, { label: 'Add User' }]} />
+      <Breadcrumb items={[{ label: 'Users', to: usersBasePath }, { label: 'Add User' }]} />
 
       <PageHeader
         title="Add User"
@@ -471,7 +479,7 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
 
         {/* Actions */}
         <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
-          <Link to="/hr/users" className="btn-secondary w-full sm:w-auto">
+          <Link to={usersBasePath} className="btn-secondary w-full sm:w-auto">
             Cancel
           </Link>
           <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isSubmitting} loadingText="Creating..." disabled={!selectedRole}>
@@ -506,7 +514,7 @@ export function UserCreatePage({ products, locations, plans, branches, activeHea
               Back
             </Button>
             <Link
-              to={`/hr/users/${conflictingHead.id}`}
+              to={`${usersBasePath}/${conflictingHead.id}`}
               className="btn-primary"
               onClick={() => setConflictModalOpen(false)}
             >

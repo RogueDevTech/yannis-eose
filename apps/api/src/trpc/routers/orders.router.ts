@@ -67,7 +67,8 @@ export const ordersRouter = router({
    * Create an offline order (CS manual entry). Creator is set as assignee. Any CS role can use (no permission required).
    */
   createOffline: authedProcedure
-    .input(createOfflineOrderSchema)
+    .meta({ branchScopedMutation: true })
+    .input(createOfflineOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
       if (!ctx.user?.id || !allowedRoles.includes(ctx.user.role)) {
@@ -76,7 +77,8 @@ export const ordersRouter = router({
           message: 'Only CS agents and Head of CS can create offline orders',
         });
       }
-      return getOrdersService().createOffline(input, ctx.user.id, ctx.currentBranchId);
+      const { branchId, ...offlineInput } = input;
+      return getOrdersService().createOffline(offlineInput, ctx.user.id, branchId ?? ctx.currentBranchId);
     }),
 
   /**
@@ -118,6 +120,12 @@ export const ordersRouter = router({
       });
     }),
 
+  listAllocatableLocations: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getOrdersService().listAllocatableLocations(input.orderId);
+    }),
+
   /**
    * List orders with filtering and pagination.
    * Allows:
@@ -157,18 +165,22 @@ export const ordersRouter = router({
    * Enforces the state machine + gates.
    */
   transition: authedProcedure
-    .input(transitionOrderSchema)
+    .meta({ branchScopedMutation: true })
+    .input(transitionOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().transition(input, ctx.user);
+      const { branchId: _branchId, ...transitionInput } = input;
+      return getOrdersService().transition(transitionInput, ctx.user);
     }),
 
   /**
    * Update order details (address, items, notes).
    */
   update: authedProcedure
-    .input(updateOrderSchema)
+    .meta({ branchScopedMutation: true })
+    .input(updateOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().update(input, ctx.user);
+      const { branchId: _branchId, ...updateInput } = input;
+      return getOrdersService().update(updateInput, ctx.user);
     }),
 
   /**
@@ -176,7 +188,8 @@ export const ordersRouter = router({
    * Restricted to Head of CS and SuperAdmin.
    */
   assignToCS: permissionProcedure('orders.reassign')
-    .input(assignOrderSchema)
+    .meta({ branchScopedMutation: true })
+    .input(assignOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getOrdersService().assignToCS(input.orderId, input.csAgentId, ctx.user);
     }),
@@ -186,7 +199,8 @@ export const ordersRouter = router({
    * Restricted to Head of CS and SuperAdmin.
    */
   bulkReassign: permissionProcedure('orders.reassign')
-    .input(bulkReassignSchema)
+    .meta({ branchScopedMutation: true })
+    .input(bulkReassignSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getOrdersService().bulkReassign(
         input.orderIds,
@@ -209,7 +223,8 @@ export const ordersRouter = router({
    * Restricted to Head of CS and SuperAdmin.
    */
   redistributeOrdersFromAgent: permissionProcedure('orders.reassign')
-    .input(z.object({ agentId: z.string().uuid() }))
+    .meta({ branchScopedMutation: true })
+    .input(z.object({ agentId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getOrdersService().redistributeOrdersFromAgent(input.agentId, ctx.user);
     }),
@@ -218,9 +233,12 @@ export const ordersRouter = router({
    * Distribute all UNPROCESSED (unassigned) orders to CS agents using the dispatch algorithm.
    * Manual fallback when auto-assignment on order creation did not run. Restricted to Head of CS and SuperAdmin.
    */
-  distributeUnassignedOrders: permissionProcedure('orders.reassign').mutation(async ({ ctx }) => {
-    return getOrdersService().distributeUnassignedOrders(ctx.user);
-  }),
+  distributeUnassignedOrders: permissionProcedure('orders.reassign')
+    .meta({ branchScopedMutation: true })
+    .input(z.object({ branchId: z.string().uuid().optional() }).optional())
+    .mutation(async ({ ctx }) => {
+      return getOrdersService().distributeUnassignedOrders(ctx.user);
+    }),
 
   /**
    * List CS agents (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
@@ -388,7 +406,8 @@ export const ordersRouter = router({
    * Logs an audit record and returns the raw phone number.
    */
   revealPhoneForManualCall: authedProcedure
-    .input(z.object({ orderId: z.string().uuid() }))
+    .meta({ branchScopedMutation: true })
+    .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getOrdersService().revealPhoneForManualCall(input.orderId, ctx.user);
     }),
@@ -437,11 +456,13 @@ export const ordersRouter = router({
    * Schedule a callback for an order after "No Answer".
    */
   scheduleCallback: authedProcedure
+    .meta({ branchScopedMutation: true })
     .input(
       z.object({
         orderId: z.string().uuid(),
         delayMinutes: z.number().int().min(5).max(10080).optional(), // 5 min to 7 days
         notes: z.string().max(500).optional(),
+        branchId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -478,10 +499,12 @@ export const ordersRouter = router({
    * Merge a duplicate order into the original.
    */
   mergeDuplicate: permissionProcedure('orders.mergeDuplicate')
+    .meta({ branchScopedMutation: true })
     .input(
       z.object({
         duplicateId: z.string().uuid(),
         originalId: z.string().uuid(),
+        branchId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -492,7 +515,8 @@ export const ordersRouter = router({
    * Dismiss a flagged duplicate — mark as legitimate order.
    */
   dismissDuplicate: permissionProcedure('orders.dismissDuplicate')
-    .input(z.object({ orderId: z.string().uuid() }))
+    .meta({ branchScopedMutation: true })
+    .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getOrdersService().dismissDuplicate(input.orderId, ctx.user);
     }),
@@ -504,11 +528,13 @@ export const ordersRouter = router({
    * Each order validated individually — partial success allowed.
    */
   bulkTransition: permissionProcedure('orders.bulkTransition')
+    .meta({ branchScopedMutation: true })
     .input(
       z.object({
         orderIds: z.array(z.string().uuid()).min(1).max(100),
         newStatus: z.string(),
         metadata: z.record(z.unknown()).optional(),
+        branchId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -524,10 +550,12 @@ export const ordersRouter = router({
    * Bulk assign multiple orders to a CS agent.
    */
   bulkAssignToCS: permissionProcedure('orders.bulkAssign')
+    .meta({ branchScopedMutation: true })
     .input(
       z.object({
         orderIds: z.array(z.string().uuid()).min(1).max(100),
         csAgentId: z.string().uuid(),
+        branchId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -566,7 +594,8 @@ export const ordersRouter = router({
    * Claim an order from the claim queue. Atomic — only one agent can claim at a time.
    */
   claimOrder: permissionProcedure('orders.read')
-    .input(z.object({ orderId: z.string().uuid() }))
+    .meta({ branchScopedMutation: true })
+    .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getOrdersService().claimOrder(input.orderId, ctx.user);
     }),

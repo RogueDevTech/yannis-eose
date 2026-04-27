@@ -497,6 +497,19 @@ export function LogisticsOrderDetailPage({
       : riders;
   const allocatableLocations = allocatableLocationsProp ?? locations.filter((l) => l.status === 'ACTIVE');
   const isSubmitting = fetcher.state === 'submitting';
+  const logisticsLocationWithGroupLink =
+    order.logisticsLocationId != null
+      ? locations.find(
+          (location) =>
+            location.id === order.logisticsLocationId &&
+            !!location.whatsappGroupLink,
+        )
+      : undefined;
+  const showLogisticsWhatsAppActions =
+    (order.status === 'ALLOCATED' ||
+      order.status === 'DISPATCHED' ||
+      order.status === 'IN_TRANSIT') &&
+    !!logisticsLocationWithGroupLink;
 
   // Compute total qty
   const totalQty = order.orderItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0;
@@ -540,9 +553,6 @@ export function LogisticsOrderDetailPage({
         actions={
           <>
             <PageRefreshButton />
-            <Button type="button" variant="secondary" size="sm" onClick={() => void handleCopyOrderSummary()}>
-              Copy for WhatsApp
-            </Button>
             {isOverdue && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                 <ClockIcon /> OVERDUE
@@ -697,6 +707,47 @@ export function LogisticsOrderDetailPage({
               )}
             </div>
 
+            {(showLogisticsWhatsAppActions ||
+              ((order.status === 'ALLOCATED' ||
+                order.status === 'DISPATCHED' ||
+                order.status === 'IN_TRANSIT') &&
+                !logisticsLocationWithGroupLink)) && (
+              <div className="mt-3 pt-3 border-t border-app-border space-y-2">
+                {showLogisticsWhatsAppActions ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => void handleCopyOrderSummary()}
+                    >
+                      Copy for WhatsApp
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="w-full"
+                      onClick={() =>
+                        window.open(
+                          logisticsLocationWithGroupLink.whatsappGroupLink as string,
+                          '_blank',
+                          'noopener,noreferrer',
+                        )
+                      }
+                    >
+                      Open Logistics Group Chat
+                    </Button>
+                  </>
+                ) : (
+                  <p className="text-xs text-warning-600 dark:text-warning-400">
+                    Add a WhatsApp group link on this allocated logistics location to enable manual share actions.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Timestamps grid */}
             <div className="mt-3 pt-3 border-t border-app-border">
               <div className="grid grid-cols-2 gap-2">
@@ -797,9 +848,8 @@ export function LogisticsOrderDetailPage({
                             </div>
                             <div>
                               <p className="text-sm font-medium text-app-fg">
-                                {item.productName ?? `Product ${item.productId.slice(0, 8)}`}
+                                {item.productName ?? 'Unknown product'}
                               </p>
-                              <p className="text-[10px] text-app-fg-muted font-mono">{item.productId.slice(0, 12)}...</p>
                             </div>
                           </div>
                         </td>

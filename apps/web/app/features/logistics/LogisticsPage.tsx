@@ -18,10 +18,6 @@ import { EmptyState } from '~/components/ui/empty-state';
 import type {
   Provider,
   Location,
-  HealthDashboard,
-  ShrinkageAlert,
-  StuckOrder,
-  TransferDelay,
 } from './types';
 
 interface LogisticsPageProps {
@@ -29,16 +25,6 @@ interface LogisticsPageProps {
   totalProviders: number;
   locations: Location[];
   totalLocations: number;
-  healthDashboard: Promise<HealthDashboard | null> | null;
-  canViewEscalations: boolean;
-}
-
-function formatTimeAgo(hours: number): string {
-  if (hours < 1) return `${Math.round(hours * 60)}m`;
-  if (hours < 24) return `${Math.round(hours)}h`;
-  const days = Math.floor(hours / 24);
-  const remainingHours = Math.round(hours % 24);
-  return `${days}d ${remainingHours}h`;
 }
 
 interface ProviderRow {
@@ -139,201 +125,10 @@ function AddProviderForm({
   );
 }
 
-function SeverityBadge({ hours, warningThreshold = 24, criticalThreshold = 48 }: { hours: number; warningThreshold?: number; criticalThreshold?: number }) {
-  if (hours >= criticalThreshold) {
-    return (
-      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-        Critical - {formatTimeAgo(hours)}
-      </span>
-    );
-  }
-  if (hours >= warningThreshold) {
-    return (
-      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
-        Warning - {formatTimeAgo(hours)}
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
-      {formatTimeAgo(hours)}
-    </span>
-  );
-}
-
-function EscalationsPanel({ healthDashboard }: { healthDashboard: HealthDashboard }) {
-  const { shrinkageAlerts, stuckOrders, transferDelays, totalEscalations } = healthDashboard;
-
-  if (totalEscalations === 0) {
-    return (
-      <div className="card">
-        <div className="flex items-center gap-3 py-8 justify-center">
-          <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-            <span className="text-green-600 dark:text-green-400 text-lg">&#10003;</span>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-app-fg">All clear</p>
-            <p className="text-xs text-app-fg-muted">No active escalations found</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <OverviewStatStrip
-        showScrollControls={false}
-        items={[
-          {
-            label: 'Shrinkage Alerts',
-            value: shrinkageAlerts.length,
-            valueClassName: shrinkageAlerts.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-app-fg',
-          },
-          {
-            label: 'Stuck Orders (>24h)',
-            value: stuckOrders.length,
-            valueClassName: stuckOrders.length > 0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-app-fg',
-          },
-          {
-            label: 'Transfer Delays (>48h)',
-            value: transferDelays.length,
-            valueClassName: transferDelays.length > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-app-fg',
-          },
-        ]}
-      />
-
-      {/* Shrinkage Alerts Table */}
-      {shrinkageAlerts.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-app-fg mb-2 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
-            Shrinkage Alerts
-          </h3>
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Product</th>
-                  <th className="table-header">Route</th>
-                  <th className="table-header text-right">Sent</th>
-                  <th className="table-header text-right">Received</th>
-                  <th className="table-header text-right">Shortage</th>
-                  <th className="table-header">Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shrinkageAlerts.map((alert) => (
-                  <tr key={alert.transferId} className="table-row">
-                    <td className="table-cell font-medium text-app-fg">{alert.productName}</td>
-                    <td className="table-cell text-app-fg-muted">
-                      {alert.fromLocationName} → {alert.toLocationName}
-                    </td>
-                    <td className="table-cell text-right text-app-fg-muted">{alert.quantitySent}</td>
-                    <td className="table-cell text-right text-app-fg-muted">{alert.quantityReceived ?? 0}</td>
-                    <td className="table-cell text-right">
-                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                        -{alert.shortage}
-                      </span>
-                    </td>
-                    <td className="table-cell text-app-fg-muted text-xs">
-                      {alert.shrinkageReason ?? '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Stuck Orders Table */}
-      {stuckOrders.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-app-fg mb-2 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block"></span>
-            Stuck Orders
-          </h3>
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Order ID</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header">Customer</th>
-                  <th className="table-header">Rider</th>
-                  <th className="table-header">Time Stuck</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stuckOrders.map((order) => (
-                  <tr key={order.orderId} className="table-row">
-                    <td className="table-cell">
-                      <OrderIdBadge id={order.orderId} textClassName="font-mono text-xs text-app-fg-muted" />
-                    </td>
-                    <td className="table-cell">
-                      <OrderStatusBadge status={order.status} />
-                    </td>
-                    <td className="table-cell text-app-fg-muted">{order.customerName}</td>
-                    <td className="table-cell text-app-fg-muted">{order.riderName ?? '—'}</td>
-                    <td className="table-cell">
-                      <SeverityBadge hours={order.stuckHours} warningThreshold={24} criticalThreshold={48} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Transfer Delays Table */}
-      {transferDelays.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-app-fg mb-2 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>
-            Transfer Delays
-          </h3>
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Transfer ID</th>
-                  <th className="table-header">Product</th>
-                  <th className="table-header">Route</th>
-                  <th className="table-header text-right">Qty Sent</th>
-                  <th className="table-header">Time in Transit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transferDelays.map((transfer) => (
-                  <tr key={transfer.transferId} className="table-row">
-                    <td className="table-cell font-mono text-xs text-app-fg-muted">
-                      {transfer.transferId.slice(0, 8)}...
-                    </td>
-                    <td className="table-cell font-medium text-app-fg">{transfer.productName}</td>
-                    <td className="table-cell text-app-fg-muted">
-                      {transfer.fromLocationName} → {transfer.toLocationName}
-                    </td>
-                    <td className="table-cell text-right text-app-fg-muted">{transfer.quantitySent}</td>
-                    <td className="table-cell">
-                      <SeverityBadge hours={transfer.delayHours} warningThreshold={48} criticalThreshold={72} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function LogisticsPage({ providers, totalProviders, locations, totalLocations, healthDashboard, canViewEscalations }: LogisticsPageProps) {
+export function LogisticsPage({ providers, totalProviders, locations, totalLocations }: LogisticsPageProps) {
   const fetcher = useFetcher();
   const { revalidate, state: revalidatorState } = useRevalidator();
-  const [activeTab, setActiveTab] = useState<'providers' | 'locations' | 'escalations'>('providers');
+  const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('providers');
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
@@ -391,34 +186,13 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         />
       )}
 
-      {canViewEscalations && healthDashboard ? (
-        <DeferredSection resolve={healthDashboard} fallback={<OverviewStatStripSkeleton count={3} />}>
-          {(resolvedHealth) => (
-            <OverviewStatStrip
-              items={[
-                { label: 'Logistics companies', value: totalProviders, valueClassName: 'text-app-fg' },
-                { label: 'Locations', value: totalLocations, valueClassName: 'text-app-fg' },
-                {
-                  label: 'Escalations',
-                  value: resolvedHealth ? resolvedHealth.totalEscalations : '—',
-                  valueClassName:
-                    resolvedHealth && resolvedHealth.totalEscalations > 0
-                      ? 'text-red-600 dark:text-red-400'
-                      : 'text-app-fg',
-                },
-              ]}
-            />
-          )}
-        </DeferredSection>
-      ) : (
-        <OverviewStatStrip
-          showScrollControls={false}
-          items={[
-            { label: 'Logistics companies', value: totalProviders, valueClassName: 'text-app-fg' },
-            { label: 'Locations', value: totalLocations, valueClassName: 'text-app-fg' },
-          ]}
-        />
-      )}
+      <OverviewStatStrip
+        showScrollControls={false}
+        items={[
+          { label: 'Logistics companies', value: totalProviders, valueClassName: 'text-app-fg' },
+          { label: 'Locations', value: totalLocations, valueClassName: 'text-app-fg' },
+        ]}
+      />
 
       {/* Add logistics company modal */}
       {showAddProvider && (
@@ -637,27 +411,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         value={activeTab}
         onChange={(v) => setActiveTab(v as typeof activeTab)}
         tabs={[
-          { value: 'providers', label: `Logistics companies (${totalProviders})` },
+          { value: 'providers', label: `Companies (${totalProviders})` },
           { value: 'locations', label: `Locations (${totalLocations})` },
-          ...(canViewEscalations
-            ? [
-                {
-                  value: 'escalations' as const,
-                  label: 'Escalations',
-                  badge: healthDashboard ? (
-                    <DeferredSection resolve={healthDashboard} skeleton="inline">
-                      {(resolvedHealth) =>
-                        resolvedHealth && resolvedHealth.totalEscalations > 0 ? (
-                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold bg-red-500 text-white">
-                            {resolvedHealth.totalEscalations}
-                          </span>
-                        ) : null
-                      }
-                    </DeferredSection>
-                  ) : undefined,
-                },
-              ]
-            : []),
         ]}
       />
 
@@ -774,7 +529,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                     <tr key={l.id} className="table-row">
                       <td className="table-cell font-medium text-app-fg">{l.name}</td>
                       <td className="table-cell text-app-fg-muted">{l.address}</td>
-                      <td className="table-cell text-app-fg-muted">{provider?.name ?? l.providerId.slice(0, 8)}</td>
+                      <td className="table-cell text-app-fg-muted">{provider?.name ?? 'Unknown logistics company'}</td>
                       <td className="table-cell">
                         <StatusBadge status={l.status} />
                       </td>
@@ -805,7 +560,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                     </div>
                     <div className="text-sm text-app-fg-muted space-y-0.5">
                       <div>Address: {l.address}</div>
-                      <div>Logistics company: {provider?.name ?? l.providerId.slice(0, 8)}</div>
+                      <div>Logistics company: {provider?.name ?? 'Unknown logistics company'}</div>
                     </div>
                   </div>
                 );
@@ -815,27 +570,6 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         </div>
       )}
 
-      {activeTab === 'escalations' && canViewEscalations && healthDashboard && (
-        <DeferredSection resolve={healthDashboard} skeleton="table">
-          {(resolvedHealth) => resolvedHealth ? (
-            <EscalationsPanel healthDashboard={resolvedHealth} />
-          ) : (
-            <div className="card">
-              <p className="text-sm text-app-fg-muted text-center py-8">
-                Unable to load escalation data. Please try again.
-              </p>
-            </div>
-          )}
-        </DeferredSection>
-      )}
-
-      {activeTab === 'escalations' && canViewEscalations && !healthDashboard && (
-        <div className="card">
-          <p className="text-sm text-app-fg-muted text-center py-8">
-            Unable to load escalation data. Please try again.
-          </p>
-        </div>
-      )}
     </div>
   );
 }
