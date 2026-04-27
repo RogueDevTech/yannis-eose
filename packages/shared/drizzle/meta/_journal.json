@@ -89,6 +89,7 @@
     { "idx": 84, "version": "7", "when": 1779149400000, "tag": "0082_cross_funnel_attempts", "breakpoints": true },
     { "idx": 85, "version": "7", "when": 1779235800000, "tag": "0083_ad_spend_platform_and_url", "breakpoints": true },
     { "idx": 86, "version": "7", "when": 1779322200000, "tag": "0084_budgets_and_approval_requests", "breakpoints": true },
-    { "idx": 87, "version": "7", "when": 1779408600000, "tag": "0085_add_admin_role", "breakpoints": true }
+    { "idx": 87, "version": "7", "when": 1779408600000, "tag": "0085_add_admin_role", "breakpoints": true },
+    { "idx": 88, "version": "7", "when": 1779495000000, "tag": "0086_permission_request_type_values_repair", "breakpoints": true }
   ]
 }

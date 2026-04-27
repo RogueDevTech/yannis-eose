@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
@@ -37,6 +37,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { RadioGroup } from '~/components/ui/radio-group';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
 
 // HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
@@ -146,6 +147,9 @@ export function UserDetailPage({
   const [dismissedError, setDismissedError] = useState(false);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const editFormRef = useRef<HTMLFormElement>(null);
+  const allowSaveSubmitRef = useRef(false);
   // Resolve the deferred `activeHeads` / `branchesList` into state so the submit handler can
   // check synchronously whether the selected role+branch is already taken by another user.
   const [resolvedActiveHeads, setResolvedActiveHeads] = useState<ActiveHeadUser[] | null>(null);
@@ -256,6 +260,15 @@ export function UserDetailPage({
   }, [user.id, user.updatedAt, user.isFinanceOfficer]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>(user.assignedProductIds ?? []);
   const [logisticsLocationEdit, setLogisticsLocationEdit] = useState(user.logisticsLocationId ?? '');
+  // Local 10-digit phone for the edit form. Empty means "keep unchanged" — only
+  // a complete 10-digit value (starting 7/8/9) ever submits as +234XXXXXXXXXX.
+  const [phoneLocalEdit, setPhoneLocalEdit] = useState('');
+  const phoneEditIsComplete = /^[789]\d{9}$/.test(phoneLocalEdit);
+  const phoneEditError = phoneLocalEdit.length > 0 && !phoneEditIsComplete
+    ? phoneLocalEdit.length < 10
+      ? 'Enter all 10 digits, or leave blank to keep current.'
+      : 'Number must start with 7, 8, or 9.'
+    : undefined;
 
   const assignedProductIdsKey = [...(user.assignedProductIds ?? [])].sort().join(',');
   useEffect(() => {
@@ -358,6 +371,26 @@ export function UserDetailPage({
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <PageRefreshButton />
+                  {/* Mirror: server `branches.canMirrorToUser` only — not behind restrictHeadView (HoCS/HoM team leads). */}
+                  {!isSelfView && viewerCanMirror && (
+                    <Form method="post" data-branch-scoped-action="true">
+                      <input type="hidden" name="intent" value="mirror" />
+                      <Button
+                        type="submit"
+                        variant="secondary"
+                        size="sm"
+                        className="flex items-center gap-1.5 border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                        loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+                        loadingText="Entering..."
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        Mirror user
+                      </Button>
+                    </Form>
+                  )}
                   {!isSelfView && (canDisburseToThisUser || (!isSuperAdminProfile && !restrictHeadView)) && (
                     <>
                     {canDisburseToThisUser && (
@@ -367,25 +400,6 @@ export function UserDetailPage({
                       >
                         Disburse
                       </Link>
-                    )}
-                    {viewerCanMirror && (
-                      <Form method="post" data-branch-scoped-action="true">
-                        <input type="hidden" name="intent" value="mirror" />
-                        <Button
-                          type="submit"
-                          variant="secondary"
-                          size="sm"
-                          className="flex items-center gap-1.5 border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
-                          loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
-                          loadingText="Entering..."
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                          Mirror user
-                        </Button>
-                      </Form>
                     )}
                     {!isSuperAdminProfile && !restrictHeadView && (
                       <>
@@ -1123,6 +1137,7 @@ export function UserDetailPage({
       {/* ─── Settings / Edit Tab ─────────────────────────── */}
       {activeTab === 'edit' && (
         <Form
+          ref={editFormRef}
           method="post"
           data-branch-scoped-action="true"
           className="space-y-6"
@@ -1130,7 +1145,14 @@ export function UserDetailPage({
             if (pendingConflict) {
               e.preventDefault();
               setConflictModalOpen(true);
+              return;
             }
+            if (!allowSaveSubmitRef.current) {
+              e.preventDefault();
+              setShowSaveConfirm(true);
+              return;
+            }
+            allowSaveSubmitRef.current = false;
           }}
         >
           <input type="hidden" name="intent" value="update" />
@@ -1231,12 +1253,27 @@ export function UserDetailPage({
               </div>
               <div>
                 <TextInput
-                  id="phone"
-                  name="phone"
+                  id="phone-local"
                   type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel-national"
                   label="Phone"
-                  defaultValue=""
-                  placeholder="Enter new phone"
+                  placeholder="8031234567"
+                  value={phoneLocalEdit}
+                  onChange={(e) => {
+                    let digits = e.target.value.replace(/\D/g, '');
+                    if (digits.startsWith('234')) digits = digits.slice(3);
+                    if (digits.startsWith('0')) digits = digits.slice(1);
+                    setPhoneLocalEdit(digits.slice(0, 10));
+                  }}
+                  leftAddon="+234"
+                  error={phoneEditError}
+                  maxLength={10}
+                />
+                <input
+                  type="hidden"
+                  name="phone"
+                  value={phoneEditIsComplete ? `+234${phoneLocalEdit}` : ''}
                 />
                 <p className="text-xs text-app-fg-muted mt-1">Current: {user.phone ?? 'Not set'}. Leave blank to keep unchanged.</p>
               </div>
@@ -1517,6 +1554,27 @@ export function UserDetailPage({
             </div>
         </Modal>
       )}
+
+      <ConfirmActionModal
+        open={showSaveConfirm}
+        onClose={() => setShowSaveConfirm(false)}
+        title="Save changes to this user?"
+        description={
+          <>
+            Updates to <strong>{user.name}</strong> apply immediately for anyone with access to this profile.
+            Role, status, and account changes are recorded in the audit trail.
+          </>
+        }
+        confirmLabel="Save changes"
+        cancelLabel="Keep editing"
+        variant="warning"
+        loading={isUpdating}
+        onConfirm={() => {
+          setShowSaveConfirm(false);
+          allowSaveSubmitRef.current = true;
+          editFormRef.current?.requestSubmit();
+        }}
+      />
 
       {conflictModalOpen && pendingConflict && (
         <Modal
