@@ -116,7 +116,8 @@ export function UserDetailPage({
   isViewerHeadOfMarketing = false,
   isViewerHeadOfCS = false,
   canEditLimited = false,
-  viewerCanMirror = false,
+  viewerShowsMirror = false,
+  mirrorSubmitDisabled = false,
   isSelfView = false,
   usersBasePath = '/hr/users',
 }: UserDetailLoaderData & { usersBasePath?: string }) {
@@ -348,7 +349,7 @@ export function UserDetailPage({
       )}
 
       {/* ─── Profile Header Card ─────────────────────────── */}
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0">
         {/* Gradient Banner */}
         <div className={`h-28 sm:h-32 bg-gradient-to-r ${gradient} relative`}>
           <div className="absolute inset-0 bg-black/10" />
@@ -371,25 +372,39 @@ export function UserDetailPage({
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <PageRefreshButton />
-                  {/* Mirror: server `branches.canMirrorToUser` only — not behind restrictHeadView (HoCS/HoM team leads). */}
-                  {!isSelfView && viewerCanMirror && (
-                    <Form method="post" data-branch-scoped-action="true">
-                      <input type="hidden" name="intent" value="mirror" />
-                      <Button
-                        type="submit"
-                        variant="secondary"
-                        size="sm"
-                        className="flex items-center gap-1.5 border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
-                        loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
-                        loadingText="Entering..."
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        Mirror user
-                      </Button>
-                    </Form>
+                  {/* Mirror: `branches.canMirrorToUser` — not behind restrictHeadView. Disabled when preview-only (nested mirror). */}
+                  {!isSelfView && viewerShowsMirror && (
+                    mirrorSubmitDisabled ? (
+                      <span title="Exit mirror mode to start a new mirror session as this user.">
+                        <Button type="button" variant="secondary" size="sm" disabled className="opacity-70 cursor-not-allowed">
+                          <span className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            Mirror user
+                          </span>
+                        </Button>
+                      </span>
+                    ) : (
+                      <Form method="post" data-branch-scoped-action="true">
+                        <input type="hidden" name="intent" value="mirror" />
+                        <Button
+                          type="submit"
+                          variant="secondary"
+                          size="sm"
+                          className="flex items-center gap-1.5 border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                          loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+                          loadingText="Entering..."
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          Mirror user
+                        </Button>
+                      </Form>
+                    )
                   )}
                   {!isSelfView && (canDisburseToThisUser || (!isSuperAdminProfile && !restrictHeadView)) && (
                     <>
@@ -852,7 +867,7 @@ export function UserDetailPage({
       {activeTab === 'orders' && (
         <DeferredSection resolve={recentOrders} skeleton="table">
           {(data) => (
-            <div className="card p-0 overflow-hidden">
+            <div className="card p-0">
               <div className="px-4 py-3 border-b border-app-border flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-app-fg">
                   {isCSRole ? 'Orders Handled' : isMarketingRole ? 'Campaign Orders' : isLogisticsRole ? 'Delivery Orders' : 'All Orders'}
@@ -922,7 +937,7 @@ export function UserDetailPage({
           {/* Payouts */}
           <DeferredSection resolve={payouts} skeleton="table">
             {(payoutList) => (
-              <div className="card p-0 overflow-hidden">
+              <div className="card p-0">
                 <div className="px-4 py-3 border-b border-app-border">
                   <h2 className="text-sm font-semibold text-app-fg">Payout History</h2>
                 </div>
@@ -969,7 +984,7 @@ export function UserDetailPage({
           {/* Adjustments */}
           <DeferredSection resolve={adjustments} skeleton="table">
             {(adjList) => (
-              <div className="card p-0 overflow-hidden">
+              <div className="card p-0">
                 <div className="px-4 py-3 border-b border-app-border">
                   <h2 className="text-sm font-semibold text-app-fg">Adjustments & Bonuses</h2>
                 </div>
@@ -1021,7 +1036,7 @@ export function UserDetailPage({
       {activeTab === 'stock' && stockMovements && (
         <DeferredSection resolve={stockMovements} skeleton="table">
           {(data) => (
-            <div className="card p-0 overflow-hidden">
+            <div className="card p-0">
               <div className="px-4 py-3 border-b border-app-border">
                 <h2 className="text-sm font-semibold text-app-fg">
                   Stock Activity
@@ -1076,7 +1091,7 @@ export function UserDetailPage({
       {activeTab === 'finance' && financeActivity && (
         <DeferredSection resolve={financeActivity} skeleton="table">
           {(data) => (
-            <div className="card p-0 overflow-hidden">
+            <div className="card p-0">
               <div className="px-4 py-3 border-b border-app-border">
                 <h2 className="text-sm font-semibold text-app-fg">
                   Approvals Processed

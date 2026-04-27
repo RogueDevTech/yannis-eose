@@ -1180,7 +1180,7 @@ function DetailModal({
         </div>
 
         {/* Data fields */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+        <div className="table-sticky-panel flex-1 min-h-0 overflow-y-auto px-6 py-4">
           <table className="w-full text-sm">
             <thead>
               <tr>
@@ -1602,7 +1602,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
       </div>
 
       {/* Audit log table — rows render immediately, actor names stream in */}
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0">
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">

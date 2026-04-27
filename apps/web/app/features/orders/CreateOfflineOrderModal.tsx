@@ -21,6 +21,8 @@ interface CreateOfflineOrderModalProps {
   products: ProductOption[];
   /** Prefill customer name when opening from Cart Abandonment */
   initialCustomerName?: string;
+  /** SuperAdmin / org-wide heads: session may have no branch — required for `orders.createOffline` middleware. */
+  branchId?: string;
 }
 
 const defaultItem = { productId: '', quantity: 1, unitPrice: '', offerLabel: '' };
@@ -31,6 +33,7 @@ export function CreateOfflineOrderModal({
   onSuccess,
   products,
   initialCustomerName,
+  branchId,
 }: CreateOfflineOrderModalProps) {
   const fetcher = useFetcher();
   const [customerName, setCustomerName] = useState('');
@@ -175,6 +178,7 @@ export function CreateOfflineOrderModal({
     if (customerGender) formData.set('customerGender', customerGender);
     if (preferredDeliveryDate.trim()) formData.set('preferredDeliveryDate', preferredDeliveryDate.trim());
     if (paymentMethod === 'PAY_ONLINE' && customerEmail.trim()) formData.set('customerEmail', customerEmail.trim());
+    if (branchId?.trim()) formData.set('branchId', branchId.trim());
     fetcher.submit(formData, { method: 'post' });
   }
 

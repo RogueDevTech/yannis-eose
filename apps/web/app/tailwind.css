@@ -10,6 +10,8 @@
     --sidebar-width: 260px;
     --sidebar-collapsed-width: 72px;
     --header-height: 56px;
+    /* In-panel / modal table scroll: set to 0 on the overflow-y parent via .table-sticky-panel */
+    --table-sticky-top: var(--header-height);
     --bottom-nav-height: 4.5rem;
     /* Default until data-app-theme is set (SSR / first line) */
     --app-canvas: 248 250 252;
@@ -280,9 +282,20 @@
     --tw-ring-color: rgb(99 102 241 / 0.5);
   }
 
-  /* Table styling */
+  /* Table styling — th.table-header: sticky under fixed app header. For scroll inside a max-h
+     panel/modal, put .table-sticky-panel on the overflow-y container (--table-sticky-top: 0). */
+  .table-sticky-panel {
+    --table-sticky-top: 0;
+  }
+
   .table-header {
-    @apply bg-app-hover text-left text-xs font-semibold uppercase tracking-wider text-app-fg px-4 py-3;
+    @apply sticky z-[15] border-b border-app-border bg-app-hover text-left text-xs font-semibold uppercase tracking-wider text-app-fg px-4 py-3 shadow-sm;
+    top: var(--table-sticky-top, var(--header-height));
+  }
+
+  .table-header-muted {
+    @apply sticky z-[15] border-b border-app-border bg-app-hover text-left text-xs font-medium text-app-fg-muted uppercase tracking-wider px-4 py-2.5 shadow-sm;
+    top: var(--table-sticky-top, var(--header-height));
   }
 
   .table-cell {

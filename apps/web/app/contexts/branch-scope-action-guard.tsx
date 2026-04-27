@@ -19,6 +19,8 @@ const BRANCH_SCOPED_INTENTS = new Set([
   'assignToCS',
   'bulkTransition',
   'bulkAssignToCS',
+  'bulkReassign',
+  'redistribute',
   'claimOrder',
   'scheduleCallback',
   'adjustOrderItems',
@@ -98,6 +100,8 @@ export function BranchScopeGuardProvider({
 
       const formData = new FormData(form);
       const intent = (formData.get('intent') || '').toString().trim();
+      // Org-wide HoM: upstream funding request to Finance — not branch-scoped on the ledger (see marketing.requestFunding + trpc guard).
+      if (intent === 'requestFunding' && role === 'HEAD_OF_MARKETING') return;
       const formMarkedBranchScoped =
         form.dataset.branchScopedAction === 'true' ||
         form.getAttribute('data-branch-scoped-action') === 'true';
@@ -111,7 +115,7 @@ export function BranchScopeGuardProvider({
 
     document.addEventListener('submit', onSubmitCapture, true);
     return () => document.removeEventListener('submit', onSubmitCapture, true);
-  }, [branches, requiresBranchSelection]);
+  }, [branches, requiresBranchSelection, role]);
 
   const value = useMemo<BranchScopeGuardContextValue>(
     () => ({ requiresBranchSelection, ensureBranchForAction }),

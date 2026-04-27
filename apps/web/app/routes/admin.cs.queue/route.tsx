@@ -6,7 +6,6 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
 import {
-  parseCSQueueTabFromSearchParam,
   type AgentWorkload,
   type InactiveAgent,
   type CSOrder,
@@ -15,6 +14,13 @@ import {
   type PendingCart,
   type LiveActivityItem,
 } from '~/features/cs/types';
+
+/** SuperAdmin / org-wide heads often have `currentBranchId: null`; tRPC requires explicit `branchId` on branch-scoped mutations. */
+function branchIdFromForm(formData: FormData): string | undefined {
+  const raw = formData.get('branchId')?.toString()?.trim();
+  if (!raw || raw.length < 32) return undefined;
+  return raw;
+}
 
 const CS_QUEUE_LIVE_EVENTS = [
   'order:new',
@@ -221,9 +227,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : { pending: 0, abandonedLast24h: 0 },
   ).catch(() => ({ pending: 0, abandonedLast24h: 0 }));
 
-  const tabParam = url.searchParams.get('tab');
-  const initialTab = parseCSQueueTabFromSearchParam(tabParam, isClaimMode);
-
   return {
     criticalData,
     inactiveAgents,
@@ -236,7 +239,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canCreateOffline,
     canDeleteCart,
     productsForOfflineOrder,
-    initialTab,
   };
 }
 
@@ -248,6 +250,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'assign') {
     const orderId = formData.get('orderId')?.toString() ?? '';
     const csAgentId = formData.get('csAgentId')?.toString() ?? '';
+    const branchId = branchIdFromForm(formData);
 
     if (!orderId || !csAgentId) {
       return json({ error: 'Order and closer selection are required' }, { status: 400 });
@@ -256,7 +259,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
       method: 'POST',
       cookie,
-      body: { orderId, csAgentId },
+      body: { orderId, csAgentId, ...(branchId ? { branchId } : {}) },
     });
 
     if (!res.ok) {
@@ -285,10 +288,12 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Pick a closer to assign to' }, { status: 400 });
     }
 
+    const branchId = branchIdFromForm(formData);
+
     const res = await apiRequest<unknown>('/trpc/orders.bulkAssignToCS', {
       method: 'POST',
       cookie,
-      body: { orderIds, csAgentId },
+      body: { orderIds, csAgentId, ...(branchId ? { branchId } : {}) },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Bulk assignment failed') }, { status: safeStatus(res.status) });
@@ -317,10 +322,12 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Cannot reassign to the same closer' }, { status: 400 });
     }
 
+    const branchId = branchIdFromForm(formData);
+
     const res = await apiRequest<unknown>('/trpc/orders.bulkReassign', {
       method: 'POST',
       cookie,
-      body: { orderIds, fromAgentId, toAgentId },
+      body: { orderIds, fromAgentId, toAgentId, ...(branchId ? { branchId } : {}) },
     });
 
     if (!res.ok) {
@@ -331,9 +338,10 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'redistribute') {
+    const branchId = branchIdFromForm(formData);
     const res = await apiRequest<{ result?: { data?: { distributed: number } } }>(
       '/trpc/orders.distributeUnassignedOrders',
-      { method: 'POST', cookie, body: {} },
+      { method: 'POST', cookie, body: branchId ? { branchId } : {} },
     );
 
     if (!res.ok) {
@@ -353,10 +361,12 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Order ID required' }, { status: 400 });
     }
 
+    const branchId = branchIdFromForm(formData);
+
     const res = await apiRequest<unknown>('/trpc/orders.scheduleCallback', {
       method: 'POST',
       cookie,
-      body: { orderId, delayMinutes, notes },
+      body: { orderId, delayMinutes, notes, ...(branchId ? { branchId } : {}) },
     });
 
     if (!res.ok) {
@@ -373,10 +383,12 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Both order IDs required' }, { status: 400 });
     }
 
+    const branchId = branchIdFromForm(formData);
+
     const res = await apiRequest<unknown>('/trpc/orders.mergeDuplicate', {
       method: 'POST',
       cookie,
-      body: { duplicateId, originalId },
+      body: { duplicateId, originalId, ...(branchId ? { branchId } : {}) },
     });
 
     if (!res.ok) {
@@ -392,10 +404,12 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Order ID required' }, { status: 400 });
     }
 
+    const branchId = branchIdFromForm(formData);
+
     const res = await apiRequest<unknown>('/trpc/orders.dismissDuplicate', {
       method: 'POST',
       cookie,
-      body: { orderId },
+      body: { orderId, ...(branchId ? { branchId } : {}) },
     });
 
     if (!res.ok) {
@@ -429,6 +443,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (paymentMethod === 'PAY_ONLINE' && (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail))) {
       return json({ error: 'Valid email is required for Pay online' }, { status: 400 });
     }
+    const branchId = branchIdFromForm(formData);
     const res = await apiRequest<{ result?: { data?: { id: string } } }>('/trpc/orders.createOffline', {
       method: 'POST',
       cookie,
@@ -445,6 +460,7 @@ export async function action({ request }: ActionFunctionArgs) {
         customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((formData.get('totalAmount') as string) || '0') || undefined,
+        ...(branchId ? { branchId } : {}),
       },
     });
     if (!res.ok) {
@@ -459,10 +475,11 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!orderId) {
       return json({ error: 'Order ID required' }, { status: 400 });
     }
+    const branchId = branchIdFromForm(formData);
     const res = await apiRequest<unknown>('/trpc/orders.claimOrder', {
       method: 'POST',
       cookie,
-      body: { orderId },
+      body: { orderId, ...(branchId ? { branchId } : {}) },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to claim order') }, { status: safeStatus(res.status) });
@@ -484,11 +501,18 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Order ID and new status are required' }, { status: 400 });
     }
 
-    const body: { orderId: string; newStatus: string; metadata?: { reason: string } } = {
+    const branchId = branchIdFromForm(formData);
+    const body: {
+      orderId: string;
+      newStatus: string;
+      metadata?: { reason: string };
+      branchId?: string;
+    } = {
       orderId,
       newStatus,
     };
     if (reason) body.metadata = { reason };
+    if (branchId) body.branchId = branchId;
 
     const res = await apiRequest<unknown>('/trpc/orders.transition', {
       method: 'POST',
@@ -522,7 +546,6 @@ export default function CSQueueRoute() {
       canCreateOffline={data.canCreateOffline}
       canDeleteCart={data.canDeleteCart}
       productsForOfflineOrder={data.productsForOfflineOrder}
-      initialTab={data.initialTab}
     />
   );
 }

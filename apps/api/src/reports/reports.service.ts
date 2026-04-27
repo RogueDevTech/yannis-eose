@@ -12,6 +12,7 @@ import { OrdersService } from '../orders/orders.service';
 import { MarketingService } from '../marketing/marketing.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
+import { UsersService } from '../users/users.service';
 import { isAdminLevel } from '../common/authz';
 
 type CsvRow = Record<string, string | number | boolean | null | undefined>;
@@ -91,6 +92,7 @@ export class ReportsService {
     private readonly marketingService: MarketingService,
     private readonly inventoryService: InventoryService,
     private readonly financeService: FinanceService,
+    private readonly usersService: UsersService,
   ) {}
 
   async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null): Promise<{ filename: string; csvContent: string }> {
@@ -98,8 +100,12 @@ export class ReportsService {
     switch (input.reportKey) {
       case 'cs_orders':
         return this.exportCsOrders(input as Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user, currentBranchId, date);
+      case 'cs_team':
+        return this.exportCsTeam(input as Extract<ExportReportInput, { reportKey: 'cs_team' }>, user, currentBranchId, date);
       case 'marketing_orders':
         return this.exportMarketingOrders(input as Extract<ExportReportInput, { reportKey: 'marketing_orders' }>, user, currentBranchId, date);
+      case 'marketing_team':
+        return this.exportMarketingTeam(input as Extract<ExportReportInput, { reportKey: 'marketing_team' }>, user, currentBranchId, date);
       case 'disbursements':
         return this.exportDisbursements(input as Extract<ExportReportInput, { reportKey: 'disbursements' }>, user, currentBranchId, date);
       case 'inventory':
@@ -175,6 +181,138 @@ export class ReportsService {
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `cs-orders-${date}.csv`, csvContent: toCsv(rows, columns) };
+  }
+
+  private async exportCsTeam(
+    input: Extract<ExportReportInput, { reportKey: 'cs_team' }>,
+    user: SessionUser,
+    currentBranchId: string | null,
+    date: string,
+  ) {
+    this.ensurePermission(user, 'cs.teamOverview');
+    const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
+    const period: 'this_month' | 'all_time' =
+      input.filters?.periodAllTime || (!startDate && !endDate && input.dateRange?.preset === 'all_time')
+        ? 'all_time'
+        : 'this_month';
+
+    const [team, workloads, leaderboard, inactive] = await Promise.all([
+      this.usersService.listCSTeam(),
+      this.ordersService.getCSAgentWorkloads(currentBranchId),
+      this.ordersService.getCSAgentLeaderboard(period, startDate, endDate),
+      this.ordersService.getInactiveAgents(10),
+    ]);
+
+    const workloadById = new Map(workloads.map((w) => [w.agentId, w]));
+    const leaderboardById = new Map(leaderboard.map((l) => [l.agentId, l]));
+    const idleSet = new Set(inactive.map((a) => a.agentId));
+
+    const closersOnly = team.filter((m) => m.role === 'CS_AGENT');
+
+    const rows = closersOnly.map((m) => {
+      const wl = workloadById.get(m.id);
+      const lb = leaderboardById.get(m.id);
+      const branches = (m.branchMemberships ?? [])
+        .map((b) => (b.isPrimary ? `${b.branchName}*` : b.branchName))
+        .join(' / ');
+      return {
+        name: m.name,
+        role: m.role === 'CS_AGENT' ? 'Closer' : m.role.replace(/_/g, ' '),
+        branches: branches || '—',
+        pending: wl?.pendingCount ?? 0,
+        capacity: wl?.capacity ?? 0,
+        assigned: lb?.ordersEngaged ?? 0,
+        delivered: lb?.ordersDelivered ?? 0,
+        confirmed: lb?.ordersConfirmed ?? 0,
+        cancelled: lb?.ordersCancelled ?? 0,
+        callsMade: lb?.callsMade ?? 0,
+        confirmationRate: lb ? `${lb.confirmationRate.toFixed(2)}%` : '—',
+        deliveryRate: lb ? `${lb.deliveryRate.toFixed(2)}%` : '—',
+        avgCallSeconds: lb ? Math.round(lb.avgCallDurationSeconds) : 0,
+        lastActiveAt: wl?.lastActionAt ? new Date(wl.lastActionAt).toLocaleString() : '—',
+        idle: idleSet.has(m.id) ? 'Yes' : 'No',
+      };
+    });
+
+    const columns = [
+      { key: 'name', label: 'Name' },
+      { key: 'role', label: 'Role' },
+      { key: 'branches', label: 'Branches' },
+      { key: 'pending', label: 'Pending now' },
+      { key: 'capacity', label: 'Capacity' },
+      { key: 'assigned', label: 'Assigned (period)' },
+      { key: 'delivered', label: 'Delivered (period)' },
+      { key: 'confirmed', label: 'Confirmed (period)' },
+      { key: 'cancelled', label: 'Cancelled (period)' },
+      { key: 'callsMade', label: 'Calls (period)' },
+      { key: 'confirmationRate', label: 'Confirmation %' },
+      { key: 'deliveryRate', label: 'Delivery %' },
+      { key: 'avgCallSeconds', label: 'Avg call (s)' },
+      { key: 'lastActiveAt', label: 'Last active' },
+      { key: 'idle', label: 'Idle' },
+    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
+
+    return { filename: `cs-team-${date}.csv`, csvContent: toCsv(rows, columns) };
+  }
+
+  private async exportMarketingTeam(
+    input: Extract<ExportReportInput, { reportKey: 'marketing_team' }>,
+    user: SessionUser,
+    currentBranchId: string | null,
+    date: string,
+  ) {
+    this.ensurePermission(user, 'marketing.teamOverview');
+    const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
+    const period: 'this_month' | 'all_time' =
+      input.filters?.periodAllTime || (!startDate && !endDate && input.dateRange?.preset === 'all_time')
+        ? 'all_time'
+        : 'this_month';
+
+    const [balances, leaderboard] = await Promise.all([
+      this.marketingService.listFundingBalances(user, currentBranchId),
+      this.marketingService.getMediaBuyerLeaderboard(period, startDate, endDate, currentBranchId),
+    ]);
+
+    // Leaderboard only includes Media Buyers — Heads of Marketing won't have a row.
+    // Balances include both. Merge by userId so the export reflects the page.
+    const lbById = new Map(leaderboard.map((l) => [l.mediaBuyerId, l]));
+
+    const rows = balances.map((b) => {
+      const lb = lbById.get(b.userId);
+      return {
+        name: b.name,
+        role: b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role.replace(/_/g, ' '),
+        branches: '—', // listFundingBalances doesn't include branch memberships; left blank for now
+        totalReceived: b.totalReceived,
+        totalSpend: b.totalSpend,
+        balance: b.balance,
+        totalOrders: lb?.totalOrders ?? 0,
+        deliveredOrders: lb?.deliveredOrders ?? 0,
+        deliveredRevenue: lb?.deliveredRevenue ?? 0,
+        confirmationRate: lb ? `${lb.confirmationRate.toFixed(2)}%` : '—',
+        deliveryRate: lb ? `${lb.deliveryRate.toFixed(2)}%` : '—',
+        cpa: lb ? lb.cpa.toFixed(2) : '—',
+        trueRoas: lb ? `${lb.trueRoas.toFixed(2)}x` : '—',
+      };
+    });
+
+    const columns = [
+      { key: 'name', label: 'Name' },
+      { key: 'role', label: 'Role' },
+      { key: 'branches', label: 'Branches' },
+      { key: 'totalReceived', label: 'Total received' },
+      { key: 'totalSpend', label: 'Total ad spend' },
+      { key: 'balance', label: 'Balance' },
+      { key: 'totalOrders', label: 'Total orders (period)' },
+      { key: 'deliveredOrders', label: 'Delivered orders (period)' },
+      { key: 'deliveredRevenue', label: 'Delivered revenue (period)' },
+      { key: 'confirmationRate', label: 'Confirmation %' },
+      { key: 'deliveryRate', label: 'Delivery %' },
+      { key: 'cpa', label: 'CPA' },
+      { key: 'trueRoas', label: 'True ROAS' },
+    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
+
+    return { filename: `marketing-team-${date}.csv`, csvContent: toCsv(rows, columns) };
   }
 
   private async exportMarketingOrders(

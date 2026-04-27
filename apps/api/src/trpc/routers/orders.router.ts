@@ -45,9 +45,12 @@ function getVoipService(): VoipService {
   return voipServiceInstance;
 }
 
-/** Org-wide department heads use unscoped order lists/metrics (same as admin-class). */
-function orderListBranchId(user: { role: string }, sessionBranchId: string | null): string | null {
-  if (isAdminLevel(user) || isOrgWideDepartmentHead(user)) return null;
+/**
+ * Session branch for orders list / statusCounts / timeSeries: non-null = restrict to that branch;
+ * null = org-wide (all branches). Applies to admin-class and org-wide department heads the same
+ * as everyone else — previously these roles forced null and ignored the branch switcher.
+ */
+function orderListBranchId(_user: { role: string }, sessionBranchId: string | null): string | null {
   return sessionBranchId;
 }
 

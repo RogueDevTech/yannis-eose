@@ -2,7 +2,9 @@ import { z } from 'zod';
 
 export const exportReportKeySchema = z.enum([
   'cs_orders',
+  'cs_team',
   'marketing_orders',
+  'marketing_team',
   'disbursements',
   'inventory',
   'finance_invoices',
@@ -21,6 +23,38 @@ export type ExportDateRange = z.infer<typeof exportDateRangeSchema>;
 
 export const reportColumnsByKey = {
   cs_orders: ['id', 'customer', 'assignedCs', 'phone', 'status', 'amount', 'created'] as const,
+  cs_team: [
+    'name',
+    'role',
+    'branches',
+    'pending',
+    'capacity',
+    'assigned',
+    'delivered',
+    'confirmed',
+    'cancelled',
+    'callsMade',
+    'confirmationRate',
+    'deliveryRate',
+    'avgCallSeconds',
+    'lastActiveAt',
+    'idle',
+  ] as const,
+  marketing_team: [
+    'name',
+    'role',
+    'branches',
+    'totalReceived',
+    'totalSpend',
+    'balance',
+    'totalOrders',
+    'deliveredOrders',
+    'deliveredRevenue',
+    'confirmationRate',
+    'deliveryRate',
+    'cpa',
+    'trueRoas',
+  ] as const,
   marketing_orders: [
     'id',
     'customer',
@@ -40,7 +74,9 @@ export const reportColumnsByKey = {
 
 const reportColumnsSchema = z.object({
   cs_orders: z.array(z.enum(reportColumnsByKey.cs_orders)).min(1),
+  cs_team: z.array(z.enum(reportColumnsByKey.cs_team)).min(1),
   marketing_orders: z.array(z.enum(reportColumnsByKey.marketing_orders)).min(1),
+  marketing_team: z.array(z.enum(reportColumnsByKey.marketing_team)).min(1),
   disbursements: z.array(z.enum(reportColumnsByKey.disbursements)).min(1),
   inventory: z.array(z.enum(reportColumnsByKey.inventory)).min(1),
   finance_invoices: z.array(z.enum(reportColumnsByKey.finance_invoices)).min(1),
@@ -63,6 +99,20 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
       .optional(),
   }),
   z.object({
+    reportKey: z.literal('cs_team'),
+    columns: reportColumnsSchema.shape.cs_team,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
+        // Date range filter scopes the leaderboard counts (assigned/delivered/confirmed)
+        // to the same window the page shows. Workload + idle state are always live.
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
     reportKey: z.literal('marketing_orders'),
     columns: reportColumnsSchema.shape.marketing_orders,
     dateRange: exportDateRangeSchema.optional(),
@@ -74,6 +124,18 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         assignedCsId: z.string().uuid().optional(),
         productId: z.string().uuid().optional(),
         campaignId: z.string().uuid().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        periodAllTime: z.boolean().optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('marketing_team'),
+    columns: reportColumnsSchema.shape.marketing_team,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: z
+      .object({
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         periodAllTime: z.boolean().optional(),

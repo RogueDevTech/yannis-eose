@@ -1,11 +1,20 @@
+import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Pagination } from '~/components/ui/pagination';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { Button } from '~/components/ui/button';
+import { ExportModal } from '~/components/ui/export-modal';
+import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { CSTeamMemberOverview } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
+import {
+  confirmationRateColorClass,
+  deliveryRateColorClass,
+  formatRate,
+} from '~/lib/rate-color';
 
 export interface CSTeamPageProps {
   teamMembers: CSTeamMemberOverview[];
@@ -96,7 +105,7 @@ function CSTeamMemberCard({ member }: { member: CSTeamMemberOverview }) {
             </div>
           </div>
           {leaderboard && (
-            <div className="grid grid-cols-3 gap-2 mb-3 text-xs text-app-fg-muted">
+            <div className="grid grid-cols-3 gap-2 mb-2 text-xs text-app-fg-muted">
               <div>
                 <span className="font-medium text-app-fg">{leaderboard.ordersEngaged}</span>
                 <span className="block text-app-fg-muted">Assigned</span>
@@ -111,6 +120,22 @@ function CSTeamMemberCard({ member }: { member: CSTeamMemberOverview }) {
               </div>
             </div>
           )}
+          {leaderboard && (
+            <div className="grid grid-cols-2 gap-2 mb-3 text-xs text-app-fg-muted">
+              <div>
+                <span className={`font-medium ${confirmationRateColorClass(leaderboard.confirmationRate)}`}>
+                  {formatRate(leaderboard.confirmationRate)}
+                </span>
+                <span className="block text-app-fg-muted">Conf. rate</span>
+              </div>
+              <div>
+                <span className={`font-medium ${deliveryRateColorClass(leaderboard.deliveryRate)}`}>
+                  {formatRate(leaderboard.deliveryRate)}
+                </span>
+                <span className="block text-app-fg-muted">Delivery rate</span>
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -118,7 +143,7 @@ function CSTeamMemberCard({ member }: { member: CSTeamMemberOverview }) {
         <Link
           to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}
           prefetch="intent"
-          className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
+          className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
         >
           View orders
         </Link>
@@ -143,21 +168,47 @@ function activityCell(member: CSTeamMemberOverview): string {
 }
 
 export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dateFilters }: CSTeamPageProps) {
+  const [showExportModal, setShowExportModal] = useState(false);
   return (
     <div className="space-y-6">
       <PageHeader
         title="Team Analysis"
         description="Closer workload, activity, and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
         actions={
-          dateFilters ? (
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-              <DateFilterBar
-                startDate={dateFilters.startDate}
-                endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime}
-              />
-            </div>
-          ) : null
+          <div className="flex items-center gap-2 flex-wrap">
+            {dateFilters ? (
+              <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                <DateFilterBar
+                  startDate={dateFilters.startDate}
+                  endDate={dateFilters.endDate}
+                  periodAllTime={dateFilters.periodAllTime}
+                />
+              </div>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowExportModal(true)}
+            >
+              Export CSV
+            </Button>
+          </div>
+        }
+      />
+
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={EXPORT_CONFIGS.cs_team}
+        initialFilters={
+          dateFilters
+            ? dateFilters.periodAllTime
+              ? { periodAllTime: true as const }
+              : dateFilters.startDate && dateFilters.endDate
+                ? { startDate: dateFilters.startDate, endDate: dateFilters.endDate }
+                : {}
+            : {}
         }
       />
 
@@ -213,9 +264,9 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
 
           {/* Desktop: table view */}
           <div className="hidden md:block">
-            <div className="card p-0 overflow-hidden">
+            <div className="card p-0">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[880px]">
+                <table className="w-full min-w-[1080px]">
                   <thead>
                     <tr>
                       <th className="table-header">Member</th>
@@ -224,6 +275,8 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
                       <th className="table-header text-right">Assigned</th>
                       <th className="table-header text-right">Delivered</th>
                       <th className="table-header text-right">Confirmed</th>
+                      <th className="table-header text-right">Conf. rate</th>
+                      <th className="table-header text-right">Delivery rate</th>
                       <th className="table-header">Actions</th>
                     </tr>
                   </thead>
@@ -293,12 +346,30 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
                               '\u2014'
                             )}
                           </td>
+                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
+                            {lb ? (
+                              <span className={`font-medium ${confirmationRateColorClass(lb.confirmationRate)}`}>
+                                {formatRate(lb.confirmationRate)}
+                              </span>
+                            ) : (
+                              '\u2014'
+                            )}
+                          </td>
+                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
+                            {lb ? (
+                              <span className={`font-medium ${deliveryRateColorClass(lb.deliveryRate)}`}>
+                                {formatRate(lb.deliveryRate)}
+                              </span>
+                            ) : (
+                              '\u2014'
+                            )}
+                          </td>
                           <td className="table-cell">
                             <div className="flex flex-wrap items-center gap-2">
                               <Link
                                 to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}
                                 prefetch="intent"
-                                className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
+                                className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
                               >
                                 View orders
                               </Link>

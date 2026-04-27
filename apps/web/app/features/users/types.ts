@@ -14,6 +14,8 @@ export interface User {
   status: string;
   capacity: number;
   createdAt: string;
+  /** Staff contact — returned by `users.list`; masked per backend policy when unauthorized. */
+  phone?: string | null;
   branchMemberships?: UserBranchMembership[];
 }
 
@@ -265,11 +267,15 @@ export interface UserDetailLoaderData {
    */
   canEditLimited?: boolean;
   /**
-   * True when the viewer is allowed to start a Mirror Mode session for this profile
-   * (see CLAUDE.md → "Mirror Mode"). Real enforcement is server-side in
-   * `AuthService.startMirror`; this flag only controls whether the button renders.
+   * True when the Mirror user control should show (role matrix or supervision for the
+   * effective identity, including preview while already mirroring someone else).
    */
-  viewerCanMirror?: boolean;
+  viewerShowsMirror?: boolean;
+  /**
+   * True when Mirror is visible but POST must not run (nested mirror preview only).
+   * Submit is blocked server-side by `AuthService.startMirror` and tRPC mutations anyway.
+   */
+  mirrorSubmitDisabled?: boolean;
   /**
    * True when the viewer is opening their OWN profile (drives /admin/profile).
    * Hides destructive admin actions (Reset Password, Deactivate, Mirror, Disburse) —

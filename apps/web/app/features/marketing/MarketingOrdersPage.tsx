@@ -233,7 +233,7 @@ export function MarketingOrdersPage({
           dailyCounts={dailyCounts}
         />
       ) : (
-      <div className="card p-0 overflow-hidden scroll-mt-4">
+      <div className="card p-0 scroll-mt-4">
         <div className="px-4 py-3 border-b border-app-border">
           <h2 className="text-lg font-semibold text-app-fg">Orders ({total})</h2>
         </div>

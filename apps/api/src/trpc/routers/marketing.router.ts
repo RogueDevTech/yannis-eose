@@ -12,6 +12,7 @@ import {
   createAdSpendSchema,
   createAdSpendBatchSchema,
   listAdSpendSchema,
+  listAdSpendGroupedSchema,
   adSpendStatusCountsSchema,
   approveAdSpendSchema,
   rejectAdSpendSchema,
@@ -257,15 +258,7 @@ export const marketingRouter = router({
    * their own.
    */
   listAdSpendGrouped: authedProcedure
-    .input(
-      z.object({
-        mediaBuyerId: z.string().uuid().optional(),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
-        page: z.number().int().min(1).optional(),
-        limit: z.number().int().min(1).max(50).optional(),
-      }),
-    )
+    .input(listAdSpendGroupedSchema)
     .query(async ({ input, ctx }) => {
       const effectiveInput =
         ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;

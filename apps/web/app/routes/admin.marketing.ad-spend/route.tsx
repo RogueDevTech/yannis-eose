@@ -47,6 +47,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const productIdFilter = productIdParam && /^[0-9a-f-]{32,36}$/i.test(productIdParam)
     ? productIdParam
     : undefined;
+  const campaignIdParam = url.searchParams.get('campaignId')?.trim();
+  const campaignIdFilter = campaignIdParam && /^[0-9a-f-]{32,36}$/i.test(campaignIdParam)
+    ? campaignIdParam
+    : undefined;
+  const mediaBuyerIdParam = url.searchParams.get('mediaBuyerId')?.trim();
+  const mediaBuyerIdFilter =
+    !isMediaBuyer && mediaBuyerIdParam && /^[0-9a-f-]{32,36}$/i.test(mediaBuyerIdParam)
+      ? mediaBuyerIdParam
+      : undefined;
 
   const adSpendScope = {
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
@@ -55,6 +64,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(statusFilter && { status: statusFilter }),
     ...(searchFilter && { search: searchFilter }),
     ...(productIdFilter && { productId: productIdFilter }),
+    ...(campaignIdFilter && { campaignId: campaignIdFilter }),
+    ...(mediaBuyerIdFilter && { mediaBuyerId: mediaBuyerIdFilter }),
   };
   const adSpendInput = JSON.stringify({
     page,
@@ -71,6 +82,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
+    ...(statusFilter && { status: statusFilter }),
+    ...(searchFilter && { search: searchFilter }),
+    ...(productIdFilter && { productId: productIdFilter }),
+    ...(campaignIdFilter && { campaignId: campaignIdFilter }),
+    ...(mediaBuyerIdFilter && { mediaBuyerId: mediaBuyerIdFilter }),
   };
   const groupedInput = JSON.stringify(groupedScope);
   // Status counts share the product filter so the pill counts match the visible list.
@@ -80,6 +96,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
     ...(searchFilter && { search: searchFilter }),
     ...(productIdFilter && { productId: productIdFilter }),
+    ...(campaignIdFilter && { campaignId: campaignIdFilter }),
+    ...(mediaBuyerIdFilter && { mediaBuyerId: mediaBuyerIdFilter }),
   });
   const metricsInput = JSON.stringify({
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
@@ -87,6 +105,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
   });
   const campaignsInput = JSON.stringify(isMediaBuyer ? { mediaBuyerId: user.id, page: 1, limit: 20 } : { page: 1, limit: 20 });
+  const buyersInputStr = encodeURIComponent(
+    JSON.stringify({ page: 1, limit: 100, role: 'MEDIA_BUYER', status: 'ACTIVE' }),
+  );
 
   const adSpendP = apiRequest<unknown>(`/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`, { method: 'GET', cookie });
   const groupedP = apiRequest<unknown>(`/trpc/marketing.listAdSpendGrouped?input=${encodeURIComponent(groupedInput)}`, { method: 'GET', cookie });
@@ -97,6 +118,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const metricsP = apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, { method: 'GET', cookie });
   const campaignsP = apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`, { method: 'GET', cookie });
   const productsP = apiRequest<unknown>('/trpc/products.list', { method: 'GET', cookie });
+  const buyersP = !isMediaBuyer
+    ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
+    : Promise.resolve({ ok: false, data: null });
 
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
   const leaderboardP = apiRequest<unknown>(
@@ -104,11 +128,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { method: 'GET', cookie },
   ).catch(() => ({ ok: false, data: { result: { data: [] } } }));
 
-  const [adSpendRes, adSpendCountsRes, campaignsRes, groupedRes] = await Promise.all([
+  const [adSpendRes, adSpendCountsRes, campaignsRes, groupedRes, buyersRes] = await Promise.all([
     adSpendP,
     adSpendCountsP,
     campaignsP,
     groupedP,
+    buyersP,
   ]);
   type GroupedShape = {
     groups?: Array<{
@@ -146,6 +171,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const groups = groupedData.groups ?? [];
   const groupsTotal = groupedData.pagination?.total ?? 0;
   const groupsTotalPages = Math.max(1, Math.ceil(groupsTotal / 20));
+  const mediaBuyersForFilter =
+    buyersRes.ok
+      ? (
+          (
+            buyersRes.data as {
+              result?: { data?: { users?: Array<{ id: string; name: string }> } };
+            }
+          )?.result?.data?.users ?? []
+        ).map((u) => ({ id: u.id, name: u.name }))
+      : [];
   const adSpendData = parseAdSpend(adSpendRes);
   const statusCounts = parseAdSpendStatusCounts(adSpendCountsRes);
   const totalRows = adSpendData?.pagination?.total ?? 0;
@@ -205,6 +240,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusFilter,
     searchFilter,
     productIdFilter,
+    campaignIdFilter,
+    mediaBuyerIdFilter,
+    mediaBuyersForFilter,
     statusCounts,
     campaigns: parseCampaigns(campaignsRes),
     metrics,

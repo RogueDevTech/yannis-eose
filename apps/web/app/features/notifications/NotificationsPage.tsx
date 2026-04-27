@@ -140,7 +140,7 @@ export function NotificationsPage({
         />
       )}
 
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0">
         {notifications.length === 0 ? (
           <EmptyState
             title={unreadOnlyFilter ? 'No unread notifications.' : 'No notifications yet.'}

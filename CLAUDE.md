@@ -283,7 +283,7 @@ Because the 3PL partners are not in-app yet, the assigned CS agent is the de fac
 **Mirror Mode** (full-session impersonation — distinct from Supervisor Mirror View above):
 The admin temporarily renders the entire app *as* another user — their role, branch, RLS, sidebar, theme, font scale. Different from Supervisor Mirror View, which only watches a rep's screen state via Socket.io. Mirror Mode actually **swaps the session identity**.
 
-- **Trigger**: "Mirror user" button on the user detail page (`/hr/users/:id`) when `viewerCanMirror` is true (server: `branches.canMirrorToUser`, which applies `canMirror()` **or** branch-team supervision via `BranchTeamsService.actorCanMirrorViaSupervision`). POSTs `intent=mirror` to `/auth/mirror/start` then redirects to `/admin`.
+- **Trigger**: "Mirror user" on the user detail page (`/hr/users/:id`) when `viewerShowsMirror` is true (server: `branches.canMirrorToUser`: `allowed` or `previewEligible`). While already mirroring, `allowed` is false (no nested chains) but `previewEligible` may be true so the button shows **disabled** until exit mirror. POSTs `intent=mirror` to `/auth/mirror/start` then redirects to `/admin`.
 - **Permission gate** (`apps/api/src/common/authz.ts::canMirror` for role-matrix heads/admins; **plus** async supervision in `auth.service.ts::startMirror` and `branches.canMirrorToUser`):
   - SuperAdmin / Admin can mirror anyone except another admin-level user.
   - HEAD_OF_CS → CS_AGENT (any branch — org-wide head).

@@ -354,7 +354,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
           </ResponsiveFormPanel>
 
           {/* Invoice Table */}
-          <div className="card p-0 overflow-hidden">
+          <div className="card p-0">
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -653,7 +653,7 @@ function ApprovalsTab({
       </div>
 
       {/* Approval Queue Table */}
-      <div className="card p-0 overflow-hidden mt-4">
+      <div className="card p-0 mt-4">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>

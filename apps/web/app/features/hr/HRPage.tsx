@@ -240,7 +240,7 @@ export function HRPage({
               {(resolvedUsers) => {
                 const getStaffName = (id: string) => resolvedUsers.find((u: HRUser) => u.id === id)?.name ?? id.slice(0, 8) + '...';
                 return (
-                  <div className="card p-0 overflow-hidden">
+                  <div className="card p-0">
                     <div className="hidden md:block overflow-x-auto">
                       <table className="w-full">
                         <thead>

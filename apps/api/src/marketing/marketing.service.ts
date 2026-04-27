@@ -13,6 +13,7 @@ import type {
   CreateAdSpendInput,
   CreateAdSpendBatchInput,
   ListAdSpendInput,
+  ListAdSpendGroupedInput,
   AdSpendStatusCountsInput,
   PreviewAdSpendIntervalInput,
   UpdateAdSpendInput,
@@ -1618,10 +1619,7 @@ export class MarketingService {
    *  - 'MIXED'    if both APPROVED and REJECTED appear and no PENDING
    *  - 'PENDING'  if any line is PENDING
    */
-  async listAdSpendGrouped(
-    input: { mediaBuyerId?: string; startDate?: string; endDate?: string; page?: number; limit?: number },
-    branchId?: string | null,
-  ) {
+  async listAdSpendGrouped(input: ListAdSpendGroupedInput, branchId?: string | null) {
     const page = Math.max(1, input.page ?? 1);
     const limit = Math.min(50, Math.max(1, input.limit ?? 20));
 
@@ -1632,6 +1630,15 @@ export class MarketingService {
     const conditions: SQL[] = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.productId) {
+      conditions.push(eq(schema.adSpendLogs.productId, input.productId));
+    }
+    if (input.campaignId) {
+      conditions.push(eq(schema.adSpendLogs.campaignId, input.campaignId));
+    }
+    if (input.status) {
+      conditions.push(eq(schema.adSpendLogs.status, input.status));
     }
     if (input.startDate) {
       conditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
@@ -1650,6 +1657,16 @@ export class MarketingService {
     }
     if (branchCampaignIds) {
       conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+    }
+    const searchTrimmed = input.search?.trim();
+    if (searchTrimmed) {
+      const searchOr = or(
+        ilike(buyer.name, `%${searchTrimmed}%`),
+        ilike(prod.name, `%${searchTrimmed}%`),
+        ilike(camp.name, `%${searchTrimmed}%`),
+        ilike(schema.adSpendLogs.id, `%${searchTrimmed}%`),
+      );
+      if (searchOr) conditions.push(searchOr);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

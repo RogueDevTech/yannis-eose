@@ -1,4 +1,5 @@
 import { useLoaderData } from '@remix-run/react';
+import type { ShouldRevalidateFunctionArgs } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
@@ -11,6 +12,27 @@ import type { FundingRequestRecord } from '~/features/marketing/types';
 export const meta: MetaFunction = () => [
   { title: 'Disbursements — Yannis EOSE' },
 ];
+
+/** Skip loader when only `tab` changes — all tab payloads are fetched in one loader run. */
+function normalizeSearchExcludingTab(search: string): string {
+  const sp = new URLSearchParams(search);
+  sp.delete('tab');
+  const entries = [...sp.entries()].sort(([a], [b]) => a.localeCompare(b));
+  return new URLSearchParams(entries).toString();
+}
+
+export function shouldRevalidate({ currentUrl, nextUrl }: ShouldRevalidateFunctionArgs): boolean {
+  const cur = new URL(currentUrl);
+  const nex = new URL(nextUrl);
+  if (cur.pathname !== nex.pathname) return true;
+  // Same location (e.g. fetcher/action completed) — must revalidate so tables refresh.
+  if (cur.pathname === nex.pathname && cur.search === nex.search) return true;
+  // URLs differ only by `tab` — single loader already has all tab slices.
+  if (normalizeSearchExcludingTab(cur.search) === normalizeSearchExcludingTab(nex.search)) {
+    return false;
+  }
+  return true;
+}
 
 function parseFunding(res: { ok: boolean; data: unknown }) {
   if (!res.ok) return null;

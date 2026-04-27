@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { HighCpaWarningBanner } from '~/features/marketing/HighCpaWarningBanner';
 import { MediaBuyerBalanceCard } from '~/features/marketing/MediaBuyerBalanceCard';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -206,10 +205,6 @@ export function MarketingOverviewPage({
     ? leaderboard.reduce((sum, b) => sum + b.cpa, 0) / leaderboard.length
     : 0;
 
-  const highCpaBuyers = leaderboard.filter(
-    (b) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0,
-  );
-
   return (
     <div className="space-y-6">
       {/* Page header */}
@@ -344,12 +339,6 @@ export function MarketingOverviewPage({
         </div>
       </div>
 
-      {/* High CPA Alert Banner */}
-      <HighCpaWarningBanner
-        buyers={highCpaBuyers.map((b) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
-        threshold={HIGH_CPA_THRESHOLD}
-      />
-
       {/* Live activity feed */}
       <div>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -375,109 +364,131 @@ export function MarketingOverviewPage({
             View all
           </Link>
         </div>
-        <div className="rounded-xl border border-app-border overflow-hidden bg-app-elevated">
-          {localOrders.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 gap-2">
-              <span className="h-3 w-3 rounded-full bg-app-border animate-pulse" />
-              <p className="text-sm text-app-fg-muted">Waiting for orders…</p>
-            </div>
-          ) : (
-            (() => {
-              const totalPages = liveOrdersTotalPages;
-              const page = Math.min(liveOrdersPage, totalPages);
-              const start = (page - 1) * pageSize;
-              const rows = localOrders.slice(start, start + pageSize);
-              return (
-                <div className="divide-y divide-app-border">
-                  {rows.map((order, idx) => {
+        {localOrders.length === 0 ? (
+          <div className="rounded-xl border border-app-border bg-app-elevated flex flex-col items-center justify-center py-12 gap-2">
+            <span className="h-3 w-3 rounded-full bg-app-border animate-pulse" />
+            <p className="text-sm text-app-fg-muted">Waiting for orders…</p>
+          </div>
+        ) : (
+          (() => {
+            const totalPages = liveOrdersTotalPages;
+            const page = Math.min(liveOrdersPage, totalPages);
+            const start = (page - 1) * pageSize;
+            const rows = localOrders.slice(start, start + pageSize);
+            return (
+              <>
+                {/* Card grid — same density as the CS Live Activities cards. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {rows.map((order) => {
                     const isHighlighted = highlightedIds.has(order.id);
-                    const isLatest = idx === 0 && page === 1;
+                    const statusBadge = STATUS_COLORS[order.status] ?? 'badge';
                     return (
-                      <div
+                      <Link
                         key={order.id}
-                        className={`relative flex items-center gap-3 px-4 py-3 transition-colors hover:bg-app-hover/50 ${isHighlighted ? 'animate-slide-in-up bg-success-50/60 dark:bg-success-900/10' : ''}`}
+                        to={`/admin/orders/${order.id}`}
+                        prefetch="intent"
+                        className={`
+                          group relative block rounded-xl border transition-all duration-200 cursor-pointer
+                          ${isHighlighted
+                            ? 'animate-slide-in-up border-success-400 dark:border-success-500 bg-gradient-to-br from-success-50 to-white dark:from-success-900/20 dark:to-surface-800 shadow-md'
+                            : 'bg-app-elevated border-app-border hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
+                          }
+                          ${isHighlighted ? 'row-new-highlight' : ''}
+                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500
+                        `}
                       >
-                        {/* Timeline dot */}
-                        <div className="shrink-0 flex flex-col items-center self-stretch pt-1">
-                          <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${
-                            isLatest && isHighlighted
-                              ? 'bg-success-500 ring-4 ring-success-500/20 animate-pulse'
-                              : isHighlighted
-                                ? 'bg-success-400'
-                                : 'bg-app-border'
-                          }`} />
-                          {idx < rows.length - 1 && (
-                            <span className="w-px flex-1 mt-1 bg-app-hover" />
+                        {/* Live dot */}
+                        <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
+                          {isHighlighted ? (
+                            <>
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success-500" />
+                            </>
+                          ) : (
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-app-border" />
+                          )}
+                        </span>
+
+                        <div className="p-3.5 pr-8">
+                          {/* Status pill */}
+                          <div className="mb-2">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${statusBadge}`}>
+                              {formatStatus(order.status)}
+                            </span>
+                          </div>
+
+                          {/* Customer name */}
+                          <div className="mb-2">
+                            <p className="text-sm font-semibold text-app-fg truncate leading-tight">
+                              {order.customerName}
+                            </p>
+                          </div>
+
+                          {/* Media buyer pill */}
+                          <div className="mb-1.5 min-w-0">
+                            <span className="inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-app-hover text-app-fg-muted">
+                              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                              </svg>
+                              <span className="truncate min-w-0">{order.mediaBuyerName ?? 'No media buyer'}</span>
+                            </span>
+                          </div>
+
+                          {/* Amount — own line for uniform card height */}
+                          <div className="mb-2 text-[11px] font-bold text-app-fg">
+                            {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
+                          </div>
+
+                          {/* Timestamp */}
+                          <div className="text-[11px] font-medium text-app-fg-muted">
+                            {new Date(order.createdAt).toLocaleString('en-NG', {
+                              weekday: 'short', month: 'short', day: 'numeric',
+                              hour: '2-digit', minute: '2-digit',
+                            })}
+                          </div>
+
+                          {/* LIVE flash */}
+                          {isHighlighted && (
+                            <div className="mt-2 pt-2 border-t flex items-center gap-1.5 border-success-200 dark:border-success-800/50">
+                              <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
+                                LIVE
+                              </span>
+                              <span className="text-[11px] text-success-600 dark:text-success-400">
+                                Just received
+                              </span>
+                            </div>
                           )}
                         </div>
-                        {/* Content */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Link
-                                to={`/admin/orders/${order.id}`}
-                                className="text-sm font-semibold text-app-fg hover:text-brand-600 dark:hover:text-brand-400 truncate"
-                              >
-                                {order.customerName}
-                              </Link>
-                              <span className={`shrink-0 ${isHighlighted ? 'animate-fade-in' : ''} ${STATUS_COLORS[order.status] ?? 'badge'}`}>
-                                {formatStatus(order.status)}
-                              </span>
-                              {isHighlighted && (
-                                <span className="animate-new-badge shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
-                                  LIVE
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-xs text-app-fg-muted whitespace-nowrap shrink-0">
-                              {new Date(order.createdAt).toLocaleDateString('en-NG', {
-                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                              })}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3 mt-0.5">
-                            <span className="text-xs text-app-fg-muted truncate">
-                              {order.mediaBuyerName ?? 'No media buyer'}
-                            </span>
-                            {order.totalAmount && (
-                              <>
-                                <span className="text-app-border">·</span>
-                                <span className="text-xs font-medium text-app-fg-muted">
-                                  {formatNaira(Number(order.totalAmount))}
-                                </span>
-                              </>
-                            )}
-                            <span className="text-app-border">·</span>
-                            <Link
-                              to={`/admin/orders/${order.id}`}
-                              className="text-xs text-brand-500 hover:text-brand-600 dark:hover:text-brand-400 font-medium shrink-0"
-                            >
-                              View →
-                            </Link>
-                          </div>
+
+                        {/* Hover arrow */}
+                        <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <svg className="w-3.5 h-3.5 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
-                  {/* Pagination footer */}
-                  <div className="flex items-center justify-between gap-2 px-4 py-3 bg-app-hover">
-                    <span className="text-xs text-app-fg-muted">
-                      {start + 1}–{Math.min(start + pageSize, localOrders.length)} of {localOrders.length} orders
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <Button type="button" variant="secondary" size="sm" disabled={page <= 1} onClick={() => setLiveOrdersPage((p) => Math.max(1, p - 1))}>
-                        ← Newer
-                      </Button>
-                      <Button type="button" variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setLiveOrdersPage((p) => Math.min(totalPages, p + 1))}>
-                        Older →
-                      </Button>
-                    </div>
+                </div>
+
+                {/* Pagination footer */}
+                <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-app-border">
+                  <span className="text-xs text-app-fg-muted">
+                    {start + 1}–{Math.min(start + pageSize, localOrders.length)} of {localOrders.length} orders
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button type="button" variant="secondary" size="sm" disabled={page <= 1} onClick={() => setLiveOrdersPage((p) => Math.max(1, p - 1))}>
+                      ← Newer
+                    </Button>
+                    <Button type="button" variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setLiveOrdersPage((p) => Math.min(totalPages, p + 1))}>
+                      Older →
+                    </Button>
                   </div>
                 </div>
-              );
-            })()
-          )}
-        </div>
+              </>
+            );
+          })()
+        )}
       </div>
 
       {/* Media Buyer Performance — horizontal scroll strip + View all modal */}

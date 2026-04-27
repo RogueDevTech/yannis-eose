@@ -115,16 +115,16 @@ export default function BranchManagementRoute() {
       />
 
       {/* Branches Table */}
-      <div className="card overflow-hidden p-0">
+      <div className="card p-0">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-app-border">
-                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Code</th>
-                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-app-fg-muted">Created</th>
-                <th className="px-4 py-3" />
+              <tr>
+                <th className="table-header-muted">Name</th>
+                <th className="table-header-muted">Code</th>
+                <th className="table-header-muted">Status</th>
+                <th className="table-header-muted">Created</th>
+                <th className="table-header-muted w-0" />
               </tr>
             </thead>
             <tbody className="divide-y divide-app-border">

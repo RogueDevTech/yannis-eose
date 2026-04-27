@@ -340,6 +340,11 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         }
         actions={
           <>
+            {canRequestFunding && (
+              <Button variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
+                + Request Funds
+              </Button>
+            )}
             <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
               <DateFilterBar
                 startDate={filters.startDate}
@@ -418,7 +423,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
       )}
 
       {/* ─── Ledger: primary tabs (received | distribute) ─ */}
-      <div className="card p-0 overflow-hidden" id="funding-ledger">
+      <div className="card p-0" id="funding-ledger">
         {canDistribute && (
           <div className="px-4 pt-2">
             <Tabs
@@ -538,6 +543,13 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                   onOpenMarkReceived={setMarkReceivedTarget}
                   onOpenNotReceived={setNotReceivedTarget}
                   emptyMessage={transferEmptyMessage}
+                  emptyAction={
+                    canRequestFunding && activeSection === 'received' ? (
+                      <Button type="button" variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
+                        + Request Funds
+                      </Button>
+                    ) : undefined
+                  }
                 />
               )}
               {activeTab === 'requests' && (
@@ -561,14 +573,14 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
       {/* ─── Modals ───────────────────────────────────────────────────────────────── */}
 
-      {/* Request Funding — MB asking HoM, or HoM asking Finance */}
+      {/* Request Funding — MB / branch supervisor → HoM, or HoM → Finance (accounts) */}
       {canRequestFunding && showRequestForm && (
         <Modal open onClose={() => setShowRequestForm(false)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
           <h3 className="text-lg font-semibold text-app-fg">Request Funding</h3>
           <p className="text-sm text-app-fg-muted">
-            {viewMode === 'admin'
-              ? 'Finance will be notified and can disburse to you via Finance → Disbursements once approved.'
-              : 'Head of Marketing will be notified and can disburse to you once approved.'}
+            {currentUserRole === 'HEAD_OF_MARKETING'
+              ? 'Super Admin and Finance are notified. Approved payouts are made via Finance → Disbursements (upstream / accounts-level funding).'
+              : 'Head of Marketing will be notified and can release funds from the level above your campaigns once approved.'}
           </p>
           <fetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="requestFunding" />
@@ -1377,6 +1389,7 @@ function TransfersTable({
   onOpenMarkReceived,
   onOpenNotReceived,
   emptyMessage,
+  emptyAction,
 }: {
   slice: FundingSliceData;
   users: User[];
@@ -1386,6 +1399,7 @@ function TransfersTable({
   onOpenMarkReceived: (rec: FundingRecord) => void;
   onOpenNotReceived: (rec: FundingRecord) => void;
   emptyMessage: string;
+  emptyAction?: ReactNode;
 }) {
   const nameOf = (id: string) =>
     users.find((u: User) => u.id === id)?.name ?? 'Unknown user';
@@ -1457,7 +1471,7 @@ function TransfersTable({
             {slice.records.length === 0 && (
               <tr>
                 <td colSpan={7}>
-                  <EmptyState title="No transfers" description={emptyMessage} />
+                  <EmptyState title="No transfers" description={emptyMessage} action={emptyAction} />
                 </td>
               </tr>
             )}
@@ -1503,7 +1517,7 @@ function TransfersTable({
           </div>
         ))}
         {slice.records.length === 0 && (
-          <EmptyState title="No transfers" description={emptyMessage} />
+          <EmptyState title="No transfers" description={emptyMessage} action={emptyAction} />
         )}
       </div>
 
