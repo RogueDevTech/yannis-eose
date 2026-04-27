@@ -11,6 +11,7 @@ import type {
   FundingStatusCountsInput,
   FundingRequestStatusCountsInput,
   CreateAdSpendInput,
+  CreateAdSpendBatchInput,
   ListAdSpendInput,
   AdSpendStatusCountsInput,
   PreviewAdSpendIntervalInput,
@@ -27,6 +28,10 @@ import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
 import { isAdminLevel } from '../common/authz';
+import { BranchTeamsService } from '../branches/branch-teams.service';
+
+/** True ROAS at or above this value maps profitability score to 1.0 (media buyer leaderboard / Team Analysis). */
+const PROFITABILITY_ROAS_TARGET = 4;
 
 @Injectable()
 export class MarketingService {
@@ -34,6 +39,7 @@ export class MarketingService {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
+    private readonly branchTeams: BranchTeamsService,
   ) {}
 
   private async getBranchUserIds(branchId?: string | null): Promise<string[] | null> {
@@ -47,15 +53,14 @@ export class MarketingService {
 
   /**
    * Strict same-branch guard for funding mutations (Pillar 4: Absolute Accountability,
-   * multi-branch isolation). Both `actor` and `otherUserId` must be members of
-   * `currentBranchId` for the transfer to proceed.
+   * multi-branch isolation). `otherUserId` must be a member of `currentBranchId`.
+   * The actor must be too, except admin-class users who only need the session branch
+   * selected (they are not required to have a `user_branches` row).
    *
-   * Bypass: admin-class actors operating in global mode (`currentBranchId == null`)
-   * skip the check — that is the explicit "All branches" mode the branch switcher
-   * grants to SuperAdmin / Admin and is the only path for cross-branch ledger writes.
+   * Bypass: admin-class or org-wide Head of Marketing with `currentBranchId == null` skips
+   * same-branch membership — ledger pairing is enforced by `assertLedgerTransferAllowed` after load.
    *
-   * Non-admin actors with no active branch are rejected — every regular user must
-   * have an active branch when initiating a funding transfer.
+   * Other actors with no active branch are rejected.
    */
   private async assertSameBranchOrAdmin(
     actor: { id: string; role: string },
@@ -64,6 +69,7 @@ export class MarketingService {
   ): Promise<void> {
     if (currentBranchId === null) {
       if (isAdminLevel(actor)) return;
+      if (actor.role === 'HEAD_OF_MARKETING') return;
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'No active branch — switch to a branch before initiating a funding transfer',
@@ -81,7 +87,7 @@ export class MarketingService {
       );
 
     const memberSet = new Set(memberships.map((m) => m.userId));
-    if (!memberSet.has(actor.id)) {
+    if (!isAdminLevel(actor) && !memberSet.has(actor.id)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'You are not a member of the active branch',
@@ -224,7 +230,7 @@ export class MarketingService {
   private assertLedgerTransferAllowed(
     senderRole: string,
     receiverRole: string,
-    opts?: { viaFundingRequest?: boolean },
+    opts?: { viaFundingRequest?: boolean; marketingSupervisorToMb?: boolean },
   ): void {
     const adminFinance = ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'];
     if (receiverRole === 'HEAD_OF_MARKETING') {
@@ -240,6 +246,9 @@ export class MarketingService {
       if (senderRole === 'HEAD_OF_MARKETING') {
         return;
       }
+      if (opts?.marketingSupervisorToMb) {
+        return;
+      }
       if (opts?.viaFundingRequest && adminFinance.includes(senderRole)) {
         return;
       }
@@ -247,7 +256,7 @@ export class MarketingService {
         code: 'FORBIDDEN',
         message: opts?.viaFundingRequest
           ? 'Only Head of Marketing, Super Admin, Admin, or Finance Officer can approve funding to a Media Buyer'
-          : 'Only Head of Marketing can disburse to Media Buyers',
+          : 'Only Head of Marketing or a branch marketing supervisor may disburse to Media Buyers',
       });
     }
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'Receiver must be Head of Marketing or Media Buyer' });
@@ -262,12 +271,21 @@ export class MarketingService {
     actor: { id: string; role: string },
     currentBranchId: string | null,
   ) {
-    // Branch isolation: sender + receiver must share the active branch.
-    // Admin-class in global mode (currentBranchId = NULL) bypasses for cross-branch
-    // disbursements from /admin via "All branches" view.
+    // Branch isolation: receiver must be on `currentBranchId`; sender must be too unless
+    // admin-class (session branch is enough — no `user_branches` row required). Global NULL
+    // branch = admin cross-branch path.
     await this.assertSameBranchOrAdmin(actor, input.receiverId, currentBranchId);
 
     const senderId = actor.id;
+    let marketingSupervisorToMb = false;
+    if (currentBranchId) {
+      marketingSupervisorToMb = await this.branchTeams.isMarketingSupervisorOf(
+        senderId,
+        input.receiverId,
+        currentBranchId,
+      );
+    }
+
     const funding = await withActor(this.db, { id: senderId }, async (tx) => {
       const [sender, receiver] = await Promise.all([
         tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, senderId)).limit(1),
@@ -278,7 +296,10 @@ export class MarketingService {
       if (!receiverRole || !senderRole) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Sender or receiver not found' });
       }
-      this.assertLedgerTransferAllowed(senderRole, receiverRole, { viaFundingRequest: false });
+      this.assertLedgerTransferAllowed(senderRole, receiverRole, {
+        viaFundingRequest: false,
+        marketingSupervisorToMb,
+      });
 
       const rows = await tx
         .insert(schema.marketingFunding)
@@ -403,16 +424,10 @@ export class MarketingService {
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.marketingFunding.sentAt, end));
     }
-    const branchUserIds = await this.getBranchUserIds(branchId);
-    if (branchUserIds && branchUserIds.length === 0) {
-      return {
-        records: [],
-        pagination: { page: input.page, limit: input.limit, total: 0 },
-      };
-    }
-    if (branchUserIds) {
-      conditions.push(inArray(schema.marketingFunding.receiverId, branchUserIds));
-    }
+    // Ledger rows have no branch_id. Do not filter by active-branch membership here — it
+    // drifted from `fundingByDirectionSummary` (actor + period only) and hid rows when the
+    // viewer's session branch did not match their `user_branches` row or cross-branch data.
+    void branchId;
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
       const searchOr = or(
@@ -476,13 +491,7 @@ export class MarketingService {
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.marketingFunding.sentAt, end));
     }
-    const branchUserIds = await this.getBranchUserIds(branchId);
-    if (branchUserIds && branchUserIds.length === 0) {
-      return { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
-    }
-    if (branchUserIds) {
-      conditions.push(inArray(schema.marketingFunding.receiverId, branchUserIds));
-    }
+    void branchId;
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
       const searchOr = or(
@@ -542,13 +551,7 @@ export class MarketingService {
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.marketingFundingRequests.createdAt, end));
     }
-    const branchUserIds = await this.getBranchUserIds(branchId);
-    if (branchUserIds && branchUserIds.length === 0) {
-      return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
-    }
-    if (branchUserIds) {
-      conditions.push(inArray(schema.marketingFundingRequests.requesterId, branchUserIds));
-    }
+    void branchId;
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const rows = await this.db
@@ -984,16 +987,7 @@ export class MarketingService {
         ) as SQL,
       );
     }
-    const branchUserIds = await this.getBranchUserIds(branchId);
-    if (branchUserIds && branchUserIds.length === 0) {
-      return {
-        records: [],
-        pagination: { page: input.page, limit: input.limit, total: 0 },
-      };
-    }
-    if (branchUserIds) {
-      conditions.push(inArray(schema.marketingFundingRequests.requesterId, branchUserIds));
-    }
+    void branchId;
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
@@ -1052,9 +1046,8 @@ export class MarketingService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
     }
 
-    // Branch isolation: approver + requester must share the active branch.
-    // Admin-class in global mode (currentBranchId = NULL) bypasses for cross-branch
-    // approvals from /admin via "All branches" view.
+    // Branch isolation: requester must be on `currentBranchId`; approver must be too unless
+    // admin-class (session branch only). Global NULL = admin cross-branch approvals.
     await this.assertSameBranchOrAdmin(actor, existing.requesterId, currentBranchId);
 
     const [ledgerDup] = await this.db
@@ -1223,9 +1216,11 @@ export class MarketingService {
           mediaBuyerId,
           productId: input.productId ?? '',
           campaignId: input.campaignId ?? '',
-          spendAmount: String(input.spendAmount),
+          spendAmount: sql`${String(input.spendAmount)}::numeric`,
           screenshotUrl: input.screenshotUrl,
           spendDate: new Date(input.spendDate),
+          platform: input.platform ?? 'FACEBOOK',
+          adUrl: input.adUrl ?? null,
         })
         .returning();
 
@@ -1235,6 +1230,77 @@ export class MarketingService {
       }
       return spend;
     });
+  }
+
+  /**
+   * Multi-line "Add Expense" submission. Writes N ad_spend_logs rows in a single
+   * `withActor` transaction, all sharing the same `spend_date`. HoM gets ONE
+   * notification for the whole batch (not N).
+   */
+  async createAdSpendBatch(
+    input: CreateAdSpendBatchInput,
+    mediaBuyerId: string,
+    branchId?: string | null,
+  ) {
+    if (input.lines.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Add at least one expense line' });
+    }
+    // Branch fence: every campaign in the batch must belong to the actor's active branch.
+    if (branchId) {
+      const campaignIds = Array.from(new Set(input.lines.map((l) => l.campaignId)));
+      const validCampaigns = await this.db
+        .select({ id: schema.campaigns.id })
+        .from(schema.campaigns)
+        .where(
+          and(
+            inArray(schema.campaigns.id, campaignIds),
+            eq(schema.campaigns.branchId, branchId),
+          ),
+        );
+      if (validCampaigns.length !== campaignIds.length) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'One or more campaigns are not in your active branch',
+        });
+      }
+    }
+
+    const spendDateAt = new Date(input.spendDate);
+    const inserted = await withActor(this.db, { id: mediaBuyerId }, async (tx) => {
+      return tx
+        .insert(schema.adSpendLogs)
+        .values(
+          input.lines.map((line) => ({
+            mediaBuyerId,
+            productId: line.productId,
+            campaignId: line.campaignId,
+            spendAmount: sql`${String(line.spendAmount)}::numeric`,
+            screenshotUrl: line.screenshotUrl,
+            spendDate: spendDateAt,
+            platform: line.platform ?? 'FACEBOOK',
+            adUrl: line.adUrl ?? null,
+          })),
+        )
+        .returning();
+    });
+
+    if (inserted.length !== input.lines.length) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to log ad spend batch' });
+    }
+
+    // One notification per batch — not per line. HoM should never wake up to
+    // 12 push pings because someone logged a busy day.
+    const total = input.lines.reduce((acc, l) => acc + l.spendAmount, 0);
+    this.notifications
+      .createForRole('HEAD_OF_MARKETING', {
+        type: 'marketing:ad_spend_submitted',
+        title: 'New ad spend submitted',
+        body: `A Media Buyer logged ${input.lines.length} line${input.lines.length === 1 ? '' : 's'} totalling ₦${total.toLocaleString()} for ${input.spendDate}.`,
+        data: { mediaBuyerId, spendDate: input.spendDate, count: input.lines.length },
+      })
+      .catch(() => {});
+
+    return { count: inserted.length, total: String(total) };
   }
 
   /** Head of Marketing / SuperAdmin: approve a PENDING ad spend entry. */
@@ -1541,6 +1607,140 @@ export class MarketingService {
     };
   }
 
+  /**
+   * Returns ad spend records grouped by `(spend_date, media_buyer_id)` for the
+   * accordion UI on /admin/marketing/ad-spend. Each group rolls up to a single
+   * accordion row showing total + line count + status.
+   *
+   * Rolled-up status semantics:
+   *  - 'APPROVED' if every line is APPROVED
+   *  - 'REJECTED' if every line is REJECTED
+   *  - 'MIXED'    if both APPROVED and REJECTED appear and no PENDING
+   *  - 'PENDING'  if any line is PENDING
+   */
+  async listAdSpendGrouped(
+    input: { mediaBuyerId?: string; startDate?: string; endDate?: string; page?: number; limit?: number },
+    branchId?: string | null,
+  ) {
+    const page = Math.max(1, input.page ?? 1);
+    const limit = Math.min(50, Math.max(1, input.limit ?? 20));
+
+    const buyer = alias(schema.users, 'ad_spend_grouped_buyer');
+    const prod = alias(schema.products, 'ad_spend_grouped_product');
+    const camp = alias(schema.campaigns, 'ad_spend_grouped_campaign');
+
+    const conditions: SQL[] = [];
+    if (input.mediaBuyerId) {
+      conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.startDate) {
+      conditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      const end = new Date(input.endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(schema.adSpendLogs.spendDate, end));
+    }
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      return {
+        groups: [],
+        pagination: { page, limit, total: 0 },
+      };
+    }
+    if (branchCampaignIds) {
+      conditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const records = await this.db
+      .select({
+        id: schema.adSpendLogs.id,
+        mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
+        mediaBuyerName: buyer.name,
+        productId: schema.adSpendLogs.productId,
+        productName: prod.name,
+        campaignId: schema.adSpendLogs.campaignId,
+        campaignName: camp.name,
+        spendAmount: schema.adSpendLogs.spendAmount,
+        screenshotUrl: schema.adSpendLogs.screenshotUrl,
+        adUrl: schema.adSpendLogs.adUrl,
+        platform: schema.adSpendLogs.platform,
+        spendDate: schema.adSpendLogs.spendDate,
+        status: schema.adSpendLogs.status,
+        rejectionReason: schema.adSpendLogs.rejectionReason,
+        approvedAt: schema.adSpendLogs.approvedAt,
+        rejectedAt: schema.adSpendLogs.rejectedAt,
+        createdAt: schema.adSpendLogs.createdAt,
+      })
+      .from(schema.adSpendLogs)
+      .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
+      .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
+      .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
+      .where(whereClause)
+      .orderBy(desc(schema.adSpendLogs.spendDate));
+
+    type Line = (typeof records)[number];
+    const byKey = new Map<
+      string,
+      {
+        spendDate: string;
+        mediaBuyerId: string;
+        mediaBuyerName: string | null;
+        lines: Line[];
+      }
+    >();
+    for (const row of records) {
+      const ymd = this.spendDateToYmd(row.spendDate);
+      const key = `${ymd}::${row.mediaBuyerId}`;
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.lines.push(row);
+      } else {
+        byKey.set(key, {
+          spendDate: ymd,
+          mediaBuyerId: row.mediaBuyerId,
+          mediaBuyerName: row.mediaBuyerName,
+          lines: [row],
+        });
+      }
+    }
+
+    const allGroups = Array.from(byKey.values()).map((g) => {
+      const totalAmount = g.lines.reduce((acc, l) => acc + Number(l.spendAmount), 0);
+      const statuses = new Set(g.lines.map((l) => l.status));
+      let rolledStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
+      if (statuses.has('PENDING')) rolledStatus = 'PENDING';
+      else if (statuses.size === 1 && statuses.has('APPROVED')) rolledStatus = 'APPROVED';
+      else if (statuses.size === 1 && statuses.has('REJECTED')) rolledStatus = 'REJECTED';
+      else rolledStatus = 'MIXED';
+      return {
+        spendDate: g.spendDate,
+        mediaBuyerId: g.mediaBuyerId,
+        mediaBuyerName: g.mediaBuyerName,
+        lineCount: g.lines.length,
+        totalAmount: String(totalAmount),
+        rolledStatus,
+        lines: g.lines,
+      };
+    });
+
+    allGroups.sort((a, b) => {
+      if (a.spendDate !== b.spendDate) return a.spendDate < b.spendDate ? 1 : -1;
+      return (a.mediaBuyerName ?? '').localeCompare(b.mediaBuyerName ?? '');
+    });
+
+    const total = allGroups.length;
+    const start = (page - 1) * limit;
+    const groups = allGroups.slice(start, start + limit);
+
+    return {
+      groups,
+      pagination: { page, limit, total },
+    };
+  }
+
   async adSpendStatusCounts(input: AdSpendStatusCountsInput, branchId?: string | null) {
     const buyer = alias(schema.users, 'ad_spend_cnt_buyer');
     const prod = alias(schema.products, 'ad_spend_cnt_product');
@@ -1763,11 +1963,16 @@ export class MarketingService {
           endDate,
           branchId,
         );
+        const profitabilityScore =
+          metrics.totalSpend > 0
+            ? Math.min(1, metrics.trueRoas / PROFITABILITY_ROAS_TARGET)
+            : null;
         return {
           mediaBuyerId: buyer.id,
           name: buyer.name,
           email: buyer.email,
           ...metrics,
+          profitabilityScore,
         };
       }),
     );
@@ -1819,6 +2024,166 @@ export class MarketingService {
     }
 
     return alerts;
+  }
+
+  // ============================================
+  // Cross-Funnel Attempts (per-MB visibility, never CS)
+  // ============================================
+
+  /**
+   * List cross-funnel attempts the actor is allowed to see.
+   * - MEDIA_BUYER: their own attempts (where they were the runner-up MB)
+   * - HEAD_OF_MARKETING: every MB on their currentBranchId
+   * - admin-class: all (optionally filtered by branchId)
+   *
+   * Never includes data CS or non-marketing staff would see — call sites should
+   * only mount this in the marketing module.
+   */
+  async listMyCrossFunnelAttempts(
+    caller: { id: string; role: string },
+    input: {
+      startDate?: string;
+      endDate?: string;
+      productId?: string;
+      page?: number;
+      limit?: number;
+    },
+    branchId?: string | null,
+  ) {
+    const page = Math.max(1, input.page ?? 1);
+    const limit = Math.min(100, Math.max(1, input.limit ?? 20));
+    const offset = (page - 1) * limit;
+
+    const conditions: SQL[] = [];
+
+    if (caller.role === 'MEDIA_BUYER') {
+      conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
+    } else if (caller.role === 'HEAD_OF_MARKETING') {
+      if (!branchId) {
+        return { rows: [], total: 0, page, limit, totalPages: 0 };
+      }
+      conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
+    } else if (isAdminLevel({ role: caller.role })) {
+      if (branchId) conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
+    } else {
+      return { rows: [], total: 0, page, limit, totalPages: 0 };
+    }
+
+    if (input.startDate) {
+      conditions.push(gte(schema.crossFunnelAttempts.attemptedAt, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      conditions.push(lte(schema.crossFunnelAttempts.attemptedAt, new Date(input.endDate)));
+    }
+    if (input.productId) {
+      conditions.push(eq(schema.crossFunnelAttempts.productId, input.productId));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [{ value: total } = { value: 0 }] = await this.db
+      .select({ value: count() })
+      .from(schema.crossFunnelAttempts)
+      .where(whereClause);
+
+    const productAlias = alias(schema.products, 'cfa_product');
+    const winnerAlias = alias(schema.users, 'cfa_winner');
+    const ownerAlias = alias(schema.users, 'cfa_owner');
+
+    const rows = await this.db
+      .select({
+        id: schema.crossFunnelAttempts.id,
+        customerName: schema.crossFunnelAttempts.customerName,
+        attemptedAt: schema.crossFunnelAttempts.attemptedAt,
+        productId: schema.crossFunnelAttempts.productId,
+        productName: productAlias.name,
+        mediaBuyerId: schema.crossFunnelAttempts.mediaBuyerId,
+        mediaBuyerName: ownerAlias.name,
+        campaignId: schema.crossFunnelAttempts.campaignId,
+        originalOrderId: schema.crossFunnelAttempts.originalOrderId,
+        originalMediaBuyerName: winnerAlias.name,
+      })
+      .from(schema.crossFunnelAttempts)
+      .leftJoin(productAlias, eq(schema.crossFunnelAttempts.productId, productAlias.id))
+      .leftJoin(
+        winnerAlias,
+        eq(schema.crossFunnelAttempts.originalMediaBuyerId, winnerAlias.id),
+      )
+      .leftJoin(ownerAlias, eq(schema.crossFunnelAttempts.mediaBuyerId, ownerAlias.id))
+      .where(whereClause)
+      .orderBy(desc(schema.crossFunnelAttempts.attemptedAt))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      rows,
+      total: Number(total),
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(Number(total) / limit)),
+    };
+  }
+
+  /**
+   * Aggregate cross-funnel attempt stats for the actor's view (count, per-product
+   * breakdown). Same scoping rules as listMyCrossFunnelAttempts.
+   */
+  async crossFunnelStats(
+    caller: { id: string; role: string },
+    input: { startDate?: string; endDate?: string },
+    branchId?: string | null,
+  ) {
+    const conditions: SQL[] = [];
+
+    if (caller.role === 'MEDIA_BUYER') {
+      conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
+    } else if (caller.role === 'HEAD_OF_MARKETING') {
+      if (!branchId) return { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
+      conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
+    } else if (isAdminLevel({ role: caller.role })) {
+      if (branchId) conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
+    } else {
+      return { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
+    }
+
+    if (input.startDate) {
+      conditions.push(gte(schema.crossFunnelAttempts.attemptedAt, new Date(input.startDate)));
+    }
+    if (input.endDate) {
+      conditions.push(lte(schema.crossFunnelAttempts.attemptedAt, new Date(input.endDate)));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [totals = { totalAttempts: 0, uniqueCustomers: 0 }] = await this.db
+      .select({
+        totalAttempts: count(),
+        uniqueCustomers: sql<number>`COUNT(DISTINCT ${schema.crossFunnelAttempts.customerPhoneHash})`,
+      })
+      .from(schema.crossFunnelAttempts)
+      .where(whereClause);
+
+    const productAlias = alias(schema.products, 'cfa_product');
+    const perProduct = await this.db
+      .select({
+        productId: schema.crossFunnelAttempts.productId,
+        productName: productAlias.name,
+        attempts: count(),
+      })
+      .from(schema.crossFunnelAttempts)
+      .leftJoin(productAlias, eq(schema.crossFunnelAttempts.productId, productAlias.id))
+      .where(whereClause)
+      .groupBy(schema.crossFunnelAttempts.productId, productAlias.name)
+      .orderBy(desc(count()));
+
+    return {
+      totalAttempts: Number(totals.totalAttempts),
+      uniqueCustomers: Number(totals.uniqueCustomers),
+      perProduct: perProduct.map((row) => ({
+        productId: row.productId,
+        productName: row.productName,
+        attempts: Number(row.attempts),
+      })),
+    };
   }
 
   // ============================================
@@ -2016,7 +2381,7 @@ export class MarketingService {
       id: string;
       name: string;
       price: string;
-      offers: Array<{ label: string; qty: number; price: string }>;
+      offers: Array<{ label: string; qty: number; price: string; imageUrls?: string[] }>;
     }> = [];
 
     const pIds = (campaign.productIds ?? []) as string[];
@@ -2034,7 +2399,12 @@ export class MarketingService {
 
       const p = pRows[0];
       if (p) {
-        const productOffers = (p.offers ?? []) as Array<{ label: string; qty: number; price: string }>;
+        const productOffers = (p.offers ?? []) as Array<{
+          label: string;
+          qty: number;
+          price: string;
+          imageUrls?: string[];
+        }>;
         products.push({
           id: p.id,
           name: p.name,

@@ -4,6 +4,9 @@ export const permissionRequestTypeSchema = z.enum([
   'USER_CREATION',
   'ROLE_CHANGE',
   'PERMISSION_GRANT',
+  'PRODUCT_ARCHIVE',
+  'ORDER_LINE_PRICE_CHANGE',
+  'ORDER_DELETION',
 ]);
 
 export type PermissionRequestType = z.infer<typeof permissionRequestTypeSchema>;

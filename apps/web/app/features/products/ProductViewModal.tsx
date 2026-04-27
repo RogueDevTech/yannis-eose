@@ -87,17 +87,28 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
                 {product.offers.map((offer, index) => (
                   <div
                     key={index}
-                    className="flex items-center justify-between gap-4 p-3 rounded-lg bg-app-hover border border-app-border"
+                    className="flex flex-col gap-2 p-3 rounded-lg bg-app-hover border border-app-border"
                   >
-                    <div className="min-w-0">
-                      <p className="font-medium text-app-fg">{offer.label || `Qty ${offer.qty}`}</p>
-                      <p className="text-xs text-app-fg-muted">
-                        {offer.qty} unit{offer.qty !== 1 ? 's' : ''}
-                      </p>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="font-medium text-app-fg">{offer.label || `Qty ${offer.qty}`}</p>
+                        <p className="text-xs text-app-fg-muted">
+                          {offer.qty} unit{offer.qty !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold text-app-fg tabular-nums">
+                        &#8358;{Number(offer.price).toLocaleString()}
+                      </span>
                     </div>
-                    <span className="text-sm font-semibold text-app-fg tabular-nums">
-                      &#8358;{Number(offer.price).toLocaleString()}
-                    </span>
+                    {offer.imageUrls && offer.imageUrls.length > 0 && (
+                      <ul className="flex flex-wrap gap-1.5">
+                        {offer.imageUrls.map((url) => (
+                          <li key={url} className="w-14 h-14 rounded border border-app-border overflow-hidden shrink-0">
+                            <img src={url} alt="" className="w-full h-full object-cover" />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 ))}
               </div>

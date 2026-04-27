@@ -14,7 +14,9 @@
  *   5. Admin in global mode (`currentBranchId = NULL`) sees everyone
  */
 
+import { randomUUID } from 'crypto';
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
 import { createTestUser, createTestBranch } from '../test/factories/order.factory';
 import { UsersService } from './users.service';
@@ -168,5 +170,57 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const ids = result.users.map((u) => u.id);
     expect(ids).toContain(mbMain.id);
     expect(ids).not.toContain(homLagos.id);
+  });
+});
+
+describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () => {
+  const pgClient = getPgClient();
+  const db = getDb();
+
+  const authStub = {
+    hashPassword: async () => '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+  } as unknown as AuthService;
+
+  const notificationsStub = {
+    sendInviteEmail: async () => false,
+    create: async () => {},
+  } as unknown as NotificationsService;
+
+  const permissionsStub = {
+    isSensitiveRole: () => false,
+  } as unknown as PermissionsService;
+
+  beforeEach(async () => {
+    await pgClient`BEGIN`;
+  });
+
+  afterEach(async () => {
+    await pgClient`ROLLBACK`;
+  });
+
+  it('createStaff rejects a second HEAD_OF_CS while another ACTIVE holder exists', async () => {
+    const branch = await createTestBranch(db as any);
+    const branch2 = await createTestBranch(db as any);
+    const existing = await createTestUser(db as any, { role: 'HEAD_OF_CS' });
+    await db.update(schema.users).set({ primaryBranchId: branch.id }).where(eq(schema.users.id, existing.id));
+
+    const admin = await createTestUser(db as any, { role: 'SUPER_ADMIN' });
+    await setSessionActor(pgClient, admin.id, null);
+
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub);
+
+    await expect(
+      svc.createStaff(
+        {
+          name: 'Second HoCS',
+          email: `second-hocs-${randomUUID()}@yannis.test`,
+          role: 'HEAD_OF_CS',
+          status: 'PENDING',
+          primaryBranchId: branch2.id,
+          phone: '08031234567',
+        },
+        { id: admin.id, role: 'SUPER_ADMIN', name: 'Admin', currentBranchId: null } as any,
+      ),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 });

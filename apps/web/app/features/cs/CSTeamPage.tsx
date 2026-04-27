@@ -1,8 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
-import { Link, useFetcher, useRevalidator } from '@remix-run/react';
-import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
-import { Button } from '~/components/ui/button';
-import { useToast } from '~/components/ui/toast';
+import { Link } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -14,10 +10,9 @@ import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 export interface CSTeamPageProps {
   teamMembers: CSTeamMemberOverview[];
   summary: { agentCount: number; totalPending: number; idleCount: number };
-  canReassign?: boolean;
   page?: number;
   totalPages?: number;
-  /** Date filter from URL — controls the leaderboard window for confirm/delivery rates. */
+  /** Date filter from URL — controls the leaderboard window for order counts. */
   dateFilters?: { startDate: string; endDate: string; periodAllTime: boolean };
 }
 
@@ -47,15 +42,7 @@ function memberInitials(name: string): string {
     .toUpperCase();
 }
 
-function CSTeamMemberCard({
-  member,
-  canReassign,
-  onRedistribute,
-}: {
-  member: CSTeamMemberOverview;
-  canReassign: boolean;
-  onRedistribute: (member: CSTeamMemberOverview) => void;
-}) {
+function CSTeamMemberCard({ member }: { member: CSTeamMemberOverview }) {
   const initials = memberInitials(member.name);
   const isAgent = member.role === 'CS_AGENT';
   const workload = member.workload;
@@ -111,16 +98,16 @@ function CSTeamMemberCard({
           {leaderboard && (
             <div className="grid grid-cols-3 gap-2 mb-3 text-xs text-app-fg-muted">
               <div>
+                <span className="font-medium text-app-fg">{leaderboard.ordersEngaged}</span>
+                <span className="block text-app-fg-muted">Assigned</span>
+              </div>
+              <div>
                 <span className="font-medium text-app-fg">{leaderboard.ordersDelivered}</span>
                 <span className="block text-app-fg-muted">Delivered</span>
               </div>
               <div>
-                <span className="font-medium text-app-fg">{Math.round(leaderboard.confirmationRate)}%</span>
-                <span className="block text-app-fg-muted">Confirm</span>
-              </div>
-              <div>
-                <span className="font-medium text-app-fg">{Math.round(leaderboard.deliveryRate)}%</span>
-                <span className="block text-app-fg-muted">Delivery</span>
+                <span className="font-medium text-app-fg">{leaderboard.ordersConfirmed}</span>
+                <span className="block text-app-fg-muted">Confirmed</span>
               </div>
             </div>
           )}
@@ -128,17 +115,6 @@ function CSTeamMemberCard({
       )}
 
       <div className="flex flex-nowrap items-center gap-2">
-        {isAgent && canReassign && (
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            className="text-xs shrink-0"
-            onClick={() => onRedistribute(member)}
-          >
-            Redistribute
-          </Button>
-        )}
         <Link
           to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}
           prefetch="intent"
@@ -166,32 +142,12 @@ function activityCell(member: CSTeamMemberOverview): string {
   return '\u2014';
 }
 
-export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1, totalPages = 1, dateFilters }: CSTeamPageProps) {
-  const fetcher = useFetcher<{ success?: boolean; error?: string; redistributed?: number }>();
-  const revalidator = useRevalidator();
-  const { toast } = useToast();
-  const [redistributeMember, setRedistributeMember] = useState<CSTeamMemberOverview | null>(null);
-  const prevFetcherData = useRef(fetcher.data);
-
-  useEffect(() => {
-    if (fetcher.data === prevFetcherData.current) return;
-    prevFetcherData.current = fetcher.data;
-    if (!fetcher.data || typeof fetcher.data !== 'object') return;
-    if (fetcher.data.success) {
-      setRedistributeMember(null);
-      const n = fetcher.data.redistributed ?? 0;
-      toast.success(n === 0 ? 'No orders to redistribute.' : `${n} order${n === 1 ? '' : 's'} redistributed.`);
-      revalidator.revalidate();
-    } else if (fetcher.data.error) {
-      toast.error('Redistribute failed', fetcher.data.error);
-    }
-  }, [fetcher.data, toast, revalidator]);
-
+export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dateFilters }: CSTeamPageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Team"
-        description="Sales & CS team overview — workload, activity, and the selected period’s performance. View orders or profile per member."
+        title="Team Analysis"
+        description="Closer workload, activity, and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
         actions={
           dateFilters ? (
             <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -243,7 +199,7 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
             <div>
               <h2 className="text-lg font-semibold text-app-fg">Team members</h2>
               <p className="text-sm text-app-fg-muted mt-0.5">
-                Workload, activity, and performance overview.
+                Workload, activity, and order counts for the selected period.
               </p>
             </div>
           </div>
@@ -251,12 +207,7 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
           {/* Mobile: always render card grid (the table view is unusable on a narrow viewport) */}
           <div className="md:hidden grid grid-cols-1 gap-3">
             {teamMembers.map((m) => (
-              <CSTeamMemberCard
-                key={m.id}
-                member={m}
-                canReassign={canReassign}
-                onRedistribute={setRedistributeMember}
-              />
+              <CSTeamMemberCard key={m.id} member={m} />
             ))}
           </div>
 
@@ -264,13 +215,15 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
           <div className="hidden md:block">
             <div className="card p-0 overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px]">
+                <table className="w-full min-w-[880px]">
                   <thead>
                     <tr>
                       <th className="table-header">Member</th>
                       <th className="table-header">Workload</th>
                       <th className="table-header">Activity</th>
-                      <th className="table-header">Performance</th>
+                      <th className="table-header text-right">Assigned</th>
+                      <th className="table-header text-right">Delivered</th>
+                      <th className="table-header text-right">Confirmed</th>
                       <th className="table-header">Actions</th>
                     </tr>
                   </thead>
@@ -319,44 +272,29 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
                               <span className="text-app-fg-muted">{act}</span>
                             )}
                           </td>
-                          <td className="table-cell text-xs text-app-fg-muted max-w-[14rem]">
+                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
                             {lb ? (
-                              <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                                <span>
-                                  <span className="font-medium text-app-fg">{lb.ordersDelivered}</span> delivered
-                                </span>
-                                <span className="text-app-border" aria-hidden>
-                                  ·
-                                </span>
-                                <span>
-                                  <span className="font-medium text-app-fg">{Math.round(lb.confirmationRate)}%</span>{' '}
-                                  confirm
-                                </span>
-                                <span className="text-app-border" aria-hidden>
-                                  ·
-                                </span>
-                                <span>
-                                  <span className="font-medium text-app-fg">{Math.round(lb.deliveryRate)}%</span>{' '}
-                                  delivery
-                                </span>
-                              </span>
+                              <span className="font-medium text-app-fg">{lb.ordersEngaged}</span>
+                            ) : (
+                              '\u2014'
+                            )}
+                          </td>
+                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
+                            {lb ? (
+                              <span className="font-medium text-app-fg">{lb.ordersDelivered}</span>
+                            ) : (
+                              '\u2014'
+                            )}
+                          </td>
+                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
+                            {lb ? (
+                              <span className="font-medium text-app-fg">{lb.ordersConfirmed}</span>
                             ) : (
                               '\u2014'
                             )}
                           </td>
                           <td className="table-cell">
                             <div className="flex flex-wrap items-center gap-2">
-                              {isAgent && canReassign && (
-                                <Button
-                                  type="button"
-                                  variant="primary"
-                                  size="sm"
-                                  className="text-xs shrink-0"
-                                  onClick={() => setRedistributeMember(member)}
-                                >
-                                  Redistribute
-                                </Button>
-                              )}
                               <Link
                                 to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}
                                 prefetch="intent"
@@ -386,36 +324,6 @@ export function CSTeamPage({ teamMembers, summary, canReassign = false, page = 1
             <Pagination page={page} totalPages={totalPages} pageParam="page" />
           )}
         </div>
-      )}
-
-      {redistributeMember && (
-        <ConfirmActionModal
-          open={!!redistributeMember}
-          onClose={() => setRedistributeMember(null)}
-          title="Redistribute orders"
-          description={
-            redistributeMember.workload ? (
-              <>
-                Redistribute {redistributeMember.workload.pendingCount} order
-                {redistributeMember.workload.pendingCount === 1 ? '' : 's'} from{' '}
-                <strong>{redistributeMember.name}</strong> to other closers? Orders will be reassigned using the same
-                dispatch rules (load-balanced or performance).
-              </>
-            ) : (
-              <>Redistribute all active orders from <strong>{redistributeMember.name}</strong> to other closers?</>
-            )
-          }
-          confirmLabel="Redistribute"
-          cancelLabel="Cancel"
-          variant="warning"
-          loading={fetcher.state === 'submitting'}
-          onConfirm={() => {
-            fetcher.submit(
-              { intent: 'redistribute', agentId: redistributeMember.id },
-              { method: 'post' },
-            );
-          }}
-        />
       )}
 
       <div className="card">

@@ -23,6 +23,7 @@ import { playNotificationSound, unlockAudioContext } from '~/lib/notification-so
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
+import { canAccessGlobalAuditLog } from '~/lib/rbac';
 
 interface Notification {
   id: string;
@@ -91,7 +92,7 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
-        label: 'Team',
+        label: 'Team Analysis',
         href: '/admin/marketing/team',
         icon: SidebarIcons.marketing,
         permission: 'marketing.teamOverview',
@@ -127,6 +128,12 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.leaderboards,
         permission: 'marketing.leaderboard',
       },
+      {
+        label: 'Cross-funnel',
+        href: '/admin/marketing/cross-funnel',
+        icon: SidebarIcons.marketing,
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
+      },
     ],
   },
   {
@@ -140,7 +147,7 @@ const navStructure: NavGroupDef[] = [
         permission: 'cs.teamOverview',
       },
       {
-        label: 'Team',
+        label: 'Team Analysis',
         href: '/admin/cs/team',
         icon: SidebarIcons.cs,
         permission: 'cs.teamOverview',
@@ -347,7 +354,7 @@ const navStructure: NavGroupDef[] = [
         label: 'Audit Trail',
         href: '/admin/analytics/audit',
         icon: SidebarIcons.audit,
-        // No permission — transparency policy: every authenticated user can view the audit trail.
+        permission: 'audit.read',
       },
     ],
   },
@@ -367,7 +374,7 @@ function getDisplayLabelMobile(item: NavItemDef, user: { role: string } | null):
 }
 
 function getNavGroupsForUser(
-  user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean } | null,
+  user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean; currentBranchId?: string | null } | null,
   options?: { forMobile?: boolean },
 ): SidebarGroup[] {
   const result: SidebarGroup[] = [];
@@ -394,6 +401,9 @@ function getNavGroupsForUser(
 
     const visibleItems = groupDef.items
       .filter((item) => {
+        if (item.href === '/admin/analytics/audit') {
+          return canAccessGlobalAuditLog(user);
+        }
         if (item.href === '/admin/finance/staff-accounts') {
           if ((user?.isFinanceOfficer ?? false) === true) return true;
         }
@@ -484,7 +494,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
 const FLAT_NAV_ITEMS = navStructure.flatMap((g) => g.items);
 
 function getBottomNavItemsForUser(
-  user: { role: string; permissions?: string[] } | null,
+  user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean } | null,
 ): BottomNavItem[] {
   if (!user) return [];
   const role = user.role ?? '';
@@ -502,7 +512,8 @@ function getBottomNavItemsForUser(
         !item.permission ||
         isSuperAdmin ||
         (item.roles?.includes(role) ?? false) ||
-        perms.includes(item.permission);
+        perms.includes(item.permission) ||
+        (item.href === '/admin/analytics/audit' && canAccessGlobalAuditLog(user));
       if (allowed) {
         result.push({
           label: getDisplayLabelMobile(item, user),

@@ -21,6 +21,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Pagination } from '~/components/ui/pagination';
 import { Textarea } from '~/components/ui/textarea';
+import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
   DistributingFundingEntry,
@@ -105,6 +106,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const isMediaBuyer = viewMode === 'media_buyer';
   const fetcher = useFetcher();
   const { toast } = useToast();
+  const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
   const revalidator = useRevalidator();
   const navigation = useNavigation();
   const location = useLocation();
@@ -173,6 +175,12 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   useEffect(() => {
     if (actionError) setDismissedError(false);
   }, [actionError]);
+  useEffect(() => {
+    if (!actionError) return;
+    if (!requiresBranchSelection) return;
+    if (!actionError.toLowerCase().includes('branch context required')) return;
+    ensureBranchForAction({ actionLabel: 'this funding action' });
+  }, [actionError, requiresBranchSelection, ensureBranchForAction]);
 
   useEffect(() => {
     if (actionSuccess && showSendForm) setShowSendForm(false);
@@ -268,7 +276,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     }
     const fd = new FormData(formEl);
     fd.set('receiptUrl', parsed.data.receiptUrl);
-    fetcher.submit(fd, { method: 'post' });
+    ensureBranchForAction({
+      actionLabel: 'sending funding',
+      onProceed: () => fetcher.submit(fd, { method: 'post' }),
+    });
   };
 
   const handleApproveFundingRequestSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -284,7 +295,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     }
     const fd = new FormData(e.currentTarget);
     fd.set('receiptUrl', parsed.data.receiptUrl);
-    fetcher.submit(fd, { method: 'post' });
+    ensureBranchForAction({
+      actionLabel: 'approving funding request',
+      onProceed: () => fetcher.submit(fd, { method: 'post' }),
+    });
   };
 
   const createFundingSubmitDisabled =
@@ -427,7 +441,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             </p>
           </div>
           <div className="shrink-0 flex flex-wrap gap-2 justify-end">
-            {displaySection === 'received' && canRequestFunding && (
+            {canRequestFunding && (
               <Button variant="primary" size="sm" onClick={() => setShowRequestForm(true)}>
                 + Request Funds
               </Button>
@@ -698,7 +712,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 fd.set('intent', 'verifyFunding');
                 fd.set('fundingId', markReceivedTarget.id);
                 fd.set('action', 'COMPLETED');
-                fetcher.submit(fd, { method: 'post' });
+                ensureBranchForAction({
+                  actionLabel: 'marking funding as received',
+                  onProceed: () => fetcher.submit(fd, { method: 'post' }),
+                });
               }}
             >
               Mark as received

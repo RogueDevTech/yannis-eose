@@ -6,6 +6,10 @@ import { AuthPage } from '~/features/auth/AuthPage';
 
 const ALLOWED_REDIRECT_PREFIXES = ['/admin', '/tpl', '/rider'] as const;
 
+/** Shown when Nest returns 200 from /auth/login but Remix cannot forward any Set-Cookie (split web/API deploys need SESSION_COOKIE_DOMAIN on the API). */
+const SESSION_COOKIE_FORWARD_FAILED =
+  'Sign-in succeeded but no session cookie was received from the API. When the web app and API use different hostnames, set SESSION_COOKIE_DOMAIN on the API to your parent domain (e.g. .roguedevtech.com), redeploy the API, and try again. If this persists, check that nothing strips Set-Cookie between the API and the app server.';
+
 function isAllowedRedirectPath(path: string): boolean {
   try {
     const decoded = decodeURIComponent(path);
@@ -102,6 +106,13 @@ async function handleLogin(request: Request, formData: FormData) {
     return json({ error: errorData.message ?? 'Invalid credentials' }, { status: safeStatus(res.status) });
   }
 
+  if (res.setCookies.length === 0) {
+    console.error(
+      '[auth] POST /auth/login returned OK but setCookies is empty — Remix cannot set yannis_session in the browser. Check API SESSION_COOKIE_DOMAIN and any proxy stripping Set-Cookie.',
+    );
+    return json({ error: SESSION_COOKIE_FORWARD_FAILED }, { status: 503 });
+  }
+
   const headers = new Headers();
   for (const c of res.setCookies) {
     headers.append('Set-Cookie', c);
@@ -162,6 +173,16 @@ async function handleSetup(request: Request, formData: FormData) {
     const redirectTo = url.searchParams.get('redirectTo');
     const target = redirectTo && isAllowedRedirectPath(redirectTo) ? decodeURIComponent(redirectTo) : '/admin';
     return redirect(target, { headers });
+  }
+
+  if (loginRes.ok && loginRes.setCookies.length === 0) {
+    console.error('[auth] setup auto-login: login OK but no Set-Cookie from API.');
+    return json(
+      {
+        error: `${SESSION_COOKIE_FORWARD_FAILED} You can still sign in manually with the account you just created.`,
+      },
+      { status: 503 },
+    );
   }
 
   // If auto-login fails, just redirect to login page

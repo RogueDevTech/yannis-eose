@@ -6,6 +6,24 @@ export interface AgentWorkload {
   lastActionAt: string | null;
 }
 
+/** Line item on a closer's pending workload order (from `orders.closerWorkloadOrders`). */
+export interface CloserWorkloadOrderItem {
+  productName: string | null;
+  quantity: number;
+  unitPrice: string;
+  offerLabel: string | null;
+}
+
+export interface CloserWorkloadOrder {
+  id: string;
+  status: string;
+  customerName: string;
+  createdAt: string;
+  updatedAt: string;
+  totalAmount: string | null;
+  items: CloserWorkloadOrderItem[];
+}
+
 export interface InactiveAgent {
   agentId: string;
   agentName: string;
@@ -147,6 +165,11 @@ export interface CSDashboardStreamData {
   unassignedTotal: number;
   activeOrders: CSOrder[];
   activeTotal: number;
+  /**
+   * Hot Swap order list for `?hotSwapFrom=` / `?from=` when opening Hot Swap — matches workload
+   * pipeline (UNPROCESSED, CS_ASSIGNED, CS_ENGAGED) for that closer, up to 100 rows.
+   */
+  hotSwapOrdersPayload: { forAgentId: string; orders: CSOrder[]; total: number } | null;
   statusCounts: Record<string, number>;
   /** True when CS_DISPATCH_STRATEGY = 'claim' (no auto-assignment). */
   isClaimMode?: boolean;
@@ -180,6 +203,4 @@ export interface CSDashboardStreamData {
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
   /** Deep-link: open this tab on load (from `?tab=`). */
   initialTab?: CSQueueTab;
-  /** Deep-link: pre-select this agent ID as "From" in Hot Swap (requires initialTab === 'hotswap'). */
-  initialHotSwapFrom?: string;
 }

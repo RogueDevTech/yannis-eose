@@ -81,6 +81,7 @@ export interface CEODashboardData {
       cpa: number;
       trueRoas: number;
       deliveryRate: number;
+      profitabilityScore: number | null;
     }>;
     csWorkloads?: Array<{
       agentId: string;

@@ -9,6 +9,10 @@ import {
   processEmailChangeSchema,
   updateMyAppThemeSchema,
   updateMyFontScaleSchema,
+  updateMyNotificationPreferencesSchema,
+  getRelevantNotificationTypesForRole,
+  NOTIFICATION_TYPE_META,
+  MANDATORY_EMAIL_TYPES,
 } from '@yannis/shared';
 import type { UsersService } from '../../users/users.service';
 import type { SessionStoreService } from '../../auth/session-store.service';
@@ -142,6 +146,45 @@ export const usersRouter = router({
         }
       }
       return result;
+    }),
+
+  /**
+   * Get the calling user's notification preferences along with the catalog of types
+   * relevant to their role (used to render the Settings → Notifications toggles).
+   * Mandatory types are filtered OUT — they cannot be toggled.
+   */
+  getMyNotificationPreferences: authedProcedure.query(async ({ ctx }) => {
+    const prefs = await getUsersService().getMyNotificationPreferences(ctx.user.id);
+    const relevantTypes = getRelevantNotificationTypesForRole(
+      ctx.user.role,
+      ctx.user.isFinanceOfficer === true,
+    );
+    const mandatory = new Set<string>(MANDATORY_EMAIL_TYPES);
+    const items = relevantTypes
+      .filter((t) => !mandatory.has(t))
+      .map((t) => {
+        const meta = NOTIFICATION_TYPE_META[t];
+        const explicit = prefs[t];
+        return {
+          type: t,
+          label: meta.label,
+          description: meta.description,
+          category: meta.category,
+          enabled: explicit !== false, // default ON unless explicitly disabled
+        };
+      });
+    return { items, preferences: prefs };
+  }),
+
+  /**
+   * Save the calling user's notification preferences. Map of type → enabled.
+   * Only `false` entries actually change behavior (they opt the user out); the
+   * notifications service treats missing keys as enabled.
+   */
+  updateMyNotificationPreferences: authedProcedure
+    .input(updateMyNotificationPreferencesSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getUsersService().updateMyNotificationPreferences(input.preferences, ctx.user);
     }),
 
   /**

@@ -17,6 +17,7 @@ import { DRIZZLE, REDIS } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { SessionStoreService } from './session-store.service';
+import { BranchTeamsService } from '../branches/branch-teams.service';
 
 const RATE_LIMIT_PREFIX = 'login_rate:';
 const RESET_TOKEN_PREFIX = 'pwd_reset:';
@@ -35,6 +36,7 @@ export class AuthService {
     @Inject(REDIS) private readonly redis: Redis,
     private readonly notifications: NotificationsService,
     private readonly sessionStore: SessionStoreService,
+    private readonly branchTeams: BranchTeamsService,
   ) {
     this.sessionTtl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10); // 24 hours
     this.maxLoginAttempts = 5;
@@ -184,12 +186,17 @@ export class AuthService {
       throw new BadRequestException('Cannot mirror an inactive user.');
     }
 
-    if (
-      !canMirror(
-        { id: actor.id, role: actor.role, currentBranchId: actor.currentBranchId, mirroredBy: actor.mirroredBy },
-        { id: target.id, role: target.role, primaryBranchId: target.primaryBranchId },
-      )
-    ) {
+    const syncMirror = canMirror(
+      { id: actor.id, role: actor.role, currentBranchId: actor.currentBranchId, mirroredBy: actor.mirroredBy },
+      { id: target.id, role: target.role, primaryBranchId: target.primaryBranchId },
+    );
+    const viaSupervision =
+      !syncMirror &&
+      (await this.branchTeams.actorCanMirrorViaSupervision(
+        { id: actor.id, currentBranchId: actor.currentBranchId },
+        { id: target.id, role: target.role },
+      ));
+    if (!syncMirror && !viaSupervision) {
       throw new ForbiddenException('You are not allowed to mirror this user.');
     }
 

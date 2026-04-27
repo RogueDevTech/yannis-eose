@@ -92,17 +92,30 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
             {product.offers.map((offer, index) => (
               <div
                 key={index}
-                className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-lg bg-app-hover border border-app-border"
+                className="flex flex-col gap-3 p-4 rounded-lg bg-app-hover border border-app-border"
               >
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-app-fg">{offer.label}</p>
-                  <p className="text-sm text-app-fg-muted mt-0.5">
-                    {offer.qty} unit{offer.qty !== 1 ? 's' : ''} · &#8358;{Number(offer.price).toLocaleString()}
-                  </p>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-app-fg">{offer.label}</p>
+                    <p className="text-sm text-app-fg-muted mt-0.5">
+                      {offer.qty} unit{offer.qty !== 1 ? 's' : ''} · &#8358;{Number(offer.price).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-sm font-semibold text-app-fg sm:text-right">
+                    &#8358;{Number(offer.price).toLocaleString()}
+                  </div>
                 </div>
-                <div className="text-sm font-semibold text-app-fg sm:text-right">
-                  &#8358;{Number(offer.price).toLocaleString()}
-                </div>
+                {offer.imageUrls && offer.imageUrls.length > 0 && (
+                  <ul className="flex flex-wrap gap-2">
+                    {offer.imageUrls.map((url) => (
+                      <li key={url} className="w-20 h-20 rounded-md border border-app-border overflow-hidden bg-app-elevated shrink-0">
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                          <img src={url} alt="" className="w-full h-full object-cover" />
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             ))}
           </div>

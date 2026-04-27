@@ -3,6 +3,8 @@
  * Import from here — do NOT duplicate role/permission checks inline.
  */
 
+import { hasFinanceAccess } from './utils/strip-finance-fields';
+
 /**
  * Admin-level roles: bypass permission checks, see all branches, have full
  * operational authority. SUPER_ADMIN additionally may manage other Admins
@@ -29,12 +31,52 @@ export function isSuperAdminOnly(user: { role: string }): boolean {
   return user.role === 'SUPER_ADMIN';
 }
 
+/** Org-wide singleton heads: one active holder per role for the whole org; cross-branch visibility. */
+export const ORG_WIDE_DEPARTMENT_HEAD_ROLES = new Set<string>([
+  'HEAD_OF_CS',
+  'HEAD_OF_MARKETING',
+  'HEAD_OF_LOGISTICS',
+]);
+
+export function isOrgWideDepartmentHead(user: { role: string }): boolean {
+  return ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(user.role);
+}
+
 /**
  * Returns true if the user is allowed to see cross-branch data.
- * SUPER_ADMIN + ADMIN have global visibility.
+ * SUPER_ADMIN, ADMIN, and org-wide department heads (CS / Marketing / Logistics).
  */
 export function canViewAllBranches(user: { role: string; permissions?: string[] }): boolean {
-  return ADMIN_LEVEL_ROLES.has(user.role);
+  return ADMIN_LEVEL_ROLES.has(user.role) || isOrgWideDepartmentHead(user);
+}
+
+/** Session fields needed for global audit log / mirror-session audit access. */
+export type GlobalAuditAccessUser = {
+  role: string;
+  permissions?: string[];
+  isFinanceOfficer?: boolean;
+  currentBranchId?: string | null;
+};
+
+/**
+ * Global audit UI (`/admin/analytics/audit`) and `audit.globalLog` — not every authed user.
+ * Admin + finance (primary or hat) see org-wide rows; others need `audit.read`.
+ */
+export function canAccessGlobalAuditLog(user: GlobalAuditAccessUser): boolean {
+  if (isAdminLevel(user)) return true;
+  if (hasFinanceAccess(user)) return true;
+  if (user.permissions?.includes('audit.read')) return true;
+  return false;
+}
+
+/**
+ * When true, `getGlobalAuditLog` restricts UNION arms to the viewer's `currentBranchId`
+ * (and drops mirror_sessions + tables without branch columns).
+ */
+export function shouldScopeGlobalAuditToBranch(user: GlobalAuditAccessUser): boolean {
+  if (!canAccessGlobalAuditLog(user)) return false;
+  if (isAdminLevel(user) || hasFinanceAccess(user)) return false;
+  return Boolean(user.currentBranchId);
 }
 
 /**
@@ -62,9 +104,10 @@ const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
  *
  * Rules (per CEO directive):
  * - SuperAdmin / Admin can mirror anyone EXCEPT another admin-level user.
- * - HEAD_OF_CS can mirror CS_AGENT on their own branch.
- * - HEAD_OF_MARKETING can mirror MEDIA_BUYER on their own branch.
- * - HEAD_OF_LOGISTICS can mirror LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER on their own branch.
+ * - HEAD_OF_CS can mirror any CS_AGENT (org-wide head — not limited to a single branch).
+ * - HEAD_OF_MARKETING can mirror any MEDIA_BUYER.
+ * - HEAD_OF_LOGISTICS can mirror LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER org-wide.
+ * - Branch team supervisors mirror via `BranchTeamsService.actorCanMirrorViaSupervision` (same branch).
  * - HR_MANAGER cannot mirror anyone (per directive — HR doesn't need it).
  * - Nobody can mirror themselves.
  *
@@ -88,14 +131,17 @@ export function canMirror(
 
   if (ADMIN_LEVEL_ROLES.has(actor.role)) return true;
 
+  if (isOrgWideDepartmentHead(actor)) {
+    if (actor.role === 'HEAD_OF_CS' && target.role === 'CS_AGENT') return true;
+    if (actor.role === 'HEAD_OF_MARKETING' && target.role === 'MEDIA_BUYER') return true;
+    if (actor.role === 'HEAD_OF_LOGISTICS' && HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role))
+      return true;
+    return false;
+  }
+
   const sameBranch =
     !!actor.currentBranchId && target.primaryBranchId === actor.currentBranchId;
   if (!sameBranch) return false;
-
-  if (actor.role === 'HEAD_OF_CS' && target.role === 'CS_AGENT') return true;
-  if (actor.role === 'HEAD_OF_MARKETING' && target.role === 'MEDIA_BUYER') return true;
-  if (actor.role === 'HEAD_OF_LOGISTICS' && HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role))
-    return true;
 
   return false;
 }

@@ -1,14 +1,18 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, desc } from 'drizzle-orm';
+import type { InferSelectModel } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
-import type { CreateStaffInput, UpdateStaffInput } from '@yannis/shared';
+import type { CreateStaffInput, UpdateStaffInput, UpdateOrderInput } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { withActor } from '../common/db/with-actor';
+import { isAdminLevel, isSuperAdminOnly } from '../common/authz';
+import { ProductsService } from '../products/products.service';
+import { OrdersService } from '../orders/orders.service';
 
 @Injectable()
 export class PermissionRequestsService {
@@ -16,7 +20,67 @@ export class PermissionRequestsService {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly usersService: UsersService,
     private readonly notificationsService: NotificationsService,
+    private readonly productsService: ProductsService,
+    private readonly ordersService: OrdersService,
   ) {}
+
+  private async assertApproverMayProcessRequest(
+    approver: SessionUser,
+    req: InferSelectModel<typeof schema.permissionRequests>,
+  ): Promise<void> {
+    if (req.type === 'PRODUCT_ARCHIVE') {
+      if (!isSuperAdminOnly(approver)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only SuperAdmin can process product archive requests.',
+        });
+      }
+      return;
+    }
+    if (req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION') {
+      const payload = req.payload as { orderId?: string } | null;
+      const orderId = payload?.orderId;
+      if (!orderId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            req.type === 'ORDER_DELETION'
+              ? 'Invalid order archive request payload.'
+              : 'Invalid price-change request payload.',
+        });
+      }
+      const [order] = await this.db
+        .select()
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+      if (!order) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order referenced by this request was not found.' });
+      }
+      if (order.deletedAt) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This order has already been archived.' });
+      }
+      const allowed = await this.ordersService.canActorEditOrderLinePrices(approver, {
+        branchId: order.branchId ?? null,
+        assignedCsId: order.assignedCsId ?? null,
+      });
+      if (!allowed) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Only Head of CS, Head of Logistics, Branch Admin, a CS team supervisor for the assignee, or an Admin may process this request.',
+        });
+      }
+      return;
+    }
+    const hasAudit = approver.permissions?.includes('audit.read') ?? false;
+    if (!hasAudit && !isAdminLevel(approver)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You do not have permission to process this type of request.',
+      });
+    }
+  }
 
   /**
    * List all PENDING permission requests. Kept for backwards compatibility; thin wrapper
@@ -99,8 +163,8 @@ export class PermissionRequestsService {
   }
 
   /**
-   * Approve a permission request. SuperAdmin only.
-   * Applies the change: creates user (USER_CREATION) or updates role (ROLE_CHANGE).
+   * Approve a permission request. Gate varies by type (see assertApproverMayProcessRequest).
+   * Applies the underlying change, then stamps the request row.
    */
   async approve(requestId: string, approver: SessionUser, reason: string) {
     const [req] = await this.db
@@ -122,6 +186,8 @@ export class PermissionRequestsService {
         message: 'Cannot approve your own request',
       });
     }
+
+    await this.assertApproverMayProcessRequest(approver, req);
 
     // Apply the underlying change first (nested service calls manage their own actor via withActor).
     if (req.type === 'USER_CREATION') {
@@ -145,6 +211,45 @@ export class PermissionRequestsService {
         { ...payload, userId: req.targetUserId },
         approver,
       );
+    } else if (req.type === 'PRODUCT_ARCHIVE') {
+      const payload = req.payload as { productId?: string; productName?: string } | null;
+      const productId = payload?.productId;
+      if (!productId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid payload for product archive',
+        });
+      }
+      await this.productsService.archiveProductAsApprover(productId, approver);
+    } else if (req.type === 'ORDER_LINE_PRICE_CHANGE') {
+      const payload = req.payload as {
+        orderId?: string;
+        items?: UpdateOrderInput['items'];
+        totalAmount?: number;
+      } | null;
+      const orderId = payload?.orderId;
+      const items = payload?.items;
+      const totalAmount = payload?.totalAmount;
+      if (!orderId || !items?.length || totalAmount == null || Number.isNaN(Number(totalAmount))) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid payload for order line price change.',
+        });
+      }
+      await this.ordersService.update(
+        { orderId, items, totalAmount: Number(totalAmount) },
+        approver,
+      );
+    } else if (req.type === 'ORDER_DELETION') {
+      const payload = req.payload as { orderId?: string } | null;
+      const orderId = payload?.orderId;
+      if (!orderId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid payload for order archive request.',
+        });
+      }
+      await this.ordersService.softDeleteOrder(orderId, approver, { approverNote: reason });
     } else if (req.type === 'PERMISSION_GRANT' && req.targetUserId && req.permissionCode) {
       // Phase 2: grant user_permission - for now we don't have the API, skip
       throw new TRPCError({
@@ -172,13 +277,32 @@ export class PermissionRequestsService {
         .where(eq(schema.permissionRequests.id, requestId));
     });
 
+    const productName =
+      req.type === 'PRODUCT_ARCHIVE'
+        ? ((req.payload as { productName?: string } | null)?.productName ?? 'product')
+        : null;
+    const priceOrderId =
+      req.type === 'ORDER_LINE_PRICE_CHANGE'
+        ? ((req.payload as { orderId?: string } | null)?.orderId ?? '')
+        : '';
+    const deletionOrderId =
+      req.type === 'ORDER_DELETION' ? ((req.payload as { orderId?: string } | null)?.orderId ?? '') : '';
+    const approvalBody =
+      req.type === 'PRODUCT_ARCHIVE' && productName
+        ? `Your request to archive product "${productName}" was approved.`
+        : req.type === 'ORDER_LINE_PRICE_CHANGE' && priceOrderId
+          ? `Your request to change line prices on order ${priceOrderId.slice(0, 8).toUpperCase()} was approved.`
+          : req.type === 'ORDER_DELETION' && deletionOrderId
+            ? `Your request to archive order ${deletionOrderId.slice(0, 8).toUpperCase()} was approved.`
+            : `Your request (${req.type}) was approved.`;
+
     // Notify requester
     await this.notificationsService
       .create({
         userId: req.requesterId,
         type: 'approval:permission_request',
         title: 'Permission request approved',
-        body: `Your request (${req.type}) was approved by SuperAdmin.`,
+        body: approvalBody,
         data: { requestId, action: 'APPROVED' },
       })
       .catch(() => {});
@@ -187,23 +311,31 @@ export class PermissionRequestsService {
   }
 
   /**
-   * Reject a permission request. SuperAdmin only.
+   * Reject a permission request. Gate varies by type (see assertApproverMayProcessRequest).
+   * Requester may withdraw their own pending ORDER_LINE_PRICE_CHANGE or ORDER_DELETION without approver rights.
    */
   async reject(requestId: string, approver: SessionUser, reason: string) {
+    const [found] = await this.db
+      .select()
+      .from(schema.permissionRequests)
+      .where(eq(schema.permissionRequests.id, requestId))
+      .limit(1);
+
+    if (!found) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Permission request not found' });
+    }
+    if (found.status !== 'PENDING') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request already processed' });
+    }
+
+    const isOwnWithdrawalWithoutApproverRights =
+      found.requesterId === approver.id &&
+      (found.type === 'ORDER_LINE_PRICE_CHANGE' || found.type === 'ORDER_DELETION');
+    if (!isOwnWithdrawalWithoutApproverRights) {
+      await this.assertApproverMayProcessRequest(approver, found);
+    }
+
     const req = await withActor(this.db, approver, async (tx) => {
-      const [found] = await tx
-        .select()
-        .from(schema.permissionRequests)
-        .where(eq(schema.permissionRequests.id, requestId))
-        .limit(1);
-
-      if (!found) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Permission request not found' });
-      }
-      if (found.status !== 'PENDING') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request already processed' });
-      }
-
       await tx
         .update(schema.permissionRequests)
         .set({
@@ -218,13 +350,22 @@ export class PermissionRequestsService {
       return found;
     });
 
+    const rejectProductName =
+      req.type === 'PRODUCT_ARCHIVE'
+        ? ((req.payload as { productName?: string } | null)?.productName ?? 'product')
+        : null;
+    const rejectBody =
+      req.type === 'PRODUCT_ARCHIVE' && rejectProductName
+        ? `Your request to archive product "${rejectProductName}" was rejected. Reason: ${reason}`
+        : `Your request (${req.type}) was rejected. Reason: ${reason}`;
+
     // Notify requester
     await this.notificationsService
       .create({
         userId: req.requesterId,
         type: 'approval:permission_request',
         title: 'Permission request rejected',
-        body: `Your request (${req.type}) was rejected. Reason: ${reason}`,
+        body: rejectBody,
         data: { requestId, action: 'REJECTED' },
       })
       .catch(() => {});

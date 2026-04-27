@@ -26,6 +26,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
 import { fetchAdSpendIntervalPreview } from '~/lib/trpc-browser';
+import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
   AdSpendIntervalPreview,
@@ -36,6 +37,8 @@ import type {
   Product,
   User,
 } from './types';
+import { AddExpenseModal } from './AddExpenseModal';
+import { AdSpendDayAccordion } from './AdSpendDayAccordion';
 
 const AD_SPEND_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'ALL', label: 'All entries' },
@@ -74,11 +77,15 @@ export function MarketingAdSpendPage({
   campaigns,
   filters,
   viewMode = 'admin',
+  groups,
+  groupsPage,
+  groupsTotalPages,
 }: MarketingAdSpendLoaderData) {
   const dateFilters = filters;
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
   const { toast } = useToast();
+  const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
   const revalidator = useRevalidator();
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
@@ -86,6 +93,8 @@ export function MarketingAdSpendPage({
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [selectedProductId, setSelectedProductId] = useState(productIdFilter || 'ALL');
   const [showAdSpendForm, setShowAdSpendForm] = useState(false);
+  const [showAddExpense, setShowAddExpense] = useState(false);
+  const [showLegacyTable, setShowLegacyTable] = useState(false);
   const [adSpendDetailModal, setAdSpendDetailModal] = useState<AdSpendRecord | null>(null);
   const [rejectStep, setRejectStep] = useState(false);
   const [editTarget, setEditTarget] = useState<AdSpendRecord | null>(null);
@@ -232,7 +241,10 @@ export function MarketingAdSpendPage({
     const fd = new FormData(e.currentTarget);
     fd.set('screenshotUrl', parsed.data.screenshotUrl);
     fd.set('spendAmount', spendRaw);
-    fetcher.submit(fd, { method: 'post' });
+    ensureBranchForAction({
+      actionLabel: 'logging ad spend',
+      onProceed: () => fetcher.submit(fd, { method: 'post' }),
+    });
   };
 
   const handleEditAdSpendSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -259,7 +271,10 @@ export function MarketingAdSpendPage({
     fd.set('spendDate', parsed.data.spendDate);
     fd.set('campaignId', editFormCampaignId);
     fd.set('productId', editFormProductId);
-    fetcher.submit(fd, { method: 'post' });
+    ensureBranchForAction({
+      actionLabel: 'updating ad spend',
+      onProceed: () => fetcher.submit(fd, { method: 'post' }),
+    });
   };
 
   const adSpendLogSubmitDisabled =
@@ -285,6 +300,12 @@ export function MarketingAdSpendPage({
   useEffect(() => {
     if (actionError) setDismissedError(false);
   }, [actionError]);
+  useEffect(() => {
+    if (!actionError) return;
+    if (!requiresBranchSelection) return;
+    if (!actionError.toLowerCase().includes('branch context required')) return;
+    ensureBranchForAction({ actionLabel: 'this ad spend action' });
+  }, [actionError, requiresBranchSelection, ensureBranchForAction]);
 
   useEffect(() => {
     if (actionSuccess && showAdSpendForm) setShowAdSpendForm(false);
@@ -356,8 +377,8 @@ export function MarketingAdSpendPage({
                 <Spinner size="sm" className="shrink-0" />
               </span>
             )}
-            <Button variant="primary" size="sm" onClick={() => setShowAdSpendForm(!showAdSpendForm)}>
-              {showAdSpendForm ? 'Close' : '+ Log Ad Spend'}
+            <Button variant="primary" size="sm" onClick={() => setShowAddExpense(true)}>
+              + Add Expense
             </Button>
           </>
         }
@@ -675,9 +696,35 @@ export function MarketingAdSpendPage({
         ) : null}
       </ResponsiveFormPanel>
 
+      {/* Phase 17: Daily groups accordion — primary view. */}
+      <div className="card p-0 overflow-hidden">
+        <div className="px-4 py-3 border-b border-app-border flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-app-fg">Daily expenses</h2>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowLegacyTable((v) => !v)}
+          >
+            {showLegacyTable ? 'Hide detailed view' : 'Detailed view'}
+          </Button>
+        </div>
+        <div className="p-4">
+          <AdSpendDayAccordion
+            groups={groups}
+            showMediaBuyerColumn={viewMode !== 'media_buyer'}
+            canModerate={viewMode !== 'media_buyer'}
+            page={groupsPage}
+            totalPages={groupsTotalPages}
+            actionUrl="/admin/marketing/ad-spend"
+          />
+        </div>
+      </div>
+
+      {showLegacyTable && (
       <div className="card p-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-app-border">
-          <h2 className="text-lg font-semibold text-app-fg">Ad spend log</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Detailed view (per-line)</h2>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center px-4 py-3 border-b border-app-border">
           <form onSubmit={handleAdSpendSearchSubmit} className="flex gap-2 flex-1 min-w-0">
@@ -920,6 +967,16 @@ export function MarketingAdSpendPage({
           </div>
         )}
       </div>
+      )}
+
+      <AddExpenseModal
+        open={showAddExpense}
+        onClose={() => setShowAddExpense(false)}
+        campaigns={campaigns}
+        products={products}
+        actionUrl="/admin/marketing/ad-spend"
+        onSuccess={() => revalidator.revalidate()}
+      />
 
       {adSpendDetailModal?.screenshotUrl && (
         <Modal

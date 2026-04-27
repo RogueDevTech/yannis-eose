@@ -5,7 +5,6 @@ import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { defer, json } from '@remix-run/node';
 import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { isAdminLevel } from '~/lib/rbac';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import type { CallLogEntry, OrderDetail, OrderDetailStreamData, OrderInvoice, TimelineEvent } from '~/features/orders/types';
@@ -17,6 +16,11 @@ export const meta: MetaFunction = () => [
 function logOrderDetailLoaderWarning(orderId: string, callName: string, detail?: string): void {
   const suffix = detail ? ` (${detail})` : '';
   console.warn(`[OrderDetailLoader] ${callName} failed for order ${orderId}${suffix}`);
+}
+
+function branchIdFromForm(formData: FormData): { branchId: string } | Record<string, never> {
+  const b = formData.get('branchId')?.toString()?.trim();
+  return b ? { branchId: b } : {};
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -105,8 +109,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   })();
 
   let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
-  // SA + ADMIN bypass permission checks at middleware (permissions: []); include them explicitly.
-  if (isAdminLevel(user) || user.permissions?.includes('orders.reassign')) {
+  // `orders.listCSAgents` returns the full roster for HoCS/Admin (`orders.reassign`) and supervised
+  // CS agents only for branch CS team supervisors; others get an empty list.
+  {
     const agentsRes = await apiRequest<unknown>('/trpc/orders.listCSAgents', deferredOpt).catch((err) => {
       const msg = err instanceof Error ? err.message : 'unknown';
       logOrderDetailLoaderWarning(orderId, 'orders.listCSAgents', msg);
@@ -121,7 +126,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  // Logistics locations — used by the "Allocate to 3PL" action available to the assigned
+  // Logistics locations — used by the "Allocate to logistics company" action available to the assigned
   // CS agent, Logistics, and admins when the order is CONFIRMED.
   let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> = [];
   const locationsRes = await apiRequest<unknown>(
@@ -175,7 +180,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     logOrderDetailLoaderWarning(orderId, 'orders.listAllocatableLocations', `status ${allocatableRes.status}`);
   }
 
-  // Dispatch templates for the "Share to 3PL" WhatsApp flow.
+  // Dispatch templates for the "Share to logistics company" WhatsApp flow.
   let logisticsDispatchTemplates: Array<{ id: string; name: string; body: string }> = [];
   const templatesRes = await apiRequest<unknown>(
     `/trpc/messaging.templates.list?input=${encodeURIComponent(JSON.stringify({ channel: 'WHATSAPP_GROUP' }))}`,
@@ -241,7 +246,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'assignToCS') {
-    await requirePermission(request, 'orders.reassign');
     const toCsAgentId = formData.get('toCsAgentId')?.toString();
     if (!toCsAgentId) {
       return json({ error: 'Agent required' }, { status: 400 });
@@ -249,7 +253,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
       method: 'POST',
       cookie,
-      body: { orderId, csAgentId: toCsAgentId },
+      body: { orderId, csAgentId: toCsAgentId, ...branchIdFromForm(formData) },
     });
     if (!res.ok) {
       const err = extractApiErrorMessage(res.data, 'Assign failed');
@@ -284,7 +288,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.revealPhoneForManualCall', {
       method: 'POST',
       cookie,
-      body: { orderId },
+      body: { orderId, ...branchIdFromForm(formData) },
     });
 
     if (!res.ok) {
@@ -305,7 +309,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.revealPhoneForManualCall', {
       method: 'POST',
       cookie,
-      body: { orderId },
+      body: { orderId, ...branchIdFromForm(formData) },
     });
 
     if (!res.ok) {
@@ -326,7 +330,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.revealPhoneForManualCall', {
       method: 'POST',
       cookie,
-      body: { orderId },
+      body: { orderId, ...branchIdFromForm(formData) },
     });
 
     if (!res.ok) {
@@ -356,7 +360,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.revealPhoneForManualCall', {
       method: 'POST',
       cookie,
-      body: { orderId },
+      body: { orderId, ...branchIdFromForm(formData) },
     });
 
     if (!res.ok) {
@@ -385,7 +389,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.revealPhoneForManualCall', {
       method: 'POST',
       cookie,
-      body: { orderId },
+      body: { orderId, ...branchIdFromForm(formData) },
     });
 
     if (!res.ok) {
@@ -402,9 +406,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'adjustOrderItems') {
-    const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
+    const allowedRoles = [
+      'CS_AGENT',
+      'HEAD_OF_CS',
+      'HEAD_OF_LOGISTICS',
+      'BRANCH_ADMIN',
+      'SUPER_ADMIN',
+      'ADMIN',
+    ];
     if (!allowedRoles.includes(user.role)) {
-      return json({ error: 'Only CS or Head of CS can adjust order items' }, { status: 403 });
+      return json({ error: 'You are not allowed to adjust order items on this page' }, { status: 403 });
     }
     const itemsRaw = formData.get('items')?.toString();
     const totalAmountStr = formData.get('totalAmount')?.toString();
@@ -440,10 +451,146 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.update', {
       method: 'POST',
       cookie,
-      body: { orderId, items: parsedItems, totalAmount },
+      body: { orderId, items: parsedItems, totalAmount, ...branchIdFromForm(formData) },
     });
     if (!res.ok) {
       const err = extractApiErrorMessage(res.data, 'Failed to update order items');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'requestOrderLinePriceChange') {
+    const allowedRoles = [
+      'CS_AGENT',
+      'HEAD_OF_CS',
+      'HEAD_OF_LOGISTICS',
+      'BRANCH_ADMIN',
+      'SUPER_ADMIN',
+      'ADMIN',
+    ];
+    if (!allowedRoles.includes(user.role)) {
+      return json({ error: 'You are not allowed to request line price changes on this page' }, { status: 403 });
+    }
+    const itemsRaw = formData.get('items')?.toString();
+    const totalAmountStr = formData.get('totalAmount')?.toString();
+    const reason = formData.get('reason')?.toString()?.trim() ?? '';
+    const branchIdField = formData.get('branchId')?.toString()?.trim();
+    if (!itemsRaw) {
+      return json({ error: 'Items are required' }, { status: 400 });
+    }
+    if (reason.length < 10) {
+      return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
+    }
+    let parsedItems: Array<{ productId: string; quantity: number; unitPrice: number }>;
+    try {
+      const arr = JSON.parse(itemsRaw) as unknown;
+      if (!Array.isArray(arr) || arr.length === 0) {
+        return json({ error: 'At least one item is required' }, { status: 400 });
+      }
+      parsedItems = arr.map((row: unknown) => {
+        if (row == null || typeof row !== 'object') throw new Error('Invalid item');
+        const o = row as Record<string, unknown>;
+        const productId = typeof o.productId === 'string' ? o.productId : '';
+        const quantity = typeof o.quantity === 'number' ? o.quantity : Number(o.quantity);
+        const unitPrice = typeof o.unitPrice === 'number' ? o.unitPrice : Number(o.unitPrice);
+        if (!productId || Number.isNaN(quantity) || quantity < 1 || Number.isNaN(unitPrice) || unitPrice < 0) {
+          throw new Error('Invalid item fields');
+        }
+        return { productId, quantity, unitPrice: Math.round(unitPrice * 100) / 100 };
+      });
+    } catch {
+      return json({ error: 'Invalid items format' }, { status: 400 });
+    }
+    const totalAmount = totalAmountStr != null && totalAmountStr !== ''
+      ? Math.round(parseFloat(totalAmountStr) * 100) / 100
+      : Math.round(parsedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0) * 100) / 100;
+    if (Number.isNaN(totalAmount) || totalAmount < 0) {
+      return json({ error: 'Invalid total amount' }, { status: 400 });
+    }
+    const body: {
+      orderId: string;
+      items: typeof parsedItems;
+      totalAmount: number;
+      reason: string;
+      branchId?: string;
+    } = { orderId, items: parsedItems, totalAmount, reason };
+    if (branchIdField) {
+      body.branchId = branchIdField;
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.requestLinePriceChangeApproval', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to submit price change request');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'requestOrderDeletion') {
+    const allowedRoles = [
+      'CS_AGENT',
+      'HEAD_OF_CS',
+      'HEAD_OF_LOGISTICS',
+      'BRANCH_ADMIN',
+      'SUPER_ADMIN',
+      'ADMIN',
+    ];
+    if (!allowedRoles.includes(user.role)) {
+      return json({ error: 'You are not allowed to request order archive on this page' }, { status: 403 });
+    }
+    const reason = formData.get('reason')?.toString()?.trim() ?? '';
+    const branchIdField = formData.get('branchId')?.toString()?.trim();
+    if (reason.length < 10) {
+      return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
+    }
+    const body: { orderId: string; reason: string; branchId?: string } = { orderId, reason };
+    if (branchIdField) {
+      body.branchId = branchIdField;
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.requestOrderDeletionApproval', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to submit archive request');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'softDeleteOrder') {
+    const allowedRoles = [
+      'CS_AGENT',
+      'HEAD_OF_CS',
+      'HEAD_OF_LOGISTICS',
+      'BRANCH_ADMIN',
+      'SUPER_ADMIN',
+      'ADMIN',
+    ];
+    if (!allowedRoles.includes(user.role)) {
+      return json({ error: 'You are not allowed to archive orders on this page' }, { status: 403 });
+    }
+    const reason = formData.get('reason')?.toString()?.trim() ?? '';
+    const branchIdField = formData.get('branchId')?.toString()?.trim();
+    if (reason.length < 10) {
+      return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
+    }
+    const body: { orderId: string; reason: string; branchId?: string } = { orderId, reason };
+    if (branchIdField) {
+      body.branchId = branchIdField;
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.softDeleteOrder', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to archive order');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
@@ -459,7 +606,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.scheduleCallback', {
       method: 'POST',
       cookie,
-      body: { orderId, delayMinutes, notes },
+      body: { orderId, delayMinutes, notes, ...branchIdFromForm(formData) },
     });
     if (!res.ok) {
       const err = extractApiErrorMessage(res.data, 'Schedule failed');
@@ -525,6 +672,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         orderId,
         newStatus,
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        ...branchIdFromForm(formData),
       },
     });
 

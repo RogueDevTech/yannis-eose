@@ -31,6 +31,18 @@ redis-cli KEYS "yannis:session:*" | wc -l  # Count active sessions
 redis-cli SMEMBERS "yannis:user_sessions:<userId>"  # Sessions for specific user
 ```
 
+### Split web and API hostnames (login loop / “stays on login”)
+
+The Remix app signs users in by calling the Nest API from the **server**, then **forwards** `Set-Cookie` from `/auth/login` to the browser. The session cookie name is `yannis_session`.
+
+If production uses different subdomains (for example web `yannis.example.com` and API `api-yannis.example.com`):
+
+1. Set **`SESSION_COOKIE_DOMAIN`** on the **API** to the **parent** domain with a leading dot, e.g. `.example.com`, so the cookie is valid for both hosts. Redeploy the API after changing it.
+2. Optionally set the same **`SESSION_COOKIE_DOMAIN`** on the **web** app environment so `/auth/logout` can clear the cookie with a matching `Domain` (see `apps/web/app/routes/auth.logout/route.tsx`).
+3. If login still fails with an on-screen message about “no session cookie”, check API logs and confirm the server-side `fetch` from web → API receives `Set-Cookie` (some misconfigured proxies strip it from **responses** to the app server).
+
+The API logs a production warning when `SESSION_COOKIE_DOMAIN` is unset (`apps/api/src/main.ts`).
+
 ---
 
 ## Redis Environment Split (Dev)
@@ -378,6 +390,32 @@ Rider pending deliveries are stored in IndexedDB. If sync fails:
 cd packages/shared
 pnpm db:migrate
 ```
+
+### PostgreSQL connection limit (`53300`)
+
+If the API logs `PostgresError: remaining connection slots are reserved for roles with the SUPERUSER attribute` (SQLSTATE `53300`), the database has hit **`max_connections`** for non-superuser roles. This is not an application bug: the server is refusing new TCP connections.
+
+**Typical causes**
+
+- Too many API / worker replicas each opening their own pool
+- Other clients on the same instance (BI tools, `psql`, local dev against prod)
+- A managed Postgres tier with a very low connection cap
+- Leaked or long-held sessions (runaway scripts, stuck transactions)
+
+**What the app already does**
+
+- The Nest API [`database.module.ts`](../apps/api/src/database/database.module.ts) configures the `postgres` client with a **small pool** (`max: 3` per process). Exhaustion usually means **too many processes** or **too low a DB limit**, not a single rogue pool size.
+
+**Mitigations (operations)**
+
+1. On Postgres: inspect usage — `SELECT count(*), usename FROM pg_stat_activity GROUP BY 1,2 ORDER BY 1 DESC;` — identify who holds connections.
+2. Raise **`max_connections`** or upgrade the instance tier (provider console / DBA).
+3. Put a **connection pooler** (PgBouncer, Neon pooler, RDS Proxy) in front of the DB so many app instances share a smaller number of server connections.
+4. Reduce horizontal scale temporarily or stop stray consumers sharing the same `DATABASE_URL`.
+
+**Not sufficient alone**
+
+- Changing only application code cannot raise the database’s global connection cap; coordination with infrastructure is required.
 
 ### View Table Sizes
 

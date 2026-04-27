@@ -135,6 +135,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [addLocationProviderId, setAddLocationProviderId] = useState('');
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [viewingProvider, setViewingProvider] = useState<Provider | null>(null);
+  const [viewingLocation, setViewingLocation] = useState<Location | null>(null);
 
   const actionError = (fetcher.data as { error?: string })?.error;
   const actionSuccess = (fetcher.data as { success?: boolean })?.success;
@@ -254,10 +255,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               </svg>
             </button>
           </div>
-          <fetcher.Form method="post" className="px-6 py-4 space-y-3">
+          <fetcher.Form method="post" className="px-6 py-4 space-y-4">
             <input type="hidden" name="intent" value="createLocation" />
             <input type="hidden" name="providerId" value={addLocationProviderId} />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-4">
               <SearchableSelect
                 id="add-location-provider"
                 label="Logistics company"
@@ -268,14 +269,37 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 placeholder="Select logistics company…"
                 searchPlaceholder="Search companies…"
               />
-              <TextInput name="name" type="text" required placeholder="Location name" />
-              <TextInput name="address" type="text" required placeholder="Address" />
-              <TextInput name="coordinates" type="text" placeholder="GPS coordinates (optional)" />
               <TextInput
+                id="add-location-name"
+                name="name"
+                type="text"
+                label="Location name"
+                required
+                placeholder="e.g. Ikeja hub"
+              />
+              <TextInput
+                id="add-location-address"
+                name="address"
+                type="text"
+                label="Address"
+                required
+                placeholder="Street, city, state"
+              />
+              <TextInput
+                id="add-location-coordinates"
+                name="coordinates"
+                type="text"
+                label="GPS coordinates"
+                placeholder="Lat, long"
+                hint="Optional map pin for dispatch."
+              />
+              <TextInput
+                id="add-location-whatsapp"
                 name="whatsappGroupLink"
                 type="url"
-                placeholder="https://chat.whatsapp.com/... (optional)"
-                hint="WhatsApp group invite link used by the CS 'Share to 3PL' flow."
+                label="WhatsApp group link"
+                placeholder="https://chat.whatsapp.com/…"
+                hint="Used by the CS Share to 3PL flow. Optional."
                 wrapperClassName="sm:col-span-2"
               />
             </div>
@@ -364,6 +388,97 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 </Button>
               </div>
             </fetcher.Form>
+        </Modal>
+      )}
+
+      {/* Location details view modal */}
+      {viewingLocation && (
+        <Modal open onClose={() => setViewingLocation(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-0">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
+            <h3 className="text-lg font-semibold text-app-fg">Location details</h3>
+            <button
+              type="button"
+              onClick={() => setViewingLocation(null)}
+              className="text-app-fg-muted hover:text-app-fg transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="px-6 py-4 space-y-4">
+            <dl className="space-y-3">
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Location name</dt>
+                <dd className="mt-0.5 text-sm text-app-fg">{viewingLocation.name}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Logistics company</dt>
+                <dd className="mt-0.5 text-sm text-app-fg">
+                  {providers.find((p) => p.id === viewingLocation.providerId)?.name ?? 'Unknown logistics company'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Address</dt>
+                <dd className="mt-0.5 text-sm text-app-fg">{viewingLocation.address}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">GPS coordinates</dt>
+                <dd className="mt-0.5 text-sm text-app-fg">{viewingLocation.coordinates ?? '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">WhatsApp group</dt>
+                <dd className="mt-0.5 text-sm break-all">
+                  {viewingLocation.whatsappGroupLink ? (
+                    <a
+                      href={viewingLocation.whatsappGroupLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-brand-500 hover:text-brand-600 underline"
+                    >
+                      {viewingLocation.whatsappGroupLink}
+                    </a>
+                  ) : (
+                    <span className="text-app-fg-muted">—</span>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Status</dt>
+                <dd className="mt-0.5">
+                  <StatusBadge status={viewingLocation.status} />
+                </dd>
+              </div>
+              {viewingLocation.dispatchLocked === true && (
+                <div>
+                  <dt className="text-xs font-medium text-app-fg-muted">Dispatch</dt>
+                  <dd className="mt-0.5">
+                    <span className="inline-flex items-center rounded-md bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                      Locked (reconciliation required)
+                    </span>
+                  </dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Created</dt>
+                <dd className="mt-0.5 text-sm text-app-fg-muted">
+                  {new Date(viewingLocation.createdAt).toLocaleString('en-NG', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </dd>
+              </div>
+            </dl>
+          </div>
+          <div className="flex gap-2 px-6 py-4 border-t border-app-border">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setViewingLocation(null)}>
+              Close
+            </Button>
+          </div>
         </Modal>
       )}
 
@@ -563,6 +678,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                   <th className="table-header">Address</th>
                   <th className="table-header">Logistics company</th>
                   <th className="table-header">Status</th>
+                  <th className="table-header"></th>
                 </tr>
               </thead>
               <tbody>
@@ -576,12 +692,17 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                       <td className="table-cell">
                         <StatusBadge status={l.status} />
                       </td>
+                      <td className="table-cell text-right">
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setViewingLocation(l)}>
+                          View
+                        </Button>
+                      </td>
                     </tr>
                   );
                 })}
                 {locations.length === 0 && (
                   <tr>
-                    <td colSpan={4}>
+                    <td colSpan={5}>
                       <EmptyState title="No locations yet" description="Add a logistics company first, then add locations." />
                     </td>
                   </tr>
@@ -604,6 +725,11 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                     <div className="text-sm text-app-fg-muted space-y-0.5">
                       <div>Address: {l.address}</div>
                       <div>Logistics company: {provider?.name ?? 'Unknown logistics company'}</div>
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setViewingLocation(l)}>
+                        View
+                      </Button>
                     </div>
                   </div>
                 );

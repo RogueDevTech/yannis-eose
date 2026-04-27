@@ -29,6 +29,8 @@ interface OutboundMessage {
 
 interface CSMessagingPanelProps {
   orderId: string;
+  /** Passed to order route actions for branch-scoped tRPC when session has no active branch */
+  orderBranchId?: string | null;
   customerName?: string | null;
   deliveryAddress?: string | null;
   productName?: string | null;
@@ -66,6 +68,7 @@ function ChannelIcon({ channel }: { channel: 'sms' | 'whatsapp' | 'call' }) {
 
 export function CSMessagingPanel({
   orderId,
+  orderBranchId,
   customerName,
   deliveryAddress,
   productName,
@@ -118,8 +121,14 @@ export function CSMessagingPanel({
       smsPrepareFetcher.state !== 'idle' ||
       smsPrepareFetcher.data
     ) return;
-    smsPrepareFetcher.submit({ intent: 'preparePhoneForSms' }, { method: 'post' });
-  }, [textPanelOpen, textChannel, preparedSmsPhone, smsPrepareFetcher.state, smsPrepareFetcher.data]);
+    smsPrepareFetcher.submit(
+      {
+        intent: 'preparePhoneForSms',
+        ...(orderBranchId ? { branchId: orderBranchId } : {}),
+      },
+      { method: 'post' },
+    );
+  }, [textPanelOpen, textChannel, preparedSmsPhone, smsPrepareFetcher.state, smsPrepareFetcher.data, orderBranchId]);
 
   useEffect(() => {
     if (
@@ -129,8 +138,21 @@ export function CSMessagingPanel({
       whatsappPrepareFetcher.state !== 'idle' ||
       whatsappPrepareFetcher.data
     ) return;
-    whatsappPrepareFetcher.submit({ intent: 'preparePhoneForWhatsApp' }, { method: 'post' });
-  }, [textPanelOpen, textChannel, preparedWhatsappPhone, whatsappPrepareFetcher.state, whatsappPrepareFetcher.data]);
+    whatsappPrepareFetcher.submit(
+      {
+        intent: 'preparePhoneForWhatsApp',
+        ...(orderBranchId ? { branchId: orderBranchId } : {}),
+      },
+      { method: 'post' },
+    );
+  }, [
+    textPanelOpen,
+    textChannel,
+    preparedWhatsappPhone,
+    whatsappPrepareFetcher.state,
+    whatsappPrepareFetcher.data,
+    orderBranchId,
+  ]);
 
   // Load outbox only when SMS composer is active (same as before).
   useEffect(() => {

@@ -16,6 +16,9 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
   USER_CREATION: 'User Creation',
   ROLE_CHANGE: 'Role Change',
   PERMISSION_GRANT: 'Permission Grant',
+  PRODUCT_ARCHIVE: 'Product archive',
+  ORDER_LINE_PRICE_CHANGE: 'Order line prices',
+  ORDER_DELETION: 'Order archive',
 };
 
 const STATUS_TABS: Array<{ value: PermissionRequestStatusFilter; label: string }> = [
@@ -36,6 +39,9 @@ function formatDateTime(iso: string | null): string {
 }
 
 function requestedSummary(req: PermissionRequest): string {
+  if (req.type === 'PRODUCT_ARCHIVE') return 'Archive product';
+  if (req.type === 'ORDER_LINE_PRICE_CHANGE') return 'Change order line prices';
+  if (req.type === 'ORDER_DELETION') return 'Archive order (soft delete)';
   if (req.requestedRole) return req.requestedRole.replace(/_/g, ' ');
   if (req.permissionCode) return req.permissionCode;
   return '—';
@@ -46,6 +52,18 @@ function targetSummary(req: PermissionRequest): string {
     const name = (req.payload as { name?: string }).name;
     if (name) return name;
   }
+  if (req.type === 'PRODUCT_ARCHIVE' && req.payload) {
+    const name = (req.payload as { productName?: string }).productName;
+    if (name) return name;
+  }
+  if (req.type === 'ORDER_LINE_PRICE_CHANGE' && req.payload) {
+    const oid = (req.payload as { orderId?: string }).orderId;
+    if (oid) return `Order ${oid.slice(0, 8).toUpperCase()}`;
+  }
+  if (req.type === 'ORDER_DELETION' && req.payload) {
+    const oid = (req.payload as { orderId?: string }).orderId;
+    if (oid) return `Order ${oid.slice(0, 8).toUpperCase()}`;
+  }
   if (req.targetUserName) return req.targetUserName;
   return '—';
 }
@@ -53,10 +71,19 @@ function targetSummary(req: PermissionRequest): string {
 export function PermissionRequestsPage({
   requests,
   canApprove = false,
+  canApproveProductArchive = false,
+  canApproveOrderLinePriceChange = false,
+  viewerId = '',
   activeStatus = 'PENDING',
 }: {
   requests: PermissionRequest[];
   canApprove?: boolean;
+  /** Only Super Admin may approve/reject product archive requests (even if user has audit.read). */
+  canApproveProductArchive?: boolean;
+  /** Head of CS / Head of Logistics / Branch Admin / Admin — server re-checks branch for heads. */
+  canApproveOrderLinePriceChange?: boolean;
+  /** Current user id — used to allow withdrawing own pending order price request. */
+  viewerId?: string;
   activeStatus?: PermissionRequestStatusFilter;
 }) {
   const fetcher = useFetcher();
@@ -87,7 +114,7 @@ export function PermissionRequestsPage({
     <div className="space-y-4">
       <PageHeader
         title="Permission Requests"
-        description="HR requests for sensitive roles (Super Admin, Finance Officer) require your approval. Approved and rejected requests are preserved for audit."
+        description="Sensitive changes (including admin-level staff and product archive) may require Super Admin approval. Approved and rejected requests are preserved for audit."
       />
 
       {fetcherError && !dismissedError && (
@@ -269,6 +296,10 @@ export function PermissionRequestsPage({
                           {(viewing.payload as { email?: string }).email ?? ''}
                         </span>
                       </span>
+                    ) : viewing.type === 'PRODUCT_ARCHIVE' && viewing.payload ? (
+                      <span className="font-medium">
+                        {(viewing.payload as { productName?: string }).productName ?? '—'}
+                      </span>
                     ) : viewing.targetUserName ? (
                       <span>
                         <span className="font-medium">{viewing.targetUserName}</span>
@@ -327,42 +358,87 @@ export function PermissionRequestsPage({
                   {JSON.stringify(viewing.payload, null, 2)}
                 </pre>
               </div>
+            ) : viewing.type === 'PRODUCT_ARCHIVE' && viewing.payload ? (
+              <div>
+                <p className="text-xs font-medium text-app-fg-muted mb-1.5">Product</p>
+                <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words border border-app-border">
+                  {JSON.stringify(viewing.payload, null, 2)}
+                </pre>
+              </div>
+            ) : viewing.type === 'ORDER_LINE_PRICE_CHANGE' && viewing.payload ? (
+              <div>
+                <p className="text-xs font-medium text-app-fg-muted mb-1.5">Proposed items & total</p>
+                <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words border border-app-border">
+                  {JSON.stringify(viewing.payload, null, 2)}
+                </pre>
+              </div>
+            ) : viewing.type === 'ORDER_DELETION' && viewing.payload ? (
+              <div>
+                <p className="text-xs font-medium text-app-fg-muted mb-1.5">Order to archive</p>
+                <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words border border-app-border">
+                  {JSON.stringify(viewing.payload, null, 2)}
+                </pre>
+              </div>
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2 justify-end shrink-0 pt-2 border-t border-app-border pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <Button type="button" variant="secondary" size="sm" onClick={() => setViewing(null)}>
               Close
             </Button>
-            {canApprove && viewing.status === 'PENDING' && (
-              <>
-                <Button
-                  type="button"
-                  variant="success"
-                  size="sm"
-                  onClick={() => {
-                    const id = viewing.id;
-                    setViewing(null);
-                    setModal({ requestId: id, action: 'APPROVED' });
-                    setReason('');
-                  }}
-                >
-                  Approve
-                </Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  onClick={() => {
-                    const id = viewing.id;
-                    setViewing(null);
-                    setModal({ requestId: id, action: 'REJECTED' });
-                    setReason('');
-                  }}
-                >
-                  Reject
-                </Button>
-              </>
-            )}
+            {(() => {
+              if (viewing.status !== 'PENDING') return null;
+              const mayApprove =
+                (viewing.type === 'PRODUCT_ARCHIVE' && canApproveProductArchive) ||
+                ((viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION') &&
+                  canApproveOrderLinePriceChange) ||
+                (viewing.type !== 'PRODUCT_ARCHIVE' &&
+                  viewing.type !== 'ORDER_LINE_PRICE_CHANGE' &&
+                  viewing.type !== 'ORDER_DELETION' &&
+                  canApprove);
+              const mayReject =
+                mayApprove ||
+                ((viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION') &&
+                  viewerId !== '' &&
+                  viewerId === viewing.requesterId);
+              if (!mayApprove && !mayReject) return null;
+              return (
+                <>
+                  {mayApprove ? (
+                    <Button
+                      type="button"
+                      variant="success"
+                      size="sm"
+                      onClick={() => {
+                        const id = viewing.id;
+                        setViewing(null);
+                        setModal({ requestId: id, action: 'APPROVED' });
+                        setReason('');
+                      }}
+                    >
+                      Approve
+                    </Button>
+                  ) : null}
+                  {mayReject ? (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      onClick={() => {
+                        const id = viewing.id;
+                        setViewing(null);
+                        setModal({ requestId: id, action: 'REJECTED' });
+                        setReason('');
+                      }}
+                    >
+                      {(viewing.type === 'ORDER_LINE_PRICE_CHANGE' || viewing.type === 'ORDER_DELETION') &&
+                      viewerId === viewing.requesterId
+                        ? 'Withdraw request'
+                        : 'Reject'}
+                    </Button>
+                  ) : null}
+                </>
+              );
+            })()}
           </div>
         </Modal>
       )}

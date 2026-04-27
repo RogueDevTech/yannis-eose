@@ -1,5 +1,8 @@
 import { pgEnum } from 'drizzle-orm/pg-core';
 
+/** Branch supervisor teams — CS vs Marketing squads within a branch. */
+export const branchTeamDepartmentEnum = pgEnum('branch_team_department', ['CS', 'MARKETING']);
+
 export const userRoleEnum = pgEnum('user_role', [
   'SUPER_ADMIN',
   // ADMIN = SuperAdmin-equivalent privileges EXCEPT cannot manage another Admin or the SuperAdmin.
@@ -197,6 +200,9 @@ export const permissionRequestTypeEnum = pgEnum('permission_request_type', [
   'USER_CREATION',
   'ROLE_CHANGE',
   'PERMISSION_GRANT',
+  'PRODUCT_ARCHIVE',
+  'ORDER_LINE_PRICE_CHANGE',
+  'ORDER_DELETION',
 ]);
 
 export const permissionRequestStatusEnum = pgEnum('permission_request_status', [
@@ -209,6 +215,17 @@ export const adSpendStatusEnum = pgEnum('ad_spend_status', [
   'PENDING',
   'APPROVED',
   'REJECTED',
+]);
+
+/**
+ * Ad platform for an ad_spend_logs entry. Default `FACEBOOK` (vast majority).
+ * Adding new values is an additive `ALTER TYPE ... ADD VALUE` migration —
+ * existing rows stay valid.
+ */
+export const adPlatformEnum = pgEnum('ad_platform', [
+  'FACEBOOK',
+  'TIKTOK',
+  'GOOGLE',
 ]);
 
 /** Status of a 3PL→warehouse transfer remittance (receipt upload, HoL marks received). */
@@ -307,4 +324,5 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'ORDER_WRITTEN_OFF',
   'SUPERVISOR_WATCHING',
   'PAYMENT_RECEIVED',
+  'ORDER_ARCHIVED',
 ]);

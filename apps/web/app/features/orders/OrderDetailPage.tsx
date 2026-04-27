@@ -23,7 +23,8 @@ import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { shareOrderToLogistics } from '~/lib/trpc-browser';
-import { isAdminLevel } from '~/lib/rbac';
+import { isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
+import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { buildOrderSummaryClipboardText } from './build-order-summary-clipboard';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
 
@@ -57,7 +58,7 @@ const STATUS_DISPLAY_LABELS: Partial<Record<(typeof STATUS_FLOW)[number], string
 
 // Everything between ALLOCATED and DELIVERED happens offline (rider with the parcel).
 // DISPATCHED + IN_TRANSIT therefore collapse back into the ALLOCATED step — the order is
-// still "in 3PL hands" from the CS perspective until someone marks it delivered.
+// still with the logistics company from the CS perspective until someone marks it delivered.
 function getProgressIndex(status: string): number {
   if (status === 'DISPATCHED' || status === 'IN_TRANSIT') {
     return STATUS_FLOW.indexOf('ALLOCATED');
@@ -464,6 +465,7 @@ function VoipCallPanel({
         ) : (
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="initiateCall" />
+            {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
             <Button
               type="submit"
               variant="primary"
@@ -563,6 +565,9 @@ export function OrderDetailPage({
   const recordCallFetcher = useFetcher();
   const scheduleFetcher = useFetcher();
   const adjustItemsFetcher = useFetcher();
+  const priceRequestFetcher = useFetcher();
+  const archiveRequestFetcher = useFetcher();
+  const archiveNowFetcher = useFetcher();
   const revalidator = useRevalidator();
 
   // Team Live View — broadcast CS agent state to cs-all room.
@@ -579,11 +584,16 @@ export function OrderDetailPage({
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [dismissedError, setDismissedError] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [scheduleCallbackModalOpen, setScheduleCallbackModalOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState('');
   const [scheduleDelayMinutes, setScheduleDelayMinutes] = useState(120);
   const [scheduleNotes, setScheduleNotes] = useState('');
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number }>>([]);
+  const [priceApprovalReason, setPriceApprovalReason] = useState('');
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
+  const [archiveModalMode, setArchiveModalMode] = useState<'request' | 'now'>('request');
+  const [archiveReason, setArchiveReason] = useState('');
   const [callDebugLog, setCallDebugLog] = useState<string[]>([]);
   const [allocateModalOpen, setAllocateModalOpen] = useState(false);
   const [allocateLocationId, setAllocateLocationId] = useState('');
@@ -604,12 +614,22 @@ export function OrderDetailPage({
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
   useFetcherToast(scheduleFetcher.data, { successMessage: 'Callback scheduled' });
 
+  const { toast } = useToast();
+  const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
+
   useEffect(() => {
     if (actionError) setDismissedError(false);
   }, [actionError]);
+  useEffect(() => {
+    if (!actionError) return;
+    if (!requiresBranchSelection) return;
+    if (!actionError.toLowerCase().includes('branch context required')) return;
+    ensureBranchForAction({ actionLabel: 'this action' });
+  }, [actionError, requiresBranchSelection, ensureBranchForAction]);
   useFetcherToast(adjustItemsFetcher.data, { successMessage: 'Order items updated' });
-
-  const { toast } = useToast();
+  useFetcherToast(priceRequestFetcher.data, { successMessage: 'Price change request submitted' });
+  useFetcherToast(archiveRequestFetcher.data, { successMessage: 'Archive request submitted' });
+  useFetcherToast(archiveNowFetcher.data, { successMessage: 'Order archived' });
   const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
   const logisticsLocationWithGroupLink =
     order.logisticsLocationId != null
@@ -634,7 +654,7 @@ export function OrderDetailPage({
         return;
       }
       await navigator.clipboard.writeText(text);
-      toast.success('Copied', 'Order summary ready to paste into WhatsApp or your 3PL group.');
+      toast.success('Copied', 'Order summary ready to paste into WhatsApp or your logistics company group.');
     } catch {
       toast.error('Copy failed', 'Could not write to the clipboard.');
     }
@@ -655,9 +675,19 @@ export function OrderDetailPage({
       revealFetcher.state === 'idle' &&
       !revealFetcher.data
     ) {
-      revealFetcher.submit({ intent: 'revealPhone' }, { method: 'post' });
+      ensureBranchForAction({
+        actionLabel: 'revealing phone for call',
+        onProceed: () =>
+          revealFetcher.submit(
+            {
+              intent: 'revealPhone',
+              ...(order.branchId ? { branchId: order.branchId } : {}),
+            },
+            { method: 'post' },
+          ),
+      });
     }
-  }, [callCustomerModalOpen, voipEnabled, revealFetcher.state, revealFetcher.data]);
+  }, [callCustomerModalOpen, voipEnabled, revealFetcher.state, revealFetcher.data, ensureBranchForAction, order.branchId]);
 
   // Reset call debug log when opening the call modal (VOIP path)
   useEffect(() => {
@@ -692,11 +722,40 @@ export function OrderDetailPage({
     ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(userRole) || branchAdminSameBranch;
   const isElevated =
     userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch;
+  const viewerIsCsTeamSupervisor = order.viewerIsCsTeamSupervisor === true;
+  const canEditLinePrices = order.viewerCanEditOrderLinePrices === true;
   // CS agent can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
+    viewerIsCsTeamSupervisor ||
     (userRole === 'CS_AGENT' && (isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId)));
-  const canAssignToCS = permissions.includes('orders.reassign');
+  const canAssignToCS =
+    permissions.includes('orders.reassign') ||
+    isAdminLevel({ role: userRole }) ||
+    viewerIsCsTeamSupervisor;
+
+  const orderAllowsLineItemEdits =
+    order.status === 'UNPROCESSED' ||
+    order.status === 'CS_ASSIGNED' ||
+    order.status === 'CS_ENGAGED' ||
+    order.status === 'CONFIRMED' ||
+    order.status === 'ALLOCATED' ||
+    order.status === 'DISPATCHED' ||
+    order.status === 'IN_TRANSIT';
+
+  /** Pre-confirmation only — matches server rule for archive / archive-request. */
+  const orderArchivableForRequest =
+    order.status === 'UNPROCESSED' ||
+    order.status === 'CS_ASSIGNED' ||
+    order.status === 'CS_ENGAGED';
+
+  const priceDriftProposing =
+    !canEditLinePrices &&
+    editedItems.some((row) => {
+      const srv = order.orderItems.find((o) => o.productId === row.productId);
+      if (!srv) return true;
+      return Math.abs(Number(srv.unitPrice) - row.unitPrice) > 0.0001;
+    });
 
   function canTransitionTo(newStatus: string): boolean {
     const allowed = order.allowedTransitions ?? [];
@@ -805,11 +864,11 @@ export function OrderDetailPage({
     prevFetcherState.current = fetcher.state;
   }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen, allocateModalOpen, deliverModalOpen]);
 
-  // Close confirm modal and revalidate when schedule callback succeeds
+  // Close schedule callback modal and revalidate when schedule succeeds
   const scheduleData = scheduleFetcher.data as { success?: boolean; scheduled?: boolean; error?: string } | undefined;
   useEffect(() => {
     if (scheduleData?.success && scheduleData?.scheduled && revalidator.state === 'idle') {
-      setConfirmModalOpen(false);
+      setScheduleCallbackModalOpen(false);
       setScheduleDelayMinutes(120);
       setScheduleNotes('');
       revalidator.revalidate();
@@ -821,19 +880,62 @@ export function OrderDetailPage({
   useEffect(() => {
     if (adjustItemsData?.success && revalidator.state === 'idle') {
       setAdjustItemsModalOpen(false);
+      setPriceApprovalReason('');
       revalidator.revalidate();
     }
   }, [adjustItemsData?.success, revalidator]);
+
+  const priceRequestData = priceRequestFetcher.data as { success?: boolean; error?: string } | undefined;
+  useEffect(() => {
+    if (priceRequestData?.success && revalidator.state === 'idle') {
+      setAdjustItemsModalOpen(false);
+      setPriceApprovalReason('');
+      revalidator.revalidate();
+    }
+  }, [priceRequestData?.success, revalidator]);
+
+  const archiveRequestData = archiveRequestFetcher.data as { success?: boolean; error?: string } | undefined;
+  useEffect(() => {
+    if (archiveRequestData?.success && revalidator.state === 'idle') {
+      setArchiveModalOpen(false);
+      setArchiveReason('');
+      revalidator.revalidate();
+    }
+  }, [archiveRequestData?.success, revalidator]);
+
+  const archiveNowData = archiveNowFetcher.data as { success?: boolean; error?: string } | undefined;
+  useEffect(() => {
+    if (archiveNowData?.success && revalidator.state === 'idle') {
+      setArchiveModalOpen(false);
+      setArchiveReason('');
+      revalidator.revalidate();
+    }
+  }, [archiveNowData?.success, revalidator]);
 
   // Escape to close adjust items modal
   useEffect(() => {
     if (!adjustItemsModalOpen) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setAdjustItemsModalOpen(false);
+      if (e.key === 'Escape') {
+        setAdjustItemsModalOpen(false);
+        setPriceApprovalReason('');
+      }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [adjustItemsModalOpen]);
+
+  useEffect(() => {
+    if (!archiveModalOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setArchiveModalOpen(false);
+        setArchiveReason('');
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [archiveModalOpen]);
 
   return (
     <div className="space-y-4 overflow-x-hidden min-w-0">
@@ -874,6 +976,31 @@ export function OrderDetailPage({
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
+      )}
+
+      {canEditOrder && order.pendingOrderLinePriceRequestId && (
+        <div className="rounded-lg border border-info-200 dark:border-info-800/50 bg-info-50 dark:bg-info-900/20 px-4 py-3 text-sm text-info-900 dark:text-info-100">
+          <p>
+            A line price change is pending approval.{' '}
+            <Link to="/admin/permission-requests" className="font-medium text-brand-600 dark:text-brand-400 underline">
+              Open permission requests
+            </Link>
+            .
+          </p>
+        </div>
+      )}
+
+      {canEditOrder && order.pendingOrderDeletionRequestId && (
+        <div className="rounded-lg border border-info-200 dark:border-info-800/50 bg-info-50 dark:bg-info-900/20 px-4 py-3 text-sm text-info-900 dark:text-info-100">
+          <p>
+            An order archive request is pending approval. The order stays active until a Head of CS, Head of
+            Logistics, branch admin, or admin approves.{' '}
+            <Link to="/admin/permission-requests" className="font-medium text-brand-600 dark:text-brand-400 underline">
+              Open permission requests
+            </Link>
+            .
+          </p>
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1078,16 +1205,9 @@ export function OrderDetailPage({
           <div className="space-y-4">
             {/* Order Actions — CS / Head of CS only, role-based.
                 CS still owns Adjust/Call/Delete after CS_ENGAGED while goods are pre-delivery so
-                they can manage upsells, delivery-coordination calls, and cancellations. */}
-            {canEditOrder && isCSOrHoS && (
-              order.status === 'UNPROCESSED' ||
-              order.status === 'CS_ASSIGNED' ||
-              order.status === 'CS_ENGAGED' ||
-              order.status === 'CONFIRMED' ||
-              order.status === 'ALLOCATED' ||
-              order.status === 'DISPATCHED' ||
-              order.status === 'IN_TRANSIT'
-            ) && (
+                they can manage upsells, delivery-coordination calls, and cancellations.
+                Media Buyers use this page read-only (campaign performance); never show CS actions. */}
+            {canEditOrder && userRole !== 'MEDIA_BUYER' && isCSOrHoS && orderAllowsLineItemEdits && (
               <div className="card">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {!canPerformCSActionsOnOrder && (
@@ -1104,6 +1224,7 @@ export function OrderDetailPage({
                     variant="secondary"
                     className="w-full"
                     onClick={() => {
+                      setPriceApprovalReason('');
                       setEditedItems(
                         order.orderItems.map((item) => ({
                           productId: item.productId,
@@ -1119,17 +1240,30 @@ export function OrderDetailPage({
                     Adjust order items
                   </Button>
 
-                  {/* Confirm order — CS_ENGAGED only */}
-                  {order.status === 'CS_ENGAGED' && canConfirm && canTransitionTo('CONFIRMED') && (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      className="w-full"
-                      onClick={() => setConfirmModalOpen(true)}
-                      disabled={fetcher.state === 'submitting'}
-                    >
-                      Confirm order
-                    </Button>
+                  {/* Confirm order / Schedule callback — CS_ENGAGED */}
+                  {order.status === 'CS_ENGAGED' && canPerformCSActionsOnOrder && (
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      {canConfirm && canTransitionTo('CONFIRMED') && (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          className="w-full sm:flex-1"
+                          onClick={() => setConfirmModalOpen(true)}
+                          disabled={fetcher.state === 'submitting'}
+                        >
+                          Confirm order
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full sm:flex-1"
+                        onClick={() => setScheduleCallbackModalOpen(true)}
+                        disabled={scheduleFetcher.state === 'submitting'}
+                      >
+                        Schedule callback
+                      </Button>
+                    </div>
                   )}
 
                   {/* Call customer — available pre-delivery. For pre-CS_ENGAGED statuses, opening
@@ -1157,7 +1291,7 @@ export function OrderDetailPage({
                     </div>
                   ) : null}
 
-                  {/* Delete order — single button for all statuses */}
+                  {/* Cancel order — lifecycle transition to CANCELLED */}
                   <Button
                     type="button"
                     variant="secondary"
@@ -1168,11 +1302,60 @@ export function OrderDetailPage({
                     }}
                     disabled={fetcher.state === 'submitting' || !canTransitionTo('CANCELLED')}
                   >
-                    Delete order
+                    Cancel order
                   </Button>
 
-                  {/* Assign to agent — CS_ENGAGED only */}
-                  {order.status === 'CS_ENGAGED' && canAssignToCS && csAgentsForAssign && csAgentsForAssign.length > 0 && (
+                  {orderArchivableForRequest && (
+                    <>
+                      {!canEditLinePrices && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full"
+                          onClick={() => {
+                            setArchiveModalMode('request');
+                            setArchiveReason('');
+                            setArchiveModalOpen(true);
+                          }}
+                          disabled={
+                            !canPerformCSActionsOnOrder ||
+                            !!order.pendingOrderDeletionRequestId ||
+                            archiveRequestFetcher.state === 'submitting' ||
+                            archiveNowFetcher.state === 'submitting'
+                          }
+                        >
+                          Request archive
+                        </Button>
+                      )}
+                      {canEditLinePrices && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full"
+                          onClick={() => {
+                            setArchiveModalMode('now');
+                            setArchiveReason('');
+                            setArchiveModalOpen(true);
+                          }}
+                          disabled={
+                            !!order.pendingOrderDeletionRequestId ||
+                            archiveRequestFetcher.state === 'submitting' ||
+                            archiveNowFetcher.state === 'submitting'
+                          }
+                        >
+                          Archive order now
+                        </Button>
+                      )}
+                    </>
+                  )}
+
+                  {/* Assign to agent — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED */}
+                  {(order.status === 'UNPROCESSED' ||
+                    order.status === 'CS_ASSIGNED' ||
+                    order.status === 'CS_ENGAGED') &&
+                    canAssignToCS &&
+                    csAgentsForAssign &&
+                    csAgentsForAssign.length > 0 && (
                     <div className="flex gap-2">
                       <SearchableSelect
                         id="order-assign-cs"
@@ -1185,6 +1368,7 @@ export function OrderDetailPage({
                       />
                       <fetcher.Form method="post" className="flex-shrink-0">
                         <input type="hidden" name="intent" value="assignToCS" />
+                        {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                         <input type="hidden" name="toCsAgentId" value={assignToId} />
                         <Button
                           type="submit"
@@ -1202,8 +1386,45 @@ export function OrderDetailPage({
               </div>
             )}
 
-            {/* Logistics Actions — share/allocate when CONFIRMED or ALLOCATED, confirm delivery when IN_TRANSIT. */}
+            {canEditOrder &&
+              userRole === 'HEAD_OF_LOGISTICS' &&
+              order.branchId &&
+              orderAllowsLineItemEdits &&
+              (isOrgWideDepartmentHead({ role: userRole }) ||
+                (!!currentBranchId && order.branchId === currentBranchId)) && (
+                <div className="card">
+                  <h2 className="text-lg font-semibold text-app-fg mb-3">Line items & pricing</h2>
+                  <p className="text-sm text-app-fg-muted mb-3">
+                    Adjust quantities or unit prices on orders for your branch (same window as CS, before dispatch
+                    completes).
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => {
+                      setPriceApprovalReason('');
+                      setEditedItems(
+                        order.orderItems.map((item) => ({
+                          productId: item.productId,
+                          productName: item.productName ?? null,
+                          quantity: item.quantity,
+                          unitPrice: Number(item.unitPrice),
+                        })),
+                      );
+                      setAdjustItemsModalOpen(true);
+                    }}
+                    disabled={order.orderItems.length === 0}
+                  >
+                    Adjust order items
+                  </Button>
+                </div>
+              )}
+
+            {/* Logistics Actions — share/allocate when CONFIRMED or ALLOCATED, confirm delivery when IN_TRANSIT.
+                Same read-only rule as Order Actions: Media Buyers must not allocate or run logistics ops here. */}
             {(() => {
+              if (!canEditOrder || userRole === 'MEDIA_BUYER') return null;
               const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
               const canShareToWhatsApp =
                 (order.status === 'CONFIRMED' || order.status === 'ALLOCATED') &&
@@ -1232,7 +1453,7 @@ export function OrderDetailPage({
                         }}
                         disabled={fetcher.state === 'submitting'}
                       >
-                        Allocate to 3PL
+                        Allocate to logistics company
                       </Button>
                     )}
                     {canShareToWhatsApp && (
@@ -1253,7 +1474,7 @@ export function OrderDetailPage({
                         }}
                         disabled={sharePending}
                       >
-                        Share to 3PL (WhatsApp)
+                        Share to logistics company (WhatsApp)
                       </Button>
                     )}
                     {showPostAllocationWhatsAppActions && (
@@ -1315,6 +1536,7 @@ export function OrderDetailPage({
             {canEditOrder && canPerformCSActionsOnOrder && (
               <CSMessagingPanel
                 orderId={order.id}
+                orderBranchId={order.branchId ?? null}
                 customerName={order.customerName}
                 deliveryAddress={order.deliveryAddress}
                 productName={order.orderItems[0]?.productName ?? null}
@@ -1386,112 +1608,226 @@ export function OrderDetailPage({
           </div>
         </div>
 
-      {/* Confirm order modal — Confirm now or Schedule callback */}
+      {/* Confirm order modal */}
       {confirmModalOpen && (
-        <Modal open onClose={() => { setConfirmModalOpen(false); setDeliveryDate(''); setScheduleDelayMinutes(120); setScheduleNotes(''); }} maxWidth="max-w-md" contentClassName="p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-            <h3 className="text-lg font-semibold text-app-fg mb-1">Confirm order</h3>
-            <p className="text-sm text-app-fg-muted mb-4">
-              Confirm the order now or schedule a callback for later.
-            </p>
-            <div className="space-y-4">
-              <fetcher.Form
-                method="post"
-                className="block"
-              >
-                <input type="hidden" name="intent" value="transition" />
-                <input type="hidden" name="newStatus" value="CONFIRMED" />
-                <input type="hidden" name="preferredDeliveryDate" value={deliveryDate} />
-                <div className="space-y-2 mb-4">
-                  <TextInput
-                    type="date"
-                    label="Scheduled delivery date"
-                    value={deliveryDate}
-                    onChange={(e) => setDeliveryDate(e.target.value)}
-                    min={new Date().toISOString().split('T')[0]}
-                    aria-label="Delivery date"
-                  />
-                  <p className="text-xs text-app-fg-muted">
-                    When should logistics deliver this order? Leave empty if not specified.
-                  </p>
-                </div>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  className="w-full"
-                  disabled={fetcher.state === 'submitting'}
-                  loading={fetcher.state === 'submitting'}
-                  loadingText="Confirming..."
-                >
-                  Confirm now
-                </Button>
-              </fetcher.Form>
-              <div className="border-t border-app-border pt-4">
-                <p className="text-sm font-medium text-app-fg-muted mb-2">Schedule callback</p>
-                <p className="text-xs text-app-fg-muted mb-3">
-                  Move order back to queue and set a time to call again (e.g. customer not picking).
-                </p>
-                <div className="space-y-2 mb-3">
-                  <FormSelect
-                    id="schedule-callback-delay"
-                    label="Delay"
-                    value={String(scheduleDelayMinutes)}
-                    onChange={(e) => setScheduleDelayMinutes(parseInt(e.target.value, 10))}
-                    aria-label="Callback delay"
-                    options={[
-                      { value: '30', label: '30 minutes' },
-                      { value: '60', label: '1 hour' },
-                      { value: '120', label: '2 hours' },
-                      { value: '240', label: '4 hours' },
-                      { value: '480', label: '8 hours' },
-                      { value: '1440', label: '24 hours' },
-                    ]}
-                  />
-                  <Textarea
-                    label="Notes (optional)"
-                    value={scheduleNotes}
-                    onChange={(e) => setScheduleNotes(e.target.value)}
-                    placeholder="e.g. Customer not picking"
-                    rows={2}
-                  />
-                </div>
-                <scheduleFetcher.Form method="post" className="block">
-                  <input type="hidden" name="intent" value="scheduleCallback" />
-                  <input type="hidden" name="delayMinutes" value={scheduleDelayMinutes} />
-                  <input type="hidden" name="notes" value={scheduleNotes} />
-                  <Button
-                    type="submit"
-                    variant="secondary"
-                    className="w-full"
-                    disabled={scheduleFetcher.state === 'submitting'}
-                    loading={scheduleFetcher.state === 'submitting'}
-                    loadingText="Scheduling..."
-                  >
-                    Schedule callback
-                  </Button>
-                </scheduleFetcher.Form>
-              </div>
+        <Modal
+          open
+          onClose={() => {
+            setConfirmModalOpen(false);
+            setDeliveryDate('');
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Confirm order</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            Set an optional delivery date and confirm when the customer is ready.
+          </p>
+          <fetcher.Form method="post" className="block space-y-4">
+            <input type="hidden" name="intent" value="transition" />
+            <input type="hidden" name="newStatus" value="CONFIRMED" />
+            {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+            <input type="hidden" name="preferredDeliveryDate" value={deliveryDate} />
+            <div className="space-y-2">
+              <TextInput
+                type="date"
+                label="Scheduled delivery date"
+                value={deliveryDate}
+                onChange={(e) => setDeliveryDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+                aria-label="Delivery date"
+              />
+              <p className="text-xs text-app-fg-muted">
+                When should logistics deliver this order? Leave empty if not specified.
+              </p>
             </div>
-            <div className="flex justify-end mt-4">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button
                 type="button"
                 variant="secondary"
+                className="w-full sm:w-auto"
                 onClick={() => {
                   setConfirmModalOpen(false);
                   setDeliveryDate('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                className="w-full sm:w-auto"
+                disabled={fetcher.state === 'submitting'}
+                loading={fetcher.state === 'submitting'}
+                loadingText="Confirming..."
+              >
+                Confirm now
+              </Button>
+            </div>
+          </fetcher.Form>
+        </Modal>
+      )}
+
+      {/* Schedule callback modal */}
+      {scheduleCallbackModalOpen && (
+        <Modal
+          open
+          onClose={() => {
+            setScheduleCallbackModalOpen(false);
+            setScheduleDelayMinutes(120);
+            setScheduleNotes('');
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Schedule callback</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            Move the order back to your queue and set a time to call again (for example when the customer is not picking up).
+          </p>
+          <scheduleFetcher.Form method="post" className="block space-y-4">
+            <input type="hidden" name="intent" value="scheduleCallback" />
+            {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+            <input type="hidden" name="delayMinutes" value={scheduleDelayMinutes} />
+            <input type="hidden" name="notes" value={scheduleNotes} />
+            <FormSelect
+              id="schedule-callback-delay"
+              label="Delay"
+              value={String(scheduleDelayMinutes)}
+              onChange={(e) => setScheduleDelayMinutes(parseInt(e.target.value, 10))}
+              aria-label="Callback delay"
+              options={[
+                { value: '30', label: '30 minutes' },
+                { value: '60', label: '1 hour' },
+                { value: '120', label: '2 hours' },
+                { value: '240', label: '4 hours' },
+                { value: '480', label: '8 hours' },
+                { value: '1440', label: '24 hours' },
+              ]}
+            />
+            <Textarea
+              label="Notes (optional)"
+              value={scheduleNotes}
+              onChange={(e) => setScheduleNotes(e.target.value)}
+              placeholder="e.g. Customer not picking"
+              rows={2}
+            />
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full sm:w-auto"
+                onClick={() => {
+                  setScheduleCallbackModalOpen(false);
                   setScheduleDelayMinutes(120);
                   setScheduleNotes('');
                 }}
               >
-                Close
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                className="w-full sm:w-auto"
+                disabled={scheduleFetcher.state === 'submitting'}
+                loading={scheduleFetcher.state === 'submitting'}
+                loadingText="Scheduling..."
+              >
+                Schedule callback
               </Button>
             </div>
+          </scheduleFetcher.Form>
         </Modal>
       )}
 
-      {/* Delete order modal (cancel with reason) */}
+      {archiveModalOpen && (
+        <Modal
+          open
+          onClose={() => {
+            setArchiveModalOpen(false);
+            setArchiveReason('');
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">
+            {archiveModalMode === 'request' ? 'Request order archive' : 'Archive order now'}
+          </h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            {archiveModalMode === 'request'
+              ? 'The order stays in the system but is hidden from active lists after approval. Rows are never permanently deleted — finance and audit history remain intact.'
+              : 'This archives the order immediately (soft delete). The database row is kept for audit; it will disappear from order lists and this page.'}
+          </p>
+          {archiveRequestData?.error && archiveModalMode === 'request' && (
+            <p className="text-sm text-danger-600 dark:text-danger-400 mb-2">{archiveRequestData.error}</p>
+          )}
+          {archiveNowData?.error && archiveModalMode === 'now' && (
+            <p className="text-sm text-danger-600 dark:text-danger-400 mb-2">{archiveNowData.error}</p>
+          )}
+          <Textarea
+            label="Reason"
+            hint="Minimum 10 characters"
+            value={archiveReason}
+            onChange={(e) => setArchiveReason(e.target.value)}
+            rows={3}
+            placeholder="Why should this order be archived?"
+          />
+          <div className="flex gap-2 mt-4 justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setArchiveModalOpen(false);
+                setArchiveReason('');
+              }}
+            >
+              Back
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={
+                archiveReason.trim().length < 10 ||
+                (archiveModalMode === 'request' && archiveRequestFetcher.state === 'submitting') ||
+                (archiveModalMode === 'now' && archiveNowFetcher.state === 'submitting')
+              }
+              loading={
+                archiveModalMode === 'request'
+                  ? archiveRequestFetcher.state === 'submitting'
+                  : archiveNowFetcher.state === 'submitting'
+              }
+              loadingText={archiveModalMode === 'request' ? 'Submitting…' : 'Archiving…'}
+              onClick={() => {
+                const fd: Record<string, string> = {
+                  reason: archiveReason.trim(),
+                };
+                if (order.branchId) {
+                  fd.branchId = order.branchId;
+                }
+                if (archiveModalMode === 'request') {
+                  fd.intent = 'requestOrderDeletion';
+                  ensureBranchForAction({
+                    actionLabel: 'submitting the archive request',
+                    onProceed: () => archiveRequestFetcher.submit(fd, { method: 'post' }),
+                  });
+                } else {
+                  fd.intent = 'softDeleteOrder';
+                  ensureBranchForAction({
+                    actionLabel: 'archiving this order',
+                    onProceed: () => archiveNowFetcher.submit(fd, { method: 'post' }),
+                  });
+                }
+              }}
+            >
+              {archiveModalMode === 'request' ? 'Submit for approval' : 'Archive now'}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Cancel order modal (transition to CANCELLED) */}
       {cancelModalOpen && (
         <Modal open onClose={() => { setCancelModalOpen(false); setCancelReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
-            <h3 className="text-lg font-semibold text-app-fg mb-1">Delete order</h3>
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Cancel order</h3>
             <p className="text-sm text-app-fg-muted mb-3">
               Please provide a reason (at least 10 characters). This will move the order to Cancelled.
             </p>
@@ -1539,6 +1875,7 @@ export function OrderDetailPage({
               >
                 <input type="hidden" name="intent" value="transition" />
                 <input type="hidden" name="newStatus" value="CANCELLED" />
+                {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                 <input type="hidden" name="reason" value={cancelReason} />
                 <Button
                   type="submit"
@@ -1555,17 +1892,17 @@ export function OrderDetailPage({
         </Modal>
       )}
 
-      {/* Allocate to 3PL modal — CONFIRMED → ALLOCATED */}
+      {/* Allocate to logistics company modal — CONFIRMED → ALLOCATED */}
       {allocateModalOpen && (
         <Modal open onClose={() => setAllocateModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-app-fg mb-1">Allocate to 3PL</h3>
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Allocate to logistics company</h3>
           <p className="text-sm text-app-fg-muted mb-3">
-            Select the 3PL location that will fulfil this order. Stock must be available at that location.
+            Select the logistics company location that will fulfil this order. Stock must be available at that location.
           </p>
           {eligibleAllocatableCount === 0 ? (
             <EmptyState
               title="No allocatable locations"
-              description="No 3PL location currently has enough stock for this order. Receive stock (intake or verified transfer) and try again."
+              description="No logistics company location currently has enough stock for this order. Receive stock (intake or verified transfer) and try again."
               variant="card"
             />
           ) : (
@@ -1594,6 +1931,7 @@ export function OrderDetailPage({
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
               <input type="hidden" name="newStatus" value="ALLOCATED" />
+              {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
               <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
               <Button
                 type="submit"
@@ -1648,6 +1986,7 @@ export function OrderDetailPage({
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
               <input type="hidden" name="newStatus" value="DELIVERED" />
+              {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
               {deliverNote.trim() && <input type="hidden" name="deliveryNote" value={deliverNote.trim()} />}
               {deliverProofUrl && <input type="hidden" name="deliveryProofUrl" value={deliverProofUrl} />}
               <Button
@@ -1664,7 +2003,7 @@ export function OrderDetailPage({
         </Modal>
       )}
 
-      {/* Share to 3PL modal (WhatsApp group) — Phase 4. Server renders the template, logs the
+      {/* Share to logistics company modal (WhatsApp group) — Phase 4. Server renders the template, logs the
           outbound message + timeline event, then we copy to clipboard and open the group link. */}
       {shareModalOpen && (() => {
         const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
@@ -1688,16 +2027,16 @@ export function OrderDetailPage({
             maxWidth="max-w-lg"
             contentClassName="p-6 max-h-[90dvh] overflow-y-auto"
           >
-            <h3 className="text-lg font-semibold text-app-fg mb-1">Share to 3PL (WhatsApp)</h3>
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Share to logistics company (WhatsApp)</h3>
             <p className="text-sm text-app-fg-muted mb-3">
-              Pick a 3PL location and a template. Clicking <strong>Copy &amp; open group</strong> logs the message, copies the text to your clipboard, and opens the WhatsApp group. Paste with ⌘V / long-press then hit send.
+              Pick a logistics company location and a template. Clicking <strong>Copy &amp; open group</strong> logs the message, copies the text to your clipboard, and opens the WhatsApp group. Paste with ⌘V / long-press then hit send.
             </p>
 
             <div className="space-y-3">
               <div>
                 <FormSelect
                   id="share-location"
-                  label="3PL location"
+                  label="Logistics company location"
                   value={shareLocationId}
                   onChange={(e) => setShareLocationId(e.target.value)}
                   placeholder="Select a location..."
@@ -1705,7 +2044,7 @@ export function OrderDetailPage({
                 />
                 {locationsWithGroup.length === 0 && (
                   <p className="text-xs text-warning-600 mt-1">
-                    No 3PL locations have a WhatsApp group link configured. Ask Logistics to add one.
+                    No logistics company locations have a WhatsApp group link configured. Ask Logistics to add one.
                   </p>
                 )}
               </div>
@@ -1799,7 +2138,17 @@ export function OrderDetailPage({
                     loadingText="Connecting..."
                     onClick={() => {
                       setCallDebugLog((prev) => [...prev, `Initiate sent at ${new Date().toLocaleTimeString()}`]);
-                      fetcher.submit({ intent: 'initiateCall' }, { method: 'post' });
+                      ensureBranchForAction({
+                        actionLabel: 'starting a customer call',
+                        onProceed: () =>
+                          fetcher.submit(
+                            {
+                              intent: 'initiateCall',
+                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                            },
+                            { method: 'post' },
+                          ),
+                      });
                     }}
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1875,6 +2224,7 @@ export function OrderDetailPage({
                       </Button>
                       <revealFetcher.Form method="post">
                         <input type="hidden" name="intent" value="revealPhone" />
+                        {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                         <Button
                           type="submit"
                           variant="primary"
@@ -1905,6 +2255,7 @@ export function OrderDetailPage({
                   </Button>
                   <recordCallFetcher.Form method="post">
                     <input type="hidden" name="intent" value="initiateCall" />
+                    {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                     <Button
                       type="submit"
                       variant="primary"
@@ -1932,10 +2283,17 @@ export function OrderDetailPage({
                     type="button"
                     variant="secondary"
                     onClick={async () => {
-                      recordCallFetcher.submit(
-                        { intent: 'initiateCall' },
-                        { method: 'post' },
-                      );
+                      ensureBranchForAction({
+                        actionLabel: 'recording customer call',
+                        onProceed: () =>
+                          recordCallFetcher.submit(
+                            {
+                              intent: 'initiateCall',
+                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                            },
+                            { method: 'post' },
+                          ),
+                      });
                       const phone = revealData.phone ?? '';
                       if (phone && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
                         await navigator.clipboard.writeText(phone);
@@ -1953,10 +2311,17 @@ export function OrderDetailPage({
                     className="inline-flex items-center justify-center gap-2"
                     disabled={recordCallFetcher.state === 'submitting'}
                     onClick={() => {
-                      recordCallFetcher.submit(
-                        { intent: 'initiateCall' },
-                        { method: 'post' },
-                      );
+                      ensureBranchForAction({
+                        actionLabel: 'recording customer call',
+                        onProceed: () =>
+                          recordCallFetcher.submit(
+                            {
+                              intent: 'initiateCall',
+                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                            },
+                            { method: 'post' },
+                          ),
+                      });
                       const phone = revealData.phone ?? '';
                       if (phone) {
                         window.location.href = `tel:${phone}`;
@@ -1985,15 +2350,30 @@ export function OrderDetailPage({
 
       {/* Adjust order items modal */}
       {adjustItemsModalOpen && (
-        <Modal open onClose={() => setAdjustItemsModalOpen(false)} maxWidth="max-w-lg" role="dialog" aria-labelledby="adjust-items-title" contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col">
+        <Modal
+          open
+          onClose={() => {
+            setAdjustItemsModalOpen(false);
+            setPriceApprovalReason('');
+          }}
+          maxWidth="max-w-lg"
+          role="dialog"
+          aria-labelledby="adjust-items-title"
+          contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col"
+        >
             <h2 id="adjust-items-title" className="text-lg font-semibold text-app-fg p-6 pb-2">
               Adjust order items
             </h2>
             <p className="text-sm text-app-fg-muted px-6 pb-4">
-              Update quantities or prices. This changes the order details only, not the order status.
+              {canEditLinePrices
+                ? 'Update quantities or unit prices. This changes the order details only, not the order status.'
+                : 'You can change quantities anytime. To change unit prices, enter the new prices and submit a request — a Head of CS, Head of Logistics, branch admin, or admin will approve or reject it.'}
             </p>
             {adjustItemsData?.error && (
               <p className="text-sm text-danger-600 dark:text-danger-400 mx-6 mb-2">{adjustItemsData.error}</p>
+            )}
+            {priceRequestData?.error && (
+              <p className="text-sm text-danger-600 dark:text-danger-400 mx-6 mb-2">{priceRequestData.error}</p>
             )}
             <div className="flex-1 min-h-0 overflow-y-auto px-6 space-y-4">
               {editedItems.map((item, index) => (
@@ -2046,44 +2426,115 @@ export function OrderDetailPage({
                 </div>
               ))}
             </div>
+            {!canEditLinePrices && priceDriftProposing && (
+              <div className="px-6 pb-2 space-y-2">
+                <label htmlFor="price-approval-reason" className="block text-xs text-app-fg-muted font-medium">
+                  Reason for price change (required, min 10 characters)
+                </label>
+                <Textarea
+                  id="price-approval-reason"
+                  rows={3}
+                  value={priceApprovalReason}
+                  onChange={(e) => setPriceApprovalReason(e.target.value)}
+                  placeholder="Explain why the line prices should change…"
+                  className="w-full"
+                />
+                {order.pendingOrderLinePriceRequestId && (
+                  <p className="text-xs text-warning-700 dark:text-warning-300">
+                    A price change is already pending approval. Wait for a decision or withdraw it from Permission requests.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="p-6 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] border-t border-app-border">
               <p className="text-sm font-semibold text-app-fg mb-4">
                 Total: &#8358;
                 {editedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </p>
-              <div className="flex gap-2 justify-end">
+              <div className="flex flex-wrap gap-2 justify-end">
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => setAdjustItemsModalOpen(false)}
+                  onClick={() => {
+                    setAdjustItemsModalOpen(false);
+                    setPriceApprovalReason('');
+                  }}
                 >
                   Cancel
                 </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  disabled={adjustItemsFetcher.state === 'submitting' || editedItems.some((i) => i.quantity < 1 || i.unitPrice < 0)}
-                  loading={adjustItemsFetcher.state === 'submitting'}
-                  loadingText="Saving..."
-                  onClick={() => {
-                    const payload = editedItems.map(({ productId, quantity, unitPrice }) => ({
-                      productId,
-                      quantity,
-                      unitPrice,
-                    }));
-                    const totalAmount = payload.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
-                    adjustItemsFetcher.submit(
-                      {
-                        intent: 'adjustOrderItems',
+                {!canEditLinePrices && priceDriftProposing ? (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={
+                      priceRequestFetcher.state === 'submitting' ||
+                      adjustItemsFetcher.state === 'submitting' ||
+                      editedItems.some((i) => i.quantity < 1 || i.unitPrice < 0) ||
+                      priceApprovalReason.trim().length < 10 ||
+                      !!order.pendingOrderLinePriceRequestId
+                    }
+                    loading={priceRequestFetcher.state === 'submitting'}
+                    loadingText="Submitting…"
+                    onClick={() => {
+                      const payload = editedItems.map(({ productId, quantity, unitPrice }) => ({
+                        productId,
+                        quantity,
+                        unitPrice: Math.round(unitPrice * 100) / 100,
+                      }));
+                      const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0) * 100) / 100;
+                      const fd: Record<string, string> = {
+                        intent: 'requestOrderLinePriceChange',
                         items: JSON.stringify(payload),
                         totalAmount: String(totalAmount),
-                      },
-                      { method: 'post' },
-                    );
-                  }}
-                >
-                  Save
-                </Button>
+                        reason: priceApprovalReason.trim(),
+                      };
+                      if (order.branchId) {
+                        fd.branchId = order.branchId;
+                      }
+                      ensureBranchForAction({
+                        actionLabel: 'submitting the price change request',
+                        onProceed: () => priceRequestFetcher.submit(fd, { method: 'post' }),
+                      });
+                    }}
+                  >
+                    Submit price change for approval
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={
+                      adjustItemsFetcher.state === 'submitting' ||
+                      priceRequestFetcher.state === 'submitting' ||
+                      editedItems.some((i) => i.quantity < 1 || i.unitPrice < 0)
+                    }
+                    loading={adjustItemsFetcher.state === 'submitting'}
+                    loadingText="Saving..."
+                    onClick={() => {
+                      const payload = editedItems.map(({ productId, quantity, unitPrice }) => ({
+                        productId,
+                        quantity,
+                        unitPrice: Math.round(unitPrice * 100) / 100,
+                      }));
+                      const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0) * 100) / 100;
+                      ensureBranchForAction({
+                        actionLabel: 'updating order items',
+                        onProceed: () =>
+                          adjustItemsFetcher.submit(
+                            {
+                              intent: 'adjustOrderItems',
+                              items: JSON.stringify(payload),
+                              totalAmount: String(totalAmount),
+                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                            },
+                            { method: 'post' },
+                          ),
+                      });
+                    }}
+                  >
+                    Save
+                  </Button>
+                )}
               </div>
             </div>
         </Modal>

@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { useState, useRef, useCallback, useEffect, useMemo, useTransition } from 'react';
+import { Link, useFetcher, useNavigation, useRevalidator, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { Textarea } from '~/components/ui/textarea';
@@ -7,12 +7,14 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { Spinner } from '~/components/ui/spinner';
 import { useFetcherToast } from '~/components/ui/toast';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { NairaPrice } from '~/components/ui/naira-price';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
@@ -26,7 +28,18 @@ import type {
   PendingCart,
   LiveActivityItem,
   CSQueueTab,
+  CloserWorkloadOrder,
 } from './types';
+
+/** Most recently active closers first; stable tie-break for strip + View all. */
+function compareCloserWorkloadsByRecency(a: AgentWorkload, b: AgentWorkload): number {
+  const aTime = a.lastActionAt ? new Date(a.lastActionAt).getTime() : 0;
+  const bTime = b.lastActionAt ? new Date(b.lastActionAt).getTime() : 0;
+  if (bTime !== aTime) return bTime - aTime;
+  const byName = a.agentName.localeCompare(b.agentName, undefined, { sensitivity: 'base' });
+  if (byName !== 0) return byName;
+  return a.agentId.localeCompare(b.agentId);
+}
 
 function resolveInitialActiveTab(
   initialTab: CSQueueTab | undefined,
@@ -103,17 +116,30 @@ function AgentWorkloadCard({
     : '';
 
   const viewOrdersLink = (
-    <Link
-      to={`/admin/cs/orders?csAgentId=${agent.agentId}&period=all_time`}
-      prefetch="intent"
-      className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-lg text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/25 hover:bg-brand-100 dark:hover:bg-brand-900/40 border border-brand-200/80 dark:border-brand-700/50 transition-colors"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-      </svg>
-      View orders
-    </Link>
+    <div className="flex flex-col gap-1.5 w-full">
+      <Link
+        to={`/admin/cs/orders?csAgentId=${agent.agentId}&period=all_time`}
+        prefetch="intent"
+        className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-lg text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/25 hover:bg-brand-100 dark:hover:bg-brand-900/40 border border-brand-200/80 dark:border-brand-700/50 transition-colors"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+        View orders
+      </Link>
+      <Link
+        to={`/admin/cs/queue?tab=hotswap&hotSwapFrom=${encodeURIComponent(agent.agentId)}`}
+        prefetch="intent"
+        className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-lg text-xs font-semibold text-app-fg bg-app-hover hover:bg-app-border border border-app-border transition-colors"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+        </svg>
+        Hot swap
+      </Link>
+    </div>
   );
 
   if (onOpen) {
@@ -151,6 +177,47 @@ function AgentWorkloadDetailModal({
   agent: AgentWorkload | null;
   onClose: () => void;
 }) {
+  const [queueOrders, setQueueOrders] = useState<CloserWorkloadOrder[] | null>(null);
+  const [queueLoadError, setQueueLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!agent) {
+      setQueueOrders(null);
+      setQueueLoadError(null);
+      return;
+    }
+    const controller = new AbortController();
+    setQueueOrders(null);
+    setQueueLoadError(null);
+
+    const apiUrl = typeof window !== 'undefined' ? window.__ENV?.API_URL || 'http://localhost:4000' : '';
+    const input = encodeURIComponent(JSON.stringify({ agentId: agent.agentId }));
+
+    void (async () => {
+      try {
+        const res = await fetch(`${apiUrl}/trpc/orders.closerWorkloadOrders?input=${input}`, {
+          credentials: 'include',
+          signal: controller.signal,
+        });
+        const json = (await res.json()) as { result?: { data?: CloserWorkloadOrder[] }; error?: { message?: string } };
+        if (controller.signal.aborted) return;
+        if (!res.ok) {
+          setQueueLoadError(json?.error?.message ?? 'Could not load orders');
+          setQueueOrders([]);
+          return;
+        }
+        const rows = json?.result?.data;
+        setQueueOrders(Array.isArray(rows) ? rows : []);
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        setQueueLoadError(e instanceof Error ? e.message : 'Could not load orders');
+        setQueueOrders([]);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [agent?.agentId]);
+
   if (!agent) return null;
 
   const utilization = agent.capacity > 0 ? (agent.pendingCount / agent.capacity) * 100 : 0;
@@ -172,7 +239,7 @@ function AgentWorkloadDetailModal({
     : 'No recent action';
 
   return (
-    <Modal open onClose={onClose} maxWidth="max-w-sm" contentClassName="p-0 overflow-hidden">
+    <Modal open onClose={onClose} maxWidth="max-w-lg" contentClassName="p-0 overflow-hidden">
       {/* Header band */}
       <div className="bg-brand-600 dark:bg-brand-700 px-5 pt-5 pb-10 relative">
         <button
@@ -235,6 +302,56 @@ function AgentWorkloadDetailModal({
       <div className="px-5 py-4 border-t border-app-border">
         <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted mb-1">Last action</p>
         <p className="text-sm font-medium text-app-fg">{lastAction}</p>
+      </div>
+
+      {/* Pending queue: orders + line items (API order = updatedAt desc) */}
+      <div className="px-5 py-3 border-t border-app-border max-h-[min(50vh,22rem)] overflow-y-auto">
+        <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted mb-2">Orders in queue</p>
+        {queueOrders === null ? (
+          <div className="flex items-center justify-center py-6 gap-2 text-app-fg-muted text-sm">
+            <Spinner size="sm" />
+            <span>Loading…</span>
+          </div>
+        ) : queueLoadError ? (
+          <p className="text-sm text-danger-600 dark:text-danger-400">{queueLoadError}</p>
+        ) : queueOrders.length === 0 ? (
+          <p className="text-sm text-app-fg-muted">No pending orders in this closer&apos;s workload.</p>
+        ) : (
+          <ul className="space-y-3">
+            {queueOrders.map((ord) => (
+              <li
+                key={ord.id}
+                className="rounded-lg border border-app-border bg-app-hover/50 p-3"
+              >
+                <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                  <OrderStatusBadge status={ord.status} />
+                  <span className="text-sm font-medium text-app-fg truncate min-w-0 flex-1">{ord.customerName}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <OrderIdBadge id={ord.id} linkTo={`/admin/orders/${ord.id}`} />
+                  {ord.totalAmount != null && (
+                    <span className="text-xs text-app-fg-muted">
+                      <NairaPrice amount={ord.totalAmount} />
+                    </span>
+                  )}
+                </div>
+                {ord.items.length > 0 ? (
+                  <ul className="text-xs text-app-fg-muted space-y-1 pl-0 list-none border-t border-app-border/80 pt-2 mt-1">
+                    {ord.items.map((it, idx) => (
+                      <li key={`${ord.id}-${idx}`} className="flex flex-wrap gap-x-1.5 gap-y-0.5">
+                        <span className="text-app-fg">{it.productName ?? 'Product'}</span>
+                        <span>×{it.quantity}</span>
+                        {it.offerLabel ? <span className="text-app-fg-muted">({it.offerLabel})</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-app-fg-muted border-t border-app-border/80 pt-2 mt-1">No line items</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="px-5 pb-5">
@@ -695,6 +812,7 @@ export function CSDashboardPage({
   unassignedTotal,
   activeOrders,
   activeTotal,
+  hotSwapOrdersPayload,
   statusCounts,
   isClaimMode = false,
   claimCap = 2,
@@ -711,9 +829,13 @@ export function CSDashboardPage({
   productsForOfflineOrder = [],
   initialCartActivity,
   initialTab,
-  initialHotSwapFrom,
 }: CSDashboardStreamData) {
   const fetcher = useFetcher();
+  const fetcherStateRef = useRef(fetcher.state);
+  const revalidator = useRevalidator();
+  const navigation = useNavigation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [hotSwapSearchPending, startHotSwapSearchTransition] = useTransition();
   const claimFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const cartsFetcher = useFetcher<{ activityItems?: LiveActivityItem[]; pendingCarts?: PendingCart[]; abandonedCarts?: PendingCart[] }>();
   const liveState = useLiveIndicator(liveEvents ?? []);
@@ -723,7 +845,9 @@ export function CSDashboardPage({
   );
   // Track which order is being claimed (to show per-row loading state)
   const [claimingOrderId, setClaimingOrderId] = useState<string | null>(null);
-  const [hotSwapFrom, setHotSwapFrom] = useState(initialHotSwapFrom ?? '');
+  /** URL-driven so socket `revalidate()` keeps loading the same closer's orders (see usePageRefreshOnEvent). */
+  const hotSwapFrom =
+    searchParams.get('hotSwapFrom')?.trim() || searchParams.get('from')?.trim() || '';
   const [hotSwapTo, setHotSwapTo] = useState('');
   const [hotSwapOrderIds, setHotSwapOrderIds] = useState<string[]>([]);
   /** Reassign order modal: order + current assignee so we can pick new agent */
@@ -956,8 +1080,11 @@ export function CSDashboardPage({
     if (actionError) setDismissedError(false);
   }, [actionError]);
 
-  // Close reassign / cancel modals only after a successful response
+  // Close reassign / cancel modals only after a successful response; refresh Hot Swap list once per bulkReassign submit
   useEffect(() => {
+    const wasSubmitting = fetcherStateRef.current === 'submitting';
+    fetcherStateRef.current = fetcher.state;
+
     if (fetcher.state === 'idle' && fetcher.data) {
       const result = fetcher.data as { success?: boolean };
       if (result.success) {
@@ -971,7 +1098,15 @@ export function CSDashboardPage({
         }
       }
     }
-  }, [fetcher.state, fetcher.data]);
+
+    if (wasSubmitting && fetcher.state === 'idle' && fetcher.data) {
+      const result = fetcher.data as { success?: boolean };
+        if (result.success && fetcher.formData?.get('intent') === 'bulkReassign') {
+          setHotSwapOrderIds([]);
+          revalidator.revalidate();
+        }
+    }
+  }, [fetcher.state, fetcher.data, reassignOrder, cancelConfirmOrder]);
 
   const totalPending = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
   const totalCapacity = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
@@ -988,10 +1123,16 @@ export function CSDashboardPage({
     [workloads],
   );
 
-  // Get orders assigned to the hotswap source agent
-  const hotSwapSourceOrders = activeOrders.filter(
-    (o: CSOrder) => o.assignedCsId === hotSwapFrom,
-  );
+  const effectiveHotSwapPayload =
+    hotSwapFrom && hotSwapOrdersPayload?.forAgentId === hotSwapFrom ? hotSwapOrdersPayload : null;
+
+  const hotSwapListLoading =
+    Boolean(hotSwapFrom) &&
+    hotSwapOrdersPayload?.forAgentId !== hotSwapFrom &&
+    (navigation.state === 'loading' || hotSwapSearchPending);
+
+  const hotSwapSourceOrders = effectiveHotSwapPayload?.orders ?? [];
+  const hotSwapSourceTotal = effectiveHotSwapPayload?.total ?? 0;
 
   function handleHotSwap() {
     if (hotSwapOrderIds.length === 0 || !hotSwapFrom || !hotSwapTo) return;
@@ -1473,15 +1614,7 @@ export function CSDashboardPage({
             className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
           >
             {[...workloads]
-              .sort((a, b) => {
-                const aNew = newAgentIds.has(a.agentId) ? 1 : 0;
-                const bNew = newAgentIds.has(b.agentId) ? 1 : 0;
-                if (aNew !== bNew) return bNew - aNew;
-                // Secondary: most recently active first
-                const aTime = a.lastActionAt ? new Date(a.lastActionAt).getTime() : 0;
-                const bTime = b.lastActionAt ? new Date(b.lastActionAt).getTime() : 0;
-                return bTime - aTime;
-              })
+              .sort(compareCloserWorkloadsByRecency)
               .map((agent: AgentWorkload) => (
                 <AgentWorkloadCard
                   key={agent.agentId}
@@ -2015,7 +2148,10 @@ export function CSDashboardPage({
           <div className="card">
             <h2 className="text-lg font-semibold text-app-fg mb-1">Hot Swap</h2>
             <p className="text-sm text-app-fg-muted mb-4">
-              Select orders from one closer and bulk-reassign them to another closer.
+              Select orders from one closer and bulk-reassign them to another closer. The list matches each
+              closer&apos;s CS queue (Unprocessed, Assigned, Engaged) — the same scope as workload counts, not only
+              &quot;engaged today&quot; on the Active tab. Your choice is kept in the URL so live refreshes do not
+              clear the list.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -2025,8 +2161,14 @@ export function CSDashboardPage({
                   label="From closer"
                   value={hotSwapFrom}
                   onChange={(v) => {
-                    setHotSwapFrom(v);
-                    setHotSwapOrderIds([]);
+                    startHotSwapSearchTransition(() => {
+                      setHotSwapOrderIds([]);
+                      const next = new URLSearchParams(searchParams);
+                      next.delete('from');
+                      if (v) next.set('hotSwapFrom', v);
+                      else next.delete('hotSwapFrom');
+                      setSearchParams(next, { replace: true });
+                    });
                   }}
                   placeholder="Select source closer..."
                   searchPlaceholder="Search closers..."
@@ -2054,11 +2196,24 @@ export function CSDashboardPage({
               </div>
             </div>
 
-            {hotSwapFrom && hotSwapSourceOrders.length > 0 && (
+            {hotSwapFrom && hotSwapListLoading && (
+              <div className="flex items-center justify-center gap-2 py-8 text-app-fg-muted text-sm">
+                <Spinner size="sm" />
+                Loading orders for this closer…
+              </div>
+            )}
+
+            {hotSwapFrom && !hotSwapListLoading && hotSwapSourceOrders.length > 0 && (
               <>
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-sm text-app-fg-muted">
                     Select orders to reassign ({hotSwapOrderIds.length} selected)
+                    {hotSwapSourceTotal > hotSwapSourceOrders.length ? (
+                      <span className="block text-xs mt-0.5 text-warning-600 dark:text-warning-400">
+                        Showing {hotSwapSourceOrders.length} of {hotSwapSourceTotal} — narrow by reassigning in batches
+                        or use CS Orders with filters for the full list.
+                      </span>
+                    ) : null}
                   </p>
                   <button
                     onClick={selectAllHotSwap}
@@ -2095,9 +2250,10 @@ export function CSDashboardPage({
               </>
             )}
 
-            {hotSwapFrom && hotSwapSourceOrders.length === 0 && (
+            {hotSwapFrom && !hotSwapListLoading && hotSwapSourceOrders.length === 0 && (
               <p className="text-sm text-app-fg-muted text-center py-4">
-                No active orders for this closer
+                No open CS-queue orders for this closer (nothing in Unprocessed / Assigned / Engaged with them as
+                assignee). If you expected more, confirm branch context and that orders are still in the CS stage.
               </p>
             )}
           </div>
@@ -2759,14 +2915,7 @@ export function CSDashboardPage({
             </div>
             <div className="flex-1 min-h-0 overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
               {(() => {
-                const sorted = [...workloads].sort((a, b) => {
-                  const aNew = newAgentIds.has(a.agentId) ? 1 : 0;
-                  const bNew = newAgentIds.has(b.agentId) ? 1 : 0;
-                  if (aNew !== bNew) return bNew - aNew;
-                  const aTime = a.lastActionAt ? new Date(a.lastActionAt).getTime() : 0;
-                  const bTime = b.lastActionAt ? new Date(b.lastActionAt).getTime() : 0;
-                  return bTime - aTime;
-                });
+                const sorted = [...workloads].sort(compareCloserWorkloadsByRecency);
                 const pageSize = 20;
                 const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
                 const page = Math.min(viewAllPage, totalPages);

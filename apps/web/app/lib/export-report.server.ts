@@ -1,6 +1,10 @@
-import { json } from '@remix-run/node';
+import { data } from '@remix-run/node';
 import { apiRequest, getSessionCookie, safeStatus } from './api.server';
 import { extractApiErrorMessage } from './api-error';
+
+export type ExportReportActionData =
+  | { ok: true; filename: string; csvContent: string }
+  | { ok: false; error: string };
 
 export async function handleExportReportAction(request: Request) {
   const cookie = getSessionCookie(request);
@@ -20,17 +24,18 @@ export async function handleExportReportAction(request: Request) {
   try {
     columns = JSON.parse(columnsRaw) as string[];
   } catch {
-    return json({ error: 'Invalid columns payload' }, { status: 400 });
+    return data({ ok: false as const, error: 'Invalid columns payload' } satisfies ExportReportActionData, { status: 400 });
   }
   try {
     filters = JSON.parse(filtersRaw) as Record<string, unknown>;
   } catch {
-    return json({ error: 'Invalid filters payload' }, { status: 400 });
+    return data({ ok: false as const, error: 'Invalid filters payload' } satisfies ExportReportActionData, { status: 400 });
   }
 
   const res = await apiRequest<{ result?: { data?: { filename: string; csvContent: string } } }>('/trpc/reports.exportCsv', {
     method: 'POST',
     cookie,
+    timeoutMs: 120_000,
     body: {
       reportKey,
       columns,
@@ -44,20 +49,20 @@ export async function handleExportReportAction(request: Request) {
   });
 
   if (!res.ok) {
-    return json({ error: extractApiErrorMessage(res.data, 'Failed to export report') }, { status: safeStatus(res.status) });
+    return data(
+      { ok: false as const, error: extractApiErrorMessage(res.data, 'Failed to export report') } satisfies ExportReportActionData,
+      { status: safeStatus(res.status) },
+    );
   }
 
-  const data = res.data?.result?.data;
-  if (!data?.csvContent || !data.filename) {
-    return json({ error: 'Export returned no data' }, { status: 500 });
+  const payload = res.data?.result?.data;
+  if (!payload?.csvContent || !payload.filename) {
+    return data({ ok: false as const, error: 'Export returned no data' } satisfies ExportReportActionData, { status: 500 });
   }
 
-  return new Response(data.csvContent, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${data.filename}"`,
-    },
-  });
+  return data({
+    ok: true as const,
+    filename: payload.filename,
+    csvContent: payload.csvContent,
+  } satisfies ExportReportActionData);
 }
-

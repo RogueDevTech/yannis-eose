@@ -6,6 +6,7 @@ import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { MarketingOrdersPage } from '~/features/marketing/MarketingOrdersPage';
 import type { Order } from '~/features/orders/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
+import type { MarketingExportPicklists } from '~/components/ui/export-modal';
 
 export const meta: MetaFunction = () => [
   { title: 'Marketing Orders — Yannis EOSE' },
@@ -44,6 +45,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const isMediaBuyer = user.role === 'MEDIA_BUYER';
   const mediaBuyerId = isMediaBuyer ? user.id : mediaBuyerIdParam;
+  const showMediaBuyerColumn =
+    user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  const loadMarketingExportPicklists = showMediaBuyerColumn && !isMediaBuyer;
 
   const listInput = {
     page,
@@ -75,11 +79,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (endDate) trendInput.endDate = endDate;
   const trendInputStr = encodeURIComponent(JSON.stringify(trendInput));
 
-  const [res, countsRes, metricsRes, trendRes] = await Promise.all([
+  const buyersInputStr = encodeURIComponent(
+    JSON.stringify({ page: 1, limit: 100, role: 'MEDIA_BUYER', status: 'ACTIVE' }),
+  );
+  const productsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }));
+  const campaignsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }));
+
+  const [res, countsRes, metricsRes, trendRes, buyersRes, productsRes, campaignsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/marketing.metrics?input=${metricsInputStr}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputStr}`, { method: 'GET', cookie }),
+    loadMarketingExportPicklists
+      ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
+      : Promise.resolve(null),
+    loadMarketingExportPicklists
+      ? apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie })
+      : Promise.resolve(null),
+    loadMarketingExportPicklists
+      ? apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${campaignsInputStr}`, { method: 'GET', cookie })
+      : Promise.resolve(null),
   ]);
 
   const trpcData = res.ok
@@ -108,6 +127,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     customerPhoneDisplay: '',
   }));
 
+  let marketingExportPicklists: MarketingExportPicklists | undefined;
+  if (loadMarketingExportPicklists && buyersRes?.ok && productsRes?.ok && campaignsRes?.ok) {
+    const usersPayload = (buyersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } })?.result?.data;
+    const productsPayload = (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data;
+    const campaignsPayload = (campaignsRes.data as { result?: { data?: { campaigns: Array<{ id: string; name: string }> } } })?.result?.data;
+    marketingExportPicklists = {
+      mediaBuyers: (usersPayload?.users ?? []).map((u) => ({ id: u.id, name: u.name })),
+      products: (productsPayload?.products ?? []).map((p) => ({ id: p.id, name: p.name })),
+      campaigns: (campaignsPayload?.campaigns ?? []).map((c) => ({ id: c.id, name: c.name })),
+    };
+  }
+  const mediaBuyersForFilter = marketingExportPicklists?.mediaBuyers ?? [];
+
   return {
     orders,
     total,
@@ -118,7 +150,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusFilter: status,
     searchFilter: search,
     isMediaBuyer,
-    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
+    showMediaBuyerColumn,
+    mediaBuyersForFilter,
+    marketingExportPicklists,
     filters,
     cpa: metricsData?.cpa ?? null,
     totalAdSpend: metricsData?.totalSpend ?? null,

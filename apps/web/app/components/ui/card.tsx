@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 /**
  * Card — base surface card with consistent padding, shadow, and border.
  * Use for panels, stat cards, form sections, and list items.
@@ -130,7 +132,9 @@ export function CardFooter({ className = '', children }: CardFooterProps) {
 
 interface StatCardProps {
   label: string;
-  value: React.ReactNode;
+  value: ReactNode;
+  /** Muted one-line context under the value (e.g. “All statuses”) */
+  description?: ReactNode;
   /** Optional change indicator */
   change?: { value: string; positive: boolean };
   icon?: React.ReactNode;
@@ -140,7 +144,16 @@ interface StatCardProps {
   className?: string;
 }
 
-export function StatCard({ label, value, change, icon, accent, loading = false, className = '' }: StatCardProps) {
+export function StatCard({
+  label,
+  value,
+  description,
+  change,
+  icon,
+  accent,
+  loading = false,
+  className = '',
+}: StatCardProps) {
   return (
     <Card variant="default" padding="md" accent={accent} className={className}>
       <div className="flex items-start justify-between gap-2">
@@ -150,6 +163,9 @@ export function StatCard({ label, value, change, icon, accent, loading = false, 
             <div className="mt-1.5 h-6 w-24 animate-pulse rounded bg-app-hover" />
           ) : (
             <p className="mt-1 text-2xl font-bold text-app-fg tabular-nums">{value}</p>
+          )}
+          {description != null && description !== '' && !loading && (
+            <p className="mt-1 text-xs text-app-fg-muted">{description}</p>
           )}
           {change && !loading && (
             <p

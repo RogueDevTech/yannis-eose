@@ -51,6 +51,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const leaderboardPeriod = url.searchParams.get('period') === 'all_time' ? 'all_time' : 'this_month';
+  const fromParamEarly = url.searchParams.get('from');
+  const hotSwapFromParamEarly =
+    url.searchParams.get('hotSwapFrom')?.trim() || fromParamEarly?.trim() || undefined;
 
   // Fetch dispatch mode to know if claim mode is active
   const dispatchSettingRes = await apiRequest<unknown>(
@@ -63,8 +66,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const claimCapSetting = settingsData.find((s) => s.key === 'CS_CLAIM_CAP');
   const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
 
+  const hotSwapFromForLoader = hotSwapFromParamEarly;
+  const hotSwapListInput = hotSwapFromForLoader
+    ? {
+        assignedCsId: hotSwapFromForLoader,
+        statuses: ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const,
+        limit: 100,
+        page: 1,
+        sortBy: 'updatedAt' as const,
+        sortOrder: 'desc' as const,
+      }
+    : null;
+  const hotSwapOrdersP = hotSwapListInput
+    ? apiRequest<unknown>(
+        `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(hotSwapListInput))}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: false as const, data: {} });
+
   // ── Critical data: await these so the page always has core content ──
-  const [workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes, activityRes, pendingRes, abandonedRes] = await Promise.all([
+  const [
+    workloadsRes,
+    unassignedRes,
+    statusCountsRes,
+    activeOrdersRes,
+    activityRes,
+    pendingRes,
+    abandonedRes,
+    hotSwapOrdersRes,
+  ] = await Promise.all([
     apiRequest<unknown>('/trpc/orders.csWorkloads', { method: 'GET', cookie }),
     apiRequest<unknown>(
       `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'UNPROCESSED', limit: 20 }))}`,
@@ -87,6 +117,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/cart.listAbandoned?input=${encodeURIComponent(JSON.stringify({ limit: 50 }))}`,
       { method: 'GET', cookie },
     ),
+    hotSwapOrdersP,
   ]);
 
   const workloads = workloadsRes.ok
@@ -111,12 +142,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (abandonedRes.data as { result?: { data?: PendingCart[] } })?.result?.data ?? []
     : [];
 
+  let hotSwapOrdersPayload: { forAgentId: string; orders: CSOrder[]; total: number } | null = null;
+  if (hotSwapFromForLoader && hotSwapOrdersRes.ok) {
+    const pack = (hotSwapOrdersRes.data as { result?: { data?: { orders: CSOrder[]; pagination: { total: number } } } })
+      ?.result?.data;
+    if (pack) {
+      hotSwapOrdersPayload = {
+        forAgentId: hotSwapFromForLoader,
+        orders: pack.orders ?? [],
+        total: pack.pagination?.total ?? 0,
+      };
+    }
+  }
+
   const criticalData = {
     workloads,
     unassignedOrders: unassignedData?.orders ?? [],
     unassignedTotal: unassignedData?.pagination?.total ?? 0,
     activeOrders: activeData?.orders ?? [],
     activeTotal: activeData?.pagination?.total ?? 0,
+    hotSwapOrdersPayload,
     statusCounts,
     isClaimMode,
     claimCap,
@@ -177,10 +222,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ).catch(() => ({ pending: 0, abandonedLast24h: 0 }));
 
   const tabParam = url.searchParams.get('tab');
-  const fromParam = url.searchParams.get('from');
   const initialTab = parseCSQueueTabFromSearchParam(tabParam, isClaimMode);
-  const initialHotSwapFrom =
-    initialTab === 'hotswap' && fromParam?.trim() ? fromParam.trim() : undefined;
 
   return {
     criticalData,
@@ -195,7 +237,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canDeleteCart,
     productsForOfflineOrder,
     initialTab,
-    initialHotSwapFrom,
   };
 }
 
@@ -482,7 +523,6 @@ export default function CSQueueRoute() {
       canDeleteCart={data.canDeleteCart}
       productsForOfflineOrder={data.productsForOfflineOrder}
       initialTab={data.initialTab}
-      initialHotSwapFrom={data.initialHotSwapFrom}
     />
   );
 }

@@ -21,7 +21,7 @@ function formatCustomFieldValue(value: string | number | boolean | string[] | un
 }
 
 /**
- * Plain-text block for pasting into WhatsApp / 3PL group chats.
+ * Plain-text block for pasting into WhatsApp / logistics company group chats.
  * Uses `customerPhoneDisplay` only (masked) — never raw phone (Lead Fortress).
  */
 export function buildOrderSummaryClipboardText(order: OrderDetail): string {
@@ -68,7 +68,7 @@ export function buildOrderSummaryClipboardText(order: OrderDetail): string {
   }
 
   if (order.logisticsLocationName) {
-    lines.push(`3PL location: ${order.logisticsLocationName}`);
+    lines.push(`Logistics company location: ${order.logisticsLocationName}`);
     lines.push('');
   }
 

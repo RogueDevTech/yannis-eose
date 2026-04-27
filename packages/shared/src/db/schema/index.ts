@@ -20,6 +20,7 @@ export * from './rbac';
 export * from './permission-requests';
 export * from './system';
 export * from './branches';
+export * from './branch-teams';
 export * from './messaging';
 export * from './auth-sessions';
 export * from './mirror-sessions';

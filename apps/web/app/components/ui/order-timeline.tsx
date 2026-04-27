@@ -70,6 +70,7 @@ const EVENT_BORDER: Record<string, string> = {
   ORDER_WRITTEN_OFF: 'border-danger-500',
   SUPERVISOR_WATCHING: 'border-app-border dark:border-neutral-600',
   PAYMENT_RECEIVED: 'border-success-500',
+  ORDER_ARCHIVED: 'border-app-border dark:border-neutral-600',
 };
 
 const RIDER_METADATA_EVENT_TYPES = new Set([

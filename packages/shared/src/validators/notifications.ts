@@ -35,3 +35,23 @@ export const createNotificationSchema = z.object({
 });
 
 export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
+
+// ============================================
+// Per-user notification preferences
+// ============================================
+
+/**
+ * Map of notification-type → enabled. Missing key = default (enabled).
+ * Setting `false` opts the user out of that type entirely (in-app, push, email).
+ */
+export const notificationPreferencesSchema = z.record(z.string().min(1), z.boolean());
+
+export type NotificationPreferences = z.infer<typeof notificationPreferencesSchema>;
+
+export const updateMyNotificationPreferencesSchema = z.object({
+  preferences: notificationPreferencesSchema,
+});
+
+export type UpdateMyNotificationPreferencesInput = z.infer<
+  typeof updateMyNotificationPreferencesSchema
+>;

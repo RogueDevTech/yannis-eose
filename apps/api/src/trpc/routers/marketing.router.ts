@@ -10,6 +10,7 @@ import {
   approveFundingRequestSchema,
   rejectFundingRequestSchema,
   createAdSpendSchema,
+  createAdSpendBatchSchema,
   listAdSpendSchema,
   adSpendStatusCountsSchema,
   approveAdSpendSchema,
@@ -27,6 +28,8 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
+import { getBranchTeamsService } from './branches.router';
+import { isAdminLevel } from '../../common/authz';
 
 let marketingServiceInstance: MarketingService | null = null;
 
@@ -43,12 +46,37 @@ function getMarketingService(): MarketingService {
 
 export const marketingRouter = router({
   // ── Funding ──────────────────────────────────────
-  createFunding: permissionProcedure('marketing.funding', 'finance.disburse')
+  createFunding: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(createFundingSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...fundingInput } = input;
-      return getMarketingService().createFunding(fundingInput, ctx.user, branchId ?? ctx.currentBranchId);
+      const bId = branchId ?? ctx.currentBranchId ?? null;
+      const perms = ctx.user.permissions ?? [];
+      const hasFundingPerm =
+        perms.includes('marketing.funding') ||
+        perms.includes('finance.disburse') ||
+        isAdminLevel(ctx.user);
+      if (!hasFundingPerm) {
+        if (!bId) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Switch to a branch to send funding',
+          });
+        }
+        const supervisorOk = await getBranchTeamsService().isMarketingSupervisorOf(
+          ctx.user.id,
+          fundingInput.receiverId,
+          bId,
+        );
+        if (!supervisorOk) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You do not have permission to send funding to this user',
+          });
+        }
+      }
+      return getMarketingService().createFunding(fundingInput, ctx.user, bId);
     }),
 
   verifyFunding: authedProcedure
@@ -197,6 +225,22 @@ export const marketingRouter = router({
       return getMarketingService().createAdSpend(adSpendInput, ctx.user.id, branchId ?? ctx.currentBranchId);
     }),
 
+  /**
+   * Multi-line "Add Expense" submission. One day, N lines, single transaction.
+   * HoM gets ONE notification for the whole batch — see MarketingService.createAdSpendBatch.
+   */
+  createAdSpendBatch: permissionProcedure('marketing.adSpend')
+    .meta({ branchScopedMutation: true })
+    .input(createAdSpendBatchSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId, ...batchInput } = input;
+      return getMarketingService().createAdSpendBatch(
+        batchInput,
+        ctx.user.id,
+        branchId ?? ctx.currentBranchId,
+      );
+    }),
+
   listAdSpend: authedProcedure
     .input(listAdSpendSchema)
     .query(async ({ input, ctx }) => {
@@ -205,6 +249,27 @@ export const marketingRouter = router({
         ? { ...input, mediaBuyerId: ctx.user.id }
         : input;
       return getMarketingService().listAdSpend(effectiveInput, ctx.currentBranchId);
+    }),
+
+  /**
+   * Grouped accordion view: each result row is one (date × MB) batch with
+   * line items. Same role scoping as listAdSpend — Media Buyers see only
+   * their own.
+   */
+  listAdSpendGrouped: authedProcedure
+    .input(
+      z.object({
+        mediaBuyerId: z.string().uuid().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        page: z.number().int().min(1).optional(),
+        limit: z.number().int().min(1).max(50).optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const effectiveInput =
+        ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
+      return getMarketingService().listAdSpendGrouped(effectiveInput, ctx.currentBranchId);
     }),
 
   adSpendStatusCounts: authedProcedure
@@ -349,6 +414,49 @@ export const marketingRouter = router({
     .input(listCampaignsSchema)
     .query(async ({ input, ctx }) => {
       return getMarketingService().listCampaigns(input, ctx.currentBranchId);
+    }),
+
+  // ── Cross-Funnel Attempts (per-MB visibility) ───
+  /**
+   * List cross-funnel attempts the caller is allowed to see.
+   * Strictly per-MB visibility — Media Buyers see their own; HoM sees their branch;
+   * admin-class sees all. CS / non-marketing roles get an empty list.
+   */
+  listMyCrossFunnelAttempts: authedProcedure
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        productId: z.string().uuid().optional(),
+        page: z.number().int().min(1).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().listMyCrossFunnelAttempts(
+        ctx.user,
+        input,
+        ctx.currentBranchId,
+      );
+    }),
+
+  /**
+   * Aggregate stats (count, unique customers, per-product breakdown) for the
+   * caller's cross-funnel attempts view. Used by the marketing dashboard.
+   */
+  crossFunnelStats: authedProcedure
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().crossFunnelStats(
+        ctx.user,
+        input,
+        ctx.currentBranchId,
+      );
     }),
 
   // ── Public Endpoint (Edge Worker) ──────────────

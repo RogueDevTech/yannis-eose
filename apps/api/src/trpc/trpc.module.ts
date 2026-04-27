@@ -53,7 +53,10 @@ import {
   setBranchesDb,
   setBranchesSessionStore,
   setBranchesNotificationsService,
+  setBranchTeamsService,
 } from './routers/branches.router';
+import { BranchesModule } from '../branches/branches.module';
+import { BranchTeamsService } from '../branches/branch-teams.service';
 import { setMessagingDb } from './routers/messaging.router';
 import { DRIZZLE, DatabaseModule } from '../database/database.module';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -75,6 +78,7 @@ import { setReportsService } from './routers/reports.router';
     NotificationsModule, AuditModule, VoipModule, SettingsModule, CartModule,
     PermissionsModule, PermissionRequestsModule,
     AuthModule,
+    BranchesModule,
     CacheModule,
     ReportsModule,
   ],
@@ -102,6 +106,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly sessionStore: SessionStoreService,
     private readonly cacheService: CacheService,
     private readonly reportsService: ReportsService,
+    private readonly branchTeamsService: BranchTeamsService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -128,6 +133,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setSettingsDb(this.db as Parameters<typeof setSettingsDb>[0]);
     setCartService(this.cartService);
     setBranchesDb(this.db as Parameters<typeof setBranchesDb>[0]);
+    setBranchTeamsService(this.branchTeamsService);
     setBranchesSessionStore(this.sessionStore);
     setBranchesNotificationsService(this.notificationsService);
     setMessagingDb(this.db as Parameters<typeof setMessagingDb>[0]);

@@ -22,6 +22,11 @@ export interface FundingBalanceRow {
   confirmationRate?: number;
   /** This month's delivery rate (0–100), when loaded from team page with leaderboard */
   deliveryRate?: number;
+  /** Ad spend / total orders (period), when merged from leaderboard */
+  cpa?: number;
+  trueRoas?: number;
+  /** min(1, trueRoas / target); null when no ad spend in period */
+  profitabilityScore?: number | null;
 }
 
 export interface FundingRequestRecord {
@@ -160,6 +165,9 @@ export interface Campaign {
   id: string;
   name: string;
   status: string;
+  /** Pulled through from marketing.listCampaigns so the Add Expense modal can
+   * auto-fill the product when a campaign is picked. May be empty/null on older rows. */
+  productIds?: string[] | null;
 }
 
 /** Optional date filter — when provided, DateFilterBar is shown and data is filtered by it */
@@ -290,6 +298,40 @@ export interface MarketingFundingLoaderData {
 }
 
 export type AdSpendStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type AdPlatform = 'FACEBOOK' | 'TIKTOK' | 'GOOGLE';
+export type RolledStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
+
+/** Single line within an ad-spend day group (Phase 17 accordion). */
+export interface AdSpendGroupLine {
+  id: string;
+  mediaBuyerId: string;
+  mediaBuyerName: string | null;
+  productId: string;
+  productName: string | null;
+  campaignId: string;
+  campaignName: string | null;
+  spendAmount: string;
+  screenshotUrl: string;
+  adUrl: string | null;
+  platform: AdPlatform;
+  spendDate: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  rejectionReason: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  createdAt: string;
+}
+
+/** One accordion row = one (date × MB) batch with its line items. */
+export interface AdSpendGroup {
+  spendDate: string;
+  mediaBuyerId: string;
+  mediaBuyerName: string | null;
+  lineCount: number;
+  totalAmount: string;
+  rolledStatus: RolledStatus;
+  lines: AdSpendGroupLine[];
+}
 
 /** `/admin/marketing/ad-spend` loader + component props */
 export interface MarketingAdSpendLoaderData {
@@ -313,4 +355,9 @@ export interface MarketingAdSpendLoaderData {
   leaderboardPeriod: 'this_month' | 'all_time';
   filters: MarketingDateFilters;
   viewMode: 'admin' | 'media_buyer';
+  /** Grouped accordion view (Phase 17). Groups are page-sliced — pagination is on groups. */
+  groups: AdSpendGroup[];
+  groupsTotal: number;
+  groupsPage: number;
+  groupsTotalPages: number;
 }

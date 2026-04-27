@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { router, authedProcedure } from '../trpc';
 import type { AuditService } from '../../audit/audit.service';
+import { canAccessGlobalAuditLog } from '../../common/authz';
 
 // Factory pattern — same as all other routers
 let auditServiceInstance: AuditService | null = null;
@@ -17,17 +19,9 @@ function getAuditService(): AuditService {
 }
 
 /**
- * Audit router — open to any authenticated user.
- *
- * Policy (Pillar 4, "Absolute Accountability"): every staff member can see
- * who changed what and when. Column-level security is still enforced via the
- * `stripFinanceFields` middleware applied in `authedProcedure`, so cost/margin
- * keys remain hidden from non-finance roles even when they appear inside audit
- * row JSON payloads. Phone numbers are already stored as hashes, so PII is not
- * leaked by exposing audit rows.
- *
- * If you need to re-gate this (e.g. hide audit from TPL riders), swap
- * `authedProcedure` back to `authedProcedure` on each row.
+ * Audit router — `recordHistory` / `timeTravel` stay authed-only (record-scoped by domain loaders).
+ * Global log + mirror list require `audit.read` or admin/finance (see `canAccessGlobalAuditLog`).
+ * Column-level security: `stripFinanceFields` on `authedProcedure` strips cost/margin in payloads.
  */
 export const auditRouter = router({
   /**
@@ -65,8 +59,17 @@ export const auditRouter = router({
         limit: z.number().int().min(1).max(100).default(20),
       }),
     )
-    .query(async ({ input }) => {
-      return getAuditService().getGlobalAuditLog(input);
+    .query(async ({ input, ctx }) => {
+      const u = ctx.user;
+      if (!canAccessGlobalAuditLog(u)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to view the global audit log.' });
+      }
+      return getAuditService().getGlobalAuditLog(input, {
+        role: u.role,
+        permissions: u.permissions,
+        isFinanceOfficer: u.isFinanceOfficer,
+        currentBranchId: u.currentBranchId,
+      });
     }),
 
   /**
@@ -92,8 +95,17 @@ export const auditRouter = router({
    * Get list of auditable table names (for UI dropdown).
    */
   tables: authedProcedure
-    .query(async () => {
-      return getAuditService().getAuditableTables();
+    .query(async ({ ctx }) => {
+      const u = ctx.user;
+      if (!canAccessGlobalAuditLog(u)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to view the global audit log.' });
+      }
+      return getAuditService().getAuditableTables({
+        role: u.role,
+        permissions: u.permissions,
+        isFinanceOfficer: u.isFinanceOfficer,
+        currentBranchId: u.currentBranchId,
+      });
     }),
 
   /**
@@ -118,7 +130,16 @@ export const auditRouter = router({
         targetId: z.string().uuid().optional(),
       }),
     )
-    .query(async ({ input }) => {
-      return getAuditService().getMirrorSessions(input);
+    .query(async ({ input, ctx }) => {
+      const u = ctx.user;
+      if (!canAccessGlobalAuditLog(u)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to view mirror session audit.' });
+      }
+      return getAuditService().getMirrorSessions(input, {
+        role: u.role,
+        permissions: u.permissions,
+        isFinanceOfficer: u.isFinanceOfficer,
+        currentBranchId: u.currentBranchId,
+      });
     }),
 });

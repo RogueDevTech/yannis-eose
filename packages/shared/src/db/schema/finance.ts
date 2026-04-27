@@ -30,7 +30,7 @@ export const approvalRequests = pgTable('approval_requests', {
   approverId: uuid('approver_id').references(() => users.id),
   approvalReason: text('approval_reason'),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
-  budgetId: uuid('budget_id'),
+  budgetId: uuid('budget_id').references(() => budgets.id),
   ...temporalColumns,
   ...timestampColumns,
 });
@@ -43,7 +43,7 @@ export const budgets = pgTable('budgets', {
   totalBudget: numeric('total_budget', { precision: 12, scale: 2 }).notNull(),
   periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
   periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
-  createdBy: text('created_by').notNull().references(() => users.id),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
   ...temporalColumns,
   ...timestampColumns,
 });

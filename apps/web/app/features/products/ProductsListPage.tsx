@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { useEffect, useState, useRef } from 'react';
+import { Link, useFetcher, useSearchParams, useRevalidator } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { EmptyState } from '~/components/ui/empty-state';
 import { FormSelect } from '~/components/ui/form-select';
+import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -11,7 +12,8 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { useFetcherToast } from '~/components/ui/toast';
+import { Textarea } from '~/components/ui/textarea';
+import { useToast } from '~/components/ui/toast';
 import type { Product } from './types';
 import { ProductViewModal } from './ProductViewModal';
 
@@ -23,6 +25,8 @@ interface ProductsListPageProps {
   canEditProduct?: boolean;
   /** Shown only when user has products.create (e.g. warehouse); media buyers must not see Add Product. */
   canCreateProduct?: boolean;
+  /** Super Admin archives immediately; others submit a permission request. */
+  canInstantArchiveProduct?: boolean;
 }
 
 function getDisplayCategory(product: Product): string {
@@ -48,7 +52,23 @@ function thumbGradient(seed: string): string {
   return THUMB_GRADIENTS[h % THUMB_GRADIENTS.length]!;
 }
 
+function firstProductThumbUrl(product: Product): string | undefined {
+  for (const o of product.offers ?? []) {
+    const u = o.imageUrls?.[0];
+    if (typeof u === 'string' && u.length > 0) return u;
+  }
+  return undefined;
+}
+
 function ProductThumb({ product }: { product: Product }) {
+  const thumbUrl = firstProductThumbUrl(product);
+  if (thumbUrl) {
+    return (
+      <div className="w-9 h-9 shrink-0 rounded-md border border-app-border overflow-hidden bg-app-hover shadow-sm" aria-hidden>
+        <img src={thumbUrl} alt="" className="w-full h-full object-cover" />
+      </div>
+    );
+  }
   const initial = product.name.trim().charAt(0).toUpperCase() || '?';
   const gradient = thumbGradient(product.id);
   return (
@@ -68,21 +88,44 @@ export function ProductsListPage({
   totalPages,
   canEditProduct = false,
   canCreateProduct = false,
+  canInstantArchiveProduct = false,
 }: ProductsListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Product | null>(null);
+  const [archiveReason, setArchiveReason] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
   const safeTotalPages = Math.max(1, totalPages);
+  const { revalidate } = useRevalidator();
+  const { toast } = useToast();
 
-  const archiveFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(archiveFetcher.data, { successMessage: 'Product archived' });
+  const archiveFetcher = useFetcher<{
+    success?: boolean;
+    error?: string;
+    requiresApproval?: boolean;
+    message?: string | null;
+  }>();
+  const prevArchiveFetcherState = useRef(archiveFetcher.state);
+
   useEffect(() => {
-    if (archiveFetcher.state === 'idle' && archiveFetcher.data?.success) {
+    const wasSubmitting = prevArchiveFetcherState.current === 'submitting';
+    prevArchiveFetcherState.current = archiveFetcher.state;
+    if (!wasSubmitting || archiveFetcher.state !== 'idle' || !archiveFetcher.data) return;
+    const d = archiveFetcher.data;
+    if (d.success) {
+      if (d.requiresApproval) {
+        toast.info('Request submitted', d.message ?? 'A Super Admin will review your archive request.');
+      } else {
+        toast.success('Product archived');
+      }
       setArchiveTarget(null);
+      setArchiveReason('');
+      revalidate();
+    } else if (d.error) {
+      toast.error('Archive failed', d.error);
     }
-  }, [archiveFetcher.state, archiveFetcher.data]);
+  }, [archiveFetcher.state, archiveFetcher.data, revalidate, toast]);
 
   // Whether to show the cost column — driven by whether the API stripped costPrice
   // from any row. (Column-level security at API; if user lacks finance access, every
@@ -236,7 +279,7 @@ export function ProductsListPage({
                         </button>
                         {canEditProduct && (
                           <Link
-                            to={`/admin/products/${product.id}`}
+                            to={`/admin/products/${product.id}?mode=edit`}
                             prefetch="intent"
                             className="btn-secondary btn-sm text-xs"
                           >
@@ -246,10 +289,13 @@ export function ProductsListPage({
                         {canEditProduct && product.status !== 'ARCHIVED' && (
                           <button
                             type="button"
-                            onClick={() => setArchiveTarget(product)}
+                            onClick={() => {
+                              setArchiveReason('');
+                              setArchiveTarget(product);
+                            }}
                             className="btn-secondary btn-sm text-xs text-danger-600 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
                           >
-                            Archive
+                            {canInstantArchiveProduct ? 'Archive' : 'Request archive'}
                           </button>
                         )}
                       </div>
@@ -326,7 +372,7 @@ export function ProductsListPage({
                 </button>
                 {canEditProduct && (
                   <Link
-                    to={`/admin/products/${product.id}`}
+                    to={`/admin/products/${product.id}?mode=edit`}
                     prefetch="intent"
                     className="btn-secondary btn-sm text-xs"
                   >
@@ -336,10 +382,13 @@ export function ProductsListPage({
                 {canEditProduct && product.status !== 'ARCHIVED' && (
                   <button
                     type="button"
-                    onClick={() => setArchiveTarget(product)}
+                    onClick={() => {
+                      setArchiveReason('');
+                      setArchiveTarget(product);
+                    }}
                     className="btn-secondary btn-sm text-xs text-danger-600 dark:text-danger-400 ml-auto"
                   >
-                    Archive
+                    {canInstantArchiveProduct ? 'Archive' : 'Request archive'}
                   </button>
                 )}
               </div>
@@ -363,8 +412,8 @@ export function ProductsListPage({
         <Pagination page={page} totalPages={safeTotalPages} onPageChange={goToPage} showLabel />
       </div>
 
-      {/* Archive confirmation */}
-      {archiveTarget && (
+      {/* Super Admin: archive immediately */}
+      {archiveTarget && canInstantArchiveProduct && (
         <ConfirmActionModal
           open
           title="Archive product?"
@@ -380,11 +429,73 @@ export function ProductsListPage({
             const fd = new FormData();
             fd.set('intent', 'archiveProduct');
             fd.set('id', archiveTarget.id);
+            fd.set('reason', 'Super Admin catalog archive from product list.');
             archiveFetcher.submit(fd, { method: 'post' });
           }}
           loading={archiveFetcher.state === 'submitting'}
           error={archiveFetcher.data?.error ?? null}
         />
+      )}
+
+      {/* Others: request Super Admin approval */}
+      {archiveTarget && !canInstantArchiveProduct && (
+        <Modal
+          open
+          onClose={() => {
+            setArchiveTarget(null);
+            setArchiveReason('');
+          }}
+          maxWidth="max-w-md"
+          backdropBlur
+          contentClassName="p-6 flex flex-col gap-4 border border-app-border bg-app-elevated"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">Request product archive</h3>
+          <p className="text-sm text-app-fg-muted">
+            <strong className="text-app-fg">{archiveTarget.name}</strong> will be archived after a Super Admin approves
+            your request. Existing orders are unaffected.
+          </p>
+          <Textarea
+            label="Reason"
+            hint="Minimum 10 characters — visible to approvers."
+            value={archiveReason}
+            onChange={(e) => setArchiveReason(e.target.value)}
+            rows={3}
+            placeholder="Why should this product be archived?"
+          />
+          {archiveFetcher.data?.error ? (
+            <p className="text-sm text-danger-600 dark:text-danger-400">{archiveFetcher.data.error}</p>
+          ) : null}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setArchiveTarget(null);
+                setArchiveReason('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              disabled={archiveReason.trim().length < 10 || archiveFetcher.state === 'submitting'}
+              loading={archiveFetcher.state === 'submitting'}
+              loadingText="Submitting…"
+              onClick={() => {
+                const fd = new FormData();
+                fd.set('intent', 'archiveProduct');
+                fd.set('id', archiveTarget.id);
+                fd.set('reason', archiveReason.trim());
+                archiveFetcher.submit(fd, { method: 'post' });
+              }}
+            >
+              Submit request
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {/* View product modal */}

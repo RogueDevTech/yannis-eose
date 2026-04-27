@@ -9,10 +9,13 @@ import type {
   UpdateProductInput,
   ListProductsInput,
   ProductOffer,
+  RequestProductArchiveInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { InventoryService } from '../inventory/inventory.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isSuperAdminOnly } from '../common/authz';
 
 function lowestOfferPrice(offers: ProductOffer[]): number {
   if (offers.length === 0) return 0;
@@ -26,6 +29,7 @@ export class ProductsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly inventory: InventoryService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -297,6 +301,14 @@ export class ProductsService {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
       }
 
+      if (input.status === 'ARCHIVED' && !isSuperAdminOnly(actor)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Only Super Admin may archive from the product edit form. On the products list, use Request archive to submit an approval request.',
+        });
+      }
+
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };
       if (input.name !== undefined) updateFields['name'] = input.name;
       if (input.description !== undefined) updateFields['description'] = input.description;
@@ -364,5 +376,92 @@ export class ProductsService {
       .map((r) => r.category)
       .filter((c): c is string => c !== null)
       .sort();
+  }
+
+  /**
+   * Archive (soft-remove) a product. Super Admin applies immediately; everyone else with
+   * `products.update` creates a PENDING permission request for Super Admin approval.
+   */
+  async requestArchive(input: RequestProductArchiveInput, actor: SessionUser) {
+    const [product] = await this.db
+      .select({
+        id: schema.products.id,
+        name: schema.products.name,
+        status: schema.products.status,
+      })
+      .from(schema.products)
+      .where(eq(schema.products.id, input.productId))
+      .limit(1);
+
+    if (!product) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+    }
+    if (product.status === 'ARCHIVED') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Product is already archived' });
+    }
+
+    if (isSuperAdminOnly(actor)) {
+      const updated = await this.update({ productId: input.productId, status: 'ARCHIVED' }, actor);
+      return { requiresApproval: false as const, product: updated };
+    }
+
+    const [existingPending] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.type, 'PRODUCT_ARCHIVE'),
+          eq(schema.permissionRequests.status, 'PENDING'),
+          sql`${schema.permissionRequests.payload}->>'productId' = ${input.productId}`,
+        ),
+      )
+      .limit(1);
+
+    if (existingPending) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'A pending archive request already exists for this product.',
+      });
+    }
+
+    const [req] = await withActor(this.db, actor, async (tx) =>
+      tx
+        .insert(schema.permissionRequests)
+        .values({
+          type: 'PRODUCT_ARCHIVE',
+          status: 'PENDING',
+          requesterId: actor.id,
+          reason: input.reason,
+          payload: {
+            productId: input.productId,
+            productName: product.name,
+          } as Record<string, unknown>,
+        })
+        .returning({ id: schema.permissionRequests.id }),
+    );
+
+    if (req?.id) {
+      await this.notifications
+        .createForRole('SUPER_ADMIN', {
+          type: 'approval:permission_request',
+          title: 'Product archive pending',
+          body: `${actor.name} requested to archive product "${product.name}".`,
+          data: { requestId: req.id, type: 'PRODUCT_ARCHIVE' },
+        })
+        .catch(() => {});
+    }
+
+    return {
+      requiresApproval: true as const,
+      requestId: req?.id,
+      message: 'Archive request submitted. A Super Admin will review it.',
+    };
+  }
+
+  /**
+   * Called when a Super Admin approves a PRODUCT_ARCHIVE permission request.
+   */
+  async archiveProductAsApprover(productId: string, approver: SessionUser) {
+    return this.update({ productId, status: 'ARCHIVED' }, approver);
   }
 }

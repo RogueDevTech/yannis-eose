@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Form, useNavigation, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { DataTable, type TableColumn } from '~/components/ui/data-table';
+import { DescriptionList } from '~/components/ui/description-list';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -10,7 +12,6 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { SearchInput } from '~/components/ui/search-input';
-import { EmptyState } from '~/components/ui/empty-state';
 
 interface Category {
   id: string;
@@ -209,9 +210,78 @@ function CategoryModal({
   );
 }
 
+function CategoryViewModal({
+  category,
+  onClose,
+  onEdit,
+}: {
+  category: Category;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  const created = new Date(category.createdAt).toLocaleString('en-NG', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+
+  return (
+    <Modal open onClose={onClose} maxWidth="max-w-lg" aria-labelledby="category-view-title">
+      <div className="card border-0 shadow-none space-y-4 p-4 sm:p-6">
+        <div className="flex items-center justify-between gap-2">
+          <h3 id="category-view-title" className="text-lg font-semibold text-app-fg">
+            Category details
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-app-fg-muted hover:text-app-fg shrink-0 p-1 rounded-lg hover:bg-app-hover"
+            aria-label="Close"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <DescriptionList
+          divided
+          items={[
+            { label: 'Category name', value: category.name },
+            { label: 'Brand name', value: category.brandName },
+            { label: 'Brand phone', value: category.brandPhone, hideIfEmpty: true },
+            { label: 'Brand email', value: category.brandEmail, hideIfEmpty: true },
+            { label: 'Brand WhatsApp', value: category.brandWhatsapp, hideIfEmpty: true },
+            { label: 'SMS sender ID', value: category.smsSenderId, hideIfEmpty: true },
+            {
+              label: 'Status',
+              value: <StatusBadge status={category.status} />,
+            },
+            { label: 'Created', value: created },
+          ]}
+        />
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-app-border">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => {
+              onClose();
+              onEdit();
+            }}
+          >
+            Edit
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function CategoriesPage({ categories, total, actionData }: CategoriesPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [modalCategory, setModalCategory] = useState<Category | null | undefined>(undefined); // undefined = closed
+  const [viewCategory, setViewCategory] = useState<Category | null>(null);
   const [dismissedError, setDismissedError] = useState(false);
 
   useEffect(() => {
@@ -239,6 +309,118 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
   };
 
   const activeCount = categories.filter((c) => c.status === 'ACTIVE').length;
+
+  const columns: TableColumn<Category>[] = useMemo(
+    () => [
+      {
+        key: 'idx',
+        header: '#',
+        className: 'w-[1%] whitespace-nowrap',
+        render: (_row, i) => <span className="text-xs text-app-fg-muted tabular-nums">{i + 1}</span>,
+      },
+      {
+        key: 'name',
+        header: 'Category name',
+        render: (cat) => <span className="font-medium text-app-fg">{cat.name}</span>,
+        minWidth: 'min-w-[120px]',
+      },
+      {
+        key: 'brand',
+        header: 'Brand name',
+        render: (cat) => <span className="text-app-fg-muted">{cat.brandName}</span>,
+        minWidth: 'min-w-[100px]',
+      },
+      {
+        key: 'contact',
+        header: 'Brand phone / email',
+        className: 'hidden md:table-cell',
+        render: (cat) => (
+          <div className="text-xs text-app-fg-muted space-y-0.5">
+            {cat.brandPhone ? <div>{cat.brandPhone}</div> : null}
+            {cat.brandEmail ? (
+              <div className="text-brand-500 dark:text-brand-400 break-all">{cat.brandEmail}</div>
+            ) : null}
+            {!cat.brandPhone && !cat.brandEmail ? <span>—</span> : null}
+          </div>
+        ),
+      },
+      {
+        key: 'contactMobile',
+        header: 'Contact',
+        className: 'md:hidden',
+        render: (cat) => (
+          <div className="text-xs text-app-fg-muted space-y-0.5">
+            {cat.brandPhone ? <div>{cat.brandPhone}</div> : null}
+            {cat.brandEmail ? (
+              <div className="text-brand-500 dark:text-brand-400 break-all">{cat.brandEmail}</div>
+            ) : null}
+            {cat.brandWhatsapp ? <div>WA: {cat.brandWhatsapp}</div> : null}
+            {cat.smsSenderId ? <div>SMS: {cat.smsSenderId}</div> : null}
+            {!cat.brandPhone && !cat.brandEmail && !cat.brandWhatsapp && !cat.smsSenderId ? <span>—</span> : null}
+          </div>
+        ),
+      },
+      {
+        key: 'whatsapp',
+        header: 'WhatsApp',
+        className: 'hidden lg:table-cell',
+        render: (cat) => <span className="text-xs text-app-fg-muted">{cat.brandWhatsapp || '—'}</span>,
+      },
+      {
+        key: 'sender',
+        header: 'Sender ID',
+        className: 'hidden lg:table-cell',
+        render: (cat) => <span className="text-xs text-app-fg-muted">{cat.smsSenderId || '—'}</span>,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (cat) => <StatusBadge status={cat.status} />,
+      },
+      {
+        key: 'actions',
+        header: <span className="sr-only">Actions</span>,
+        align: 'right',
+        className: 'w-[1%] whitespace-nowrap',
+        render: (cat) => (
+          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewCategory(cat);
+              }}
+            >
+              View
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalCategory(cat);
+              }}
+            >
+              Edit
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [],
+  );
+
+  useEffect(() => {
+    if (!viewCategory) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewCategory(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [viewCategory]);
 
   return (
     <div className="space-y-4">
@@ -284,102 +466,34 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         </div>
       </div>
 
-      {/* Table */}
-      <div className="card p-0 overflow-hidden">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">#</th>
-                <th className="table-header">Category Name</th>
-                <th className="table-header">Brand Name</th>
-                <th className="table-header hidden md:table-cell">Brand Phone / Email</th>
-                <th className="table-header hidden lg:table-cell">WhatsApp</th>
-                <th className="table-header hidden lg:table-cell">Sender ID</th>
-                <th className="table-header">Status</th>
-                <th className="table-header text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categories.length === 0 && (
-                <tr>
-                  <td colSpan={8}>
-                    <EmptyState title="No categories found" description="Create one to get started." />
-                  </td>
-                </tr>
-              )}
-              {categories.map((cat, idx) => (
-                <tr key={cat.id} className="table-row">
-                  <td className="table-cell text-xs text-app-fg-muted">{idx + 1}</td>
-                  <td className="table-cell font-medium text-app-fg">{cat.name}</td>
-                  <td className="table-cell text-app-fg-muted">{cat.brandName}</td>
-                  <td className="table-cell hidden md:table-cell text-xs text-app-fg-muted">
-                    {cat.brandPhone && <div>{cat.brandPhone}</div>}
-                    {cat.brandEmail && <div className="text-brand-500 dark:text-brand-400">{cat.brandEmail}</div>}
-                    {!cat.brandPhone && !cat.brandEmail && '—'}
-                  </td>
-                  <td className="table-cell hidden lg:table-cell text-xs text-app-fg-muted">
-                    {cat.brandWhatsapp || '—'}
-                  </td>
-                  <td className="table-cell hidden lg:table-cell text-xs text-app-fg-muted">
-                    {cat.smsSenderId || '—'}
-                  </td>
-                  <td className="table-cell">
-                    <StatusBadge status={cat.status} />
-                  </td>
-                  <td className="table-cell text-right">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setModalCategory(cat)}
-                    >
-                      Edit
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile card list */}
-        <div className="md:hidden space-y-3 px-1">
-          {categories.length === 0 ? (
-            <EmptyState title="No categories found" description="Create one to get started." />
-          ) : (
-            categories.map((cat) => (
-              <div key={cat.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div>
-                    <p className="font-medium text-app-fg">{cat.name}</p>
-                    <p className="text-sm text-app-fg-muted">{cat.brandName}</p>
-                  </div>
-                  <StatusBadge status={cat.status} />
-                </div>
-                {(cat.brandPhone || cat.brandEmail || cat.brandWhatsapp || cat.smsSenderId) && (
-                  <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
-                    {cat.brandPhone && <div>Phone: {cat.brandPhone}</div>}
-                    {cat.brandEmail && <div className="text-brand-500 dark:text-brand-400">{cat.brandEmail}</div>}
-                    {cat.brandWhatsapp && <div>WhatsApp: {cat.brandWhatsapp}</div>}
-                    {cat.smsSenderId && <div>Sender ID: {cat.smsSenderId}</div>}
-                  </div>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setModalCategory(cat)}
-                >
-                  Edit
-                </Button>
-              </div>
-            ))
-          )}
-        </div>
+      <div className="card p-4 sm:p-6">
+        <DataTable
+          caption="Product categories"
+          columns={columns}
+          data={categories}
+          keyField="id"
+          emptyTitle="No categories found"
+          emptyDescription="Create one to get started."
+          emptyAction={
+            <Button type="button" variant="primary" onClick={() => setModalCategory(null)}>
+              New category
+            </Button>
+          }
+          stickyHeader={false}
+        />
       </div>
 
-      {/* Modal */}
+      {viewCategory && (
+        <CategoryViewModal
+          category={viewCategory}
+          onClose={() => setViewCategory(null)}
+          onEdit={() => {
+            setModalCategory(viewCategory);
+            setViewCategory(null);
+          }}
+        />
+      )}
+
       {modalCategory !== undefined && (
         <CategoryModal
           category={modalCategory}

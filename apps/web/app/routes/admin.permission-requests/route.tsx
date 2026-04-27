@@ -1,9 +1,10 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { redirect } from '@remix-run/node';
+import { isSuperAdminOnly } from '~/lib/rbac';
 import { PermissionRequestsPage } from '~/features/permission-requests/PermissionRequestsPage';
 import type { PermissionRequest } from '~/features/permission-requests/types';
 
@@ -34,15 +35,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? ((res.data as { result?: { data?: PermissionRequest[] } })?.result?.data ?? [])
     : [];
 
-  // SUPER_ADMIN + ADMIN and users with audit.read can approve/reject.
-  // NOTE: true approval of Admin-level roles is still enforced server-side to SuperAdmin only.
-  const canApprove = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('audit.read');
+  // UI affordance: admins, audit.read, and branch heads may open approve/reject (server enforces per request type).
+  const canApprove =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    (user.permissions ?? []).includes('audit.read') ||
+    user.role === 'HEAD_OF_CS' ||
+    user.role === 'HEAD_OF_LOGISTICS' ||
+    user.role === 'BRANCH_ADMIN';
+  const canApproveProductArchive = isSuperAdminOnly(user);
+  const canApproveOrderLinePriceChange =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    user.role === 'HEAD_OF_CS' ||
+    user.role === 'HEAD_OF_LOGISTICS' ||
+    user.role === 'BRANCH_ADMIN';
 
-  return { requests, canApprove, status };
+  return {
+    requests,
+    canApprove,
+    canApproveProductArchive,
+    canApproveOrderLinePriceChange,
+    viewerId: user.id,
+    status,
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermission(request, 'audit.read');
+  const user = await getCurrentUser(request);
+  if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
@@ -81,6 +102,22 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function PermissionRequestsRoute() {
-  const { requests, canApprove, status } = useLoaderData<typeof loader>();
-  return <PermissionRequestsPage requests={requests} canApprove={canApprove} activeStatus={status} />;
+  const {
+    requests,
+    canApprove,
+    canApproveProductArchive,
+    canApproveOrderLinePriceChange,
+    viewerId,
+    status,
+  } = useLoaderData<typeof loader>();
+  return (
+    <PermissionRequestsPage
+      requests={requests}
+      canApprove={canApprove}
+      canApproveProductArchive={canApproveProductArchive}
+      canApproveOrderLinePriceChange={canApproveOrderLinePriceChange}
+      viewerId={viewerId}
+      activeStatus={status}
+    />
+  );
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { router, authedProcedure, permissionProcedure } from '../trpc';
+import { router, authedProcedure } from '../trpc';
 import type { PermissionRequestsService } from '../../permission-requests/permission-requests.service';
 
 let permissionRequestsServiceInstance: PermissionRequestsService | null = null;
@@ -17,8 +17,8 @@ function getService(): PermissionRequestsService {
 
 /**
  * Permission requests router.
- * listPending: all authenticated users can view
- * approve/reject: audit.read required (SuperAdmin + Finance Officer)
+ * listPending / list: all authenticated users can view (sensitive; route UI may narrow).
+ * approve/reject: authedProcedure — service enforces per-type gates (audit.read / SuperAdmin / order price approvers).
  */
 export const permissionRequestsRouter = router({
   listPending: authedProcedure
@@ -38,7 +38,7 @@ export const permissionRequestsRouter = router({
       return getService().list({ status: input?.status });
     }),
 
-  approve: permissionProcedure('audit.read')
+  approve: authedProcedure
     .input(
       z.object({
         requestId: z.string().uuid(),
@@ -49,7 +49,7 @@ export const permissionRequestsRouter = router({
       return getService().approve(input.requestId, ctx.user, input.reason);
     }),
 
-  reject: permissionProcedure('audit.read')
+  reject: authedProcedure
     .input(
       z.object({
         requestId: z.string().uuid(),

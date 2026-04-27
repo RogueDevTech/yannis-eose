@@ -86,9 +86,9 @@ const PERMISSIONS: Array<{ code: string; resource: string; action: string; descr
 // role -> permission codes
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: [], // bypasses all checks - no need to store
-  HEAD_OF_MARKETING: ['marketing.read', 'marketing.funding', 'marketing.fundingSummary', 'marketing.leaderboard', 'marketing.checkHighCpa', 'marketing.offerTemplate', 'marketing.campaigns', 'marketing.teamOverview', 'marketing.orders', 'products.read', 'users.read'],
+  HEAD_OF_MARKETING: ['marketing.read', 'marketing.funding', 'marketing.fundingSummary', 'marketing.leaderboard', 'marketing.checkHighCpa', 'marketing.offerTemplate', 'marketing.campaigns', 'marketing.teamOverview', 'marketing.orders', 'products.read', 'users.read', 'audit.read'],
   MEDIA_BUYER: ['marketing.read', 'marketing.adSpend', 'marketing.leaderboard', 'marketing.campaigns', 'marketing.orders', 'products.read'],
-  HEAD_OF_CS: ['orders.read', 'orders.reassign', 'orders.bulkTransition', 'orders.bulkAssign', 'orders.csWorkloads', 'orders.releaseLocks', 'orders.inactiveAgents', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.mergeDuplicate', 'orders.dismissDuplicate', 'cs.teamOverview', 'cs.leaderboard', 'cart.read', 'users.read'],
+  HEAD_OF_CS: ['orders.read', 'orders.reassign', 'orders.bulkTransition', 'orders.bulkAssign', 'orders.csWorkloads', 'orders.releaseLocks', 'orders.inactiveAgents', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.mergeDuplicate', 'orders.dismissDuplicate', 'cs.teamOverview', 'cs.leaderboard', 'cart.read', 'users.read', 'audit.read'],
   CS_AGENT: ['orders.read', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.dismissDuplicate', 'cs.leaderboard', 'cart.read'],
   FINANCE_OFFICER: ['finance.read', 'finance.costView', 'finance.approve', 'finance.disburse', 'marketing.read', 'marketing.fundingSummary', 'orders.read', 'audit.read', 'users.read'],
   HEAD_OF_LOGISTICS: [
@@ -105,6 +105,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'inventory.reconciliations',
     'inventory.createReconciliation',
     'inventory.resolveReconciliation',
+    'audit.read',
   ],
   STOCK_MANAGER: [
     'inventory.read',
@@ -125,7 +126,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   TPL_MANAGER: ['inventory.read', 'inventory.verifyTransfer', 'inventory.returnedOrders', 'inventory.createReconciliation', 'inventory.reconciliations', 'logistics.read', 'logistics.remit', 'orders.read', 'transfers.read', 'returns.read'],
   TPL_RIDER: ['rider.dashboard'],
-  HR_MANAGER: ['hr.read', 'hr.write', 'users.read', 'users.create', 'users.update'],
+  HR_MANAGER: ['hr.read', 'hr.write', 'users.read', 'users.create', 'users.update', 'audit.read'],
   // hr.approveAdjustment: SuperAdmin only (not in any role — bypass)
   // finance.initMaterializedViews: SuperAdmin only (not in any role — bypass)
 };

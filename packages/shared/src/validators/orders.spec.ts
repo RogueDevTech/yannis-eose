@@ -250,6 +250,15 @@ describe('listOrdersSchema', () => {
   it('accepts valid date filter', () => {
     expect(() => listOrdersSchema.parse({ startDate: '2026-01-01', endDate: '2026-01-31' })).not.toThrow();
   });
+
+  it('accepts optional campaignId and productId filters', () => {
+    const result = listOrdersSchema.parse({
+      campaignId: VALID_UUID,
+      productId: VALID_UUID,
+    });
+    expect(result.campaignId).toBe(VALID_UUID);
+    expect(result.productId).toBe(VALID_UUID);
+  });
 });
 
 // ---------------------------------------------------------------------------

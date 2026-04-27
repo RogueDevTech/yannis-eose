@@ -7,7 +7,7 @@ import {
   listInvoicesSchema,
   listOrdersSchema,
 } from '@yannis/shared';
-import type { ExportReportInput, ExportDateRange } from '@yannis/shared';
+import type { ExportReportInput, ExportDateRange, ListOrdersInput } from '@yannis/shared';
 import { OrdersService } from '../orders/orders.service';
 import { MarketingService } from '../marketing/marketing.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -15,6 +15,9 @@ import { FinanceService } from '../finance/finance.service';
 import { isAdminLevel } from '../common/authz';
 
 type CsvRow = Record<string, string | number | boolean | null | undefined>;
+
+const EXPORT_PAGE_LIMIT = 100;
+const EXPORT_MAX_PAGES = 50;
 
 function escapeField(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -57,9 +60,28 @@ function resolveDateRange(dateRange?: ExportDateRange): { startDate?: string; en
     start.setDate(now.getDate() - 29);
     return { startDate: start.toISOString().split('T')[0] ?? '', endDate };
   }
-  // this_month default
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   return { startDate: start.toISOString().split('T')[0] ?? '', endDate };
+}
+
+type OrderExportFilterDates = {
+  startDate?: string;
+  endDate?: string;
+  periodAllTime?: boolean;
+};
+
+function resolveOrderListDates(
+  dateRange: ExportDateRange | undefined,
+  filters: OrderExportFilterDates | undefined,
+): { startDate?: string; endDate?: string } {
+  if (filters?.periodAllTime) return {};
+  if (filters?.startDate || filters?.endDate) {
+    return {
+      ...(filters.startDate ? { startDate: filters.startDate } : {}),
+      ...(filters.endDate ? { endDate: filters.endDate } : {}),
+    };
+  }
+  return resolveDateRange(dateRange);
 }
 
 @Injectable()
@@ -95,22 +117,46 @@ export class ReportsService {
     throw new TRPCError({ code: 'FORBIDDEN', message: `Missing ${permission}` });
   }
 
+  private async collectOrdersPages(
+    base: Omit<ListOrdersInput, 'page' | 'limit'>,
+    branchId: string | null,
+  ): Promise<Awaited<ReturnType<OrdersService['list']>>['orders']> {
+    const all: Awaited<ReturnType<OrdersService['list']>>['orders'] = [];
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const listInput = listOrdersSchema.parse({
+        ...base,
+        page,
+        limit: EXPORT_PAGE_LIMIT,
+        sortBy: base.sortBy ?? 'createdAt',
+        sortOrder: base.sortOrder ?? 'desc',
+      });
+      const result = await this.ordersService.list(listInput, branchId);
+      const batch = result.orders ?? [];
+      all.push(...batch);
+      if (batch.length < EXPORT_PAGE_LIMIT) return all;
+    }
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Export is limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} orders. Narrow your filters and try again.`,
+    });
+  }
+
   private async exportCsOrders(input: Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user: SessionUser, currentBranchId: string | null, date: string) {
     this.ensurePermission(user, 'orders.read');
-    const { startDate, endDate } = resolveDateRange(input.dateRange);
-    const listInput = listOrdersSchema.parse({
-      page: 1,
-      limit: 1000,
-      sortBy: 'createdAt',
-      sortOrder: 'desc',
-      ...(input.filters?.status ? { status: input.filters.status } : {}),
-      ...(input.filters?.search ? { search: input.filters.search } : {}),
-      ...(input.filters?.assignedCsId ? { assignedCsId: input.filters.assignedCsId } : {}),
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
-    });
-    const result = await this.ordersService.list(listInput, currentBranchId);
-    const rows = (result.orders ?? []).map((o) => ({
+    const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
+    const orders = await this.collectOrdersPages(
+      {
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
+        ...(input.filters?.status ? { status: input.filters.status as ListOrdersInput['status'] } : {}),
+        ...(input.filters?.search ? { search: input.filters.search } : {}),
+        ...(input.filters?.assignedCsId ? { assignedCsId: input.filters.assignedCsId } : {}),
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      },
+      currentBranchId,
+    );
+    const rows = orders.map((o) => ({
       id: o.id,
       customer: o.customerName,
       assignedCs: o.assignedCsName ?? '—',
@@ -131,33 +177,56 @@ export class ReportsService {
     return { filename: `cs-orders-${date}.csv`, csvContent: toCsv(rows, columns) };
   }
 
-  private async exportMarketingOrders(input: Extract<ExportReportInput, { reportKey: 'marketing_orders' }>, user: SessionUser, currentBranchId: string | null, date: string) {
+  private async exportMarketingOrders(
+    input: Extract<ExportReportInput, { reportKey: 'marketing_orders' }>,
+    user: SessionUser,
+    currentBranchId: string | null,
+    date: string,
+  ) {
     this.ensurePermission(user, 'marketing.orders');
-    const { startDate, endDate } = resolveDateRange(input.dateRange);
-    const listInput = listOrdersSchema.parse({
-      page: 1,
-      limit: 1000,
-      sortBy: 'createdAt',
-      sortOrder: 'desc',
-      ...(input.filters?.status ? { status: input.filters.status } : {}),
-      ...(input.filters?.search ? { search: input.filters.search } : {}),
-      ...(input.filters?.mediaBuyerId ? { mediaBuyerId: input.filters.mediaBuyerId } : {}),
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
+    const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
+    const orders = await this.collectOrdersPages(
+      {
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
+        ...(input.filters?.status ? { status: input.filters.status as ListOrdersInput['status'] } : {}),
+        ...(input.filters?.search ? { search: input.filters.search } : {}),
+        ...(input.filters?.mediaBuyerId ? { mediaBuyerId: input.filters.mediaBuyerId } : {}),
+        ...(input.filters?.assignedCsId ? { assignedCsId: input.filters.assignedCsId } : {}),
+        ...(input.filters?.productId ? { productId: input.filters.productId } : {}),
+        ...(input.filters?.campaignId ? { campaignId: input.filters.campaignId } : {}),
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      },
+      currentBranchId,
+    );
+
+    const ids = orders.map((o) => o.id);
+    const enrich = await this.ordersService.getMarketingExportEnrichment(ids);
+
+    const rows = orders.map((o) => {
+      const ex = enrich.get(o.id);
+      return {
+        id: o.id,
+        customer: o.customerName,
+        mediaBuyer: o.mediaBuyerName ?? '—',
+        assignedCs: o.assignedCsName ?? '—',
+        product: ex?.productLines ?? '—',
+        campaign: ex?.campaignName ?? '—',
+        branch: ex?.branchName ?? '—',
+        status: o.status,
+        amount: o.totalAmount ?? '',
+        created: new Date(o.createdAt).toLocaleDateString(),
+      };
     });
-    const result = await this.ordersService.list(listInput, currentBranchId);
-    const rows = (result.orders ?? []).map((o) => ({
-      id: o.id,
-      customer: o.customerName,
-      mediaBuyer: o.mediaBuyerName ?? '—',
-      status: o.status,
-      amount: o.totalAmount ?? '',
-      created: new Date(o.createdAt).toLocaleDateString(),
-    }));
     const columns = [
       { key: 'id', label: 'Order ID' },
       { key: 'customer', label: 'Customer' },
       { key: 'mediaBuyer', label: 'Media Buyer' },
+      { key: 'assignedCs', label: 'Assigned CS' },
+      { key: 'product', label: 'Products (lines)' },
+      { key: 'campaign', label: 'Campaign' },
+      { key: 'branch', label: 'Branch' },
       { key: 'status', label: 'Status' },
       { key: 'amount', label: 'Amount' },
       { key: 'created', label: 'Created' },
@@ -168,17 +237,29 @@ export class ReportsService {
   private async exportDisbursements(input: Extract<ExportReportInput, { reportKey: 'disbursements' }>, user: SessionUser, currentBranchId: string | null, date: string) {
     this.ensurePermission(user, 'finance.disburse');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
-    const fundingInput = listFundingSchema.parse({
-      page: 1,
-      limit: 1000,
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
-      ...(input.filters?.status ? { status: input.filters.status } : {}),
-      ...(input.filters?.receiverId ? { receiverId: input.filters.receiverId } : {}),
-      ...(input.filters?.search ? { search: input.filters.search } : {}),
-    });
-    const result = await this.marketingService.listFunding(fundingInput, currentBranchId);
-    const rows = (result.records ?? []).map((f) => ({
+    const all: Awaited<ReturnType<MarketingService['listFunding']>>['records'] = [];
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const fundingInput = listFundingSchema.parse({
+        page,
+        limit: EXPORT_PAGE_LIMIT,
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+        ...(input.filters?.status ? { status: input.filters.status } : {}),
+        ...(input.filters?.receiverId ? { receiverId: input.filters.receiverId } : {}),
+        ...(input.filters?.search ? { search: input.filters.search } : {}),
+      });
+      const result = await this.marketingService.listFunding(fundingInput, currentBranchId);
+      const batch = result.records ?? [];
+      all.push(...batch);
+      if (batch.length < EXPORT_PAGE_LIMIT) break;
+      if (page === EXPORT_MAX_PAGES) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Export is limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} rows. Narrow your filters and try again.`,
+        });
+      }
+    }
+    const rows = all.map((f) => ({
       id: f.id,
       sender: f.senderName ?? f.senderId,
       receiver: f.receiverName ?? f.receiverId,
@@ -206,17 +287,29 @@ export class ReportsService {
     if (!isAdminLevel(user) && user.role !== 'STOCK_MANAGER') {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Inventory export is restricted to admin-level and stock manager' });
     }
-    const levelsInput = listInventorySchema.parse({
-      page: 1,
-      limit: 1000,
-      sortBy: input.filters?.sort ? 'available' : 'updatedAt',
-      sortOrder: input.filters?.sort === 'lowestAvailable' ? 'asc' : 'desc',
-      ...(input.filters?.productId ? { productId: input.filters.productId } : {}),
-      ...(input.filters?.locationId ? { locationId: input.filters.locationId } : {}),
-      ...(input.filters?.search ? { search: input.filters.search } : {}),
-    });
-    const levels = await this.inventoryService.listLevels(levelsInput);
-    const rows = (levels.levels ?? []).map((inv) => ({
+    const all: Awaited<ReturnType<InventoryService['listLevels']>>['levels'] = [];
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const levelsInput = listInventorySchema.parse({
+        page,
+        limit: EXPORT_PAGE_LIMIT,
+        sortBy: input.filters?.sort ? 'available' : 'updatedAt',
+        sortOrder: input.filters?.sort === 'lowestAvailable' ? 'asc' : 'desc',
+        ...(input.filters?.productId ? { productId: input.filters.productId } : {}),
+        ...(input.filters?.locationId ? { locationId: input.filters.locationId } : {}),
+        ...(input.filters?.search ? { search: input.filters.search } : {}),
+      });
+      const levels = await this.inventoryService.listLevels(levelsInput);
+      const batch = levels.levels ?? [];
+      all.push(...batch);
+      if (batch.length < EXPORT_PAGE_LIMIT) break;
+      if (page === EXPORT_MAX_PAGES) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Export is limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} rows. Narrow your filters and try again.`,
+        });
+      }
+    }
+    const rows = all.map((inv) => ({
       product: inv.productId,
       location: inv.locationId,
       stock: inv.stockCount,
@@ -240,15 +333,27 @@ export class ReportsService {
   private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, date: string) {
     this.ensurePermission(user, 'finance.read');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
-    const invoicesInput = listInvoicesSchema.parse({
-      page: 1,
-      limit: 1000,
-      ...(input.filters?.status ? { status: input.filters.status } : {}),
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
-    });
-    const list = await this.financeService.listInvoices(invoicesInput);
-    const rows = (list.invoices ?? []).map((inv) => ({
+    const all: Awaited<ReturnType<FinanceService['listInvoices']>>['invoices'] = [];
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const invoicesInput = listInvoicesSchema.parse({
+        page,
+        limit: EXPORT_PAGE_LIMIT,
+        ...(input.filters?.status ? { status: input.filters.status } : {}),
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      });
+      const list = await this.financeService.listInvoices(invoicesInput);
+      const batch = list.invoices ?? [];
+      all.push(...batch);
+      if (batch.length < EXPORT_PAGE_LIMIT) break;
+      if (page === EXPORT_MAX_PAGES) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Export is limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} rows. Narrow your filters and try again.`,
+        });
+      }
+    }
+    const rows = all.map((inv) => ({
       reference: inv.referenceFormatted ?? `INV-${inv.referenceNumber}`,
       orderId: inv.orderId ?? '',
       amount: inv.totalAmount,
@@ -265,4 +370,3 @@ export class ReportsService {
     return { filename: `invoices-${date}.csv`, csvContent: toCsv(rows, columns) };
   }
 }
-

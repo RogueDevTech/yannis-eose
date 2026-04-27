@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 type SearchableSelectSize = 'sm' | 'md' | 'lg';
@@ -69,6 +69,7 @@ export function SearchableSelect({
   const hasError = Boolean(error);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -122,6 +123,27 @@ export function SearchableSelect({
       window.removeEventListener('resize', onScroll, true);
     };
   }, [open]);
+
+  /** Keep keyboard-highlighted option visible; listbox uses its own scroll container. */
+  useLayoutEffect(() => {
+    if (!open || activeIndex < 0) return;
+    const el = document.getElementById(`${listboxId}-opt-${activeIndex}`);
+    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [open, activeIndex, filtered, listboxId]);
+
+  const forwardWheelToListbox = (e: React.WheelEvent) => {
+    const lb = listboxRef.current;
+    if (!lb || filtered.length === 0) return;
+    const { scrollTop, scrollHeight, clientHeight } = lb;
+    const delta = e.deltaY;
+    const atTop = scrollTop <= 0;
+    const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+    if (delta < 0 && atTop) return;
+    if (delta > 0 && atBottom) return;
+    e.preventDefault();
+    e.stopPropagation();
+    lb.scrollTop += delta;
+  };
 
   const move = (dir: 1 | -1) => {
     if (filtered.length === 0) return;
@@ -198,7 +220,7 @@ export function SearchableSelect({
       {open && typeof document !== 'undefined' && createPortal(
         <div
           ref={popoverRef}
-          className="fixed z-[9999] rounded-lg border border-app-border bg-app-elevated shadow-lg p-2"
+          className="fixed z-[9999] flex max-h-[min(24rem,calc(100dvh-1rem))] flex-col rounded-lg border border-app-border bg-app-elevated shadow-lg p-2"
           style={{ top: pos.top, left: pos.left, width: pos.width }}
         >
           <input
@@ -210,7 +232,8 @@ export function SearchableSelect({
               setActiveIndex(filtered.findIndex((o) => !o.disabled));
             }}
             placeholder={searchPlaceholder}
-            className="w-full h-8 rounded-md border border-app-border bg-app-canvas px-2 text-sm text-app-fg placeholder:text-app-fg-muted focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 mb-2"
+            className="mb-2 h-8 w-full shrink-0 rounded-md border border-app-border bg-app-canvas px-2 text-sm text-app-fg placeholder:text-app-fg-muted focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+            onWheel={forwardWheelToListbox}
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -231,13 +254,21 @@ export function SearchableSelect({
             aria-activedescendant={activeIndex >= 0 ? `${listboxId}-opt-${activeIndex}` : undefined}
           />
 
-          <div id={listboxId} role="listbox" className="max-h-56 overflow-y-auto">
+          <div
+            ref={listboxRef}
+            id={listboxId}
+            role="listbox"
+            className={[
+              'min-w-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] touch-pan-y',
+              filtered.length === 0 ? 'max-h-40 shrink-0' : 'min-h-0 max-h-56 flex-1',
+            ].join(' ')}
+          >
             {filtered.length === 0 ? (
               <p className="px-2 py-1.5 text-xs text-app-fg-muted">{emptyText}</p>
             ) : (
               filtered.map((opt, idx) => (
                 <button
-                  key={opt.value}
+                  key={`${listboxId}-${idx}-${opt.value}`}
                   id={`${listboxId}-opt-${idx}`}
                   type="button"
                   role="option"

@@ -6,11 +6,14 @@ import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { SessionStoreService } from '../../auth/session-store.service';
 import type { NotificationsService } from '../../notifications/notifications.service';
+import type { BranchTeamsService } from '../../branches/branch-teams.service';
+import { canMirror } from '../../common/authz';
 
 // Service instances injected via factory pattern
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
 let sessionStoreInstance: SessionStoreService | null = null;
 let notificationsServiceInstance: NotificationsService | null = null;
+let branchTeamsServiceInstance: BranchTeamsService | null = null;
 
 export function setBranchesDb(db: PostgresJsDatabase<typeof schema>) {
   drizzleInstance = db;
@@ -22,6 +25,10 @@ export function setBranchesSessionStore(sessionStore: SessionStoreService) {
 
 export function setBranchesNotificationsService(service: NotificationsService) {
   notificationsServiceInstance = service;
+}
+
+export function setBranchTeamsService(service: BranchTeamsService) {
+  branchTeamsServiceInstance = service;
 }
 
 function getDb(): PostgresJsDatabase<typeof schema> {
@@ -41,8 +48,33 @@ function getBranchesNotificationsService(): NotificationsService {
   return notificationsServiceInstance;
 }
 
+export function getBranchTeamsService(): BranchTeamsService {
+  if (!branchTeamsServiceInstance) throw new Error('BranchTeamsService not initialized');
+  return branchTeamsServiceInstance;
+}
+
 const CS_OVERVIEW_ROLES = new Set(['CS_AGENT', 'HEAD_OF_CS']);
 const MARKETING_OVERVIEW_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
+const LOGISTICS_OVERVIEW_ROLES = new Set([
+  'LOGISTICS_MANAGER',
+  'HEAD_OF_LOGISTICS',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+  'STOCK_MANAGER',
+]);
+
+/** Payroll-aligned buckets for branch member filters (see branch overview UI). */
+type BranchMemberDepartment = 'CS' | 'MARKETING' | 'LOGISTICS' | 'FINANCE' | 'HR' | 'OTHER';
+
+function departmentForBranchMemberRole(effectiveRole: string): BranchMemberDepartment {
+  if (CS_OVERVIEW_ROLES.has(effectiveRole)) return 'CS';
+  if (MARKETING_OVERVIEW_ROLES.has(effectiveRole)) return 'MARKETING';
+  if (LOGISTICS_OVERVIEW_ROLES.has(effectiveRole)) return 'LOGISTICS';
+  if (effectiveRole === 'FINANCE_OFFICER') return 'FINANCE';
+  if (effectiveRole === 'HR_MANAGER') return 'HR';
+  return 'OTHER';
+}
+
 const ACTIVE_ORDER_STATUSES = new Set([
   'UNPROCESSED',
   'CS_ASSIGNED',
@@ -67,7 +99,7 @@ export const branchesRouter = router({
       .from(schema.userBranches)
       .where(eq(schema.userBranches.userId, ctx.user.id));
     if (memberships.length === 0) return [];
-    const branchIds: string[] = memberships.map((m) => m.branchId as string);
+    const branchIds: string[] = memberships.map((m) => m.branchId);
     return db
       .select()
       .from(schema.branches)
@@ -77,7 +109,7 @@ export const branchesRouter = router({
   }),
 
   /**
-   * Branch overview: members (CS vs Marketing), order pipeline counts, campaigns, message templates.
+   * Branch overview: flat `members` (+ department bucket), order pipeline counts, campaigns, message templates.
    */
   overview: permissionProcedure('branches.manage')
     .input(z.object({ branchId: z.string().uuid() }))
@@ -135,14 +167,9 @@ export const branchesRouter = router({
           name: row.name,
           effectiveRole,
           isPrimary: row.isPrimary,
+          department: departmentForBranchMemberRole(effectiveRole),
         };
       });
-
-      const csTeam = members.filter((m) => CS_OVERVIEW_ROLES.has(m.effectiveRole));
-      const marketingTeam = members.filter((m) => MARKETING_OVERVIEW_ROLES.has(m.effectiveRole));
-      const otherMembers = members.filter(
-        (m) => !CS_OVERVIEW_ROLES.has(m.effectiveRole) && !MARKETING_OVERVIEW_ROLES.has(m.effectiveRole),
-      );
 
       const orderStatRows = await db
         .select({
@@ -183,9 +210,7 @@ export const branchesRouter = router({
           campaigns: Number(campaignsRow?.c ?? 0),
           messageTemplates: Number(templatesRow?.c ?? 0),
         },
-        csTeam,
-        marketingTeam,
-        otherMembers,
+        members,
       };
     }),
 
@@ -350,6 +375,125 @@ export const branchesRouter = router({
       }
 
       return { success: true };
+    }),
+
+  /**
+   * Whether the current user may start Mirror Mode for the target user (HoS matrix or branch supervisor graph).
+   */
+  canMirrorToUser: authedProcedure
+    .input(z.object({ targetUserId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      const db = getDb();
+      const teams = getBranchTeamsService();
+      const [target] = await db
+        .select({
+          id: schema.users.id,
+          role: schema.users.role,
+          primaryBranchId: schema.users.primaryBranchId,
+          status: schema.users.status,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, input.targetUserId))
+        .limit(1);
+      if (!target || target.status !== 'ACTIVE') {
+        return { allowed: false as const, reason: 'not_found_or_inactive' as const };
+      }
+      const actor = {
+        id: ctx.user.id,
+        role: ctx.user.role,
+        currentBranchId: ctx.user.currentBranchId ?? null,
+        mirroredBy: ctx.user.mirroredBy ?? null,
+      };
+      if (
+        canMirror(actor, {
+          id: target.id,
+          role: target.role,
+          primaryBranchId: target.primaryBranchId,
+        })
+      ) {
+        return { allowed: true as const, reason: 'role_matrix' as const };
+      }
+      const viaSupervision = await teams.actorCanMirrorViaSupervision(actor, {
+        id: target.id,
+        role: target.role,
+      });
+      return viaSupervision
+        ? ({ allowed: true as const, reason: 'supervision' as const })
+        : ({ allowed: false as const, reason: 'forbidden' as const });
+    }),
+
+  listTeamsWithMembers: permissionProcedure('branches.manage')
+    .input(z.object({ branchId: z.string().uuid() }))
+    .query(async ({ input }) => getBranchTeamsService().listTeamsWithMembers(input.branchId)),
+
+  createBranchTeam: permissionProcedure('branches.manage')
+    .input(
+      z.object({
+        branchId: z.string().uuid(),
+        department: z.enum(['CS', 'MARKETING']),
+        name: z.string().max(120).optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) =>
+      getBranchTeamsService().createTeam(input.branchId, input.department, input.name, ctx.user),
+    ),
+
+  updateBranchTeam: permissionProcedure('branches.manage')
+    .input(
+      z.object({
+        teamId: z.string().uuid(),
+        name: z.string().max(120).nullable().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => getBranchTeamsService().updateTeam(input.teamId, { name: input.name })),
+
+  deleteBranchTeam: permissionProcedure('branches.manage')
+    .input(z.object({ teamId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      await getBranchTeamsService().deleteTeam(input.teamId);
+      return { success: true as const };
+    }),
+
+  addBranchTeamMember: permissionProcedure('branches.manage')
+    .input(
+      z.object({
+        teamId: z.string().uuid(),
+        userId: z.string().uuid(),
+        isSupervisor: z.boolean().default(false),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await getBranchTeamsService().addTeamMember(
+        input.teamId,
+        input.userId,
+        input.isSupervisor,
+        ctx.user,
+      );
+      return { success: true as const };
+    }),
+
+  removeBranchTeamMember: permissionProcedure('branches.manage')
+    .input(z.object({ teamId: z.string().uuid(), userId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      await getBranchTeamsService().removeTeamMember(input.teamId, input.userId);
+      return { success: true as const };
+    }),
+
+  setBranchTeamMemberSupervisor: permissionProcedure('branches.manage')
+    .input(
+      z.object({
+        teamId: z.string().uuid(),
+        userId: z.string().uuid(),
+        isSupervisor: z.boolean(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      await getBranchTeamsService().setMemberSupervisor(
+        input.teamId,
+        input.userId,
+        input.isSupervisor,
+      );
+      return { success: true as const };
     }),
 
   /**

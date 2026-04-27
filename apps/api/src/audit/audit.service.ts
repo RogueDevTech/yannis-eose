@@ -5,6 +5,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { inArray } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { PG_CLIENT, DRIZZLE } from '../database/database.module';
+import { shouldScopeGlobalAuditToBranch, type GlobalAuditAccessUser } from '../common/authz';
 
 /**
  * Whitelist of tables that have _history counterparts.
@@ -80,6 +81,19 @@ export interface AuditLogFilters {
   page?: number;
   limit?: number;
 }
+
+/** Base tables whose *_history rows include `branch_id` (native uuid after migration 0062). */
+const HISTORY_TABLES_WITH_BRANCH_ID = new Set<string>([
+  'orders',
+  'campaigns',
+  'marketing_funding',
+  'marketing_funding_requests',
+  'ad_spend_logs',
+  'inventory_levels',
+  'commission_plans',
+  'payout_records',
+  'logistics_locations',
+]);
 
 export interface FieldDiff {
   field: string;
@@ -238,8 +252,12 @@ export class AuditService {
 
   /**
    * Query audit log across all (or a specific) history tables.
+   * @param viewer Required for branch scoping — same user passed from `audit.globalLog` tRPC ctx.
    */
-  async getGlobalAuditLog(filters: AuditLogFilters): Promise<{ rows: AuditEntry[]; total: number }> {
+  async getGlobalAuditLog(
+    filters: AuditLogFilters,
+    viewer: GlobalAuditAccessUser,
+  ): Promise<{ rows: AuditEntry[]; total: number }> {
     try {
       const { tableName, actorId, startDate, endDate, page = 1, limit = 20 } = filters;
       const offset = (page - 1) * limit;
@@ -248,63 +266,106 @@ export class AuditService {
       // mirror_sessions is special-cased below (append-only, no `_history` twin).
       const existingTables = await this.getExistingHistoryTables();
 
-      const tables: AuditableTable[] = tableName
+      let tables: AuditableTable[] = tableName
         ? isAuditableTable(tableName)
-          ? tableName === 'mirror_sessions' || existingTables.has(tableName) ? [tableName] : []
-          : (() => { throw new TRPCError({ code: 'BAD_REQUEST', message: `Table '${tableName}' is not auditable` }); })()
+          ? tableName === 'mirror_sessions' || existingTables.has(tableName)
+            ? [tableName]
+            : []
+          : (() => {
+              throw new TRPCError({ code: 'BAD_REQUEST', message: `Table '${tableName}' is not auditable` });
+            })()
         : AUDITABLE_TABLES.filter((t) => t === 'mirror_sessions' || existingTables.has(t));
+
+      const scopeToBranch = shouldScopeGlobalAuditToBranch(viewer);
+      const branchId = viewer.currentBranchId ?? null;
+
+      if (scopeToBranch && branchId) {
+        // Branch viewers: no org-wide catalog/settings history; no mirror_sessions (org-wide).
+        tables = tables.filter((t) => {
+          if (t === 'mirror_sessions') return false;
+          if (t === 'users') return true;
+          return HISTORY_TABLES_WITH_BRANCH_ID.has(t);
+        });
+      }
 
       if (tables.length === 0) {
         return { rows: [], total: 0 };
       }
 
-      // Build UNION ALL query across selected history tables
-      const unionParts: string[] = [];
+      // Shared placeholders across every UNION arm (PostgreSQL uses one param array for the whole query).
       const params: (string | number)[] = [];
-      let paramIdx = 1;
+      let next = 1;
+      let actorIdx = 0;
+      let startIdx = 0;
+      let endIdx = 0;
+      let branchIdx = 0;
+      if (actorId) {
+        actorIdx = next;
+        next += 1;
+        params.push(actorId);
+      }
+      if (startDate) {
+        startIdx = next;
+        next += 1;
+        params.push(startDate);
+      }
+      if (endDate) {
+        endIdx = next;
+        next += 1;
+        params.push(endDate);
+      }
+      if (scopeToBranch && branchId) {
+        branchIdx = next;
+        next += 1;
+        params.push(branchId);
+      }
+
+      const unionParts: string[] = [];
 
       for (const table of tables) {
         const conditions: string[] = [];
 
-        // mirror_sessions has its own column names — actor_id (not modified_by) and
-        // started_at/ended_at (not valid_from/valid_to). The SELECT below aliases them so
-        // every union arm has identical shape.
         const isMirror = table === 'mirror_sessions';
-        const actorCol = isMirror ? 'actor_id' : 'modified_by';
         const fromCol = isMirror ? 'started_at' : 'valid_from';
 
-        if (actorId) {
-          conditions.push(`${actorCol} = $${paramIdx}::uuid`);
-          params.push(actorId);
-          paramIdx++;
+        if (actorIdx) {
+          if (isMirror) {
+            conditions.push(`actor_id = $${actorIdx}::uuid`);
+          } else {
+            // Cast both sides to text so the predicate works whether modified_by
+            // is uuid (most tables) or text (legacy/inconsistent ones).
+            conditions.push(`modified_by::text = $${actorIdx}::text`);
+          }
         }
-        if (startDate) {
-          conditions.push(`${fromCol} >= $${paramIdx}::timestamptz`);
-          params.push(startDate);
-          paramIdx++;
+        if (startIdx) {
+          conditions.push(`${fromCol} >= $${startIdx}::timestamptz`);
         }
-        if (endDate) {
-          conditions.push(`${fromCol} <= $${paramIdx}::timestamptz`);
-          params.push(endDate);
-          paramIdx++;
+        if (endIdx) {
+          conditions.push(`${fromCol} <= $${endIdx}::timestamptz`);
+        }
+        if (branchIdx) {
+          if (table === 'users') {
+            conditions.push(`primary_branch_id = $${branchIdx}::uuid`);
+          } else if (HISTORY_TABLES_WITH_BRANCH_ID.has(table)) {
+            conditions.push(`branch_id = $${branchIdx}::uuid`);
+          }
         }
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
         if (isMirror) {
-          // valid_from = ended_at when the session has ended (so closed sessions appear at
-          // their close time, which is the most useful audit timestamp), otherwise started_at.
-          // valid_to is the raw ended_at — drives inferAction (NULL → INSERT/active, set → UPDATE/ended).
           unionParts.push(
-            `SELECT 'mirror_sessions' AS _table_name, id, actor_id AS modified_by,
+            `SELECT 'mirror_sessions' AS _table_name, id, actor_id::text AS modified_by,
                     COALESCE(ended_at, started_at) AS valid_from, ended_at AS valid_to,
                     row_to_json(mirror_sessions.*) AS _row_data
              FROM mirror_sessions
              ${whereClause}`,
           );
         } else {
+          // Always cast `modified_by` to text in the SELECT so the UNION succeeds
+          // even if a history table declares it as text instead of uuid (drift).
           unionParts.push(
-            `SELECT '${table}' AS _table_name, id, modified_by,
+            `SELECT '${table}' AS _table_name, id, modified_by::text AS modified_by,
                     valid_from, valid_to,
                     row_to_json(${table}_history.*) AS _row_data
              FROM ${table}_history
@@ -315,24 +376,23 @@ export class AuditService {
 
       const unionQuery = unionParts.join('\n UNION ALL \n');
 
-      // Count total
       const countQuery = `SELECT COUNT(*)::int AS total FROM (${unionQuery}) AS _audit_union`;
       const countResult = await this.sql.unsafe(countQuery, params);
       const total = ((countResult[0] as Record<string, unknown> | undefined)?.total ?? 0) as number;
 
-      // Fetch paginated
+      const limitIdx = next;
+      const offsetIdx = next + 1;
+      const dataParams = [...params, limit, offset];
       const dataQuery = `SELECT * FROM (${unionQuery}) AS _audit_union
                          ORDER BY valid_from DESC
-                         LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
-      params.push(limit, offset);
+                         LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
 
-      const rows = await this.sql.unsafe(dataQuery, params);
+      const rows = await this.sql.unsafe(dataQuery, dataParams);
 
       return {
         rows: rows.map((row) => {
           const rawRow = row as Record<string, unknown>;
           const data = (rawRow._row_data ?? {}) as Record<string, unknown>;
-          // Remove temporal/internal fields from data display
           delete data.valid_from;
           delete data.valid_to;
           delete data.modified_by;
@@ -485,9 +545,16 @@ export class AuditService {
   /**
    * Get the list of auditable table names (for the UI dropdown).
    */
-  async getAuditableTables(): Promise<string[]> {
+  async getAuditableTables(viewer?: GlobalAuditAccessUser): Promise<string[]> {
     const existing = await this.getExistingHistoryTables();
-    return AUDITABLE_TABLES.filter((t) => existing.has(t));
+    let list = AUDITABLE_TABLES.filter((t) => existing.has(t));
+    if (viewer && shouldScopeGlobalAuditToBranch(viewer) && viewer.currentBranchId) {
+      list = list.filter((t) => {
+        if (t === 'users') return true;
+        return HISTORY_TABLES_WITH_BRANCH_ID.has(t);
+      });
+    }
+    return list;
   }
 
   // ── Private helpers ──────────────────────────────────────────
@@ -531,7 +598,10 @@ export class AuditService {
    * without a join at render time. Sessions stay in the table forever (Pillar 4); `endedAt`
    * stays NULL while the session is active. Sorted newest-first.
    */
-  async getMirrorSessions(filters: { page?: number; limit?: number; actorId?: string; targetId?: string }): Promise<{
+  async getMirrorSessions(
+    filters: { page?: number; limit?: number; actorId?: string; targetId?: string },
+    viewer?: GlobalAuditAccessUser,
+  ): Promise<{
     rows: Array<{
       id: string;
       actorId: string;
@@ -560,6 +630,14 @@ export class AuditService {
     if (filters.targetId) {
       params.push(filters.targetId);
       conditions.push(`ms.target_id = $${params.length}::uuid`);
+    }
+    if (viewer && shouldScopeGlobalAuditToBranch(viewer) && viewer.currentBranchId) {
+      params.push(viewer.currentBranchId);
+      const b = params.length;
+      conditions.push(
+        `(EXISTS (SELECT 1 FROM user_branches ub WHERE ub.user_id = ms.actor_id AND ub.branch_id = $${b}::uuid)` +
+          ` OR EXISTS (SELECT 1 FROM users u WHERE u.id = ms.actor_id AND u.primary_branch_id = $${b}::uuid))`,
+      );
     }
     const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 

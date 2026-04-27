@@ -1,15 +1,13 @@
 import { useLoaderData } from '@remix-run/react';
-import { json } from '@remix-run/node';
-import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized, safeStatus } from '~/lib/api.server';
-import { extractApiErrorMessage } from '~/lib/api-error';
+import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { resolveMarketingDateFilters, buildLeaderboardInput } from '~/lib/marketing-pages.server';
 import { CSTeamPage } from '~/features/cs/CSTeamPage';
 import type { CSTeamMemberOverview } from '~/features/cs/types';
 import type { AgentWorkload, CSLeaderboardEntry, InactiveAgent } from '~/features/cs/types';
 
 export const meta: MetaFunction = () => [
-  { title: 'Team — Yannis EOSE' },
+  { title: 'Team Analysis — Yannis EOSE' },
 ];
 
 function parseCSTeamList(res: { ok: boolean; status: number; data: unknown }): Array<{
@@ -47,7 +45,7 @@ function parseCSTeamList(res: { ok: boolean; status: number; data: unknown }): A
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermissionOrRoles(request, {
+  await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
     permission: 'cs.teamOverview',
   });
@@ -104,9 +102,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const totalPending = workloads.reduce((sum, w) => sum + w.pendingCount, 0);
   const idleCount = inactiveAgents.length;
 
-  // Role-based: only these roles can redistribute (permission-based checks only when decided otherwise)
-  const canReassign = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
-
   // Client-side pagination — `users.listCSTeam` returns all members. With 20/page the loader
   // is the single source of truth for which slice is shown.
   const PAGE_SIZE = 20;
@@ -124,41 +119,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalPending,
       idleCount,
     },
-    canReassign,
     page,
     totalPages,
     totalCount,
     dateFilters: filters,
   };
-}
-
-export async function action({ request }: ActionFunctionArgs) {
-  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
-  await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
-    permission: 'cs.teamOverview',
-  });
-  const cookie = getSessionCookie(request);
-  if (!cookie) return json({ error: 'Session cookie missing' }, { status: 401 });
-
-  const formData = await request.formData();
-  const intent = formData.get('intent')?.toString();
-  if (intent !== 'redistribute') return json({ error: 'Unknown action' }, { status: 400 });
-
-  const agentId = formData.get('agentId')?.toString() ?? '';
-  if (!agentId) return json({ error: 'Closer selection required' }, { status: 400 });
-
-  const res = await apiRequest<{ result?: { data?: { redistributed: number } } }>(
-    '/trpc/orders.redistributeOrdersFromAgent',
-    { method: 'POST', cookie, body: { agentId } },
-  );
-
-  if (!res.ok) {
-    return json({ success: false, error: extractApiErrorMessage(res.data, 'Redistribute failed') }, { status: safeStatus(res.status) });
-  }
-
-  const redistributed = res.data?.result?.data?.redistributed ?? 0;
-  return json({ success: true, redistributed });
 }
 
 export default function CSTeamRoute() {
@@ -167,7 +132,6 @@ export default function CSTeamRoute() {
     <CSTeamPage
       teamMembers={data.teamMembers}
       summary={data.summary}
-      canReassign={data.canReassign}
       page={data.page}
       totalPages={data.totalPages}
       dateFilters={data.dateFilters}
