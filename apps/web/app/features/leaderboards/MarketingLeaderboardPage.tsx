@@ -3,8 +3,9 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { PageHeader } from '~/components/ui/page-header';
 import { Pagination } from '~/components/ui/pagination';
-import { Spinner } from '~/components/ui/spinner';
-import { useNavigation, useSearchParams } from '@remix-run/react';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useSearchParams } from '@remix-run/react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type { LeaderboardEntry } from '~/features/marketing/types';
 
 const HIGH_CPA_THRESHOLD = 5000;
@@ -23,8 +24,7 @@ export function MarketingLeaderboardPage({
 }: MarketingLeaderboardPageProps) {
   const periodLabel = leaderboardPeriod === 'all_time' ? 'all time' : (filters.startDate && filters.endDate ? `${filters.startDate} – ${filters.endDate}` : 'this month');
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
   const [searchParams, setSearchParams] = useSearchParams();
   const pageParam = Number(searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
@@ -43,11 +43,6 @@ export function MarketingLeaderboardPage({
                 periodAllTime={dateFilters.periodAllTime}
               />
             </div>
-            {isFilterLoading && (
-              <span className="flex items-center text-app-fg-muted" aria-hidden>
-                <Spinner size="sm" className="shrink-0" />
-              </span>
-            )}
           </>
         }
       />
@@ -56,9 +51,11 @@ export function MarketingLeaderboardPage({
         {(lb: LeaderboardEntry[]) => {
           if (lb.length === 0) {
             return (
-              <div className="card p-8 text-center">
-                <p className="text-sm text-app-fg-muted">No media buyer data for {periodLabel}.</p>
-              </div>
+              <TableLoadingOverlay show={isFilterLoading}>
+                <div className="card p-8 text-center">
+                  <p className="text-sm text-app-fg-muted">No media buyer data for {periodLabel}.</p>
+                </div>
+              </TableLoadingOverlay>
             );
           }
           // 10/page client-side. Rank stays global so #1 is #1 across pages.
@@ -67,6 +64,7 @@ export function MarketingLeaderboardPage({
           const startIdx = (safePage - 1) * LEADERBOARD_PAGE_SIZE;
           const pagedLb = lb.slice(startIdx, startIdx + LEADERBOARD_PAGE_SIZE);
           return (
+            <TableLoadingOverlay show={isFilterLoading}>
             <div className="card p-0">
               <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
                 <h2 className="text-base font-semibold text-app-fg sm:text-lg">Media Buyer Performance</h2>
@@ -164,6 +162,7 @@ export function MarketingLeaderboardPage({
                 </div>
               )}
             </div>
+            </TableLoadingOverlay>
           );
         }}
       </DeferredSection>

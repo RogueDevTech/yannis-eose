@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Link, useNavigation } from '@remix-run/react';
+import { Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
-import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
@@ -63,8 +64,7 @@ export function NotificationsPage({
   embeddedInTabs = false,
 }: NotificationsPageProps) {
   const [detailNotification, setDetailNotification] = useState<Notification | null>(null);
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
   const { displayUnreadCount, isOptimisticallyRead, markAsRead, markAllRead } = useNotificationsState();
 
   const handleOpenDetail = (n: Notification) => {
@@ -97,11 +97,6 @@ export function NotificationsPage({
             >
               {unreadOnlyFilter ? 'Show all' : 'Unread only'}
             </Link>
-            {isFilterLoading && (
-              <span className="flex items-center text-app-fg-muted" aria-hidden>
-                <Spinner size="sm" className="shrink-0" />
-              </span>
-            )}
             {displayUnreadCount(unreadCount) > 0 && (
               <Button type="button" variant="secondary" size="sm" onClick={() => markAllRead()}>
                 Mark all read
@@ -125,11 +120,6 @@ export function NotificationsPage({
               >
                 {unreadOnlyFilter ? 'Show all' : 'Unread only'}
               </Link>
-              {isFilterLoading && (
-                <span className="flex items-center text-app-fg-muted" aria-hidden>
-                  <Spinner size="sm" className="shrink-0" />
-                </span>
-              )}
               {displayUnreadCount(unreadCount) > 0 && (
                 <Button type="button" variant="secondary" size="sm" onClick={() => markAllRead()}>
                   Mark all read
@@ -140,6 +130,7 @@ export function NotificationsPage({
         />
       )}
 
+      <TableLoadingOverlay show={isFilterLoading}>
       <div className="card p-0">
         {notifications.length === 0 ? (
           <EmptyState
@@ -201,6 +192,7 @@ export function NotificationsPage({
           </div>
         )}
       </div>
+      </TableLoadingOverlay>
 
       {/* Detail modal — full message, action button only when notification requires one */}
       {detailNotification && (

@@ -386,16 +386,48 @@ export class InventoryService {
 
     const hasShrinkage = input.quantityReceived < transfer.quantitySent;
 
+    const approvedQuantity = Math.max(0, input.quantityReceived);
+    const disputedQuantity = Math.max(0, transfer.quantitySent - approvedQuantity);
+
     // Update transfer record
     await tx
       .update(schema.stockTransfers)
       .set({
-        quantityReceived: input.quantityReceived,
+        quantityReceived: approvedQuantity,
         transferStatus: hasShrinkage ? 'DISPUTED' : 'RECEIVED',
         shrinkageReason: input.shrinkageReason ?? null,
+        receiverNotes: input.receiverNotes ?? null,
         verifiedAt: new Date(),
       })
       .where(eq(schema.stockTransfers.id, input.transferId));
+
+    const outcomeRows: Array<{
+      transferId: string;
+      status: 'APPROVED' | 'DISPUTED';
+      quantity: number;
+      reason?: string | null;
+      recordedBy: string;
+    }> = [];
+    if (approvedQuantity > 0) {
+      outcomeRows.push({
+        transferId: transfer.id,
+        status: 'APPROVED',
+        quantity: approvedQuantity,
+        recordedBy: actor.id,
+      });
+    }
+    if (disputedQuantity > 0) {
+      outcomeRows.push({
+        transferId: transfer.id,
+        status: 'DISPUTED',
+        quantity: disputedQuantity,
+        reason: input.shrinkageReason ?? null,
+        recordedBy: actor.id,
+      });
+    }
+    if (outcomeRows.length > 0) {
+      await tx.insert(schema.stockTransferOutcomes).values(outcomeRows);
+    }
 
     // Shrinkage alert: notify SuperAdmin and Head of Logistics
     if (hasShrinkage) {
@@ -419,7 +451,7 @@ export class InventoryService {
     }
 
     // Add stock to destination location
-    if (input.quantityReceived > 0) {
+    if (approvedQuantity > 0) {
       const destLevel = await tx
         .select()
         .from(schema.inventoryLevels)
@@ -435,7 +467,7 @@ export class InventoryService {
         await tx
           .update(schema.inventoryLevels)
           .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantityReceived}`,
+            stockCount: sql`${schema.inventoryLevels.stockCount} + ${approvedQuantity}`,
             updatedAt: new Date(),
           })
           .where(eq(schema.inventoryLevels.id, destLevel[0].id));
@@ -445,7 +477,7 @@ export class InventoryService {
           .values({
             productId: transfer.productId,
             locationId: transfer.toLocationId,
-            stockCount: input.quantityReceived,
+            stockCount: approvedQuantity,
             reservedCount: 0,
             status: 'AVAILABLE',
           });
@@ -455,7 +487,7 @@ export class InventoryService {
       await tx.insert(schema.stockMovements).values({
         productId: transfer.productId,
         movementType: 'TRANSFER_IN',
-        quantity: input.quantityReceived,
+        quantity: approvedQuantity,
         fromLocationId: transfer.fromLocationId,
         toLocationId: transfer.toLocationId,
         referenceId: transfer.id,
@@ -470,7 +502,7 @@ export class InventoryService {
         transferId: transfer.id,
         productId: transfer.productId,
         sent: transfer.quantitySent,
-        received: input.quantityReceived,
+        received: approvedQuantity,
         shrinkage: shrinkageQty,
         reason: input.shrinkageReason,
       });
@@ -980,10 +1012,59 @@ export class InventoryService {
       senderByTransferId.set(row.transferId, row.senderName);
     }
 
-    return transfers.map((transfer) => ({
-      ...transfer,
-      senderName: senderByTransferId.get(transfer.id) ?? null,
-    }));
+    const outcomeRows =
+      transferIds.length > 0
+        ? await this.db
+            .select({
+              transferId: schema.stockTransferOutcomes.transferId,
+              outcomeStatus: schema.stockTransferOutcomes.status,
+              outcomeQuantity: schema.stockTransferOutcomes.quantity,
+              outcomeReason: schema.stockTransferOutcomes.reason,
+              outcomeRecordedAt: schema.stockTransferOutcomes.recordedAt,
+            })
+            .from(schema.stockTransferOutcomes)
+            .where(inArray(schema.stockTransferOutcomes.transferId, transferIds))
+            .orderBy(desc(schema.stockTransferOutcomes.recordedAt))
+        : [];
+
+    const outcomesByTransfer = new Map<string, typeof outcomeRows>();
+    for (const row of outcomeRows) {
+      const bucket = outcomesByTransfer.get(row.transferId) ?? [];
+      bucket.push(row);
+      outcomesByTransfer.set(row.transferId, bucket);
+    }
+
+    const mapped = transfers.flatMap((transfer) => {
+      const senderName = senderByTransferId.get(transfer.id) ?? null;
+      const outcomes = outcomesByTransfer.get(transfer.id) ?? [];
+      if (outcomes.length === 0) {
+        return [
+          {
+            ...transfer,
+            senderName,
+            outcomeStatus: transfer.transferStatus === 'RECEIVED' ? 'APPROVED' : transfer.transferStatus,
+            outcomeQuantity: transfer.quantityReceived,
+            outcomeReason: transfer.shrinkageReason,
+          },
+        ];
+      }
+      return outcomes.map((outcome) => ({
+        ...transfer,
+        senderName,
+        outcomeStatus: outcome.outcomeStatus,
+        outcomeQuantity: outcome.outcomeQuantity,
+        outcomeReason: outcome.outcomeReason,
+      }));
+    });
+
+    if (!status) return mapped;
+    if (status === 'RECEIVED') {
+      return mapped.filter((row) => row.outcomeStatus === 'APPROVED');
+    }
+    if (status === 'DISPUTED') {
+      return mapped.filter((row) => row.outcomeStatus === 'DISPUTED');
+    }
+    return mapped.filter((row) => row.transferStatus === status);
   }
 
   /**

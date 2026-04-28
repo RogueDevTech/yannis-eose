@@ -102,6 +102,8 @@ export interface ViewerInfo {
   role: string;
   currentBranchId: string | null;
   isFinanceOfficer: boolean;
+  prepareDepartments?: PayrollDepartment[];
+  prepareBranchIds?: string[];
 }
 
 export interface HRPageProps {
@@ -118,7 +120,8 @@ export interface HRPageProps {
 
 /**
  * Loader → HRPage. The HRPage focus narrowed to Monthly Payrolls + Adjustments after the
- * 2026-04-26 split (Plans → /hr/plans, Payouts → /hr/payouts, Settlement Config removed).
+ * 2026-04-26 split (Plans → /hr/plans, Settlement Config removed). The legacy /hr/payouts
+ * flat list was retired (2026-04-28) — per-payout status is shown inside the batch detail.
  */
 export interface HRStreamData {
   adjustments: Adjustment[];

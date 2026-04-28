@@ -171,6 +171,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     whatsappGroupLink?: string | null;
     eligible: boolean;
     reason: string | null;
+    availabilityByProduct: Array<{
+      productId: string;
+      productName: string;
+      needed: number;
+      available: number;
+    }> | null;
   }> = [];
   const allocatableRes = await apiRequest<unknown>(
     `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
@@ -190,6 +196,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           whatsappGroupLink?: string | null;
           eligible: boolean;
           reason: string | null;
+          availabilityByProduct: Array<{
+            productId: string;
+            productName: string;
+            needed: number;
+            available: number;
+          }> | null;
         }>;
       };
     };

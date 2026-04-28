@@ -292,4 +292,162 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
 
     expect(batch!.remainingQuantity).toBe(0);
   });
+
+  it('verifyTransfer partial receipt writes APPROVED and DISPUTED outcome rows', async () => {
+    const actor = await createTestUser(db as any, { role: 'HEAD_OF_LOGISTICS' });
+    await setSessionActor(pgClient, actor.id);
+    const { id: productId } = await createTestProduct(db as any);
+
+    const [provider] = await db
+      .insert(schema.logisticsProviders)
+      .values({ name: `Provider ${randomUUID().slice(0, 8)}` })
+      .returning({ id: schema.logisticsProviders.id });
+    const [fromLoc] = await db
+      .insert(schema.logisticsLocations)
+      .values({ providerId: provider!.id, name: 'From', address: 'Addr A' })
+      .returning({ id: schema.logisticsLocations.id });
+    const [toLoc] = await db
+      .insert(schema.logisticsLocations)
+      .values({ providerId: provider!.id, name: 'To', address: 'Addr B' })
+      .returning({ id: schema.logisticsLocations.id });
+
+    const [transfer] = await db
+      .insert(schema.stockTransfers)
+      .values({
+        productId,
+        quantitySent: 20,
+        quantityReceived: null,
+        fromLocationId: fromLoc!.id,
+        toLocationId: toLoc!.id,
+        transferStatus: 'IN_TRANSIT',
+      })
+      .returning({ id: schema.stockTransfers.id });
+
+    const svc = new InventoryService(
+      db as any,
+      { emitToRoom: () => {} } as any,
+      { createForRole: async () => undefined } as any,
+      { get: async () => null } as any,
+    );
+    await svc.verifyTransfer(
+      { transferId: transfer!.id, quantityReceived: 10, shrinkageReason: 'Short by 10 units' },
+      { id: actor.id } as any,
+    );
+
+    const outcomes = await db
+      .select({
+        status: schema.stockTransferOutcomes.status,
+        quantity: schema.stockTransferOutcomes.quantity,
+      })
+      .from(schema.stockTransferOutcomes)
+      .where(eq(schema.stockTransferOutcomes.transferId, transfer!.id));
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'APPROVED', quantity: 10 }),
+        expect.objectContaining({ status: 'DISPUTED', quantity: 10 }),
+      ]),
+    );
+  });
+
+  it('verifyTransfer full receipt writes only APPROVED outcome row', async () => {
+    const actor = await createTestUser(db as any, { role: 'HEAD_OF_LOGISTICS' });
+    await setSessionActor(pgClient, actor.id);
+    const { id: productId } = await createTestProduct(db as any);
+
+    const [provider] = await db
+      .insert(schema.logisticsProviders)
+      .values({ name: `Provider ${randomUUID().slice(0, 8)}` })
+      .returning({ id: schema.logisticsProviders.id });
+    const [fromLoc] = await db
+      .insert(schema.logisticsLocations)
+      .values({ providerId: provider!.id, name: 'From', address: 'Addr A' })
+      .returning({ id: schema.logisticsLocations.id });
+    const [toLoc] = await db
+      .insert(schema.logisticsLocations)
+      .values({ providerId: provider!.id, name: 'To', address: 'Addr B' })
+      .returning({ id: schema.logisticsLocations.id });
+
+    const [transfer] = await db
+      .insert(schema.stockTransfers)
+      .values({
+        productId,
+        quantitySent: 15,
+        quantityReceived: null,
+        fromLocationId: fromLoc!.id,
+        toLocationId: toLoc!.id,
+        transferStatus: 'IN_TRANSIT',
+      })
+      .returning({ id: schema.stockTransfers.id });
+
+    const svc = new InventoryService(
+      db as any,
+      { emitToRoom: () => {} } as any,
+      { createForRole: async () => undefined } as any,
+      { get: async () => null } as any,
+    );
+    await svc.verifyTransfer({ transferId: transfer!.id, quantityReceived: 15 }, { id: actor.id } as any);
+
+    const outcomes = await db
+      .select({
+        status: schema.stockTransferOutcomes.status,
+        quantity: schema.stockTransferOutcomes.quantity,
+      })
+      .from(schema.stockTransferOutcomes)
+      .where(eq(schema.stockTransferOutcomes.transferId, transfer!.id));
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({ status: 'APPROVED', quantity: 15 });
+  });
+
+  it('verifyTransfer zero receipt writes only DISPUTED outcome row', async () => {
+    const actor = await createTestUser(db as any, { role: 'HEAD_OF_LOGISTICS' });
+    await setSessionActor(pgClient, actor.id);
+    const { id: productId } = await createTestProduct(db as any);
+
+    const [provider] = await db
+      .insert(schema.logisticsProviders)
+      .values({ name: `Provider ${randomUUID().slice(0, 8)}` })
+      .returning({ id: schema.logisticsProviders.id });
+    const [fromLoc] = await db
+      .insert(schema.logisticsLocations)
+      .values({ providerId: provider!.id, name: 'From', address: 'Addr A' })
+      .returning({ id: schema.logisticsLocations.id });
+    const [toLoc] = await db
+      .insert(schema.logisticsLocations)
+      .values({ providerId: provider!.id, name: 'To', address: 'Addr B' })
+      .returning({ id: schema.logisticsLocations.id });
+
+    const [transfer] = await db
+      .insert(schema.stockTransfers)
+      .values({
+        productId,
+        quantitySent: 11,
+        quantityReceived: null,
+        fromLocationId: fromLoc!.id,
+        toLocationId: toLoc!.id,
+        transferStatus: 'IN_TRANSIT',
+      })
+      .returning({ id: schema.stockTransfers.id });
+
+    const svc = new InventoryService(
+      db as any,
+      { emitToRoom: () => {} } as any,
+      { createForRole: async () => undefined } as any,
+      { get: async () => null } as any,
+    );
+    await svc.verifyTransfer(
+      { transferId: transfer!.id, quantityReceived: 0, shrinkageReason: 'Not delivered' },
+      { id: actor.id } as any,
+    );
+
+    const outcomes = await db
+      .select({
+        status: schema.stockTransferOutcomes.status,
+        quantity: schema.stockTransferOutcomes.quantity,
+      })
+      .from(schema.stockTransferOutcomes)
+      .where(eq(schema.stockTransferOutcomes.transferId, transfer!.id));
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({ status: 'DISPUTED', quantity: 11 });
+  });
 });

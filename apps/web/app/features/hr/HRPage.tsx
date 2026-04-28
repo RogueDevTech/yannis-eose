@@ -24,9 +24,13 @@ const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
  * HR & Payroll landing page.
  *
  * Layout philosophy (CEO directive 2026-04-26): the heavy concerns are split across separate
- * routes — Commission Plans → /hr/plans, raw Payouts list → /hr/payouts. This page focuses on
- * the multi-stage payroll workflow (Monthly Payrolls) plus a small Adjustments inbox that only
- * HR + Finance use. Heads of Department land on this page and see only Monthly Payrolls.
+ * routes — Commission Plans → /hr/plans. This page focuses on the multi-stage payroll
+ * workflow (Monthly Payrolls) plus a small Adjustments inbox that only HR + Finance use.
+ * Heads of Department land on this page and see only Monthly Payrolls.
+ *
+ * The legacy /hr/payouts flat list was retired (2026-04-28) — per-payout PAID status is now
+ * visible inside each Monthly Payroll batch detail (`MonthlyPayrolls.tsx`) once Finance marks
+ * the batch paid (which cascades each child `payoutRecords.status` to PAID).
  *
  * The Settlement Config tab was removed — payroll always runs monthly.
  */

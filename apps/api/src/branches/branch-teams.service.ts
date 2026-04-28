@@ -254,6 +254,25 @@ export class BranchTeamsService {
     });
   }
 
+  /** True if actor is marked as a supervisor on any branch team for this branch. */
+  async isActorSupervisorOnBranch(actorId: string, branchId: string): Promise<boolean> {
+    return this.safeBranchTeamsRead(false, async () => {
+      const rows = await this.db
+        .select({ x: sql`1` })
+        .from(schema.branchTeamMembers)
+        .innerJoin(schema.branchTeams, eq(schema.branchTeams.id, schema.branchTeamMembers.teamId))
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, actorId),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+            eq(schema.branchTeams.branchId, branchId),
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    });
+  }
+
   /** Supervisee user IDs on this branch for CS or Marketing teams where actor is a supervisor. */
   async listSupervisedUserIds(
     actorId: string,

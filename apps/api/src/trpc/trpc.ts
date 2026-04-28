@@ -5,7 +5,7 @@ import {
   hasFinanceAccess,
   stripFinanceFields,
 } from '../common/utils/strip-finance-fields';
-import { isAdminLevel, isOrgWideDepartmentHead } from '../common/authz';
+import { isOrgWideDepartmentHead } from '../common/authz';
 
 const t = initTRPC.context<TrpcContext>().create();
 export const BRANCH_CONTEXT_REQUIRED_MESSAGE =
@@ -115,8 +115,7 @@ function extractInputBranchId(input: unknown, depth = 0): string | null {
 const requireBranchScopeForGlobalAdminMutations = t.middleware(async ({ ctx, type, path, meta, input, getRawInput, next }) => {
   if (type !== 'mutation') return next();
   if (!ctx.user) return next();
-  const needsExplicitBranchOnScopedMutations =
-    isAdminLevel(ctx.user) || isOrgWideDepartmentHead(ctx.user);
+  const needsExplicitBranchOnScopedMutations = isOrgWideDepartmentHead(ctx.user);
   if (!needsExplicitBranchOnScopedMutations) return next();
   if (ctx.currentBranchId !== null) return next();
   const isBranchScopedMutation =

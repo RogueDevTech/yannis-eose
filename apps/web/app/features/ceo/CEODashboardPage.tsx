@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useSearchParams, useNavigation, useFetcher, useRevalidator } from '@remix-run/react';
+import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
 import { useToast } from '~/components/ui/toast';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Spinner } from '~/components/ui/spinner';
 import { PageHeader } from '~/components/ui/page-header';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { formatNaira } from '~/lib/format-amount';
@@ -70,7 +72,7 @@ export function CEODashboardPage({
 }: CEODashboardPageProps) {
   const [showChartView, setShowChartView] = useState(false);
   const [_searchParams, setSearchParams] = useSearchParams();
-  const navigation = useNavigation();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const fetcher = useFetcher<ChartDataPayload>();
   const refreshFetcher = useFetcher<{
     success?: boolean;
@@ -122,7 +124,6 @@ export function CEODashboardPage({
       ? { ...data, ...fetcher.data }
       : data;
   const isChartLoading = showChartView && fetcher.state === 'loading' && !fetcher.data;
-  const isLoadingTopic = navigation.state === 'loading';
   const revenue = data?.revenue ?? 0;
   const trueProfit = data?.trueProfit ?? 0;
   const margin = data?.margin ?? 0;
@@ -253,6 +254,7 @@ export function CEODashboardPage({
           <p className="text-sm font-medium text-app-fg-muted">Loading charts...</p>
         </div>
       ) : (
+      <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[24rem]">
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Revenue & orders over time
@@ -328,12 +330,14 @@ export function CEODashboardPage({
           )}
         </div>
       </div>
+      </TableLoadingOverlay>
       )}
       </>
       )}
 
       {/* ── Data view: KPIs, lists, grids (no charts) ─────────────────────── */}
       {!showChartView && (
+        <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[20rem]">
         <>
       {/* ── Section 1: Revenue & Profit KPIs ────────────────── */}
       <div>
@@ -692,10 +696,13 @@ export function CEODashboardPage({
         </div>
       </div>
 
-      </> )}
+      </>
+        </TableLoadingOverlay>
+      )}
 
       {/* ── Chart view only: content by topic (Orders / Media buyers / CS) ───────────────── */}
       {showChartView && !isChartLoading && (
+      <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[16rem]">
       <>
         {/* Topic filter: only visible in chart section */}
         <div className="flex items-center gap-3 flex-wrap">
@@ -709,19 +716,13 @@ export function CEODashboardPage({
                 next.set('topic', e.target.value);
                 return next;
               })}
-              disabled={isLoadingTopic}
+              disabled={isLoaderRefetchBusy}
               options={[
                 { value: 'orders', label: 'Orders' },
                 { value: 'media_buyers', label: 'Media buyers' },
                 { value: 'cs', label: 'CS' },
               ]}
             />
-            {isLoadingTopic && (
-              <span
-                className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-app-border border-t-brand-500"
-                aria-hidden
-              />
-            )}
           </div>
         </div>
 
@@ -965,10 +966,12 @@ export function CEODashboardPage({
         </div>
         )}
       </>
+      </TableLoadingOverlay>
       )}
 
       {/* Branch Breakdown — only shown when system has multiple branches */}
       {branchBreakdown && branchBreakdown.length > 1 && (
+        <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[10rem]">
         <div className="card p-0">
           <div className="px-4 py-3 border-b border-app-border flex items-center justify-between">
             <h2 className="text-sm font-semibold text-app-fg">Branch Breakdown</h2>
@@ -1019,6 +1022,7 @@ export function CEODashboardPage({
             </tbody>
           </table>
         </div>
+        </TableLoadingOverlay>
       )}
 
     </div>

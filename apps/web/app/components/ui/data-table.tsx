@@ -13,6 +13,7 @@
 
 import { EmptyState } from '~/components/ui/empty-state';
 import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 
 export interface TableColumn<T> {
   key: string;
@@ -28,12 +29,19 @@ export interface TableColumn<T> {
   minWidth?: string;
 }
 
+export type DataTableLoadingVariant = 'replace' | 'overlay';
+
 interface DataTableProps<T> {
   columns: TableColumn<T>[];
   data: T[];
   /** Field name used as React key (must be unique per row) */
   keyField: keyof T;
   loading?: boolean;
+  /**
+   * `replace` (default): spinner only while loading (legacy).
+   * `overlay`: keep previous rows / empty state visible with a dimmed overlay + spinner (filter refetch UX).
+   */
+  loadingVariant?: DataTableLoadingVariant;
   /** Shown when data is empty */
   emptyTitle?: string;
   emptyDescription?: string;
@@ -60,6 +68,7 @@ export function DataTable<T>({
   data,
   keyField,
   loading = false,
+  loadingVariant = 'replace',
   emptyTitle = 'No records found',
   emptyDescription,
   emptyIcon,
@@ -69,26 +78,6 @@ export function DataTable<T>({
   rowClassName,
   caption,
 }: DataTableProps<T>) {
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
-  if (data.length === 0) {
-    return (
-      <EmptyState
-        icon={emptyIcon}
-        title={emptyTitle}
-        description={emptyDescription}
-        action={emptyAction}
-        variant="card"
-      />
-    );
-  }
-
   const headerCellClass = (extra: string[]) =>
     [
       'border-b border-app-border bg-app-elevated px-4 py-2.5 text-xs font-semibold text-app-fg-muted whitespace-nowrap',
@@ -97,7 +86,33 @@ export function DataTable<T>({
       .filter(Boolean)
       .join(' ');
 
-  return (
+  const showOverlay = loading && loadingVariant === 'overlay';
+
+  if (loading && loadingVariant === 'replace') {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
+
+  if (data.length === 0) {
+    const empty = (
+      <EmptyState
+        icon={emptyIcon}
+        title={emptyTitle}
+        description={emptyDescription}
+        action={emptyAction}
+        variant="card"
+      />
+    );
+    if (showOverlay) {
+      return <TableLoadingOverlay show>{empty}</TableLoadingOverlay>;
+    }
+    return empty;
+  }
+
+  const table = (
     <div className={['overflow-x-auto rounded-xl border border-app-border', className].filter(Boolean).join(' ')}>
       <table className="w-full min-w-full border-collapse text-sm">
         {caption && <caption className="sr-only">{caption}</caption>}
@@ -153,4 +168,10 @@ export function DataTable<T>({
       </table>
     </div>
   );
+
+  if (showOverlay) {
+    return <TableLoadingOverlay show>{table}</TableLoadingOverlay>;
+  }
+
+  return table;
 }

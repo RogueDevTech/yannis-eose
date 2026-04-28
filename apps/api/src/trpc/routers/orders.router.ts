@@ -153,8 +153,8 @@ export const ordersRouter = router({
 
   listAllocatableLocations: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getOrdersService().listAllocatableLocations(input.orderId);
+    .query(async ({ input, ctx }) => {
+      return getOrdersService().listAllocatableLocations(input.orderId, ctx.user.role);
     }),
 
   /**

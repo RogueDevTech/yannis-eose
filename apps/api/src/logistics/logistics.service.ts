@@ -16,6 +16,7 @@ import type {
   MarkRemittanceReceivedInput,
   CreateDeliveryRemittanceInput,
   ListDeliveryRemittancesInput,
+  ListDeliveryRemittanceEligibleOrdersInput,
   MarkDeliveryRemittanceReceivedInput,
   SubmitDeliveryConfirmationInput,
   ListDeliveryConfirmationRequestsInput,
@@ -25,8 +26,10 @@ import type {
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
-import { withActor } from '../common/db/with-actor';
+import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { OrdersService } from '../orders/orders.service';
+import { isAdminLevel } from '../common/authz';
+import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 @Injectable()
@@ -620,16 +623,29 @@ export class LogisticsService {
    * Orders must be DELIVERED, belong to actor's location, and not already in another remittance.
    */
   async createDeliveryRemittance(input: CreateDeliveryRemittanceInput, actor: SessionUser) {
-    if (actor.role !== 'TPL_MANAGER' || !actor.logisticsLocationId) {
+    // Phase 18 (CEO directive 2026-04-29): the 3PL partners aren't on-platform yet,
+    // so the accountant records remittances directly. The legacy TPL_MANAGER path
+    // stays alive for when a 3PL actually onboards. Finance roles include the
+    // primary FINANCE_OFFICER, anyone with the Finance hat, and admin-class.
+    const isTplCaller = actor.role === 'TPL_MANAGER' && !!actor.logisticsLocationId;
+    const isFinanceCaller = hasFinanceAccess(actor) || isAdminLevel(actor);
+    if (!isTplCaller && !isFinanceCaller) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only 3PL Managers with an assigned location can submit delivery remittances',
+        message:
+          'Only Finance (or a 3PL Manager with an assigned location) can record a delivery remittance',
       });
     }
 
-    const remittance = await withActor(this.db, actor, async (tx) => {
+    const result = await withActorAndBranch(this.db, actor, async (tx) => {
       const orderRows = await tx
-        .select({ id: schema.orders.id, status: schema.orders.status, logisticsLocationId: schema.orders.logisticsLocationId })
+        .select({
+          id: schema.orders.id,
+          status: schema.orders.status,
+          logisticsLocationId: schema.orders.logisticsLocationId,
+          branchId: schema.orders.branchId,
+          totalAmount: schema.orders.totalAmount,
+        })
         .from(schema.orders)
         .where(inArray(schema.orders.id, input.orderIds));
 
@@ -640,6 +656,9 @@ export class LogisticsService {
         }
       }
 
+      // All orders must currently be DELIVERED. Any other status is a bug
+      // upstream — refuse so we don't accidentally settle a CANCELLED or
+      // RETURNED order.
       for (const row of orderRows) {
         if (row.status !== 'DELIVERED') {
           throw new TRPCError({
@@ -647,12 +666,42 @@ export class LogisticsService {
             message: `Order ${row.id} is not DELIVERED. Only delivered orders can be included.`,
           });
         }
-        if (row.logisticsLocationId !== actor.logisticsLocationId) {
+      }
+
+      // Resolve the remittance's logistics location. TPL caller: must own all
+      // orders. Finance caller: derive from the orders themselves and require
+      // they all share one location (one cash drop = one source).
+      let remittanceLocationId: string;
+      if (isTplCaller) {
+        for (const row of orderRows) {
+          if (row.logisticsLocationId !== actor.logisticsLocationId) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: 'Orders must belong to your 3PL location',
+            });
+          }
+        }
+        remittanceLocationId = actor.logisticsLocationId!;
+      } else {
+        const distinctLocs = new Set(
+          orderRows
+            .map((r) => r.logisticsLocationId)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        );
+        if (distinctLocs.size === 0) {
           throw new TRPCError({
-            code: 'FORBIDDEN',
-            message: 'Orders must belong to your 3PL location',
+            code: 'BAD_REQUEST',
+            message: 'Selected orders are missing a logistics location.',
           });
         }
+        if (distinctLocs.size > 1) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'All orders in a remittance must share the same logistics location. Create one remittance per location.',
+          });
+        }
+        remittanceLocationId = [...distinctLocs][0]!;
       }
 
       const alreadyRemitted = await tx
@@ -666,13 +715,18 @@ export class LogisticsService {
         });
       }
 
+      const markReceivedNow = !!input.markReceivedNow;
+      const now = new Date();
+
       const [row] = await tx
         .insert(schema.deliveryRemittances)
         .values({
-          logisticsLocationId: actor.logisticsLocationId!,
+          logisticsLocationId: remittanceLocationId,
           sentBy: actor.id,
           receiptUrls: input.receiptUrls,
-          status: 'SENT',
+          status: markReceivedNow ? 'RECEIVED' : 'SENT',
+          notes: input.notes ?? null,
+          ...(markReceivedNow ? { receivedAt: now, receivedBy: actor.id } : {}),
         })
         .returning();
 
@@ -687,19 +741,58 @@ export class LogisticsService {
         })),
       );
 
-      return row;
+      // Cascade DELIVERED → COMPLETED in the same transaction when the
+      // accountant is marking received now. This is the canonical "remittance
+      // received and reconciled" signal that CLAUDE.md → Order Lifecycle ties
+      // to COMPLETED. We bulk-update with status guard ('DELIVERED') so we
+      // never accidentally bump a CANCELLED order.
+      let completedAmountTotal = 0;
+      if (markReceivedNow) {
+        for (const orderRow of orderRows) {
+          completedAmountTotal += Number(orderRow.totalAmount ?? 0);
+        }
+        await tx
+          .update(schema.orders)
+          .set({ status: 'COMPLETED', updatedAt: now })
+          .where(
+            and(
+              inArray(schema.orders.id, input.orderIds),
+              eq(schema.orders.status, 'DELIVERED'),
+            ),
+          );
+
+        await tx.insert(schema.deliveryRemittanceOutcomes).values({
+          deliveryRemittanceId: row.id,
+          status: 'APPROVED',
+          amount: sql`${completedAmountTotal.toFixed(2)}::numeric`,
+          orderCount: input.orderIds.length,
+          recordedBy: actor.id,
+        });
+      }
+
+      return { remittance: row, orderRows, markReceivedNow, completedAmountTotal };
     });
 
-    this.notifications
-      .createForRole('FINANCE_OFFICER', {
-        type: 'delivery_remittance:sent',
-        title: 'Delivery remittance received',
-        body: `3PL submitted a delivery remittance with ${input.orderIds.length} order(s). Please review and mark as received.`,
-        data: { deliveryRemittanceId: remittance.id },
-      })
-      .catch(() => {});
+    // Note: per-order order:status_changed socket events are intentionally not
+    // emitted here. The Finance page revalidates on its own action submit and
+    // Order detail re-fetches on the next open. Adding socket fan-out is a
+    // future optimization if real-time CS dashboards need to drop completed
+    // orders without a refresh.
 
-    return remittance;
+    // Notify Finance when a TPL caller drops a remittance for review. Finance-
+    // led inserts don't need a self-notification.
+    if (isTplCaller) {
+      this.notifications
+        .createForRole('FINANCE_OFFICER', {
+          type: 'delivery_remittance:sent',
+          title: 'Delivery remittance received',
+          body: `3PL submitted a delivery remittance with ${input.orderIds.length} order(s). Please review and mark as received.`,
+          data: { deliveryRemittanceId: result.remittance.id },
+        })
+        .catch(() => {});
+    }
+
+    return result.remittance;
   }
 
   /**
@@ -721,6 +814,11 @@ export class LogisticsService {
     } else if (input.logisticsLocationId) {
       conditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
     }
+    // Phase 18: Sent-by filter (the accountant who recorded a remittance).
+    if (input.sentBy) {
+      conditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
+    }
+    // Phase 18: status filter now covers all three values, not just SENT.
     if (input.status) {
       conditions.push(eq(schema.deliveryRemittances.status, input.status));
     }
@@ -759,10 +857,13 @@ export class LogisticsService {
         : [];
     const locationMap = new Map(locations.map((l) => [l.id, l.name]));
 
-    const orderCounts = await Promise.all(
+    const orderSummaries = await Promise.all(
       records.map((r) =>
         this.db
-          .select({ count: count() })
+          .select({
+            count: count(),
+            amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+          })
           .from(schema.deliveryRemittanceOrders)
           .innerJoin(
             schema.orders,
@@ -774,6 +875,29 @@ export class LogisticsService {
           .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, r.id)),
       ),
     );
+
+    const remittanceIds = records.map((r) => r.id);
+    const outcomes =
+      remittanceIds.length > 0
+        ? await this.db
+            .select({
+              deliveryRemittanceId: schema.deliveryRemittanceOutcomes.deliveryRemittanceId,
+              status: schema.deliveryRemittanceOutcomes.status,
+              amount: schema.deliveryRemittanceOutcomes.amount,
+              orderCount: schema.deliveryRemittanceOutcomes.orderCount,
+              reason: schema.deliveryRemittanceOutcomes.reason,
+              recordedAt: schema.deliveryRemittanceOutcomes.recordedAt,
+            })
+            .from(schema.deliveryRemittanceOutcomes)
+            .where(inArray(schema.deliveryRemittanceOutcomes.deliveryRemittanceId, remittanceIds))
+            .orderBy(desc(schema.deliveryRemittanceOutcomes.recordedAt))
+        : [];
+    const outcomesByRemittance = new Map<string, typeof outcomes>();
+    for (const outcome of outcomes) {
+      const bucket = outcomesByRemittance.get(outcome.deliveryRemittanceId) ?? [];
+      bucket.push(outcome);
+      outcomesByRemittance.set(outcome.deliveryRemittanceId, bucket);
+    }
 
     // Summary aggregation: total remitted amounts by status (across all matching remittances, not just current page).
     // Keep location/date/role scoping but intentionally ignore status filter so all buckets are visible.
@@ -795,40 +919,93 @@ export class LogisticsService {
       ? and(summaryWhere, eq(schema.orders.status, 'DELIVERED'))
       : eq(schema.orders.status, 'DELIVERED');
 
-    const summaryRows = await this.db
+    const baseSummaryRows = await this.db
       .select({
         totalRemitted: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
         pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
-        receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
-        disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
         totalCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittances.id})::text`,
         pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittances.id} END)::text`,
-        receivedCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.deliveryRemittances.id} END)::text`,
-        disputedCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.deliveryRemittances.id} END)::text`,
       })
       .from(schema.deliveryRemittances)
       .innerJoin(schema.deliveryRemittanceOrders, eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id))
       .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
       .where(deliveredSummaryWhere);
 
-    const summary = summaryRows[0] ?? {
+    const outcomeSummaryRows = await this.db
+      .select({
+        receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
+        disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
+        receivedCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.deliveryRemittanceId} END)::text`,
+        disputedCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.deliveryRemittanceId} END)::text`,
+      })
+      .from(schema.deliveryRemittanceOutcomes)
+      .innerJoin(
+        schema.deliveryRemittances,
+        eq(schema.deliveryRemittanceOutcomes.deliveryRemittanceId, schema.deliveryRemittances.id),
+      )
+      .where(summaryWhere);
+
+    const baseSummary = baseSummaryRows[0];
+    const outcomeSummary = outcomeSummaryRows[0];
+    const summary = {
+      totalRemitted: baseSummary?.totalRemitted ?? '0',
+      pendingAmount: baseSummary?.pendingAmount ?? '0',
+      receivedAmount: outcomeSummary?.receivedAmount ?? '0',
+      disputedAmount: outcomeSummary?.disputedAmount ?? '0',
+      totalCount: baseSummary?.totalCount ?? '0',
+      pendingCount: baseSummary?.pendingCount ?? '0',
+      receivedCount: outcomeSummary?.receivedCount ?? '0',
+      disputedCount: outcomeSummary?.disputedCount ?? '0',
+    };
+
+    const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
     };
 
     return {
-      records: records.map((r, i) => ({
-        ...r,
-        locationName: locationMap.get(r.logisticsLocationId) ?? null,
-        orderCount: orderCounts[i]?.[0]?.count ?? 0,
-      })),
+      records: records
+        .flatMap((r, i) => {
+          const orderCount = orderSummaries[i]?.[0]?.count ?? 0;
+          const orderAmount = orderSummaries[i]?.[0]?.amount ?? '0';
+          const base = {
+            ...r,
+            locationName: locationMap.get(r.logisticsLocationId) ?? null,
+            orderCount,
+            outcomeAmount: orderAmount,
+            outcomeOrderCount: orderCount,
+            outcomeReason: r.disputeReason,
+          };
+          const recordOutcomes = outcomesByRemittance.get(r.id) ?? [];
+          if (recordOutcomes.length === 0) {
+            return [
+              {
+                ...base,
+                outcomeStatus: r.status === 'RECEIVED' ? 'APPROVED' : r.status,
+              },
+            ];
+          }
+          return recordOutcomes.map((outcome) => ({
+            ...base,
+            outcomeStatus: outcome.status,
+            outcomeAmount: String(outcome.amount ?? '0'),
+            outcomeOrderCount: Number(outcome.orderCount ?? 0),
+            outcomeReason: outcome.reason,
+          }));
+        })
+        .filter((row) => {
+          if (!input.status) return true;
+          if (input.status === 'RECEIVED') return row.outcomeStatus === 'APPROVED';
+          if (input.status === 'DISPUTED') return row.outcomeStatus === 'DISPUTED';
+          return row.outcomeStatus === 'SENT';
+        }),
       pagination: {
         page: input.page,
         limit: input.limit,
         total,
         totalPages: Math.ceil(total / input.limit),
       },
-      summary,
+      summary: summary ?? fallbackSummary,
     };
   }
 
@@ -836,14 +1013,18 @@ export class LogisticsService {
    * Finance marks a delivery remittance as received (payment confirmed). Notifies 3PL location.
    */
   async markDeliveryRemittanceReceived(input: MarkDeliveryRemittanceReceivedInput, actor: SessionUser) {
-    if (actor.role !== 'FINANCE_OFFICER' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
+    // Phase 18: Finance / admin / Finance-hat holders can mark received. The
+    // legacy "FINANCE_OFFICER only" check is widened so the Finance hat holder
+    // (the only role that's layered on top of another) can run the close-out
+    // flow without escalating their primary role.
+    if (!hasFinanceAccess(actor) && !isAdminLevel(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Finance or Super Admin can mark delivery remittances as received',
       });
     }
 
-    const remittance = await withActor(this.db, actor, async (tx) => {
+    const remittance = await withActorAndBranch(this.db, actor, async (tx) => {
       const [found] = await tx
         .select()
         .from(schema.deliveryRemittances)
@@ -860,14 +1041,55 @@ export class LogisticsService {
         });
       }
 
+      const [totals] = await tx
+        .select({
+          amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+          orderCount: count(),
+        })
+        .from(schema.deliveryRemittanceOrders)
+        .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+        .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, input.deliveryRemittanceId));
+
+      const now = new Date();
+
       await tx
         .update(schema.deliveryRemittances)
         .set({
           status: 'RECEIVED',
-          receivedAt: new Date(),
+          receivedAt: now,
           receivedBy: actor.id,
         })
         .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId));
+
+      await tx.insert(schema.deliveryRemittanceOutcomes).values({
+        deliveryRemittanceId: found.id,
+        status: 'APPROVED',
+        amount: sql`${totals?.amount ?? '0'}::numeric`,
+        orderCount: totals?.orderCount ?? 0,
+        recordedBy: actor.id,
+      });
+
+      // Cascade DELIVERED → COMPLETED on every linked order. Bulk-update with
+      // the status guard so we never accidentally bump an order that drifted
+      // (e.g. a manual revert before remittance was confirmed).
+      const linkedOrderIds = (
+        await tx
+          .select({ orderId: schema.deliveryRemittanceOrders.orderId })
+          .from(schema.deliveryRemittanceOrders)
+          .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, input.deliveryRemittanceId))
+      ).map((r) => r.orderId);
+
+      if (linkedOrderIds.length > 0) {
+        await tx
+          .update(schema.orders)
+          .set({ status: 'COMPLETED', updatedAt: now })
+          .where(
+            and(
+              inArray(schema.orders.id, linkedOrderIds),
+              eq(schema.orders.status, 'DELIVERED'),
+            ),
+          );
+      }
 
       return found;
     });
@@ -877,7 +1099,10 @@ export class LogisticsService {
         type: 'delivery_remittance:received',
         title: 'Delivery remittance marked received',
         body: 'Your delivery remittance has been marked as received by Finance. Payment confirmed.',
-        data: { deliveryRemittanceId: remittance.id },
+        data: {
+          deliveryRemittanceId: remittance.id,
+          splitOutcomes: [{ status: 'APPROVED' }],
+        },
       })
       .catch(() => {});
 
@@ -912,6 +1137,15 @@ export class LogisticsService {
         });
       }
 
+      const [totals] = await tx
+        .select({
+          amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+          orderCount: count(),
+        })
+        .from(schema.deliveryRemittanceOrders)
+        .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+        .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, input.deliveryRemittanceId));
+
       await tx
         .update(schema.deliveryRemittances)
         .set({
@@ -922,6 +1156,15 @@ export class LogisticsService {
         })
         .where(eq(schema.deliveryRemittances.id, input.deliveryRemittanceId));
 
+      await tx.insert(schema.deliveryRemittanceOutcomes).values({
+        deliveryRemittanceId: found.id,
+        status: 'DISPUTED',
+        amount: sql`${totals?.amount ?? '0'}::numeric`,
+        orderCount: totals?.orderCount ?? 0,
+        reason: input.disputeReason,
+        recordedBy: actor.id,
+      });
+
       return found;
     });
 
@@ -930,7 +1173,10 @@ export class LogisticsService {
         type: 'delivery_remittance:disputed',
         title: 'Delivery remittance disputed',
         body: `Your delivery remittance has been disputed by Finance. Reason: ${input.disputeReason}`,
-        data: { deliveryRemittanceId: remittance.id },
+        data: {
+          deliveryRemittanceId: remittance.id,
+          splitOutcomes: [{ status: 'DISPUTED', reason: input.disputeReason }],
+        },
       })
       .catch(() => {});
 
@@ -940,42 +1186,93 @@ export class LogisticsService {
   /**
    * List delivered orders for the 3PL's location that are not yet in any delivery remittance (for "select orders" UI).
    */
-  async listDeliveryRemittanceEligibleOrders(actor: SessionUser) {
-    if (actor.role !== 'TPL_MANAGER' || !actor.logisticsLocationId) {
+  async listDeliveryRemittanceEligibleOrders(
+    input: ListDeliveryRemittanceEligibleOrdersInput,
+    actor: SessionUser,
+  ) {
+    // Phase 18 — accountant view of "delivered orders not yet on a remittance".
+    // TPL_MANAGER keeps their own-location-only behavior for the legacy 3PL
+    // path. Finance / admin / Finance-hat get the full multi-location list,
+    // optionally narrowed by a logistics location filter (for one-cash-drop-
+    // per-location remittances).
+    const isTplCaller = actor.role === 'TPL_MANAGER' && !!actor.logisticsLocationId;
+    const isFinanceCaller = hasFinanceAccess(actor) || isAdminLevel(actor);
+    if (!isTplCaller && !isFinanceCaller) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only 3PL Managers with an assigned location can list eligible orders',
+        message: 'You cannot list delivery remittance eligible orders',
       });
     }
 
-    const remittedOrderIds = await this.db
-      .select({ orderId: schema.deliveryRemittanceOrders.orderId })
-      .from(schema.deliveryRemittanceOrders);
+    const conditions = [eq(schema.orders.status, 'DELIVERED')];
 
-    const remittedSet = new Set(remittedOrderIds.map((r) => r.orderId));
+    if (isTplCaller) {
+      conditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
+    } else if (input.logisticsLocationId) {
+      conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
+    }
 
-    const orders = await this.db
-      .select({
-        id: schema.orders.id,
-        customerName: schema.orders.customerName,
-        totalAmount: schema.orders.totalAmount,
-        deliveredAt: schema.orders.deliveredAt,
-      })
-      .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.logisticsLocationId, actor.logisticsLocationId),
-          eq(schema.orders.status, 'DELIVERED'),
-        ),
-      )
-      .orderBy(desc(schema.orders.deliveredAt));
+    if (input.search && input.search.trim()) {
+      const term = `%${input.search.trim()}%`;
+      conditions.push(
+        sql`(${schema.orders.customerName} ILIKE ${term} OR ${schema.orders.id}::text ILIKE ${term})`,
+      );
+    }
 
-    return orders.filter((o) => !remittedSet.has(o.id)).map((o) => ({
-      id: o.id,
-      customerName: o.customerName,
-      totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
-      deliveredAt: o.deliveredAt?.toISOString() ?? null,
-    }));
+    if (input.startDate) {
+      conditions.push(gte(schema.orders.deliveredAt, new Date(input.startDate + 'T00:00:00')));
+    }
+    if (input.endDate) {
+      conditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate + 'T23:59:59')));
+    }
+
+    // Anti-join: skip orders already on any remittance. Cleaner than fetch-all
+    // + filter-in-JS when the table grows.
+    const remittedOrderIds = (
+      await this.db
+        .select({ orderId: schema.deliveryRemittanceOrders.orderId })
+        .from(schema.deliveryRemittanceOrders)
+    ).map((r) => r.orderId);
+
+    if (remittedOrderIds.length > 0) {
+      conditions.push(sql`${schema.orders.id} NOT IN ${remittedOrderIds}`);
+    }
+
+    const whereClause = and(...conditions);
+    const offset = (input.page - 1) * input.limit;
+
+    const locAlias = alias(schema.logisticsLocations, 'eligible_loc');
+
+    const [orders, totalRows] = await Promise.all([
+      this.db
+        .select({
+          id: schema.orders.id,
+          customerName: schema.orders.customerName,
+          totalAmount: schema.orders.totalAmount,
+          deliveredAt: schema.orders.deliveredAt,
+          logisticsLocationId: schema.orders.logisticsLocationId,
+          logisticsLocationName: locAlias.name,
+        })
+        .from(schema.orders)
+        .leftJoin(locAlias, eq(schema.orders.logisticsLocationId, locAlias.id))
+        .where(whereClause)
+        .orderBy(desc(schema.orders.deliveredAt))
+        .limit(input.limit)
+        .offset(offset),
+      this.db.select({ count: count() }).from(schema.orders).where(whereClause),
+    ]);
+
+    return {
+      orders: orders.map((o) => ({
+        id: o.id,
+        customerName: o.customerName,
+        totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
+        deliveredAt: o.deliveredAt?.toISOString() ?? null,
+        logisticsLocationId: o.logisticsLocationId ?? null,
+        logisticsLocationName: o.logisticsLocationName ?? null,
+      })),
+      total: totalRows[0]?.count ?? 0,
+    };
   }
 
   /**

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useSearchParams, useNavigation, useFetcher } from '@remix-run/react';
+import { Link, useSearchParams, useFetcher } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { SearchInput } from '~/components/ui/search-input';
@@ -7,7 +7,8 @@ import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Pagination } from '~/components/ui/pagination';
-import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast } from '~/components/ui/toast';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import type { User } from './types';
@@ -40,8 +41,7 @@ export function UsersListPage({
   const staffAccounts = variant === 'staffAccounts';
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
   const safeTotalPages = Math.max(1, totalPages);
   const resendFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
   useFetcherToast(resendFetcher.data, { successMessage: 'Invite re-sent with new credentials' });
@@ -166,15 +166,11 @@ export function UsersListPage({
               />
             </>
           )}
-          {isFilterLoading && (
-            <span className="flex items-center text-app-fg-muted" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
         </div>
       </div>
 
       {/* Users table — full HR directory vs finance staff roster */}
+      <TableLoadingOverlay show={isFilterLoading}>
       <div className="card p-0">
         {staffAccounts ? (
           <>
@@ -427,6 +423,7 @@ export function UsersListPage({
           </>
         )}
       </div>
+      </TableLoadingOverlay>
 
       {/* Pagination */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">

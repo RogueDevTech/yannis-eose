@@ -163,7 +163,13 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
         <Button type="button" variant="secondary" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="button" variant="primary" disabled={!canGenerate} onClick={handleGenerate}>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={!canGenerate}
+          onClick={handleGenerate}
+          className="bg-gradient-to-r from-brand-600 to-brand-500 border border-brand-700/30 shadow-md shadow-brand-900/20 hover:from-brand-500 hover:to-brand-400"
+        >
           Generate report
         </Button>
       </div>

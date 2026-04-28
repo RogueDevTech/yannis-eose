@@ -178,6 +178,76 @@ async function seedOfferTemplates(sql: postgres.Sql): Promise<void> {
 }
 
 /**
+ * Adds one deterministic PENDING stock reconciliation so reconciliation flows
+ * are visible immediately after seeding.
+ */
+async function seedPendingReconciliation(sql: postgres.Sql): Promise<void> {
+  console.log('  Seeding one pending stock reconciliation...');
+
+  const actorRows = await sql`
+    SELECT COALESCE(
+      (SELECT id FROM users WHERE role = 'HEAD_OF_LOGISTICS' ORDER BY created_at ASC NULLS LAST LIMIT 1),
+      (SELECT id FROM users WHERE role = 'STOCK_MANAGER' ORDER BY created_at ASC NULLS LAST LIMIT 1),
+      (SELECT id FROM users WHERE role = 'SUPER_ADMIN' ORDER BY created_at ASC NULLS LAST LIMIT 1),
+      (SELECT id FROM users ORDER BY created_at ASC NULLS LAST LIMIT 1)
+    ) AS id
+  `;
+  const actorId = (actorRows[0] as { id: string | null } | undefined)?.id ?? null;
+  if (!actorId) {
+    console.log('  Skipping stock_reconciliations: no users found.');
+    return;
+  }
+
+  const levelRows = await sql`
+    SELECT id, product_id, location_id, stock_count
+    FROM inventory_levels
+    ORDER BY updated_at DESC NULLS LAST
+    LIMIT 1
+  `;
+  const level = levelRows[0] as
+    | { id: string; product_id: string; location_id: string; stock_count: number }
+    | undefined;
+  if (!level) {
+    console.log('  Skipping stock_reconciliations: no inventory_levels found.');
+    return;
+  }
+
+  const existingRows = await sql`
+    SELECT id
+    FROM stock_reconciliations
+    WHERE location_id = ${level.location_id}
+      AND product_id = ${level.product_id}
+      AND reason_code = 'SEED_DEMO'
+      AND reconciliation_status = 'PENDING'
+    LIMIT 1
+  `;
+  if (existingRows.length > 0) {
+    console.log('  stock_reconciliations: seeded pending demo already exists.');
+    return;
+  }
+
+  const physicalCount = Math.max(0, Number(level.stock_count) - 1);
+  const discrepancy = physicalCount - Number(level.stock_count);
+
+  await sql`SELECT set_config('yannis.current_user_id', ${actorId}, true)`;
+  await sql`
+    INSERT INTO stock_reconciliations (
+      id, location_id, product_id, digital_count, physical_count,
+      discrepancy, reason_code, notes, reconciliation_status, submitted_by
+    )
+    VALUES (
+      gen_random_uuid(), ${level.location_id}, ${level.product_id}, ${level.stock_count}, ${physicalCount},
+      ${discrepancy}, 'SEED_DEMO', 'Seeded pending reconciliation for demo visibility', 'PENDING', ${actorId}
+    )
+  `;
+  await sql`
+    UPDATE logistics_locations
+    SET dispatch_locked = true
+    WHERE id = ${level.location_id}
+  `;
+}
+
+/**
  * Ensures every non-SuperAdmin user has at least one user_branches row.
  * Uses the MAIN_BRANCH_ID constant. Idempotent — safe to run repeatedly.
  */
@@ -217,11 +287,12 @@ async function seed() {
     await seedUserBranches(sql);
     await seedMessageTemplates(sql);
     await seedOfferTemplates(sql);
+    await seedPendingReconciliation(sql);
 
     console.log('\n========================================');
     console.log('  Minimal seed complete');
     console.log('========================================');
-    console.log('  Seeded domains: user_branches, message_templates, offer_templates');
+    console.log('  Seeded domains: user_branches, message_templates, offer_templates, stock_reconciliations');
     console.log('');
   } finally {
     await sql.end();

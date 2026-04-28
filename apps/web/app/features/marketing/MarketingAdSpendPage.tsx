@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useFetcher, useRevalidator, useNavigation, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { createAdSpendLogFormSchema, updateAdSpendSchema } from '@yannis/shared/validators';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -13,6 +13,8 @@ import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/ov
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
 import { SearchInput } from '~/components/ui/search-input';
@@ -91,8 +93,7 @@ export function MarketingAdSpendPage({
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
   const revalidator = useRevalidator();
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [selectedProductId, setSelectedProductId] = useState(productIdFilter || 'ALL');
@@ -435,11 +436,6 @@ export function MarketingAdSpendPage({
                 periodAllTime={dateFilters.periodAllTime}
               />
             </div>
-            {isFilterLoading && (
-              <span className="flex items-center text-app-fg-muted" aria-hidden>
-                <Spinner size="sm" className="shrink-0" />
-              </span>
-            )}
             <Button variant="primary" size="sm" onClick={() => setShowAddExpense(true)}>
               + Add Expense
             </Button>
@@ -791,11 +787,6 @@ export function MarketingAdSpendPage({
               }`,
             }))}
           />
-          {isFilterLoading && (
-            <span className="flex items-center text-app-fg-muted shrink-0" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
         </div>
         <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center px-4 py-3 border-b border-app-border">
           <form onSubmit={handleAdSpendSearchSubmit} className="flex gap-2 flex-1 min-w-0">
@@ -847,17 +838,19 @@ export function MarketingAdSpendPage({
             />
           )}
         </div>
-        <div className="p-4">
-          <AdSpendDayAccordion
-            groups={groups}
-            showMediaBuyerColumn={viewMode !== 'media_buyer'}
-            canModerate={viewMode !== 'media_buyer'}
-            page={groupsPage}
-            totalPages={groupsTotalPages}
-            actionUrl="/admin/marketing/ad-spend"
-            onPreviewReceipt={openGroupLineReceiptModal}
-          />
-        </div>
+        <TableLoadingOverlay show={isFilterLoading}>
+          <div className="p-4">
+            <AdSpendDayAccordion
+              groups={groups}
+              showMediaBuyerColumn={viewMode !== 'media_buyer'}
+              canModerate={viewMode !== 'media_buyer'}
+              page={groupsPage}
+              totalPages={groupsTotalPages}
+              actionUrl="/admin/marketing/ad-spend"
+              onPreviewReceipt={openGroupLineReceiptModal}
+            />
+          </div>
+        </TableLoadingOverlay>
       </div>
 
       {showLegacyTable && (
@@ -866,6 +859,7 @@ export function MarketingAdSpendPage({
           <h2 className="text-lg font-semibold text-app-fg">Detailed view (per-line)</h2>
           <p className="text-sm text-app-fg-muted mt-1">Uses the same filters as Daily expenses above.</p>
         </div>
+        <TableLoadingOverlay show={isFilterLoading}>
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -1116,6 +1110,7 @@ export function MarketingAdSpendPage({
             <Pagination page={page} totalPages={totalPages} pageParam="page" />
           </div>
         )}
+        </TableLoadingOverlay>
       </div>
       )}
 

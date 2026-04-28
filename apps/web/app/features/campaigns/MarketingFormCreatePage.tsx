@@ -34,6 +34,7 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
   const [formButtonText, setFormButtonText] = useState('');
   const [successCallbackUrl, setSuccessCallbackUrl] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
+  const [showProductImages, setShowProductImages] = useState(true);
 
   const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
   const standardFieldsJson = useMemo(() => JSON.stringify(standardFields), [standardFields]);
@@ -92,6 +93,7 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="productId" value={selectedProductId} readOnly />
+            <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
 
             <div className="card space-y-3">
               <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
@@ -152,6 +154,15 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
                     onChange={(e) => setSuccessCallbackUrl(e.target.value)}
                     className="sm:col-span-2"
                   />
+                  <label className="sm:col-span-2 inline-flex items-center gap-2 text-sm text-app-fg-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showProductImages}
+                      onChange={(e) => setShowProductImages(e.target.checked)}
+                      className="rounded border-app-border text-brand-600"
+                    />
+                    Show product images on the form
+                  </label>
                 </div>
               </div>
             </div>

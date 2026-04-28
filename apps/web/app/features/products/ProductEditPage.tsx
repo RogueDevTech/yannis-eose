@@ -51,6 +51,7 @@ function parseOffers(offers: Product['offers']): OfferRow[] {
 export function ProductEditPage({ product, categories, actionData, productId }: ProductEditPageProps) {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
+  const isSaving = navigation.state !== 'idle';
   const errorRef = useRef<HTMLDivElement>(null);
   const formWrapperRef = useRef<HTMLDivElement>(null);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
@@ -298,7 +299,7 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
                 <OfferImagesEditor
                   imageUrls={offer.imageUrls}
                   onChange={(urls) => setOfferImageUrls(index, urls)}
-                  disabled={isSubmitting || product.status === 'ARCHIVED'}
+                  disabled={isSaving || product.status === 'ARCHIVED'}
                   onUploadStateChange={(s) =>
                     setOfferUploadStates((prev) => ({ ...prev, [index]: s }))
                   }
@@ -347,9 +348,9 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
             type="submit"
             variant="primary"
             className="w-full sm:w-auto"
-            loading={isSubmitting}
+            loading={isSaving}
             loadingText="Saving..."
-            disabled={offers.length === 0 || anyOfferImageUploading}
+            disabled={offers.length === 0 || anyOfferImageUploading || isSaving}
           >
             Save Changes
           </Button>

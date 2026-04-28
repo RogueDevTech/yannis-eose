@@ -70,6 +70,7 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
   const [formSubtitle, setFormSubtitle] = useState(() => cfg?.subtitle ?? '');
   const [formButtonText, setFormButtonText] = useState(() => cfg?.buttonText ?? '');
   const [successCallbackUrl, setSuccessCallbackUrl] = useState(() => cfg?.successCallbackUrl ?? '');
+  const [showProductImages, setShowProductImages] = useState(() => cfg?.showProductImages !== false);
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>(() => normalizeStandardFields(campaign.formConfig));
 
   useEffect(() => {
@@ -80,6 +81,7 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
     setFormSubtitle(c?.subtitle ?? '');
     setFormButtonText(c?.buttonText ?? '');
     setSuccessCallbackUrl(c?.successCallbackUrl ?? '');
+    setShowProductImages(c?.showProductImages !== false);
     setStandardFields(normalizeStandardFields(c));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset when switching form
   }, [campaign.id]);
@@ -187,6 +189,7 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
+            <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
 
             <div className="card space-y-4">
               <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
@@ -249,6 +252,15 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
                     onChange={(e) => setSuccessCallbackUrl(e.target.value)}
                     className="sm:col-span-2"
                   />
+                  <label className="sm:col-span-2 inline-flex items-center gap-2 text-sm text-app-fg-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showProductImages}
+                      onChange={(e) => setShowProductImages(e.target.checked)}
+                      className="rounded border-app-border text-brand-600"
+                    />
+                    Show product images on the form
+                  </label>
                 </div>
               </div>
             </div>

@@ -1212,6 +1212,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
     return fc.requirePaymentMethod === true;
   };
   const showPaymentMethod = showField('paymentMethod');
+  const showProductImages = fc.showProductImages !== false;
 
   const hasSingleProduct = config.products.length === 1;
 
@@ -1233,7 +1234,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
       const urls = (o as ProductOffer).imageUrls;
       const firstImg =
         Array.isArray(urls) && typeof urls[0] === 'string' && /^https?:\/\//i.test(urls[0]) ? urls[0] : '';
-      const thumbHtml = firstImg
+      const thumbHtml = showProductImages && firstImg
         ? `<img src="${escapeHtml(firstImg)}" alt="" class="offer-thumb" width="48" height="48" loading="lazy">`
         : '';
       return `<label class="offer-option">

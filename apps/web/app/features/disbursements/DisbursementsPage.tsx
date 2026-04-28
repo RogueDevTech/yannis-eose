@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useFetcher, useRevalidator, useNavigation, useSearchParams, Link } from '@remix-run/react';
+import { useFetcher, useRevalidator, useSearchParams, Link } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { createFundingSchema, approveFundingRequestSchema } from '@yannis/shared/validators';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -9,7 +9,8 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
@@ -35,13 +36,13 @@ const STATUS_LABELS: Record<string, string> = {
   DISPUTED: 'Disputed',
 };
 
-/** Top-level route tabs — all data is loaded in one shot; tab switches skip loader (see route shouldRevalidate). */
+/** Top-level route views — switched by URL `tab` param. */
 type MainTab = 'disbursements' | 'requests' | 'balances';
 
 function mainTabFromSearchParams(sp: URLSearchParams): MainTab {
   const t = sp.get('tab');
-  if (t === 'balances') return 'balances';
   if (t === 'requests') return 'requests';
+  if (t === 'balances') return 'balances';
   // Legacy: ?tab=activity&type=REQUESTS|DISBURSEMENTS
   if (t === 'activity') {
     const type = sp.get('type');
@@ -50,25 +51,6 @@ function mainTabFromSearchParams(sp: URLSearchParams): MainTab {
   }
   return 'disbursements';
 }
-
-/** Wraps scrollable table cards so filter/pagination refetches show a centered spinner without shifting layout. */
-function TableLoadingOverlay({ show, children }: { show: boolean; children: React.ReactNode }) {
-  return (
-    <div className="relative min-h-[12rem]">
-      {children}
-      {show ? (
-        <div
-          className="absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-app-elevated/70 backdrop-blur-[1px]"
-          aria-busy="true"
-          aria-live="polite"
-        >
-          <Spinner size="lg" />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 
 export interface DisbursementRecord {
   id: string;
@@ -114,6 +96,9 @@ export interface DisbursementsPageData {
     receiver: string;
     /** Free-text search — matches sender name, receiver name, or row ID server-side. */
     search: string;
+    balancesSearch?: string;
+    balancesRole?: string;
+    balancesStatus?: string;
   };
   recipientBalances?: Array<{
     userId: string;
@@ -380,7 +365,17 @@ export function DisbursementsPage({
   users,
   canDisburseToHoM,
   preselectedReceiverId = null,
-  filters = { startDate: '', endDate: '', periodAllTime: false, status: '', receiver: '', search: '' },
+  filters = {
+    startDate: '',
+    endDate: '',
+    periodAllTime: false,
+    status: '',
+    receiver: '',
+    search: '',
+    balancesSearch: '',
+    balancesRole: '',
+    balancesStatus: '',
+  },
   recipientBalances = [],
   recipientBalancesTotal = 0,
   balancesPage = 1,
@@ -392,10 +387,9 @@ export function DisbursementsPage({
   requestsTotalPages = 1,
   requestersList = [],
 }: DisbursementsPageData) {
-  const navigation = useNavigation();
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
   const [showForm, setShowForm] = useState(!!preselectedReceiverId);
   const mainTab = mainTabFromSearchParams(searchParams);
   const [receiptModal, setReceiptModal] = useState<DisbursementRecord | null>(null);
@@ -457,11 +451,24 @@ export function DisbursementsPage({
   // single, debounce-free query against the server. Prefilled from the URL on mount/back-nav.
   const [searchQuery, setSearchQuery] = useState(filters.search || '');
   const [showExportModal, setShowExportModal] = useState(false);
+  const [balancesSearchQuery, setBalancesSearchQuery] = useState(filters.balancesSearch || '');
+  const [balancesRoleFilter, setBalancesRoleFilter] = useState(filters.balancesRole || 'ALL');
+  const [balancesStatusFilter, setBalancesStatusFilter] = useState(filters.balancesStatus || 'ALL');
   useEffect(() => {
     setOptimisticStatus(filters.status || 'ALL');
     setOptimisticReceiver(filters.receiver || 'ALL');
     setSearchQuery(filters.search || '');
-  }, [filters.status, filters.receiver, filters.search]);
+    setBalancesSearchQuery(filters.balancesSearch || '');
+    setBalancesRoleFilter(filters.balancesRole || 'ALL');
+    setBalancesStatusFilter(filters.balancesStatus || 'ALL');
+  }, [
+    filters.status,
+    filters.receiver,
+    filters.search,
+    filters.balancesSearch,
+    filters.balancesRole,
+    filters.balancesStatus,
+  ]);
 
   const setMainTab = useCallback((tab: MainTab) => {
     setSearchParams((p) => {
@@ -524,6 +531,40 @@ export function DisbursementsPage({
       const q = searchQuery.trim();
       if (q) next.set('search', q);
       else next.delete('search');
+      return next;
+    });
+  };
+
+  const handleBalancesSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('balancesPage', '1');
+      const q = balancesSearchQuery.trim();
+      if (q) next.set('balancesSearch', q);
+      else next.delete('balancesSearch');
+      return next;
+    });
+  };
+
+  const handleBalancesRoleChange = (role: string) => {
+    setBalancesRoleFilter(role);
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('balancesPage', '1');
+      if (role === 'ALL') next.delete('balancesRole');
+      else next.set('balancesRole', role);
+      return next;
+    });
+  };
+
+  const handleBalancesStatusChange = (status: string) => {
+    setBalancesStatusFilter(status);
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('balancesPage', '1');
+      if (status === 'ALL') next.delete('balancesStatus');
+      else next.set('balancesStatus', status);
       return next;
     });
   };
@@ -607,44 +648,20 @@ export function DisbursementsPage({
         ]}
       />
 
-      {/* Primary tabs — loader skips refetch when only `tab` changes (route shouldRevalidate). */}
-      <div className="flex flex-wrap gap-1 border-b border-app-border">
-        <button
-          type="button"
-          onClick={() => setMainTab('disbursements')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            mainTab === 'disbursements'
-              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-app-fg-muted hover:text-app-fg'
-          }`}
-        >
-          Disbursements
-          <span className="ml-1.5 text-xs text-surface-400">({totalFunding})</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setMainTab('requests')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            mainTab === 'requests'
-              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-app-fg-muted hover:text-app-fg'
-          }`}
-        >
-          Funding requests
-          <span className="ml-1.5 text-xs text-surface-400">({fundingRequestsTotal})</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setMainTab('balances')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            mainTab === 'balances'
-              ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-              : 'border-transparent text-app-fg-muted hover:text-app-fg'
-          }`}
-        >
-          Recipient balances
-          <span className="ml-1.5 text-xs text-surface-400">({recipientBalancesTotal})</span>
-        </button>
+      <div className="card">
+        <FormSelect
+          id="disbursement-view-filter"
+          label="View"
+          value={mainTab}
+          onChange={(e) => setMainTab(e.target.value as MainTab)}
+          options={[
+            { value: 'disbursements', label: `Disbursements (${totalFunding})` },
+            { value: 'requests', label: `Funding requests (${fundingRequestsTotal})` },
+            { value: 'balances', label: `Recipient balances (${recipientBalancesTotal})` },
+          ]}
+          controlSize="sm"
+          wrapperClassName="w-full sm:w-72"
+        />
       </div>
 
       {/* Disbursements ledger */}
@@ -962,140 +979,186 @@ export function DisbursementsPage({
         </>
       )}
 
-      {/* Balances tab */}
       {mainTab === 'balances' && (
         <>
-          <TableLoadingOverlay show={isFilterLoading}>
-          <div className="card p-0 overflow-hidden rounded-xl">
-          <div className="px-4 py-3 border-b border-app-border">
-            <h2 className="text-sm font-semibold text-app-fg">Recipient balances</h2>
-            <p className="text-xs text-app-fg-muted mt-0.5">
-              Funding received (confirmed) minus approved ad spend
-            </p>
+          <div className="card">
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+              <form onSubmit={handleBalancesSearchSubmit} className="flex gap-2 flex-1 min-w-0">
+                <SearchInput
+                  type="search"
+                  value={balancesSearchQuery}
+                  onChange={(v) => setBalancesSearchQuery(v)}
+                  placeholder="Search recipient name..."
+                  controlSize="sm"
+                  clearable
+                  wrapperClassName="flex-1 min-w-0"
+                  aria-label="Search recipient balances"
+                />
+                <Button type="submit" variant="secondary" size="sm" className="shrink-0">
+                  Search
+                </Button>
+              </form>
+              <FormSelect
+                id="balances-role-filter"
+                value={balancesRoleFilter}
+                onChange={(e) => handleBalancesRoleChange(e.target.value)}
+                options={[
+                  { value: 'ALL', label: 'All roles' },
+                  { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
+                  { value: 'MEDIA_BUYER', label: 'Media Buyer' },
+                ]}
+                controlSize="sm"
+                wrapperClassName="w-full sm:w-52"
+                aria-label="Filter balances by role"
+              />
+              <FormSelect
+                id="balances-status-filter"
+                value={balancesStatusFilter}
+                onChange={(e) => handleBalancesStatusChange(e.target.value)}
+                options={[
+                  { value: 'ALL', label: 'All balances' },
+                  { value: 'POSITIVE', label: 'Positive' },
+                  { value: 'ZERO', label: 'Zero' },
+                  { value: 'NEGATIVE', label: 'Negative' },
+                ]}
+                controlSize="sm"
+                wrapperClassName="w-full sm:w-48"
+                aria-label="Filter by balance status"
+              />
+            </div>
           </div>
-          {recipientBalances.length > 0 ? (
-            <>
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="table-header">Recipient</th>
-                      <th className="table-header">Role</th>
-                      <th className="table-header text-right">Received</th>
-                      <th className="table-header text-right">Spent</th>
-                      <th className="table-header text-right">Balance</th>
-                      <th className="table-header text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+
+          <TableLoadingOverlay show={isFilterLoading}>
+            <div className="card p-0 overflow-hidden rounded-xl">
+              <div className="px-4 py-3 border-b border-app-border">
+                <h2 className="text-sm font-semibold text-app-fg">Recipient balances</h2>
+                <p className="text-xs text-app-fg-muted mt-0.5">
+                  Funding received (confirmed) minus approved ad spend
+                </p>
+              </div>
+              {recipientBalances.length > 0 ? (
+                <>
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr>
+                          <th className="table-header">Recipient</th>
+                          <th className="table-header">Role</th>
+                          <th className="table-header text-right">Received</th>
+                          <th className="table-header text-right">Spent</th>
+                          <th className="table-header text-right">Balance</th>
+                          <th className="table-header text-center">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recipientBalances.map((b) => {
+                          const balance = Number(b.balance);
+                          const canSendFundsToRecipient = canCreate && b.role === 'HEAD_OF_MARKETING';
+                          return (
+                            <tr key={b.userId} className="table-row">
+                              <td className="table-cell">
+                                <Link to={`/admin/finance/staff-accounts/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 text-sm font-medium">
+                                  {b.name}
+                                </Link>
+                              </td>
+                              <td className="table-cell text-sm text-app-fg-muted">
+                                {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}
+                              </td>
+                              <td className="table-cell text-right text-sm">
+                                <NairaPrice amount={Number(b.totalReceived)} />
+                              </td>
+                              <td className="table-cell text-right text-sm">
+                                <NairaPrice amount={Number(b.totalSpend)} />
+                              </td>
+                              <td className={`table-cell text-right font-medium ${
+                                balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
+                              }`}>
+                                {formatNaira(balance)}
+                              </td>
+                              <td className="table-cell text-center">
+                                {canSendFundsToRecipient ? (
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSearchParams((p) => {
+                                        const next = new URLSearchParams(p);
+                                        next.set('receiverId', b.userId);
+                                        next.set('tab', 'disbursements');
+                                        next.delete('type');
+                                        return next;
+                                      });
+                                      setShowForm(true);
+                                    }}
+                                    className="text-xs"
+                                  >
+                                    Send funds
+                                  </Button>
+                                ) : (
+                                  <span className="text-xs text-surface-400">&mdash;</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="md:hidden space-y-3 px-1">
                     {recipientBalances.map((b) => {
                       const balance = Number(b.balance);
                       const canSendFundsToRecipient = canCreate && b.role === 'HEAD_OF_MARKETING';
                       return (
-                        <tr key={b.userId} className="table-row">
-                          <td className="table-cell">
-                            <Link to={`/admin/finance/staff-accounts/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 text-sm font-medium">
+                        <div key={b.userId} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <Link to={`/admin/finance/staff-accounts/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 font-medium">
                               {b.name}
                             </Link>
-                          </td>
-                          <td className="table-cell text-sm text-app-fg-muted">
-                            {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}
-                          </td>
-                          <td className="table-cell text-right text-sm">
-                            <NairaPrice amount={Number(b.totalReceived)} />
-                          </td>
-                          <td className="table-cell text-right text-sm">
-                            <NairaPrice amount={Number(b.totalSpend)} />
-                          </td>
-                          <td className={`table-cell text-right font-medium ${
-                            balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
-                          }`}>
-                            {formatNaira(balance)}
-                          </td>
-                          <td className="table-cell text-center">
-                            {canSendFundsToRecipient ? (
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => {
-                                  setSearchParams((p) => {
-                                    const next = new URLSearchParams(p);
-                                    next.set('receiverId', b.userId);
-                                    next.set('tab', 'disbursements');
-                                    next.delete('type');
-                                    return next;
-                                  });
-                                  setShowForm(true);
-                                }}
-                                className="text-xs"
-                              >
-                                Send funds
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-surface-400">&mdash;</span>
-                            )}
-                          </td>
-                        </tr>
+                            <span className={`font-medium text-sm ${
+                              balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
+                            }`}>
+                              {formatNaira(balance)}
+                            </span>
+                          </div>
+                          <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
+                            <div>Role: {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}</div>
+                            <div>Received: <NairaPrice amount={Number(b.totalReceived)} /></div>
+                            <div>Spent: <NairaPrice amount={Number(b.totalSpend)} /></div>
+                          </div>
+                          {canSendFundsToRecipient && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setSearchParams((p) => {
+                                  const next = new URLSearchParams(p);
+                                  next.set('receiverId', b.userId);
+                                  next.set('tab', 'disbursements');
+                                  next.delete('type');
+                                  return next;
+                                });
+                                setShowForm(true);
+                              }}
+                              className="text-xs"
+                            >
+                              Send funds
+                            </Button>
+                          )}
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="md:hidden space-y-3 px-1">
-                {recipientBalances.map((b) => {
-                  const balance = Number(b.balance);
-                  const canSendFundsToRecipient = canCreate && b.role === 'HEAD_OF_MARKETING';
-                  return (
-                    <div key={b.userId} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <Link to={`/admin/finance/staff-accounts/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 font-medium">
-                          {b.name}
-                        </Link>
-                        <span className={`font-medium text-sm ${
-                          balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
-                        }`}>
-                          {formatNaira(balance)}
-                        </span>
-                      </div>
-                      <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
-                        <div>Role: {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}</div>
-                        <div>Received: <NairaPrice amount={Number(b.totalReceived)} /></div>
-                        <div>Spent: <NairaPrice amount={Number(b.totalSpend)} /></div>
-                      </div>
-                      {canSendFundsToRecipient && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => {
-                            setSearchParams((p) => {
-                              const next = new URLSearchParams(p);
-                              next.set('receiverId', b.userId);
-                              next.set('tab', 'disbursements');
-                              next.delete('type');
-                              return next;
-                            });
-                            setShowForm(true);
-                          }}
-                          className="text-xs"
-                        >
-                          Send funds
-                        </Button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <EmptyState title="No recipient balances available" />
+                  </div>
+                </>
+              ) : (
+                <EmptyState title="No recipient balances available" description="Try adjusting your search or role filter." />
+              )}
+            </div>
+          </TableLoadingOverlay>
+          {balancesTotalPages > 1 && (
+            <Pagination page={balancesPage} totalPages={balancesTotalPages} pageParam="balancesPage" />
           )}
-        </div>
-        </TableLoadingOverlay>
-        {balancesTotalPages > 1 && (
-          <Pagination page={balancesPage} totalPages={balancesTotalPages} pageParam="balancesPage" />
-        )}
         </>
       )}
 

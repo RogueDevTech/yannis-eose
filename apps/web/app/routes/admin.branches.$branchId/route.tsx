@@ -1,7 +1,8 @@
+import { redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Link, useLoaderData, useFetcher, useRevalidator } from '@remix-run/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getCurrentUser, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -125,6 +126,10 @@ interface BranchOverview {
     campaigns: number;
   };
   members: OverviewMember[];
+  viewer?: {
+    canManageBranchPage?: boolean;
+    isSupervisor?: boolean;
+  };
 }
 
 const DEPT_LABEL: Record<MemberDepartment, string> = {
@@ -175,7 +180,8 @@ const ROLE_OPTIONS = [
 // ── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermission(request, 'branches.manage');
+  const viewer = await getCurrentUser(request);
+  if (!viewer) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   const branchId = params.branchId;
   if (!branchId) throw new Response('Missing branch', { status: 400 });
 
@@ -201,6 +207,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   ]);
 
   if (!overviewRes.ok) {
+    if (overviewRes.status === 403) {
+      throw redirect('/admin/unauthorized');
+    }
     const errMsg =
       extractApiErrorMessage(overviewRes.data, 'Unable to load branch');
     throw new Response(errMsg, {
@@ -401,7 +410,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 /** Page size for the Branch members table. Tuned to fit a viewport without scrolling. */
 const MEMBERS_PAGE_SIZE = 20;
 
-function BranchMembersPanel({ members }: { members: OverviewMember[] }) {
+function BranchMembersPanel({ members, canManage }: { members: OverviewMember[]; canManage: boolean }) {
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
   const [search, setSearch] = useState('');
   const [removeTarget, setRemoveTarget] = useState<OverviewMember | null>(null);
@@ -530,13 +539,15 @@ function BranchMembersPanel({ members }: { members: OverviewMember[] }) {
                         >
                           Profile
                         </Link>
-                        <button
-                          type="button"
-                          onClick={() => setRemoveTarget(m)}
-                          className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400"
-                        >
-                          Remove
-                        </button>
+                        {canManage ? (
+                          <button
+                            type="button"
+                            onClick={() => setRemoveTarget(m)}
+                            className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400"
+                          >
+                            Remove
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -559,7 +570,7 @@ function BranchMembersPanel({ members }: { members: OverviewMember[] }) {
         </div>
       )}
 
-      {removeTarget && (
+      {canManage && removeTarget && (
         <RemoveModal member={removeTarget} onClose={() => setRemoveTarget(null)} />
       )}
     </div>
@@ -574,9 +585,11 @@ const DEPT_TEAM_LABEL: Record<'CS' | 'MARKETING', string> = {
 function BranchSupervisorTeamsPanel({
   teams,
   branchMembers,
+  canManage,
 }: {
   teams: BranchTeamWithMembers[];
   branchMembers: OverviewMember[];
+  canManage: boolean;
 }) {
   const squadFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const revalidate = useRevalidator();
@@ -600,6 +613,7 @@ function BranchSupervisorTeamsPanel({
 
   return (
     <div className="space-y-6">
+      {canManage ? (
       <div className="rounded-lg border border-app-border bg-app-elevated/40 p-4 space-y-3">
         <div>
           <p className="text-sm font-semibold text-app-fg">Create supervisor team</p>
@@ -636,6 +650,13 @@ function BranchSupervisorTeamsPanel({
           </Button>
         </squadFetcher.Form>
       </div>
+      ) : (
+        <div className="rounded-lg border border-app-border bg-app-elevated/40 p-4">
+          <p className="text-xs text-app-fg-muted">
+            Read-only mode: supervisors can view team assignments but cannot edit branch teams.
+          </p>
+        </div>
+      )}
 
       {teams.length === 0 ? (
         <EmptyState
@@ -657,6 +678,7 @@ function BranchSupervisorTeamsPanel({
                       {team.members.length === 1 ? '' : 's'}
                     </p>
                   </div>
+                  {canManage ? (
                   <div className="flex flex-wrap gap-2 items-end">
                     <squadFetcher.Form method="post" className="flex flex-wrap items-end gap-2">
                       <input type="hidden" name="intent" value="updateBranchTeam" />
@@ -686,6 +708,7 @@ function BranchSupervisorTeamsPanel({
                       Delete team
                     </Button>
                   </div>
+                  ) : null}
                 </div>
 
                 <div className="overflow-x-auto">
@@ -706,6 +729,7 @@ function BranchSupervisorTeamsPanel({
                             <RoleBadge role={m.role} size="sm" />
                           </td>
                           <td className="py-2 pr-4">
+                            {canManage ? (
                             <label className="inline-flex items-center gap-2 cursor-pointer">
                               <Checkbox
                                 key={`${team.id}-${m.userId}-${String(m.isSupervisor)}`}
@@ -724,24 +748,29 @@ function BranchSupervisorTeamsPanel({
                               />
                               <span className="text-app-fg-muted text-xs">Supervisor</span>
                             </label>
+                            ) : (
+                              <span className="text-app-fg-muted text-xs">{m.isSupervisor ? 'Yes' : 'No'}</span>
+                            )}
                           </td>
                           <td className="py-2">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-danger-600 dark:text-danger-400"
-                              disabled={squadFetcher.state !== 'idle'}
-                              onClick={() => {
-                                if (!confirm(`Remove ${m.name} from this team?`)) return;
-                                squadFetcher.submit(
-                                  { intent: 'removeBranchTeamMember', teamId: team.id, userId: m.userId },
-                                  { method: 'post' },
-                                );
-                              }}
-                            >
-                              Remove
-                            </Button>
+                            {canManage ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-danger-600 dark:text-danger-400"
+                                disabled={squadFetcher.state !== 'idle'}
+                                onClick={() => {
+                                  if (!confirm(`Remove ${m.name} from this team?`)) return;
+                                  squadFetcher.submit(
+                                    { intent: 'removeBranchTeamMember', teamId: team.id, userId: m.userId },
+                                    { method: 'post' },
+                                  );
+                                }}
+                              >
+                                Remove
+                              </Button>
+                            ) : null}
                           </td>
                         </tr>
                       ))}
@@ -749,6 +778,7 @@ function BranchSupervisorTeamsPanel({
                   </table>
                 </div>
 
+                {canManage ? (
                 <squadFetcher.Form method="post" className="flex flex-wrap gap-3 items-end border-t border-app-border pt-3">
                   <input type="hidden" name="intent" value="addBranchTeamMember" />
                   <input type="hidden" name="teamId" value={team.id} />
@@ -779,6 +809,7 @@ function BranchSupervisorTeamsPanel({
                     Add to team
                   </Button>
                 </squadFetcher.Form>
+                ) : null}
               </div>
             );
           })}
@@ -795,6 +826,7 @@ type ActiveTab = 'overview' | 'team' | 'squads';
 export default function BranchOverviewRoute() {
   const { overview, allUsers, teams } = useLoaderData<typeof loader>();
   const { branch, counts } = overview;
+  const canManageBranchPage = overview.viewer?.canManageBranchPage ?? false;
 
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(fetcher.data, { successMessage: 'Saved' });
@@ -943,9 +975,11 @@ export default function BranchOverviewRoute() {
 
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={branch.status} />
-            <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
-              Edit
-            </Button>
+            {canManageBranchPage ? (
+              <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
+                Edit
+              </Button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1084,25 +1118,31 @@ export default function BranchOverviewRoute() {
             <p className="text-sm text-app-fg-muted">
               {counts.totalMembers} member{counts.totalMembers !== 1 ? 's' : ''} assigned to this branch.
             </p>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setAddMemberOpen(true)}
-            >
-              + Add member
-            </Button>
+            {canManageBranchPage ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setAddMemberOpen(true)}
+              >
+                + Add member
+              </Button>
+            ) : null}
           </div>
 
-          <BranchMembersPanel members={overview.members} />
+          <BranchMembersPanel members={overview.members} canManage={canManageBranchPage} />
         </div>
       )}
 
       {activeTab === 'squads' && (
-        <BranchSupervisorTeamsPanel teams={teams} branchMembers={overview.members} />
+        <BranchSupervisorTeamsPanel
+          teams={teams}
+          branchMembers={overview.members}
+          canManage={canManageBranchPage}
+        />
       )}
 
       {/* ── Edit branch modal ── */}
-      {editOpen && (
+      {canManageBranchPage && editOpen && (
         <Modal
           open
           onClose={() => setEditOpen(false)}
@@ -1173,7 +1213,7 @@ export default function BranchOverviewRoute() {
       )}
 
       {/* ── Add member modal ── */}
-      {addMemberOpen && (
+      {canManageBranchPage && addMemberOpen && (
         <Modal
           open
           onClose={() => setAddMemberOpen(false)}

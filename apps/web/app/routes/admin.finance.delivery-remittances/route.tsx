@@ -1,7 +1,8 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
 
@@ -10,7 +11,14 @@ export const meta: MetaFunction = () => [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'finance.read');
+  // Phase 18 — accountant-led flow. Allow Finance roles + admins; rejects
+  // TPL_MANAGER specifically (their legacy view stays in /tpl/* if/when 3PL
+  // onboards). HR / CS / Marketing don't need access; using `finance.read` as
+  // the catch-all permission for granted users.
+  await requirePermissionOrRoles(request, {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
+    permission: 'finance.read',
+  });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
 
@@ -18,6 +26,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
   const statusFilter = url.searchParams.get('status') ?? undefined;
   const locationFilter = url.searchParams.get('location') ?? undefined;
+  const sentByFilter = url.searchParams.get('sentBy') ?? undefined;
 
   // Date filtering — default to this month
   const periodAllTime = url.searchParams.get('period') === 'all_time';
@@ -43,10 +52,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (locationFilter) {
     listInput.logisticsLocationId = locationFilter;
   }
+  if (sentByFilter) {
+    listInput.sentBy = sentByFilter;
+  }
   if (startDate) listInput.startDate = startDate;
   if (endDate) listInput.endDate = endDate;
 
-  const [listRes, locationsRes, usersRes] = await Promise.all([
+  // Eligible delivered orders for the "Create cash remittance" picker. We pull
+  // a generous page (max 500) so the modal can render without a second
+  // round-trip. If the eligibility list grows past that, the modal will need
+  // its own pagination — track via the `eligibleTotal` count.
+  const eligibleInput = JSON.stringify({ page: 1, limit: 500 });
+
+  const [listRes, locationsRes, usersRes, eligibleRes] = await Promise.all([
     apiRequest<unknown>(
       '/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify(listInput)),
       { method: 'GET', cookie },
@@ -58,6 +76,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
     apiRequest<unknown>(
       `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 200 }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      '/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' + encodeURIComponent(eligibleInput),
       { method: 'GET', cookie },
     ),
   ]);
@@ -79,16 +101,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
   const locations = locationsData?.locations ?? [];
 
-  // Build user name map for sentBy resolution
+  // Build user name map for sentBy resolution + accountant filter.
+  type UserRow = { id: string; name: string; role: string; isFinanceOfficer?: boolean };
   const usersData = usersRes.ok
-    ? (usersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } })?.result?.data?.users
+    ? (usersRes.data as { result?: { data?: { users: UserRow[] } } })?.result?.data?.users
     : null;
   const userMap: Record<string, string> = {};
+  const sentByOptions: Array<{ id: string; name: string }> = [];
   if (usersData) {
     for (const u of usersData) {
       userMap[u.id] = u.name;
+      // Sent-by filter only lists accountants — primary FINANCE_OFFICER, the
+      // singleton Finance hat holder, and admin-class. Non-finance users
+      // never appear because they cannot create remittances.
+      const isFinance =
+        u.role === 'FINANCE_OFFICER' ||
+        u.isFinanceOfficer === true ||
+        u.role === 'SUPER_ADMIN' ||
+        u.role === 'ADMIN';
+      if (isFinance) {
+        sentByOptions.push({ id: u.id, name: u.name });
+      }
     }
   }
+  sentByOptions.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Eligible delivered-orders for the Create modal.
+  type EligibleOrder = {
+    id: string;
+    customerName: string;
+    totalAmount: string | null;
+    deliveredAt: string | null;
+    logisticsLocationId: string | null;
+    logisticsLocationName: string | null;
+  };
+  const eligibleData = eligibleRes.ok
+    ? (eligibleRes.data as { result?: { data?: { orders: EligibleOrder[]; total: number } } })?.result?.data
+    : null;
+  const eligibleOrders = eligibleData?.orders ?? [];
+  const eligibleTotal = eligibleData?.total ?? 0;
 
   return {
     remittances,
@@ -97,17 +148,64 @@ export async function loader({ request }: LoaderFunctionArgs) {
     filters: {
       status: statusFilter ?? '',
       location: locationFilter ?? '',
+      sentBy: sentByFilter ?? '',
       startDate: startDate ?? '',
       endDate: endDate ?? '',
       periodAllTime,
     },
     userMap,
+    sentByOptions,
+    eligibleOrders,
+    eligibleTotal,
     summary,
   };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  return json({ error: 'Use remittance detail page for actions' }, { status: 400 });
+  const cookie = getSessionCookie(request);
+  if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
+  const formData = await request.formData();
+  const intent = formData.get('intent')?.toString();
+
+  if (intent === 'createRemittance') {
+    // Order IDs + receipt URLs arrive as JSON strings so we don't have to
+    // coordinate `orderIds[0]` / `receiptUrls[0]` field-name shapes across
+    // the boundary.
+    const orderIdsRaw = formData.get('orderIds')?.toString() ?? '';
+    const receiptUrlsRaw = formData.get('receiptUrls')?.toString() ?? '';
+    const notes = formData.get('notes')?.toString().trim() || undefined;
+    const markReceivedNow = formData.get('markReceivedNow')?.toString() === 'true';
+
+    let orderIds: unknown;
+    let receiptUrls: unknown;
+    try {
+      orderIds = JSON.parse(orderIdsRaw);
+      receiptUrls = JSON.parse(receiptUrlsRaw);
+    } catch {
+      return json({ error: 'Invalid order or receipt payload' }, { status: 400 });
+    }
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return json({ error: 'Select at least one delivered order' }, { status: 400 });
+    }
+    if (!Array.isArray(receiptUrls) || receiptUrls.length === 0) {
+      return json({ error: 'Upload at least one payment receipt' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/logistics.createDeliveryRemittance', {
+      method: 'POST',
+      cookie,
+      body: { orderIds, receiptUrls, notes, markReceivedNow },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to create remittance') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
+  return json({ error: 'Unknown action' }, { status: 400 });
 }
 
 export default function AdminFinanceDeliveryRemittancesRoute() {
@@ -119,6 +217,9 @@ export default function AdminFinanceDeliveryRemittancesRoute() {
       locations={data.locations}
       filters={data.filters}
       userMap={data.userMap}
+      sentByOptions={data.sentByOptions}
+      eligibleOrders={data.eligibleOrders}
+      eligibleTotal={data.eligibleTotal}
       summary={data.summary}
     />
   );

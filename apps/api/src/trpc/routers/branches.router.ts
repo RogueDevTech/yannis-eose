@@ -7,7 +7,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { SessionStoreService } from '../../auth/session-store.service';
 import type { NotificationsService } from '../../notifications/notifications.service';
 import type { BranchTeamsService } from '../../branches/branch-teams.service';
-import { canMirror } from '../../common/authz';
+import { canMirror, isAdminLevel } from '../../common/authz';
 
 // Service instances injected via factory pattern
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
@@ -111,25 +111,33 @@ export const branchesRouter = router({
   /**
    * Branch overview: flat `members` (+ department bucket), order pipeline counts, campaigns, message templates.
    */
-  overview: permissionProcedure('branches.manage')
+  overview: authedProcedure
     .input(z.object({ branchId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
       const db = getDb();
+      const teams = getBranchTeamsService();
+      const isAdminViewer = isAdminLevel(ctx.user);
+      const hasBranchManagePermission = (ctx.user.permissions ?? []).includes('branches.manage');
 
-      if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
-        const membership = await db
-          .select({ branchId: schema.userBranches.branchId })
-          .from(schema.userBranches)
-          .where(
-            and(
-              eq(schema.userBranches.userId, ctx.user.id),
-              eq(schema.userBranches.branchId, input.branchId),
-            ),
-          )
-          .limit(1);
-        if (!membership[0]) {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Not a member of this branch' });
-        }
+      const membership = await db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(
+          and(
+            eq(schema.userBranches.userId, ctx.user.id),
+            eq(schema.userBranches.branchId, input.branchId),
+          ),
+        )
+        .limit(1);
+      if (!isAdminViewer && !membership[0]) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not a member of this branch' });
+      }
+
+      const isBranchSupervisor = await teams.isActorSupervisorOnBranch(ctx.user.id, input.branchId);
+      const canAccessBranchPage =
+        isAdminViewer || hasBranchManagePermission || ctx.user.role === 'BRANCH_ADMIN' || isBranchSupervisor;
+      if (!canAccessBranchPage) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to access this branch page' });
       }
 
       const [branch] = await db
@@ -170,6 +178,20 @@ export const branchesRouter = router({
           department: departmentForBranchMemberRole(effectiveRole),
         };
       });
+      const canManageBranchPage = isAdminViewer || hasBranchManagePermission;
+      let visibleMembers = members;
+      if (!canManageBranchPage) {
+        if (isBranchSupervisor) {
+          const [supervisedCs, supervisedMarketing] = await Promise.all([
+            teams.listSupervisedUserIds(ctx.user.id, input.branchId, 'CS'),
+            teams.listSupervisedUserIds(ctx.user.id, input.branchId, 'MARKETING'),
+          ]);
+          const visibleIds = new Set([ctx.user.id, ...supervisedCs, ...supervisedMarketing]);
+          visibleMembers = members.filter((member) => visibleIds.has(member.userId));
+        } else {
+          visibleMembers = members.filter((member) => member.userId === ctx.user.id);
+        }
+      }
 
       const orderStatRows = await db
         .select({
@@ -203,14 +225,18 @@ export const branchesRouter = router({
       return {
         branch,
         counts: {
-          totalMembers: members.length,
+          totalMembers: visibleMembers.length,
           totalOrders,
           deliveredOrders,
           activeOrders,
           campaigns: Number(campaignsRow?.c ?? 0),
           messageTemplates: Number(templatesRow?.c ?? 0),
         },
-        members,
+        members: visibleMembers,
+        viewer: {
+          canManageBranchPage,
+          isSupervisor: isBranchSupervisor,
+        },
       };
     }),
 
@@ -455,9 +481,33 @@ export const branchesRouter = router({
       };
     }),
 
-  listTeamsWithMembers: permissionProcedure('branches.manage')
+  listTeamsWithMembers: authedProcedure
     .input(z.object({ branchId: z.string().uuid() }))
-    .query(async ({ input }) => getBranchTeamsService().listTeamsWithMembers(input.branchId)),
+    .query(async ({ input, ctx }) => {
+      const db = getDb();
+      const teams = getBranchTeamsService();
+      const isAdminViewer = isAdminLevel(ctx.user);
+      const hasBranchManagePermission = (ctx.user.permissions ?? []).includes('branches.manage');
+      const [membership, isBranchSupervisor] = await Promise.all([
+        db
+          .select({ branchId: schema.userBranches.branchId })
+          .from(schema.userBranches)
+          .where(
+            and(
+              eq(schema.userBranches.userId, ctx.user.id),
+              eq(schema.userBranches.branchId, input.branchId),
+            ),
+          )
+          .limit(1),
+        teams.isActorSupervisorOnBranch(ctx.user.id, input.branchId),
+      ]);
+      const canAccessBranchPage =
+        isAdminViewer || hasBranchManagePermission || ctx.user.role === 'BRANCH_ADMIN' || isBranchSupervisor;
+      if (!canAccessBranchPage || (!isAdminViewer && !membership[0])) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to access branch teams' });
+      }
+      return teams.listTeamsWithMembers(input.branchId);
+    }),
 
   createBranchTeam: permissionProcedure('branches.manage')
     .input(

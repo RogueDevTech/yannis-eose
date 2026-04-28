@@ -1,5 +1,11 @@
 import { uuid, pgTable, text, integer, numeric, timestamp } from 'drizzle-orm/pg-core';
-import { stockStateEnum, movementTypeEnum, transferStatusEnum, remittanceStatusEnum } from './enums';
+import {
+  stockStateEnum,
+  movementTypeEnum,
+  transferStatusEnum,
+  remittanceStatusEnum,
+  remittanceOutcomeStatusEnum,
+} from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { products } from './products';
 import { users } from './users';
@@ -73,6 +79,8 @@ export const stockTransfers = pgTable('stock_transfers', {
     .references(() => logisticsLocations.id),
   transferStatus: transferStatusEnum('transfer_status').default('PENDING').notNull(),
   shrinkageReason: text('shrinkage_reason'),
+  /** Optional free-text comment written by the receiver when marking received. */
+  receiverNotes: text('receiver_notes'),
   transferCost: numeric('transfer_cost', { precision: 12, scale: 2 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   verifiedAt: timestamp('verified_at', { withTimezone: true }),
@@ -102,5 +110,21 @@ export const transferRemittances = pgTable('transfer_remittances', {
   receivedAt: timestamp('received_at', { withTimezone: true }),
   receivedBy: text('received_by').references(() => users.id),
   shrinkageReason: text('shrinkage_reason'),
+  ...temporalColumns,
+});
+
+// Table: stock_transfer_outcomes — settlement lines for transfer receipt outcomes
+export const stockTransferOutcomes = pgTable('stock_transfer_outcomes', {
+  id: uuidv7Pk(),
+  transferId: uuid('transfer_id')
+    .notNull()
+    .references(() => stockTransfers.id, { onDelete: 'cascade' }),
+  status: remittanceOutcomeStatusEnum('status').notNull(),
+  quantity: integer('quantity').notNull(),
+  reason: text('reason'),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
+  recordedBy: text('recorded_by')
+    .notNull()
+    .references(() => users.id),
   ...temporalColumns,
 });

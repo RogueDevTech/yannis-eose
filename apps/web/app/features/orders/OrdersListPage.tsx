@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useFetcher, useSearchParams, useNavigation, useNavigate } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { Checkbox } from '~/components/ui/checkbox';
@@ -25,6 +25,8 @@ import { useLiveIndicator } from '~/hooks/useSocket';
 import { STATUS_OPTIONS, STATUS_LABELS, STATUS_TEXT_CLASS, formatStatus } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import type { Order } from './types';
 
 // Status transitions that make sense for bulk operations
@@ -102,6 +104,7 @@ export function OrdersListPage({
   const [showChartView, setShowChartView] = useState(false);
   const liveState = useLiveIndicator(liveEvents ?? []);
   const navigate = useNavigate();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showExportModal, setShowExportModal] = useState(false);
@@ -604,6 +607,7 @@ export function OrdersListPage({
           dailyCounts={dailyCounts}
         />
       ) : (
+      <TableLoadingOverlay show={isLoaderRefetchBusy}>
       <div className="card p-0">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
@@ -779,6 +783,7 @@ export function OrdersListPage({
           )}
         </div>
       </div>
+      </TableLoadingOverlay>
       )}
 
       {/* Pagination — table view only; the chart view doesn't paginate. */}

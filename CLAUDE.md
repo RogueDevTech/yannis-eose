@@ -446,6 +446,27 @@ Do NOT regress the page back to a single-tabbed feed. The split is the whole poi
 - Invoices use sequential reference numbers (INV-2026-0001). Auto-generated. No manual override
 - Budget tracking: Finance Officers set budget limits per department/campaign. Requests exceeding remaining budget trigger a warning (approval still possible but requires explicit override with reason)
 
+**Cash Remittance — accountant-led flow (Phase 18, CEO directive 2026-04-29):**
+The 3PL partners aren't on-platform yet, so the **accountant** records cash remittances directly from `/admin/finance/delivery-remittances`. Flow:
+1. Accountant clicks **Create cash remittance** → modal lists every `DELIVERED` order not yet on a remittance (`logistics.listDeliveryRemittanceEligibleOrders` — open to FINANCE / Finance hat / admin-class).
+2. Multi-select orders sharing the SAME logistics location (server validates one-location-per-remittance — "one cash drop = one source"), upload receipt(s), optional notes.
+3. **Mark received now** checkbox: when ticked, `logistics.createDeliveryRemittance` writes the remittance with `status = RECEIVED` AND bulk-transitions every linked order from `DELIVERED → COMPLETED` in the same transaction. When unticked, status stays `SENT` and the accountant marks Received later from the detail page (`logistics.markDeliveryRemittanceReceived` cascades the same COMPLETED transition).
+4. Tabs: **All / Pending (SENT) / Received (RECEIVED) / Disputed (DISPUTED)** using the shared `<Tabs>` component. Filters: location, **Sent by** (accountant who recorded; populated from FINANCE_OFFICER + Finance hat + admin-class roles), date range.
+5. Order detail surfaces a "Cash remittance: <id> · <Pending/Settled/Disputed>" badge linking to the remittance — explains why a `DELIVERED` order isn't yet `COMPLETED`, or where the receipt that closed it lives.
+
+**Server gates** ([apps/api/src/logistics/logistics.service.ts](apps/api/src/logistics/logistics.service.ts) — yes, the methods live in LogisticsService for historical reasons):
+- `createDeliveryRemittance` — TPL_MANAGER (legacy, when 3PL onboards) OR `hasFinanceAccess(actor) || isAdminLevel(actor)`. Validates: orders are DELIVERED, share one logistics location, none are already on a remittance.
+- `markDeliveryRemittanceReceived` — Finance / admin / Finance hat. Cascade `DELIVERED → COMPLETED` on every linked order in the same `withActorAndBranch` transaction. Status guard (`AND status = 'DELIVERED'`) so a manually reverted order doesn't get stamped COMPLETED.
+- `disputeDeliveryRemittance` — same gate. Does NOT touch order status.
+
+**Do NOT** route remittance creation through `permissionProcedure('logistics.remit')` — that grant is for the legacy 3PL→warehouse stock transfer flow (`transferRemittances`, different table), not delivery cash remittances. The Phase 18 procedure is `authedProcedure` with role-gating in the service. The `logistics.remit` permission stays with TPL_MANAGER for the stock-transfer use case.
+
+**Finance Payout workspace (Phase 19, rollout 2026-04-28):**
+- New page: `/admin/finance/payout` (Finance group sidebar). Audience: `FINANCE_OFFICER`, Finance hat, admin-class.
+- Purpose: review payroll batches in `PENDING_FINANCE`/`PAID`, inspect per-staff payout lines, export payout documents (CSV/XLSX) with bank details.
+- Data source: `hr.listMonthlyPayrolls` + `hr.getBatch` (single source of truth; no duplicate finance-only payroll tables).
+- Bank fields live on `users` (`payout_bank_name`, `payout_account_name`, `payout_account_number`; migration `0090_users_payout_bank_fields.sql`) and must be treated as finance-sensitive: expose only in finance flows, never in general staff lists.
+
 **Finance "hat" (deputization, migration 0059 — CEO directive 2026-04-23):**
 Finance is the ONLY role that can be worn on top of another primary role. Every other role is single-assignment. The hat is org-wide and a singleton: exactly one user in the entire org holds it at a time.
 - Column on `users`: `is_finance_officer boolean not null default false`. Partial unique index `users_only_one_finance_officer` on `((1)) WHERE is_finance_officer = true` enforces the singleton at the DB layer.
@@ -486,7 +507,7 @@ Payroll is no longer a flat list of payouts that HR approves one by one. Each mo
 **Lifecycle + permission gates:**
 | Stage | Trigger | Gate (`apps/api/src/hr/payroll-batch.service.ts`) |
 |---|---|---|
-| `DRAFT` | `generateBatch()` derives payouts for staff in (branch, dept) | `canPrepareDept(viewer, branchId, dept)` — admin OR matching Head (`currentBranchId` matches branch, or org-wide head with null session branch — uses `input.branchId`) |
+| `DRAFT` | `generateBatch()` derives payouts for staff in (branch, dept) | `canPrepareDept(viewer, branchId, dept)` — admin OR matching Head (`currentBranchId` matches branch, or org-wide head with null session branch — uses `input.branchId`) OR branch team supervisor (`CS`/`MARKETING`) OR branch `HR_MANAGER` for `LOGISTICS`/`HR` |
 | `PENDING_HR` | `submitBatch()` (DRAFT → PENDING_HR) | Same as DRAFT (the owner submits) |
 | `PENDING_FINANCE` | `approveBatch()` (PENDING_HR → PENDING_FINANCE) — HR may attach `hrNotes` and add per-staff adjustments via `addBatchAdjustment` while in this stage | `canReviewBatch` — admin OR `HR_MANAGER` |
 | `PAID` | `markBatchPaid({ financeReference })` cascades all child payouts to PAID | `canProcessBatch` — admin OR `FINANCE_OFFICER` OR Finance hat (`hasFinanceAccess`) |
@@ -496,7 +517,7 @@ Payroll is no longer a flat list of payouts that HR approves one by one. Each mo
 - From `PENDING_FINANCE` → `PENDING_HR` (Finance rejects to HR)
 - The batch is never destroyed. Forward-stage timestamps clear; rejection metadata persists until the next forward transition.
 
-**HR adjustments during PENDING_HR** route through `earnings_adjustments` (existing pattern). `addBatchAdjustment` writes one row with `payoutId` set + auto-`approvedBy = actor`, then `recomputePayoutTotals` re-derives that payout's `addOnsTotal` / `deductionsTotal` / `totalPayout`, and `recomputeBatchTotals` re-derives the batch's `staffCount` / `totalAmount`. Do NOT manually edit `payout_records` numbers — always go through the adjustment path so the audit trail captures who added what.
+**Adjustments by stage:** `addBatchAdjustment` now supports both `DRAFT` (eligible preparers: head/admin/supervisor, plus branch HR for `LOGISTICS`/`HR`) and `PENDING_HR` (HR/admin review stage). All writes still route through `earnings_adjustments` + recompute helpers; do NOT edit payout totals directly.
 
 **Generation rules:**
 - `generateBatch` is only allowed for slots that are missing or in `DRAFT`. Submitted batches must be rejected first to be re-generated. Re-generating a `DRAFT` wipes its payouts and re-derives from the latest commission plans + delivered orders. Pending unattached `CLAWBACK` adjustments re-link to the new payout.
@@ -515,12 +536,14 @@ Deep-link mapper in `notifications.service.ts::getLinkPathForType` routes any `h
 - HR module is split across **two pages**, not one tabbed page (CEO directive 2026-04-26):
   - `/hr/payroll` — Monthly Payrolls (multi-stage batches). Admins / HR_MANAGER / Heads / Finance can land here. Heads see only their dept's batches.
   - `/hr/plans` — Commission Plans. Admins / HR_MANAGER / Heads can land here. Heads see + create + edit only their dept's roles.
-  - Legacy admin tabs (Payouts list, Adjustments, Settlement Config) live on `/hr/payroll` for HR + admins. Heads / Finance don't see them.
+  - Adjustments inbox lives on `/hr/payroll` for HR + admins. Heads / Finance don't see it. The legacy `/hr/payouts` flat list was retired (2026-04-28) — per-payout `payoutRecords.status` is now visible inside each batch detail panel as a `<StatusBadge />` column. Once Finance runs `markBatchPaid`, every child payout row shows `PAID` and the batch detail also surfaces a one-line note ("Finance marked this batch paid — every staff payout below is now PAID."). Settlement Config UI was removed — payroll always runs monthly.
   - Both sidebar entries are in the HR group (`dashboard-layout.tsx`). Do NOT merge them back into a tabbed page.
 - `listMonthlyPayrolls` auto-scopes:
   - admins → all branches
   - HR Manager / Finance → their `currentBranchId`
   - Org-wide department heads with **null** `currentBranchId` → their **dept only**, all branches (optional `input.branchId` to narrow); heads with a session branch → that branch AND their dept only
+  - branch supervisors (`branch_team_members.is_supervisor`) → their supervised department (`CS` / `MARKETING`) on their active branch only
+- `hr.payrollPrepareAccess` is the canonical guard for non-head preparers entering `/hr/payroll` (e.g. branch supervisors). Do not open `/hr/payroll` to all CS/Marketing agents just to reach generation.
 - `listCommissionPlans` / `createCommissionPlan` / `updateCommissionPlan` auto-scope by `getManageableRolesForViewer` (exported from `payroll-batch.service.ts`):
   - admin / HR_MANAGER → every role across all departments
   - HEAD_OF_CS → `CS_AGENT` only
@@ -611,6 +634,8 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | Card / panel surface | `<Card />`, `<CardHeader />`, `<CardBody />`, `<CardFooter />` |
 | Financial P&L rows | `<StatRow />`, `<StatRowGroup />` |
 | Table with sticky header | `<DataTable />` |
+| Table/list URL refetch (blur overlay; keep stale rows mounted) | `<TableLoadingOverlay show={…} />` with `useLoaderRefetchBusy()` (`apps/web/app/hooks/use-loader-refetch-busy.ts`) — `navigation.state === 'loading'`, same-pathname guard on by default; additive with `<NavProgressBar />` |
+| DataTable while loader refetches (no row swap) | `<DataTable loading loadingVariant="overlay" />` — default `loadingVariant` is `replace` |
 | Empty list state | `<EmptyState />` |
 | Pagination | `<Pagination />` |
 | Status badge (generic) | `<StatusBadge />` |
