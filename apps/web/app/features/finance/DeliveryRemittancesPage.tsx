@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -9,8 +10,8 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Pagination } from '~/components/ui/pagination';
 import { Tabs } from '~/components/ui/tabs';
-import { exportToCsv } from '~/lib/csv-export';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { LocalExportModal } from '~/components/ui/local-export-modal';
 
 export interface DeliveryRemittanceListItem {
   id: string;
@@ -76,6 +77,7 @@ export function DeliveryRemittancesPage({
 }: DeliveryRemittancesPageProps) {
   const [, setSearchParams] = useSearchParams();
   const { totalPages, page } = pagination;
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const handleStatusChange = (status: string) => {
     setSearchParams((p) => {
@@ -97,28 +99,6 @@ export function DeliveryRemittancesPage({
     });
   };
 
-  const handleExportCsv = () => {
-    exportToCsv(
-      remittances.map((r) => ({
-        id: r.id,
-        location: r.locationName ?? '',
-        sentBy: userMap[r.sentBy] ?? 'Unknown user',
-        orderCount: r.orderCount,
-        status: STATUS_LABEL[r.status] ?? r.status,
-        sentAt: new Date(r.sentAt).toLocaleString(),
-      })),
-      [
-        { key: 'id', label: 'ID' },
-        { key: 'location', label: 'Location' },
-        { key: 'sentBy', label: 'Sent by' },
-        { key: 'orderCount', label: 'Orders' },
-        { key: 'status', label: 'Status' },
-        { key: 'sentAt', label: 'Sent at' },
-      ],
-      `cash-remittances-${new Date().toISOString().split('T')[0]}.csv`,
-    );
-  };
-
   const hasFilters = !!filters.status || !!filters.location;
 
   return (
@@ -134,11 +114,35 @@ export function DeliveryRemittancesPage({
               periodAllTime={filters.periodAllTime}
             />
             <PageRefreshButton />
-            <Button variant="secondary" size="sm" onClick={handleExportCsv}>
-              Export CSV
+            <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+              Generate report
             </Button>
           </>
         }
+      />
+      <LocalExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        title="Export Delivery Remittances"
+        description="Choose format and columns for delivery remittances export."
+        filenamePrefix="cash-remittances"
+        rows={remittances.map((r) => ({
+          id: r.id,
+          location: r.locationName ?? '',
+          sentBy: userMap[r.sentBy] ?? 'Unknown user',
+          orderCount: r.orderCount,
+          status: STATUS_LABEL[r.status] ?? r.status,
+          sentAt: new Date(r.sentAt).toLocaleString(),
+        }))}
+        columns={[
+          { key: 'id', label: 'ID' },
+          { key: 'location', label: 'Location' },
+          { key: 'sentBy', label: 'Sent by' },
+          { key: 'orderCount', label: 'Orders' },
+          { key: 'status', label: 'Status' },
+          { key: 'sentAt', label: 'Sent at' },
+        ]}
+        defaultColumns={['id', 'location', 'sentBy', 'orderCount', 'status', 'sentAt']}
       />
 
       <OverviewStatStrip

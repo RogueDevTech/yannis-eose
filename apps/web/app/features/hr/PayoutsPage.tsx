@@ -12,7 +12,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { Pagination } from '~/components/ui/pagination';
 import { Spinner } from '~/components/ui/spinner';
 import { useFetcherToast } from '~/components/ui/toast';
-import { exportToCsv } from '~/lib/csv-export';
+import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { formatNaira } from '~/lib/format-amount';
 import type { Payout, PayoutSummary, HRUser } from './types';
 
@@ -41,6 +41,7 @@ export function PayoutsPage({
   const isFilterLoading = navigation.state === 'loading';
   const [expandedPayoutId, setExpandedPayoutId] = useState<string | null>(null);
   const [markPaidConfirm, setMarkPaidConfirm] = useState<{ payoutId: string; staffName: string; amount: number } | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'Payout updated' });
 
   const userMap = new Map(users.map((u) => [u.id, u]));
@@ -69,38 +70,42 @@ export function PayoutsPage({
             <Button
               variant="secondary"
               size="sm"
-              onClick={() =>
-                exportToCsv(
-                  payouts.map((p) => ({
-                    staff: getStaffName(p.staffId),
-                    role: getStaffRole(p.staffId),
-                    period: `${new Date(p.periodStart).toLocaleDateString()} - ${new Date(p.periodEnd).toLocaleDateString()}`,
-                    base: p.baseSalary,
-                    bonus: p.performanceBonus,
-                    addOns: p.addOnsTotal,
-                    deductions: p.deductionsTotal,
-                    total: p.totalPayout,
-                    status: p.status,
-                  })),
-                  [
-                    { key: 'staff', label: 'Staff' },
-                    { key: 'role', label: 'Role' },
-                    { key: 'period', label: 'Period' },
-                    { key: 'base', label: 'Base Salary' },
-                    { key: 'bonus', label: 'Bonus' },
-                    { key: 'addOns', label: 'Add-ons' },
-                    { key: 'deductions', label: 'Deductions' },
-                    { key: 'total', label: 'Total Payout' },
-                    { key: 'status', label: 'Status' },
-                  ],
-                  `payouts-${new Date().toISOString().split('T')[0]}.csv`,
-                )
-              }
+              onClick={() => setShowExportModal(true)}
             >
-              Export CSV
+              Generate report
             </Button>
           </div>
         }
+      />
+      <LocalExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        title="Export Payouts"
+        description="Choose format and columns for payouts export."
+        filenamePrefix="payouts"
+        rows={payouts.map((p) => ({
+          staff: getStaffName(p.staffId),
+          role: getStaffRole(p.staffId),
+          period: `${new Date(p.periodStart).toLocaleDateString()} - ${new Date(p.periodEnd).toLocaleDateString()}`,
+          base: p.baseSalary,
+          bonus: p.performanceBonus,
+          addOns: p.addOnsTotal,
+          deductions: p.deductionsTotal,
+          total: p.totalPayout,
+          status: p.status,
+        }))}
+        columns={[
+          { key: 'staff', label: 'Staff' },
+          { key: 'role', label: 'Role' },
+          { key: 'period', label: 'Period' },
+          { key: 'base', label: 'Base Salary' },
+          { key: 'bonus', label: 'Bonus' },
+          { key: 'addOns', label: 'Add-ons' },
+          { key: 'deductions', label: 'Deductions' },
+          { key: 'total', label: 'Total Payout' },
+          { key: 'status', label: 'Status' },
+        ]}
+        defaultColumns={['staff', 'role', 'period', 'base', 'bonus', 'total', 'status']}
       />
 
       <OverviewStatStrip

@@ -133,7 +133,7 @@ export function PermissionRequestsPage({
       />
 
       <div className="card p-0 flex flex-col">
-        <div className="table-sticky-panel hidden md:block overflow-auto max-h-[min(60vh,22rem)] overscroll-contain">
+        <div className="hidden md:block overflow-auto max-h-[min(60vh,22rem)] overscroll-contain">
           <table className="w-full min-w-[640px]">
             <thead>
               <tr>

@@ -299,7 +299,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 type="url"
                 label="WhatsApp group link"
                 placeholder="https://chat.whatsapp.com/…"
-                hint="Used by the CS Share to 3PL flow. Optional."
+                hint="Used by the CS Share to logistics company flow. Optional."
                 wrapperClassName="sm:col-span-2"
               />
             </div>

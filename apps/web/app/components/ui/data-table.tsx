@@ -1,5 +1,5 @@
 /**
- * DataTable — responsive table with sticky header, loading state, and empty state.
+ * DataTable — responsive table with loading state and empty state.
  * Columns are defined as typed objects; rows are passed as data.
  *
  * Usage:
@@ -43,8 +43,6 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   /** Extra className on table wrapper */
   className?: string;
-  /** Sticky header — defaults to true */
-  stickyHeader?: boolean;
   /** Row-level className override */
   rowClassName?: (row: T, index: number) => string;
   /** Caption for accessibility */
@@ -68,7 +66,6 @@ export function DataTable<T>({
   emptyAction,
   onRowClick,
   className = '',
-  stickyHeader = true,
   rowClassName,
   caption,
 }: DataTableProps<T>) {
@@ -94,10 +91,7 @@ export function DataTable<T>({
 
   const headerCellClass = (extra: string[]) =>
     [
-      stickyHeader
-        ? 'sticky z-[15] top-[var(--table-sticky-top,var(--header-height))] border-b border-app-border bg-app-elevated shadow-sm'
-        : 'border-b border-app-border bg-app-elevated',
-      'px-4 py-2.5 text-xs font-semibold text-app-fg-muted whitespace-nowrap',
+      'border-b border-app-border bg-app-elevated px-4 py-2.5 text-xs font-semibold text-app-fg-muted whitespace-nowrap',
       ...extra,
     ]
       .filter(Boolean)

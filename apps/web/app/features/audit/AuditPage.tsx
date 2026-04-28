@@ -6,7 +6,6 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Spinner } from '~/components/ui/spinner';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
-import { exportToCsv } from '~/lib/csv-export';
 import { formatNaira } from '~/lib/format-amount';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -16,6 +15,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
+import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { ActorMap, AuditEntry, AuditPageProps } from './types';
 
 /**
@@ -1180,7 +1180,7 @@ function DetailModal({
         </div>
 
         {/* Data fields */}
-        <div className="table-sticky-panel flex-1 min-h-0 overflow-y-auto px-6 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
           <table className="w-full text-sm">
             <thead>
               <tr>
@@ -1399,6 +1399,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
   const navigation = useNavigation();
   const isFilterLoading = navigation.state === 'loading';
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [unknownActorModal, setUnknownActorModal] = useState<{ changedBy: string | null; displayName: string } | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState(false);
@@ -1561,43 +1562,46 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
         </div>
       </div>
 
+      <DeferredSection resolve={actorNames} skeleton="inline">
+        {(resolvedActorNames) => (
+          <LocalExportModal
+            open={showExportModal}
+            onClose={() => setShowExportModal(false)}
+            title="Export Audit Log"
+            description="Choose format and columns for the current audit rows."
+            filenamePrefix="audit-log"
+            rows={rows.map((entry) => ({
+              timestamp: formatDate(entry.validFrom),
+              table: formatTableName(entry.tableName),
+              description: generateDescription(entry, resolvedActorNames),
+              actor: getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom),
+              action: entry.action,
+              recordId: entry.recordId,
+              validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
+            }))}
+            columns={[
+              { key: 'timestamp', label: 'Timestamp' },
+              { key: 'table', label: 'Table' },
+              { key: 'description', label: 'Description' },
+              { key: 'actor', label: 'Actor' },
+              { key: 'action', label: 'Action' },
+              { key: 'recordId', label: 'Record ID' },
+              { key: 'validTo', label: 'Valid To' },
+            ]}
+            defaultColumns={['timestamp', 'table', 'description', 'actor', 'action', 'recordId', 'validTo']}
+          />
+        )}
+      </DeferredSection>
+
       {/* Results count + Export */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-app-fg-muted">
           {total} {total === 1 ? 'entry' : 'entries'} found
         </p>
         {rows.length > 0 && (
-          <DeferredSection resolve={actorNames} skeleton="inline">
-            {(resolvedActorNames) => (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => exportToCsv(
-                  rows.map((entry) => ({
-                    timestamp: formatDate(entry.validFrom),
-                    table: formatTableName(entry.tableName),
-                    description: generateDescription(entry, resolvedActorNames),
-                    actor: getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom),
-                    action: entry.action,
-                    recordId: entry.recordId,
-                    validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
-                  })),
-                  [
-                    { key: 'timestamp', label: 'Timestamp' },
-                    { key: 'table', label: 'Table' },
-                    { key: 'description', label: 'Description' },
-                    { key: 'actor', label: 'Actor' },
-                    { key: 'action', label: 'Action' },
-                    { key: 'recordId', label: 'Record ID' },
-                    { key: 'validTo', label: 'Valid To' },
-                  ],
-                  `audit-log-${new Date().toISOString().split('T')[0]}.csv`,
-                )}
-              >
-                Export CSV
-              </Button>
-            )}
-          </DeferredSection>
+          <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+            Generate report
+          </Button>
         )}
       </div>
 

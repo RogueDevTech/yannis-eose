@@ -191,7 +191,7 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
               size="sm"
               onClick={() => setShowExportModal(true)}
             >
-              Export CSV
+              Generate report
             </Button>
           </div>
         }

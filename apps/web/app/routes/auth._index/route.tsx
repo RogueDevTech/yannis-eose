@@ -75,6 +75,7 @@ export async function action({ request }: ActionFunctionArgs) {
 async function handleLogin(request: Request, formData: FormData) {
   const email = formData.get('email')?.toString() ?? '';
   const password = formData.get('password')?.toString() ?? '';
+  const rememberMe = formData.get('rememberMe')?.toString() === 'on';
 
   if (!email || !password) {
     return json({ error: 'Email and password are required' }, { status: 400 });
@@ -87,7 +88,7 @@ async function handleLogin(request: Request, formData: FormData) {
       user?: { id: string; name: string; role: string; email: string };
     }>('/auth/login', {
       method: 'POST',
-      body: { email, password },
+      body: { email, password, rememberMe },
       timeoutMs: 20_000,
     });
   } catch (err) {

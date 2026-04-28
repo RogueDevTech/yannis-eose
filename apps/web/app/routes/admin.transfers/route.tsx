@@ -18,7 +18,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie });
   const locationsPromise = apiRequest<unknown>('/trpc/logistics.listLocations', { method: 'GET', cookie });
   const productsPromise = apiRequest<unknown>('/trpc/products.list', { method: 'GET', cookie });
-  const levelsPromise = apiRequest<unknown>('/trpc/inventory.levels', { method: 'GET', cookie });
+  // The transfer form looks up available stock by `(productId, locationId)` against
+  // this list. Without an explicit `limit`, the API defaults to 20 rows — so any
+  // level past row 20 silently returns 0 and the form shows "Quantity (max: 0)"
+  // even when stock is plenty. Pull up to the schema cap (100) so a typical
+  // multi-product / multi-location org has every row available client-side.
+  const levelsInput = JSON.stringify({ limit: 100 });
+  const levelsPromise = apiRequest<unknown>(
+    `/trpc/inventory.levels?input=${encodeURIComponent(levelsInput)}`,
+    { method: 'GET', cookie },
+  );
 
   // Await only critical: transfers, locations
   const [transfersRes, locationsRes] = await Promise.all([transfersPromise, locationsPromise]);
@@ -74,6 +83,26 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to initiate transfer') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'cancelTransfer') {
+    const transferId = formData.get('transferId')?.toString() ?? '';
+    const reason = formData.get('reason')?.toString().trim() ?? '';
+    if (!transferId) {
+      return json({ error: 'Transfer ID is required' }, { status: 400 });
+    }
+    if (reason.length < 10) {
+      return json({ error: 'Cancellation reason must be at least 10 characters' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/inventory.cancelTransfer', {
+      method: 'POST',
+      cookie,
+      body: { transferId, reason },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to cancel transfer') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }

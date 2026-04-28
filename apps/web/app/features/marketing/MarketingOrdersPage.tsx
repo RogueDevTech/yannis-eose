@@ -15,7 +15,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
-import { ExportModal, type MarketingExportPicklists } from '~/components/ui/export-modal';
+import { ExportModal, type ExportModalPicklists } from '~/components/ui/export-modal';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { Order } from '~/features/orders/types';
@@ -34,7 +34,7 @@ interface MarketingOrdersPageProps {
   showMediaBuyerColumn?: boolean;
   /** For "Filter by media buyer" (HoM / Admin / SuperAdmin). */
   mediaBuyersForFilter?: Array<{ id: string; name: string }>;
-  marketingExportPicklists?: MarketingExportPicklists;
+  marketingExportPicklists?: Partial<ExportModalPicklists>;
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
@@ -165,7 +165,7 @@ export function MarketingOrdersPage({
               variant="secondary"
               size="sm"
             >
-              Export CSV
+              Generate report
             </Button>
           </div>
         }
@@ -382,7 +382,7 @@ export function MarketingOrdersPage({
         open={showExportModal}
         onClose={() => setShowExportModal(false)}
         config={EXPORT_CONFIGS.marketing_orders}
-        marketingExportPicklists={marketingExportPicklists}
+        picklists={marketingExportPicklists}
         initialFilters={{
           status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
           search: searchQuery || undefined,

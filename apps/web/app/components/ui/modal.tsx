@@ -105,7 +105,7 @@ export function Modal({
       >
         <div
           className={[
-            'w-full max-h-[90dvh] overflow-y-auto table-sticky-panel',
+            'w-full max-h-[90dvh] overflow-y-auto',
             'rounded-t-2xl md:rounded-xl',
             'bg-app-elevated shadow-xl',
             'pb-[max(2.5rem,env(safe-area-inset-bottom))] md:pb-5',

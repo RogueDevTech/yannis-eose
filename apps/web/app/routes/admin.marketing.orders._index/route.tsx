@@ -6,7 +6,7 @@ import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { MarketingOrdersPage } from '~/features/marketing/MarketingOrdersPage';
 import type { Order } from '~/features/orders/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
-import type { MarketingExportPicklists } from '~/components/ui/export-modal';
+import type { ExportModalPicklists } from '~/components/ui/export-modal';
 
 export const meta: MetaFunction = () => [
   { title: 'Marketing Orders — Yannis EOSE' },
@@ -127,7 +127,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     customerPhoneDisplay: '',
   }));
 
-  let marketingExportPicklists: MarketingExportPicklists | undefined;
+  let marketingExportPicklists: Partial<ExportModalPicklists> | undefined;
   if (loadMarketingExportPicklists && buyersRes?.ok && productsRes?.ok && campaignsRes?.ok) {
     const usersPayload = (buyersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } })?.result?.data;
     const productsPayload = (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data;

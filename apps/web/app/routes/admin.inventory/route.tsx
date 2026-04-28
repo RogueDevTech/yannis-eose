@@ -87,6 +87,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return { movements: data?.movements ?? [], total: data?.pagination?.total ?? 0 };
   }).catch(() => ({ movements: [] as StockMovement[], total: 0 }));
 
+  const deliveryOrderIds = Array.from(
+    new Set(
+      movementsData.movements
+        .filter((m) => m.movementType === 'DELIVERY' && !!m.referenceId)
+        .map((m) => m.referenceId as string),
+    ),
+  );
+
+  const deliveryOrderCustomerNameById = new Map<string, string>();
+  if (deliveryOrderIds.length > 0) {
+    await Promise.all(
+      deliveryOrderIds.map(async (orderId) => {
+        const res = await apiRequest<{ result?: { data?: { customerName?: string } } }>(
+          `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+          { method: 'GET', cookie },
+        );
+        if (!res.ok) return;
+        const customerName = res.data?.result?.data?.customerName;
+        if (customerName) deliveryOrderCustomerNameById.set(orderId, customerName);
+      }),
+    );
+  }
+
   // Products and locations for Stock Intake
   const [productsRes, locationsRes] = await Promise.all([productsPromise, locationsPromise]);
 
@@ -129,7 +152,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     levelsLocationFilter: rawLocationFilter,
     levelsSearch: rawSearch,
     levelsSort: rawSort === 'lowestAvailable' || rawSort === 'highestAvailable' ? rawSort : 'default',
-    movements: movementsData.movements,
+    movements: movementsData.movements.map((m) => ({
+      ...m,
+      referenceCustomerName: m.referenceId ? deliveryOrderCustomerNameById.get(m.referenceId) ?? null : null,
+    })),
     totalMovements: movementsData.total,
     products,
     locations,

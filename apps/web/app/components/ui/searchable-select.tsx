@@ -115,12 +115,18 @@ export function SearchableSelect({
 
   useEffect(() => {
     if (!open) return;
-    const onScroll = () => setOpen(false);
+    const onScroll = (e: Event) => {
+      // Keep dropdown open when scrolling inside its own list.
+      const target = e.target as Node | null;
+      if (target && popoverRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
     window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onScroll, true);
+    window.addEventListener('resize', onResize, true);
     return () => {
       window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onScroll, true);
+      window.removeEventListener('resize', onResize, true);
     };
   }, [open]);
 

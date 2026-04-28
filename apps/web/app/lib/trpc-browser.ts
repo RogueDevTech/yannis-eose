@@ -86,7 +86,7 @@ export async function shareOrderToLogistics(input: {
     error?: { message?: string };
   };
   if (!res.ok) {
-    throw new Error(json.error?.message ?? 'Share to 3PL failed');
+    throw new Error(json.error?.message ?? 'Share to logistics company failed');
   }
   const data = json.result?.data;
   if (!data) throw new Error('No data returned from share');

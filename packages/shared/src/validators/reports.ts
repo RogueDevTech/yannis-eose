@@ -92,6 +92,7 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         status: z.string().optional(),
         search: z.string().optional(),
         assignedCsId: z.string().uuid().optional(),
+        minAmount: z.number().nonnegative().optional(),
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         periodAllTime: z.boolean().optional(),
@@ -109,6 +110,7 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         periodAllTime: z.boolean().optional(),
+        minRate: z.number().nonnegative().optional(),
       })
       .optional(),
   }),
@@ -124,6 +126,7 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         assignedCsId: z.string().uuid().optional(),
         productId: z.string().uuid().optional(),
         campaignId: z.string().uuid().optional(),
+        minAmount: z.number().nonnegative().optional(),
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         periodAllTime: z.boolean().optional(),
@@ -139,6 +142,9 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         periodAllTime: z.boolean().optional(),
+        role: z.enum(['MEDIA_BUYER', 'HEAD_OF_MARKETING']).optional(),
+        minAmount: z.number().nonnegative().optional(),
+        maxAmount: z.number().nonnegative().optional(),
       })
       .optional(),
   }),
@@ -151,6 +157,8 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         status: z.string().optional(),
         receiverId: z.string().uuid().optional(),
         search: z.string().optional(),
+        minAmount: z.number().nonnegative().optional(),
+        maxAmount: z.number().nonnegative().optional(),
       })
       .optional(),
   }),
@@ -164,6 +172,8 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         locationId: z.string().uuid().optional(),
         search: z.string().optional(),
         sort: z.enum(['lowestAvailable', 'highestAvailable']).optional(),
+        status: z.string().optional(),
+        maxAvailable: z.number().int().min(0).optional(),
       })
       .optional(),
   }),
@@ -174,6 +184,8 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
     filters: z
       .object({
         status: z.string().optional(),
+        minAmount: z.number().nonnegative().optional(),
+        maxAmount: z.number().nonnegative().optional(),
       })
       .optional(),
   }),

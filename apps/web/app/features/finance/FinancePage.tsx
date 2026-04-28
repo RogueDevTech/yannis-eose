@@ -141,7 +141,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
               size="sm"
               onClick={() => setShowExportModal(true)}
             >
-              Export CSV
+              Generate report
             </Button>
             <Button variant="primary" size="sm" onClick={() => { setShowInvoiceForm(!showInvoiceForm); setActiveTab('invoices'); }}>
               {showInvoiceForm ? 'Close' : '+ Create Invoice'}
@@ -354,39 +354,39 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
           </ResponsiveFormPanel>
 
           {/* Invoice Table */}
-          <div className="card p-0">
+          <div className="card p-0 overflow-hidden rounded-xl">
             <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-[980px] table-fixed">
                 <thead>
                   <tr>
-                    <th className="table-header">Reference</th>
-                    <th className="table-header">Recipient</th>
-                    <th className="table-header text-right">Amount</th>
-                    <th className="table-header">Status</th>
-                    <th className="table-header">Due Date</th>
-                    <th className="table-header">Created</th>
-                    <th className="table-header">Actions</th>
+                    <th className="table-header !static !top-auto w-[170px]">Reference</th>
+                    <th className="table-header !static !top-auto">Recipient</th>
+                    <th className="table-header !static !top-auto w-[130px] text-right">Amount</th>
+                    <th className="table-header !static !top-auto w-[120px]">Status</th>
+                    <th className="table-header !static !top-auto w-[120px]">Due Date</th>
+                    <th className="table-header !static !top-auto w-[120px]">Created</th>
+                    <th className="table-header !static !top-auto w-[260px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedInvoices.map((inv: Invoice) => (
                     <tr key={inv.id} className="table-row">
-                      <td className="table-cell font-mono font-medium text-app-fg text-sm">{inv.referenceFormatted}</td>
-                      <td className="table-cell text-sm text-app-fg-muted">
+                      <td className="table-cell w-[170px] font-mono font-medium text-app-fg text-sm whitespace-nowrap">{inv.referenceFormatted}</td>
+                      <td className="table-cell text-sm text-app-fg-muted truncate">
                         {inv.recipientInfo?.name ?? '\u2014'}
                       </td>
-                      <td className="table-cell text-right font-medium"><NairaPrice amount={Number(inv.totalAmount)} /></td>
-                      <td className="table-cell">
+                      <td className="table-cell w-[130px] text-right font-medium whitespace-nowrap"><NairaPrice amount={Number(inv.totalAmount)} /></td>
+                      <td className="table-cell w-[120px]">
                         <StatusBadge status={inv.status} />
                       </td>
-                      <td className="table-cell text-app-fg-muted text-sm">
+                      <td className="table-cell w-[120px] text-app-fg-muted text-sm whitespace-nowrap">
                         {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' }) : '\u2014'}
                       </td>
-                      <td className="table-cell text-app-fg-muted text-sm">
+                      <td className="table-cell w-[120px] text-app-fg-muted text-sm whitespace-nowrap">
                         {new Date(inv.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                       </td>
-                      <td className="table-cell">
-                        <div className="flex items-center gap-1.5">
+                      <td className="table-cell w-[260px]">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => previewInvoicePdf(inv)}
@@ -653,42 +653,42 @@ function ApprovalsTab({
       </div>
 
       {/* Approval Queue Table */}
-      <div className="card p-0 mt-4">
+      <div className="card p-0 mt-4 overflow-hidden rounded-xl">
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[920px] table-fixed">
             <thead>
               <tr>
-                <th className="table-header">Type</th>
-                <th className="table-header">Description</th>
-                <th className="table-header text-right">Amount</th>
-                <th className="table-header">Status</th>
-                <th className="table-header">Submitted</th>
-                <th className="table-header">Actions</th>
+                <th className="table-header !static !top-auto w-[130px]">Type</th>
+                <th className="table-header !static !top-auto">Description</th>
+                <th className="table-header !static !top-auto w-[130px] text-right">Amount</th>
+                <th className="table-header !static !top-auto w-[120px]">Status</th>
+                <th className="table-header !static !top-auto w-[120px]">Submitted</th>
+                <th className="table-header !static !top-auto w-[260px]">Actions</th>
               </tr>
             </thead>
             <tbody>
               {paginated.map((req) => (
                 <tr key={req.id} className="table-row">
-                  <td className="table-cell">
+                  <td className="table-cell w-[130px]">
                     <span className="text-xs font-medium px-2 py-0.5 rounded bg-app-hover text-app-fg-muted">
                       {APPROVAL_TYPE_LABELS[req.type] ?? req.type}
                     </span>
                   </td>
-                  <td className="table-cell text-sm text-app-fg-muted max-w-xs truncate">
+                  <td className="table-cell text-sm text-app-fg-muted truncate">
                     {req.description}
                   </td>
-                  <td className="table-cell text-right font-medium text-app-fg">
+                  <td className="table-cell w-[130px] text-right font-medium text-app-fg whitespace-nowrap">
                     <NairaPrice amount={Number(req.amount)} />
                   </td>
-                  <td className="table-cell">
+                  <td className="table-cell w-[120px]">
                     <StatusBadge status={req.status} />
                   </td>
-                  <td className="table-cell text-app-fg-muted text-sm">
+                  <td className="table-cell w-[120px] text-app-fg-muted text-sm whitespace-nowrap">
                     {new Date(req.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                   </td>
-                  <td className="table-cell">
+                  <td className="table-cell w-[260px]">
                     {(req.status === 'PENDING' || req.status === 'QUERIED') && (
-                      <div className="flex gap-1.5">
+                      <div className="flex flex-wrap gap-1.5">
                         <Button type="button" variant="success" size="sm" className="text-xs"
                           onClick={() => { setApprovalModal({ requestId: req.id, action: 'APPROVED' }); setApprovalReason(''); }}>
                           Approve

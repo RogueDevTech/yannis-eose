@@ -15,6 +15,8 @@ export interface StockMovement {
   quantity: number;
   fromLocationId: string | null;
   toLocationId: string | null;
+  referenceId?: string | null;
+  referenceCustomerName?: string | null;
   reason: string | null;
   actorId: string;
   createdAt: string;
@@ -74,7 +76,7 @@ export interface InventoryStreamData {
   canIntake?: boolean;
   /** When false, the row-level "Edit" (stock adjust) action is hidden. */
   canAdjust?: boolean;
-  /** When false, the Export CSV button is hidden. SuperAdmin/Admin + STOCK_MANAGER only. */
+  /** When false, the Generate report button is hidden. SuperAdmin/Admin + STOCK_MANAGER only. */
   canExport?: boolean;
   /** TPL combined view: transfers, returns, reconciliations */
   transfers?: Transfer[];

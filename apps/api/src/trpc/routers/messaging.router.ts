@@ -355,7 +355,7 @@ export const messagingRouter = router({
    * List outbound messages for a specific order.
    */
   /**
-   * Share an order to a 3PL via WhatsApp group (Phase 4 "Share to 3PL" flow).
+   * Share an order to a logistics company via WhatsApp group (Phase 4 "Share to logistics company" flow).
    * The server renders the template, logs an outbound_messages row (channel WHATSAPP_GROUP)
    * and an order_timeline_events row in a single transaction, then returns the rendered text
    * and group link so the client can copy + open WhatsApp. WhatsApp group invite links do not

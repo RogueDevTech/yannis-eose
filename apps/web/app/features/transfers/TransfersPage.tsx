@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '~/components/ui/button';
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -11,7 +11,22 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { DataTable, type TableColumn } from '~/components/ui/data-table';
 import { DescriptionList } from '~/components/ui/description-list';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { Textarea } from '~/components/ui/textarea';
+import { FormSelect } from '~/components/ui/form-select';
+import { Tabs } from '~/components/ui/tabs';
 import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from './types';
+
+/** Status options shown as filter pills. Order matches the lifecycle. */
+const STATUS_FILTER_OPTIONS: { value: string; label: string; dotColor: string }[] = [
+  { value: 'PENDING', label: 'Pending', dotColor: 'bg-warning-500' },
+  { value: 'IN_TRANSIT', label: 'In transit', dotColor: 'bg-brand-500' },
+  { value: 'RECEIVED', label: 'Received', dotColor: 'bg-success-500' },
+  { value: 'DISPUTED', label: 'Disputed', dotColor: 'bg-danger-500' },
+  { value: 'CANCELLED', label: 'Cancelled', dotColor: 'bg-app-fg-muted' },
+];
 
 function formatRecordedAt(iso: string | null) {
   if (!iso) return '—';
@@ -26,11 +41,47 @@ function formatRecordedAt(iso: string | null) {
 
 export function TransfersPage({ transfers, locations, products, levels, canInitiate = true }: TransfersStreamData) {
   const fetcher = useFetcher();
+  const cancelFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
   const [viewTransfer, setViewTransfer] = useState<Transfer | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Transfer | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedFromLocation, setSelectedFromLocation] = useState('');
   const [selectedToLocationId, setSelectedToLocationId] = useState('');
+
+  const cancelSubmitting = cancelFetcher.state !== 'idle';
+  const [cancelInlineError, setCancelInlineError] = useState<string | null>(null);
+  const cancelFetcherError = (cancelFetcher.data as { error?: string } | undefined)?.error ?? null;
+  // Local validation errors (e.g. "reason too short") win over stale fetcher
+  // errors so the user always sees the most recent feedback.
+  const cancelError = cancelInlineError ?? cancelFetcherError;
+  const cancelSuccess = (cancelFetcher.data as { success?: boolean } | undefined)?.success;
+  useFetcherToast(cancelFetcher.data, { successMessage: 'Transfer cancelled' });
+
+  // Close cancel modal + clear reason on a successful cancel.
+  useEffect(() => {
+    if (cancelSuccess && cancelTarget) {
+      setCancelTarget(null);
+      setCancelReason('');
+      setViewTransfer(null);
+    }
+  }, [cancelSuccess, cancelTarget]);
+
+  const submitCancel = () => {
+    if (!cancelTarget) return;
+    if (cancelReason.trim().length < 10) {
+      setCancelInlineError('Cancellation reason must be at least 10 characters.');
+      return;
+    }
+    setCancelInlineError(null);
+    const fd = new FormData();
+    fd.set('intent', 'cancelTransfer');
+    fd.set('transferId', cancelTarget.id);
+    fd.set('reason', cancelReason.trim());
+    cancelFetcher.submit(fd, { method: 'POST' });
+  };
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
@@ -63,6 +114,107 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
   };
 
   const activeLocations = locations.filter((l: Location) => l.status === 'ACTIVE');
+  const hasDateParams = searchParams.has('startDate') || searchParams.has('endDate') || searchParams.has('period');
+  const periodAllTime = searchParams.get('period') === 'all_time' || !hasDateParams;
+  const rawStartDate = searchParams.get('startDate') ?? '';
+  const rawEndDate = searchParams.get('endDate') ?? '';
+  const effectiveDateRange = (() => {
+    if (periodAllTime) return { startDate: '', endDate: '' };
+    if (rawStartDate && rawEndDate) return { startDate: rawStartDate, endDate: rawEndDate };
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return {
+      startDate: first.toISOString().slice(0, 10),
+      endDate: last.toISOString().slice(0, 10),
+    };
+  })();
+
+  // Filter state — synced to URL so filters persist across refreshes and can be deep-linked.
+  const statusFilter = searchParams.get('status') ?? '';
+  const fromLocationFilter = searchParams.get('fromLocationId') ?? '';
+  const toLocationFilter = searchParams.get('toLocationId') ?? '';
+  const productFilter = searchParams.get('productId') ?? '';
+
+  const updateFilter = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next, { replace: true });
+  };
+
+  const clearFilters = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('status');
+    next.delete('fromLocationId');
+    next.delete('toLocationId');
+    next.delete('productId');
+    setSearchParams(next, { replace: true });
+  };
+
+  const hasFilters = !!(statusFilter || fromLocationFilter || toLocationFilter || productFilter);
+
+  // Status counts within the current date window — drives the badge counts on each pill.
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of transfers) {
+      if (!periodAllTime) {
+        const recordedIso = (t.verifiedAt ?? t.createdAt)?.slice(0, 10);
+        if (!recordedIso) continue;
+        if (recordedIso < effectiveDateRange.startDate || recordedIso > effectiveDateRange.endDate) continue;
+      }
+      counts[t.transferStatus] = (counts[t.transferStatus] ?? 0) + 1;
+    }
+    return counts;
+  }, [transfers, periodAllTime, effectiveDateRange.startDate, effectiveDateRange.endDate]);
+
+  const statusTabItems = useMemo(() => {
+    const total = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+    return [
+      { value: '', label: `All (${total})` },
+      ...STATUS_FILTER_OPTIONS.map((opt) => ({
+        value: opt.value,
+        label: `${opt.label} (${statusCounts[opt.value] ?? 0})`,
+      })),
+    ];
+  }, [statusCounts]);
+
+  const filteredTransfers = transfers.filter((t: Transfer) => {
+    if (!periodAllTime) {
+      const recordedIso = (t.verifiedAt ?? t.createdAt)?.slice(0, 10);
+      if (!recordedIso) return false;
+      if (recordedIso < effectiveDateRange.startDate || recordedIso > effectiveDateRange.endDate) return false;
+    }
+    if (statusFilter && t.transferStatus !== statusFilter) return false;
+    if (fromLocationFilter && t.fromLocationId !== fromLocationFilter) return false;
+    if (toLocationFilter && t.toLocationId !== toLocationFilter) return false;
+    if (productFilter && t.productId !== productFilter) return false;
+    return true;
+  });
+
+  const filteredStatusCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      PENDING: 0,
+      IN_TRANSIT: 0,
+      RECEIVED: 0,
+      DISPUTED: 0,
+      CANCELLED: 0,
+    };
+    for (const t of filteredTransfers) {
+      counts[t.transferStatus] = (counts[t.transferStatus] ?? 0) + 1;
+    }
+    return counts;
+  }, [filteredTransfers]);
+
+  const filteredQuantitySent = useMemo(
+    () => filteredTransfers.reduce((sum, t) => sum + t.quantitySent, 0),
+    [filteredTransfers],
+  );
+
+  const filteredQuantityReceived = useMemo(
+    () => filteredTransfers.reduce((sum, t) => sum + (t.quantityReceived ?? 0), 0),
+    [filteredTransfers],
+  );
 
   return (
     <div className="space-y-4">
@@ -70,20 +222,29 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
         title="Stock Transfers"
         description="Record stock movements between your warehouse and other locations. Receipt is confirmed in Logistics → Stock Transfer Confirmations."
         actions={
-          canInitiate ? (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                setSelectedProductId('');
-                setSelectedFromLocation('');
-                setSelectedToLocationId('');
-                setShowForm(true);
-              }}
-            >
-              + Record transfer
-            </Button>
-          ) : undefined
+          <>
+            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
+              <DateFilterBar
+                startDate={periodAllTime ? '' : effectiveDateRange.startDate}
+                endDate={periodAllTime ? '' : effectiveDateRange.endDate}
+                periodAllTime={periodAllTime}
+              />
+            </div>
+            {canInitiate && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setSelectedProductId('');
+                  setSelectedFromLocation('');
+                  setSelectedToLocationId('');
+                  setShowForm(true);
+                }}
+              >
+                + Record transfer
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -98,9 +259,101 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
       <OverviewStatStrip
         items={[
-          { label: 'Transfer records', value: transfers.length, valueClassName: 'text-app-fg' },
+          { label: 'Transfer records', value: filteredTransfers.length, valueClassName: 'text-app-fg' },
+          {
+            label: 'Pending',
+            value: filteredStatusCounts.PENDING,
+            valueClassName: 'text-warning-600 dark:text-warning-400',
+          },
+          {
+            label: 'In transit',
+            value: filteredStatusCounts.IN_TRANSIT,
+            valueClassName: 'text-brand-600 dark:text-brand-400',
+          },
+          {
+            label: 'Received',
+            value: filteredStatusCounts.RECEIVED,
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+          {
+            label: 'Disputed',
+            value: filteredStatusCounts.DISPUTED,
+            valueClassName: 'text-danger-600 dark:text-danger-400',
+          },
+          {
+            label: 'Cancelled',
+            value: filteredStatusCounts.CANCELLED,
+            valueClassName: 'text-app-fg-muted',
+          },
+          { label: 'Qty sent', value: filteredQuantitySent, valueClassName: 'text-app-fg' },
+          {
+            label: 'Qty received',
+            value: filteredQuantityReceived,
+            valueClassName: 'text-brand-600 dark:text-brand-400',
+          },
         ]}
       />
+
+      {/* Filters — status pills + from/to/product dropdowns. URL-synced so filters persist
+          across refreshes and can be deep-linked. */}
+      <div className="card p-3 sm:p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs
+            value={statusFilter}
+            onChange={(value) => updateFilter('status', value)}
+            tabs={statusTabItems}
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <FormSelect
+            id="transfer-filter-from"
+            label="From location"
+            value={fromLocationFilter}
+            onChange={(e) => updateFilter('fromLocationId', e.target.value)}
+            options={[
+              { value: '', label: 'All locations' },
+              ...locations.map((l: Location) => ({ value: l.id, label: l.name })),
+            ]}
+            controlSize="sm"
+          />
+          <FormSelect
+            id="transfer-filter-to"
+            label="To location"
+            value={toLocationFilter}
+            onChange={(e) => updateFilter('toLocationId', e.target.value)}
+            options={[
+              { value: '', label: 'All locations' },
+              ...locations.map((l: Location) => ({ value: l.id, label: l.name })),
+            ]}
+            controlSize="sm"
+          />
+          <DeferredSection resolve={products} skeleton="inline">
+            {(resolvedProducts) => (
+              <FormSelect
+                id="transfer-filter-product"
+                label="Product"
+                value={productFilter}
+                onChange={(e) => updateFilter('productId', e.target.value)}
+                options={[
+                  { value: '', label: 'All products' },
+                  ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
+                ]}
+                controlSize="sm"
+              />
+            )}
+          </DeferredSection>
+        </div>
+        {hasFilters && (
+          <div className="flex items-center justify-between pt-1">
+            <p className="text-xs text-app-fg-muted">
+              {filteredTransfers.length} of {transfers.length} transfer{transfers.length === 1 ? '' : 's'}
+            </p>
+            <Button type="button" variant="secondary" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          </div>
+        )}
+      </div>
 
       {canInitiate && (
         <Modal
@@ -194,11 +447,19 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                             onChange={setSelectedToLocationId}
                             placeholder="Select destination..."
                             searchPlaceholder="Search locations..."
+                            // Mirror the From-location dropdown: when a product
+                            // is picked, show the destination's current stock
+                            // for that product so the user knows what they're
+                            // adding to (e.g. avoid double-stocking a location
+                            // that already has plenty).
                             options={activeLocations
                               .filter((l: Location) => l.id !== selectedFromLocation)
                               .map((l: Location) => ({
                                 value: l.id,
                                 label: l.name,
+                                description: selectedProductId
+                                  ? `${getAvailableStock(selectedProductId, l.id)} available`
+                                  : undefined,
                               }))}
                           />
 
@@ -313,14 +574,34 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 hideOnMobile: true,
               },
               {
+                key: 'status',
+                header: 'Status',
+                render: (t) => <StatusBadge status={t.transferStatus} />,
+              },
+              {
                 key: 'actions',
                 header: '',
                 align: 'right',
                 className: 'w-[1%] whitespace-nowrap',
                 render: (t) => (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setViewTransfer(t)}>
-                    View
-                  </Button>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setViewTransfer(t)}>
+                      View
+                    </Button>
+                    {t.transferStatus !== 'CANCELLED' && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setCancelTarget(t);
+                          setCancelReason('');
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
                 ),
               },
             ];
@@ -329,11 +610,10 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
               <DataTable
                 caption="Stock transfers"
                 columns={columns}
-                data={transfers}
+                data={filteredTransfers}
                 keyField="id"
                 emptyTitle="No transfers yet"
-                emptyDescription="Record a transfer to move stock between locations and keep the ledger in sync."
-                stickyHeader={false}
+                emptyDescription="No transfers found for the selected date range."
               />
             );
           }}
@@ -380,12 +660,77 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
             <p className="text-xs text-app-fg-muted">
               Confirm or dispute receipt in <span className="font-medium text-app-fg">Logistics → Stock Transfer Confirmations</span>.
             </p>
-            <Button type="button" variant="secondary" size="sm" onClick={() => setViewTransfer(null)}>
-              Close
-            </Button>
+            <div className="flex items-center justify-end gap-2">
+              {viewTransfer.transferStatus !== 'CANCELLED' && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setCancelTarget(viewTransfer);
+                    setCancelReason('');
+                  }}
+                >
+                  Cancel transfer
+                </Button>
+              )}
+              <Button type="button" variant="secondary" size="sm" onClick={() => setViewTransfer(null)}>
+                Close
+              </Button>
+            </div>
           </div>
         )}
       </Modal>
+
+      {/* Cancel-transfer confirmation. The reason is mandatory (≥ 10 chars) so
+          the audit trail explains the reversal. The server reverses both
+          inventory legs in one transaction and refuses if the destination has
+          already shipped the units. */}
+      <ConfirmActionModal
+        open={!!cancelTarget}
+        onClose={() => {
+          if (!cancelSubmitting) {
+            setCancelTarget(null);
+            setCancelReason('');
+            setCancelInlineError(null);
+          }
+        }}
+        title="Cancel this transfer?"
+        description={
+          cancelTarget
+            ? `This will add ${cancelTarget.quantitySent} unit(s) back to ${getLocationName(cancelTarget.fromLocationId)} and remove ${cancelTarget.quantityReceived ?? cancelTarget.quantitySent} unit(s) from ${getLocationName(cancelTarget.toLocationId)}. The transfer row stays for audit but flips to CANCELLED.`
+            : ''
+        }
+        confirmLabel="Cancel transfer"
+        cancelLabel="Keep transfer"
+        variant="danger"
+        loading={cancelSubmitting}
+        onConfirm={submitCancel}
+        error={cancelError}
+        details={
+          <div className="space-y-2">
+            <label htmlFor="cancel-transfer-reason" className="block text-xs font-semibold text-app-fg-muted uppercase tracking-wider">
+              Reason (required, min 10 chars)
+            </label>
+            <Textarea
+              id="cancel-transfer-reason"
+              value={cancelReason}
+              onChange={(e) => {
+                setCancelReason(e.target.value);
+                if (cancelInlineError && e.target.value.trim().length >= 10) {
+                  setCancelInlineError(null);
+                }
+              }}
+              rows={3}
+              placeholder="Why is this transfer being cancelled?"
+              maxLength={500}
+            />
+            <p className="text-[11px] text-app-fg-muted">
+              {cancelReason.trim().length}/10 characters minimum
+            </p>
+          </div>
+        }
+      />
     </div>
   );
 }

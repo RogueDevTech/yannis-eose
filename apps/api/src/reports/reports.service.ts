@@ -171,6 +171,10 @@ export class ReportsService {
       amount: o.totalAmount ?? '',
       created: new Date(o.createdAt).toLocaleDateString(),
     }));
+    const filteredRows = rows.filter((row) => {
+      if (typeof input.filters?.minAmount === 'number' && Number(row.amount ?? 0) < input.filters.minAmount) return false;
+      return true;
+    });
     const columns = [
       { key: 'id', label: 'Order ID' },
       { key: 'customer', label: 'Customer' },
@@ -180,7 +184,7 @@ export class ReportsService {
       { key: 'amount', label: 'Amount' },
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
-    return { filename: `cs-orders-${date}.csv`, csvContent: toCsv(rows, columns) };
+    return { filename: `cs-orders-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
   private async exportCsTeam(
@@ -233,6 +237,13 @@ export class ReportsService {
         idle: idleSet.has(m.id) ? 'Yes' : 'No',
       };
     });
+    const filteredRows = rows.filter((row) => {
+      if (typeof input.filters?.minRate === 'number') {
+        const parsed = Number.parseFloat(String(row.confirmationRate).replace('%', ''));
+        if (!Number.isFinite(parsed) || parsed < input.filters.minRate) return false;
+      }
+      return true;
+    });
 
     const columns = [
       { key: 'name', label: 'Name' },
@@ -252,7 +263,7 @@ export class ReportsService {
       { key: 'idle', label: 'Idle' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
 
-    return { filename: `cs-team-${date}.csv`, csvContent: toCsv(rows, columns) };
+    return { filename: `cs-team-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
   private async exportMarketingTeam(
@@ -295,6 +306,18 @@ export class ReportsService {
         trueRoas: lb ? `${lb.trueRoas.toFixed(2)}x` : '—',
       };
     });
+    const filteredRows = rows.filter((row) => {
+      if (input.filters?.role) {
+        const normalizedRole = input.filters.role === 'MEDIA_BUYER' ? 'Media Buyer' : 'HEAD OF MARKETING';
+        if (String(row.role) !== normalizedRole) return false;
+      }
+      if (typeof input.filters?.minAmount === 'number' && Number(row.balance) < input.filters.minAmount) return false;
+      if (typeof input.filters?.maxAmount === 'number') {
+        const parsedRoas = Number.parseFloat(String(row.trueRoas).replace('x', ''));
+        if (!Number.isFinite(parsedRoas) || parsedRoas < input.filters.maxAmount) return false;
+      }
+      return true;
+    });
 
     const columns = [
       { key: 'name', label: 'Name' },
@@ -312,7 +335,7 @@ export class ReportsService {
       { key: 'trueRoas', label: 'True ROAS' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
 
-    return { filename: `marketing-team-${date}.csv`, csvContent: toCsv(rows, columns) };
+    return { filename: `marketing-team-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
   private async exportMarketingOrders(
@@ -357,6 +380,10 @@ export class ReportsService {
         created: new Date(o.createdAt).toLocaleDateString(),
       };
     });
+    const filteredRows = rows.filter((row) => {
+      if (typeof input.filters?.minAmount === 'number' && Number(row.amount ?? 0) < input.filters.minAmount) return false;
+      return true;
+    });
     const columns = [
       { key: 'id', label: 'Order ID' },
       { key: 'customer', label: 'Customer' },
@@ -369,7 +396,7 @@ export class ReportsService {
       { key: 'amount', label: 'Amount' },
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
-    return { filename: `marketing-orders-${date}.csv`, csvContent: toCsv(rows, columns) };
+    return { filename: `marketing-orders-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
   private async exportDisbursements(input: Extract<ExportReportInput, { reportKey: 'disbursements' }>, user: SessionUser, currentBranchId: string | null, date: string) {
@@ -407,6 +434,11 @@ export class ReportsService {
       date: new Date(f.sentAt).toLocaleDateString(),
       verifiedAt: f.verifiedAt ? new Date(f.verifiedAt).toLocaleDateString() : '',
     }));
+    const filteredRows = rows.filter((row) => {
+      if (typeof input.filters?.minAmount === 'number' && Number(row.amount ?? 0) < input.filters.minAmount) return false;
+      if (typeof input.filters?.maxAmount === 'number' && Number(row.amount ?? 0) > input.filters.maxAmount) return false;
+      return true;
+    });
     const columns = [
       { key: 'id', label: 'ID' },
       { key: 'sender', label: 'Sender' },
@@ -417,7 +449,7 @@ export class ReportsService {
       { key: 'date', label: 'Sent Date' },
       { key: 'verifiedAt', label: 'Verified Date' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
-    return { filename: `disbursements-${date}.csv`, csvContent: toCsv(rows, columns) };
+    return { filename: `disbursements-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
   private async exportInventory(input: Extract<ExportReportInput, { reportKey: 'inventory' }>, user: SessionUser, date: string) {
@@ -456,6 +488,11 @@ export class ReportsService {
       status: inv.status,
       updated: new Date(inv.updatedAt).toLocaleDateString(),
     }));
+    const filteredRows = rows.filter((row) => {
+      if (input.filters?.status && row.status !== input.filters.status) return false;
+      if (typeof input.filters?.maxAvailable === 'number' && row.available > input.filters.maxAvailable) return false;
+      return true;
+    });
     const columns = [
       { key: 'product', label: 'Product' },
       { key: 'location', label: 'Location' },
@@ -465,7 +502,7 @@ export class ReportsService {
       { key: 'status', label: 'Status' },
       { key: 'updated', label: 'Last Updated' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
-    return { filename: `inventory-${date}.csv`, csvContent: toCsv(rows, columns) };
+    return { filename: `inventory-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
   private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, date: string) {
@@ -498,6 +535,11 @@ export class ReportsService {
       status: inv.status,
       dueDate: inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '',
     }));
+    const filteredRows = rows.filter((row) => {
+      if (typeof input.filters?.minAmount === 'number' && Number(row.amount ?? 0) < input.filters.minAmount) return false;
+      if (typeof input.filters?.maxAmount === 'number' && Number(row.amount ?? 0) > input.filters.maxAmount) return false;
+      return true;
+    });
     const columns = [
       { key: 'reference', label: 'Reference' },
       { key: 'orderId', label: 'Order ID' },
@@ -505,6 +547,6 @@ export class ReportsService {
       { key: 'status', label: 'Status' },
       { key: 'dueDate', label: 'Due Date' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
-    return { filename: `invoices-${date}.csv`, csvContent: toCsv(rows, columns) };
+    return { filename: `invoices-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 }

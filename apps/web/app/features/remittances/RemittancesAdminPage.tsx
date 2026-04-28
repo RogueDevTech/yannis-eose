@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -7,10 +7,13 @@ import { PageHeader } from '~/components/ui/page-header';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
-import { NairaPrice } from '~/components/ui/naira-price';
 import { Tabs } from '~/components/ui/tabs';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 
-export interface RemittanceAdminRecord {
+export interface TransferConfirmationRecord {
   id: string;
   fromLocationId: string;
   toLocationId: string;
@@ -18,31 +21,50 @@ export interface RemittanceAdminRecord {
   productName: string;
   quantitySent: number;
   quantityReceived: number | null;
-  receiptUrl: string;
-  status: string;
-  sentAt: string;
+  transferStatus: string;
+  createdAt: string;
+  verifiedAt: string | null;
   fromLocationName: string;
   toLocationName: string;
   shrinkageReason: string | null;
+  senderName?: string | null;
 }
 
 export interface RemittancesAdminPageProps {
-  remittances: RemittanceAdminRecord[];
+  remittances: TransferConfirmationRecord[];
+  locations: Array<{ id: string; name: string }>;
+  senderOptions: string[];
+  filters: {
+    status: string;
+    locationId: string;
+    search: string;
+    sender: string;
+    minQty: string;
+    maxQty: string;
+    startDate: string;
+    endDate: string;
+    periodAllTime: boolean;
+  };
 }
 
-export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps) {
+export function RemittancesAdminPage({ remittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'pending' | 'processed'>('pending');
   const [quantityReceived, setQuantityReceived] = useState<Record<string, string>>({});
   const [shrinkageReason, setShrinkageReason] = useState<Record<string, string>>({});
-  const [remittanceReceiptModal, setRemittanceReceiptModal] = useState<RemittanceAdminRecord | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<RemittanceAdminRecord | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<TransferConfirmationRecord | null>(null);
+  const [confirmMode, setConfirmMode] = useState<'receive' | 'reject'>('receive');
 
-  useFetcherToast(fetcher.data, { successMessage: 'Remittance marked as received' });
+  useFetcherToast(fetcher.data, { successMessage: 'Transfer receipt recorded' });
 
-  const sentRemittances = remittances.filter((r) => r.status === 'SENT');
-  const receivedOrDisputed = remittances.filter((r) => r.status === 'RECEIVED' || r.status === 'DISPUTED');
+  const sentRemittances = remittances.filter((r) => r.transferStatus === 'IN_TRANSIT');
+  const receivedOrDisputed = remittances.filter((r) => r.transferStatus === 'RECEIVED' || r.transferStatus === 'DISPUTED');
+  const receivedCount = remittances.filter((r) => r.transferStatus === 'RECEIVED').length;
+  const disputedCount = remittances.filter((r) => r.transferStatus === 'DISPUTED').length;
+  const totalQuantitySent = remittances.reduce((sum, r) => sum + r.quantitySent, 0);
+  const totalQuantityReceived = remittances.reduce((sum, r) => sum + (r.quantityReceived ?? 0), 0);
 
   useEffect(() => {
     if (activeTab === 'pending' && sentRemittances.length === 0 && receivedOrDisputed.length > 0) {
@@ -57,26 +79,143 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
     }
   }, [fetcher.state, fetcher.data]);
 
-  const handleMarkReceived = (remittance: RemittanceAdminRecord) => {
+  const handleMarkReceived = (remittance: TransferConfirmationRecord) => {
     const qty = quantityReceived[remittance.id] ?? String(remittance.quantitySent);
     const qtyNum = parseInt(qty, 10);
     if (Number.isNaN(qtyNum) || qtyNum < 0 || qtyNum > remittance.quantitySent) return;
     setMarkingId(remittance.id);
     const formData = new FormData();
-    formData.set('intent', 'markRemittanceReceived');
-    formData.set('remittanceId', remittance.id);
+    formData.set('intent', 'markTransferReceived');
+    formData.set('transferId', remittance.id);
     formData.set('quantityReceived', String(qtyNum));
     const reason = shrinkageReason[remittance.id]?.trim();
     if (reason) formData.set('shrinkageReason', reason);
     fetcher.submit(formData, { method: 'post' });
   };
 
+  const handleMarkNotReceived = (remittance: TransferConfirmationRecord) => {
+    const reason = shrinkageReason[remittance.id]?.trim() ?? '';
+    if (reason.length < 10) return;
+    setMarkingId(remittance.id);
+    const formData = new FormData();
+    formData.set('intent', 'markTransferReceived');
+    formData.set('transferId', remittance.id);
+    formData.set('quantityReceived', '0');
+    formData.set('shrinkageReason', reason);
+    fetcher.submit(formData, { method: 'post' });
+  };
+
+  const setFilterParam = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value.trim().length === 0) next.delete(key);
+    else next.set(key, value);
+    setSearchParams(next);
+  };
+
+  const clearAllFilters = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('status');
+    next.delete('locationId');
+    next.delete('search');
+    next.delete('sender');
+    next.delete('minQty');
+    next.delete('maxQty');
+    next.delete('startDate');
+    next.delete('endDate');
+    next.delete('period');
+    setSearchParams(next);
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Stock Transfer Confirmations"
-        description="Incoming remittances from 3PL locations. Mark as received when stock arrives at the warehouse."
+        description="Confirm in-transit stock transfers when goods arrive at the destination. No receipt upload required."
       />
+
+      <OverviewStatStrip
+        items={[
+          { label: 'Total transfers', value: remittances.length, valueClassName: 'text-app-fg' },
+          { label: 'Pending', value: sentRemittances.length, valueClassName: 'text-warning-600 dark:text-warning-400' },
+          { label: 'Received', value: receivedCount, valueClassName: 'text-success-600 dark:text-success-400' },
+          { label: 'Disputed', value: disputedCount, valueClassName: 'text-danger-600 dark:text-danger-400' },
+          { label: 'Qty sent', value: totalQuantitySent, valueClassName: 'text-app-fg' },
+          { label: 'Qty received', value: totalQuantityReceived, valueClassName: 'text-brand-600 dark:text-brand-400' },
+        ]}
+      />
+
+      <div className="card p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchInput
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-64"
+            placeholder="Search by ID or product"
+            value={filters.search}
+            onChange={(value) => setFilterParam('search', value)}
+            debounceMs={250}
+          />
+          <FormSelect
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-44"
+            value={filters.status}
+            onChange={(e) => setFilterParam('status', e.target.value)}
+            options={[
+              { value: '', label: 'All statuses' },
+              { value: 'IN_TRANSIT', label: 'Pending receipt' },
+              { value: 'RECEIVED', label: 'Received' },
+              { value: 'DISPUTED', label: 'Disputed' },
+            ]}
+          />
+          <FormSelect
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-52"
+            value={filters.locationId}
+            onChange={(e) => setFilterParam('locationId', e.target.value)}
+            options={[
+              { value: '', label: 'All locations' },
+              ...locations.map((loc) => ({ value: loc.id, label: loc.name })),
+            ]}
+          />
+          <FormSelect
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-48"
+            value={filters.sender}
+            onChange={(e) => setFilterParam('sender', e.target.value)}
+            options={[
+              { value: '', label: 'All senders' },
+              ...senderOptions.map((name) => ({ value: name, label: name })),
+            ]}
+          />
+          <TextInput
+            type="number"
+            min={0}
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-28"
+            placeholder="Min qty"
+            value={filters.minQty}
+            onChange={(e) => setFilterParam('minQty', e.target.value)}
+          />
+          <TextInput
+            type="number"
+            min={0}
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-28"
+            placeholder="Max qty"
+            value={filters.maxQty}
+            onChange={(e) => setFilterParam('maxQty', e.target.value)}
+          />
+          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
+            <DateFilterBar
+              startDate={filters.startDate}
+              endDate={filters.endDate}
+              periodAllTime={filters.periodAllTime}
+            />
+          </div>
+          <Button type="button" variant="secondary" size="sm" onClick={clearAllFilters}>
+            Clear all filters
+          </Button>
+        </div>
+      </div>
 
       <Tabs
         value={activeTab}
@@ -101,11 +240,11 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
                     From {r.fromLocationName} → {r.toLocationName}
                   </p>
                   <p className="text-sm text-app-fg-muted">
-                    Quantity sent: {r.quantitySent} · Sent {new Date(r.sentAt).toLocaleString()}
+                    Quantity sent: {r.quantitySent} · Created {new Date(r.createdAt).toLocaleString()}
                   </p>
-                  <Button type="button" variant="ghost" size="sm" className="text-sm text-brand-600 dark:text-brand-400 hover:underline h-auto p-0" onClick={() => setRemittanceReceiptModal(r)}>
-                    View receipt
-                  </Button>
+                  <p className="text-sm text-app-fg-muted">
+                    Sent by: {r.senderName ?? 'Unknown user'}
+                  </p>
                 </div>
                 <div className="flex items-end gap-2 flex-wrap">
                   <TextInput
@@ -131,11 +270,27 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
                     type="button"
                     variant="primary"
                     size="sm"
-                    onClick={() => setConfirmTarget(r)}
+                    onClick={() => {
+                      setConfirmMode('receive');
+                      setConfirmTarget(r);
+                    }}
                     loading={markingId === r.id || fetcher.state === 'submitting'}
                     loadingText="Saving..."
                   >
                     Mark received
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => {
+                      setConfirmMode('reject');
+                      setConfirmTarget(r);
+                    }}
+                    loading={markingId === r.id || fetcher.state === 'submitting'}
+                    loadingText="Saving..."
+                  >
+                    Not received
                   </Button>
                 </div>
               </div>
@@ -146,8 +301,8 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
 
       {activeTab === 'pending' && sentRemittances.length === 0 && (
         <EmptyState
-          title="No remittances pending receipt"
-          description="All incoming remittances have been processed."
+          title="No transfers pending receipt"
+          description="All in-transit stock transfers have been processed."
           variant="inline"
         />
       )}
@@ -155,32 +310,38 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
       {activeTab === 'processed' && receivedOrDisputed.length > 0 && (
         <div>
           <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="border-b border-app-border">
-                  <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Product</th>
-                  <th className="text-left py-2 px-3 font-medium text-app-fg-muted">From → To</th>
-                  <th className="text-right py-2 px-3 font-medium text-app-fg-muted">Qty</th>
-                  <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Status</th>
-                  <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Sent</th>
+                <tr>
+                  <th className="table-header">Product</th>
+                  <th className="table-header">From → To</th>
+                  <th className="table-header">Sent by</th>
+                  <th className="table-header text-right">Qty</th>
+                  <th className="table-header">Status</th>
+                  <th className="table-header">Sent</th>
+                  <th className="table-header text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {receivedOrDisputed.map((r) => (
-                  <tr key={r.id} className="border-b border-app-border">
-                    <td className="py-2 px-3 text-app-fg">{r.productName}</td>
-                    <td className="py-2 px-3 text-app-fg-muted">
+                  <tr key={r.id} className="table-row">
+                    <td className="table-cell text-app-fg">{r.productName}</td>
+                    <td className="table-cell text-app-fg-muted">
                       {r.fromLocationName} → {r.toLocationName}
                     </td>
-                    <td className="py-2 px-3 text-right">
+                    <td className="table-cell text-app-fg-muted">
+                      {r.senderName ?? 'Unknown user'}
+                    </td>
+                    <td className="table-cell text-right">
                       {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : '—'}
                     </td>
-                    <td className="py-2 px-3">
-                      <StatusBadge status={r.status} />
+                    <td className="table-cell">
+                      <StatusBadge status={r.transferStatus} />
                     </td>
-                    <td className="py-2 px-3 text-app-fg-muted">
-                      {new Date(r.sentAt).toLocaleDateString()}
+                    <td className="table-cell text-app-fg-muted">
+                      {new Date(r.createdAt).toLocaleDateString()}
                     </td>
+                    <td className="table-cell text-right">—</td>
                   </tr>
                 ))}
               </tbody>
@@ -191,12 +352,13 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
               <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <p className="font-medium text-app-fg">{r.productName}</p>
-                  <StatusBadge status={r.status} />
+                            <StatusBadge status={r.transferStatus} />
                 </div>
                 <div className="text-sm text-app-fg-muted space-y-0.5">
                   <div>From → To: {r.fromLocationName} → {r.toLocationName}</div>
+                  <div>Sent by: {r.senderName ?? 'Unknown user'}</div>
                   <div>Qty: {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : '—'}</div>
-                  <div>Sent: {new Date(r.sentAt).toLocaleDateString()}</div>
+                  <div>Created: {new Date(r.createdAt).toLocaleDateString()}</div>
                 </div>
               </div>
             ))}
@@ -206,8 +368,8 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
 
       {activeTab === 'processed' && receivedOrDisputed.length === 0 && (
         <EmptyState
-          title="No processed remittances yet"
-          description="Received or disputed transfers will appear here."
+          title="No processed transfers yet"
+          description="Received or disputed stock transfers will appear here."
           variant="inline"
         />
       )}
@@ -220,9 +382,13 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
           role="dialog"
           contentClassName="p-6 space-y-4 bg-app-elevated"
         >
-          <h3 className="text-lg font-semibold text-app-fg">Confirm mark received</h3>
+          <h3 className="text-lg font-semibold text-app-fg">
+            {confirmMode === 'reject' ? 'Confirm not received' : 'Confirm mark received'}
+          </h3>
           <p className="text-sm text-app-fg-muted">
-            You are about to confirm this transfer as received.
+            {confirmMode === 'reject'
+              ? 'You are about to mark this transfer as not received (disputed).'
+              : 'You are about to confirm this transfer as received.'}
           </p>
           <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm space-y-1.5">
             <p className="font-medium text-app-fg">{confirmTarget.productName}</p>
@@ -235,9 +401,15 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
             <p className="text-app-fg-muted">
               Quantity to mark as received:{' '}
               <span className="font-medium text-app-fg">
-                {quantityReceived[confirmTarget.id] ?? confirmTarget.quantitySent}
+                {confirmMode === 'reject' ? '0' : (quantityReceived[confirmTarget.id] ?? confirmTarget.quantitySent)}
               </span>
             </p>
+            {confirmMode === 'reject' && (
+              <p className="text-app-fg-muted">
+                Provide reason (min 10 chars):
+                <span className="font-medium text-app-fg"> required</span>
+              </p>
+            )}
             {(shrinkageReason[confirmTarget.id] ?? '').trim() && (
               <p className="text-app-fg-muted">
                 Shrinkage reason: {(shrinkageReason[confirmTarget.id] ?? '').trim()}
@@ -256,63 +428,27 @@ export function RemittancesAdminPage({ remittances }: RemittancesAdminPageProps)
             </Button>
             <Button
               type="button"
-              variant="primary"
+              variant={confirmMode === 'reject' ? 'danger' : 'primary'}
               size="sm"
-              onClick={() => handleMarkReceived(confirmTarget)}
+              onClick={() => {
+                if (confirmMode === 'reject') {
+                  handleMarkNotReceived(confirmTarget);
+                  return;
+                }
+                handleMarkReceived(confirmTarget);
+              }}
+              disabled={
+                confirmMode === 'reject' && (shrinkageReason[confirmTarget.id]?.trim().length ?? 0) < 10
+              }
               loading={fetcher.state === 'submitting' && markingId === confirmTarget.id}
               loadingText="Saving..."
             >
-              Confirm mark received
+              {confirmMode === 'reject' ? 'Confirm not received' : 'Confirm mark received'}
             </Button>
           </div>
         </Modal>
       )}
 
-      {/* Transfer remittance receipt modal */}
-      {remittanceReceiptModal?.receiptUrl && (
-        <Modal open onClose={() => setRemittanceReceiptModal(null)} maxWidth="max-w-lg" role="dialog" contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]">
-          <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-            <h3 className="text-lg font-semibold text-app-fg">Transfer remittance receipt</h3>
-            <button type="button" onClick={() => setRemittanceReceiptModal(null)} className="text-app-fg-muted hover:text-app-fg">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
-            <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
-              <p className="font-medium text-app-fg">{remittanceReceiptModal.productName}</p>
-              <p className="text-sm text-brand-600 dark:text-brand-400 mt-1">
-                {remittanceReceiptModal.fromLocationName} → {remittanceReceiptModal.toLocationName}
-              </p>
-              <p className="text-sm text-app-fg-muted mt-1">
-                Quantity sent: {remittanceReceiptModal.quantitySent} · Sent {new Date(remittanceReceiptModal.sentAt).toLocaleString()}
-              </p>
-            </div>
-            <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover">
-              <img
-                src={remittanceReceiptModal.receiptUrl}
-                alt="Transfer remittance receipt"
-                className="w-full max-h-[400px] object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                  const fallback = (e.target as HTMLImageElement).nextElementSibling;
-                  if (fallback) (fallback as HTMLElement).style.display = 'flex';
-                }}
-              />
-              <div className="items-center justify-center gap-2 p-8 hidden">
-                <span className="text-sm text-app-fg-muted">Receipt image could not be loaded</span>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-app-border shrink-0 px-4 sm:px-5 pb-4">
-            <a href={remittanceReceiptModal.receiptUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
-              Open in new tab
-            </a>
-            <Button variant="secondary" size="sm" onClick={() => setRemittanceReceiptModal(null)}>Close</Button>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

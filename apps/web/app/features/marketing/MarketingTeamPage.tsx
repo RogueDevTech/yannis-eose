@@ -137,7 +137,7 @@ export function MarketingTeamPage({
               size="sm"
               onClick={() => setShowExportModal(true)}
             >
-              Export CSV
+              Generate report
             </Button>
           </div>
         }

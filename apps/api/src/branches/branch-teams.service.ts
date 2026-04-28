@@ -24,6 +24,25 @@ export class BranchTeamsService {
     }
   }
 
+  /**
+   * Write paths should fail explicitly (not silently) when branch-team schema is absent.
+   * This turns low-level Postgres 42P01 into a stable product error.
+   */
+  private async safeBranchTeamsWrite<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      if (isBranchTeamsSchemaMissingError(err)) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'Supervisor teams are unavailable because branch-team tables are missing. Apply database migration 0076 and retry.',
+        });
+      }
+      throw err;
+    }
+  }
+
   private async assertUserBranchMember(userId: string, branchId: string): Promise<void> {
     const [row] = await this.db
       .select({ one: sql`1` })
@@ -81,68 +100,80 @@ export class BranchTeamsService {
     name: string | undefined,
     _actor: SessionUser,
   ) {
-    const [row] = await this.db
-      .insert(schema.branchTeams)
-      .values({
-        branchId,
-        department,
-        name: name?.trim() || null,
-      })
-      .returning();
-    return row;
+    return this.safeBranchTeamsWrite(async () => {
+      const [row] = await this.db
+        .insert(schema.branchTeams)
+        .values({
+          branchId,
+          department,
+          name: name?.trim() || null,
+        })
+        .returning();
+      return row;
+    });
   }
 
   async updateTeam(teamId: string, input: { name?: string | null }) {
-    const [row] = await this.db
-      .update(schema.branchTeams)
-      .set({
-        ...(input.name !== undefined ? { name: input.name?.trim() || null } : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.branchTeams.id, teamId))
-      .returning();
-    if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
-    return row;
+    return this.safeBranchTeamsWrite(async () => {
+      const [row] = await this.db
+        .update(schema.branchTeams)
+        .set({
+          ...(input.name !== undefined ? { name: input.name?.trim() || null } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.branchTeams.id, teamId))
+        .returning();
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
+      return row;
+    });
   }
 
   async deleteTeam(teamId: string) {
-    await this.db.delete(schema.branchTeams).where(eq(schema.branchTeams.id, teamId));
+    await this.safeBranchTeamsWrite(async () => {
+      await this.db.delete(schema.branchTeams).where(eq(schema.branchTeams.id, teamId));
+    });
   }
 
   async addTeamMember(teamId: string, userId: string, isSupervisor: boolean, _actor: SessionUser) {
-    const [team] = await this.db
-      .select({ branchId: schema.branchTeams.branchId })
-      .from(schema.branchTeams)
-      .where(eq(schema.branchTeams.id, teamId))
-      .limit(1);
-    if (!team) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
-    await this.assertUserBranchMember(userId, team.branchId);
-    await this.db
-      .insert(schema.branchTeamMembers)
-      .values({ teamId, userId, isSupervisor })
-      .onConflictDoUpdate({
-        target: [schema.branchTeamMembers.teamId, schema.branchTeamMembers.userId],
-        set: { isSupervisor },
-      });
+    await this.safeBranchTeamsWrite(async () => {
+      const [team] = await this.db
+        .select({ branchId: schema.branchTeams.branchId })
+        .from(schema.branchTeams)
+        .where(eq(schema.branchTeams.id, teamId))
+        .limit(1);
+      if (!team) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
+      await this.assertUserBranchMember(userId, team.branchId);
+      await this.db
+        .insert(schema.branchTeamMembers)
+        .values({ teamId, userId, isSupervisor })
+        .onConflictDoUpdate({
+          target: [schema.branchTeamMembers.teamId, schema.branchTeamMembers.userId],
+          set: { isSupervisor },
+        });
+    });
   }
 
   async removeTeamMember(teamId: string, userId: string) {
-    await this.db
-      .delete(schema.branchTeamMembers)
-      .where(
-        and(eq(schema.branchTeamMembers.teamId, teamId), eq(schema.branchTeamMembers.userId, userId)),
-      );
+    await this.safeBranchTeamsWrite(async () => {
+      await this.db
+        .delete(schema.branchTeamMembers)
+        .where(
+          and(eq(schema.branchTeamMembers.teamId, teamId), eq(schema.branchTeamMembers.userId, userId)),
+        );
+    });
   }
 
   async setMemberSupervisor(teamId: string, userId: string, isSupervisor: boolean) {
-    const updated = await this.db
-      .update(schema.branchTeamMembers)
-      .set({ isSupervisor })
-      .where(
-        and(eq(schema.branchTeamMembers.teamId, teamId), eq(schema.branchTeamMembers.userId, userId)),
-      )
-      .returning();
-    if (!updated[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team member not found' });
+    await this.safeBranchTeamsWrite(async () => {
+      const updated = await this.db
+        .update(schema.branchTeamMembers)
+        .set({ isSupervisor })
+        .where(
+          and(eq(schema.branchTeamMembers.teamId, teamId), eq(schema.branchTeamMembers.userId, userId)),
+        )
+        .returning();
+      if (!updated[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team member not found' });
+    });
   }
 
   /** Same team, CS department, actor is supervisor, supervisee is non-supervisor CS_AGENT. */

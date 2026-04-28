@@ -100,6 +100,22 @@ export const inventoryRouter = router({
     }),
 
   /**
+   * Cancel a transfer that was created in error. Reverses both inventory legs
+   * and writes audit movements. Same permission as initiating — Stock Manager
+   * (and admin-class) can undo their own mistake without going through HoL.
+   */
+  cancelTransfer: permissionProcedure('inventory.transfer')
+    .input(
+      z.object({
+        transferId: z.string().uuid(),
+        reason: z.string().trim().min(10, 'Reason must be at least 10 characters').max(500).optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return getInventoryService().cancelTransfer(input, ctx.user);
+    }),
+
+  /**
    * Manual stock adjustment.
    */
   adjust: permissionProcedure('inventory.adjust')

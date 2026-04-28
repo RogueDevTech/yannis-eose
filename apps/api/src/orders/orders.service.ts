@@ -4260,8 +4260,11 @@ export class OrdersService {
           callbackScheduledAt: scheduledAt,
           callbackAttempts: currentAttempts + 1,
           callbackNotes: options?.notes ?? null,
-          // Move to CS_ASSIGNED so order stays in same agent's queue
-          status: 'CS_ASSIGNED',
+          // Preserve the order's current status. Rescheduling a callback is a
+          // post-engagement action — the agent already spoke (or tried to) with
+          // the customer. Reverting to CS_ASSIGNED erases the engagement event
+          // from the audit trail and makes the UI flip-flop. We only release
+          // the lock so the agent isn't blocked from working other orders.
           lockedUntil: null,
           lockedBy: null,
           updatedAt: new Date(),
@@ -4269,16 +4272,8 @@ export class OrdersService {
         .where(eq(schema.orders.id, orderId)),
     );
 
-    this.events.emitOrderStatusChange({
-      orderId,
-      oldStatus: order.status,
-      newStatus: 'CS_ASSIGNED',
-      assignedCsId: order.assignedCsId,
-      mediaBuyerId: order.mediaBuyerId,
-      logisticsLocationId: order.logisticsLocationId,
-      riderId: order.riderId,
-      branchId: order.branchId ?? null,
-    });
+    // Status didn't change — do NOT emit a status-change event. The callback
+    // notification + timeline event below are the right signals.
 
     // Notify assigned agent about the scheduled callback
     if (order.assignedCsId) {
