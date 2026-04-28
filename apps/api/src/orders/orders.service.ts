@@ -1283,13 +1283,22 @@ export class OrdersService {
     };
   }
 
-  async listAllocatableLocations(orderId: string): Promise<Array<{
+  async listAllocatableLocations(
+    orderId: string,
+    viewerRole?: string | null,
+  ): Promise<Array<{
     id: string;
     name: string;
     address: string | null;
     whatsappGroupLink: string | null;
     eligible: boolean;
     reason: string | null;
+    availabilityByProduct: Array<{
+      productId: string;
+      productName: string;
+      needed: number;
+      available: number;
+    }> | null;
   }>> {
     const [orderRow] = await this.db
       .select({ id: schema.orders.id })
@@ -1334,14 +1343,27 @@ export class OrdersService {
       .where(eq(schema.logisticsLocations.status, 'ACTIVE'))
       .orderBy(asc(schema.logisticsLocations.name));
 
-    const results: Array<{
+    // CS_AGENT must NOT see remaining-stock numbers (per CEO directive). Hide both the
+    // per-product availability array AND the leaky "have X" details inside the reason text.
+    // Everyone else with allocate authority (HoCS, HoLogistics, LogisticsManager, TPL_MANAGER,
+    // BranchAdmin, StockManager, Admin, SuperAdmin, ...) sees the full breakdown.
+    const hideStockCounts = viewerRole === 'CS_AGENT';
+
+    type LocationResult = {
       id: string;
       name: string;
       address: string | null;
       whatsappGroupLink: string | null;
       eligible: boolean;
       reason: string | null;
-    }> = [];
+      availabilityByProduct: Array<{
+        productId: string;
+        productName: string;
+        needed: number;
+        available: number;
+      }> | null;
+    };
+    const results: LocationResult[] = [];
 
     for (const location of locations) {
       const isLocked = await this.inventoryService.isDispatchLocked(location.id);
@@ -1350,11 +1372,20 @@ export class OrdersService {
           ...location,
           eligible: false,
           reason: 'Dispatch locked at this location. Resolve stock reconciliations first.',
+          availabilityByProduct: null,
         });
         continue;
       }
 
-      let reason: string | null = null;
+      const availabilityByProduct: Array<{
+        productId: string;
+        productName: string;
+        needed: number;
+        available: number;
+      }> = [];
+      let detailedReason: string | null = null;
+      let genericReason: string | null = null;
+
       for (const [productId, need] of needsByProduct) {
         const levelRows = await this.db
           .select({
@@ -1369,21 +1400,30 @@ export class OrdersService {
           .limit(1);
 
         const level = levelRows[0];
-        if (!level) {
-          reason = `No inventory row for ${need.name}. Receive stock first.`;
-          break;
-        }
-        const available = level.stockCount - level.reservedCount;
-        if (available < need.qty) {
-          reason = `Insufficient ${need.name} stock (need ${need.qty}, have ${available}).`;
-          break;
+        const available = level ? level.stockCount - level.reservedCount : 0;
+        availabilityByProduct.push({
+          productId,
+          productName: need.name,
+          needed: need.qty,
+          available,
+        });
+
+        if (detailedReason == null) {
+          if (!level) {
+            detailedReason = `No inventory row for ${need.name}. Receive stock first.`;
+            genericReason = 'No inventory at this location.';
+          } else if (available < need.qty) {
+            detailedReason = `Insufficient ${need.name} stock (need ${need.qty}, have ${available}).`;
+            genericReason = 'Insufficient stock for one or more products.';
+          }
         }
       }
 
       results.push({
         ...location,
-        eligible: reason == null,
-        reason,
+        eligible: detailedReason == null,
+        reason: hideStockCounts ? genericReason : detailedReason,
+        availabilityByProduct: hideStockCounts ? null : availabilityByProduct,
       });
     }
 

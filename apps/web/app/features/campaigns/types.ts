@@ -54,6 +54,7 @@ export interface CampaignFormConfig {
   showGender?: boolean | string;
   showPreferredDeliveryDate?: boolean | string;
   showPaymentMethod?: boolean | string;
+  showProductImages?: boolean | string;
   requireDeliveryAddress?: boolean | string;
   requireDeliveryNotes?: boolean | string;
   requireDeliveryState?: boolean | string;

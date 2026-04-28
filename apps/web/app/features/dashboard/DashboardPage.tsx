@@ -576,7 +576,7 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
           <div className="flex gap-2">
             <Link to="/admin/inventory" prefetch="intent" className="btn-primary btn-sm">View Inventory</Link>
             <Link to="/admin/transfers" prefetch="intent" className="btn-secondary btn-sm">Transfers</Link>
-            <Link to="/admin/returns" prefetch="intent" className="btn-secondary btn-sm">Returns</Link>
+            <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm">Reconciliation</Link>
           </div>
         </div>
         <QuickActionsCard role="STOCK_MANAGER" unprocessed={0} />
@@ -759,7 +759,7 @@ function getQuickActions(role: string, unprocessed: number) {
       return [
         { href: '/admin/inventory', label: 'Inventory', description: 'Stock levels', icon: 'products', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
         { href: '/admin/transfers', label: 'Transfers', description: 'Stock transfers', icon: 'orders', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
-        { href: '/admin/returns', label: 'Returns', description: 'Process returns', icon: 'pending', bg: 'bg-danger-50 dark:bg-danger-700/20 text-danger-600 dark:text-danger-400' },
+        { href: '/admin/inventory', label: 'Reconciliation', description: 'Resolve stock mismatches', icon: 'pending', bg: 'bg-danger-50 dark:bg-danger-700/20 text-danger-600 dark:text-danger-400' },
       ];
     default:
       return [

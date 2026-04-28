@@ -1,5 +1,5 @@
-import { uuid, pgTable, text, jsonb, timestamp } from 'drizzle-orm/pg-core';
-import { remittanceStatusEnum } from './enums';
+import { uuid, pgTable, text, jsonb, timestamp, numeric, integer } from 'drizzle-orm/pg-core';
+import { remittanceStatusEnum, remittanceOutcomeStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns } from './helpers';
 import { users } from './users';
 import { logisticsLocations } from './logistics';
@@ -41,4 +41,21 @@ export const deliveryRemittanceOrders = pgTable('delivery_remittance_orders', {
     .notNull()
     .references(() => orders.id)
     .unique(),
+});
+
+/** Settlement rows for approved/disputed remittance outcomes. */
+export const deliveryRemittanceOutcomes = pgTable('delivery_remittance_outcomes', {
+  id: uuidv7Pk(),
+  deliveryRemittanceId: uuid('delivery_remittance_id')
+    .notNull()
+    .references(() => deliveryRemittances.id, { onDelete: 'cascade' }),
+  status: remittanceOutcomeStatusEnum('status').notNull(),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  orderCount: integer('order_count').notNull(),
+  reason: text('reason'),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
+  recordedBy: text('recorded_by')
+    .notNull()
+    .references(() => users.id),
+  ...temporalColumns,
 });

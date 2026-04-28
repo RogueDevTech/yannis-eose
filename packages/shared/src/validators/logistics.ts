@@ -147,11 +147,22 @@ export type RejectDeliveryConfirmationInput = z.infer<typeof rejectDeliveryConfi
 export const createDeliveryRemittanceSchema = z.object({
   orderIds: z.array(z.string().uuid()).min(1).max(500),
   receiptUrls: z.array(z.string().url()).min(1).max(20),
+  /** Optional comment captured on the remittance row (Phase 18 — accountant-led flow). */
+  notes: z.string().trim().max(1000).optional(),
+  /**
+   * When true, the same write transitions the remittance to RECEIVED and bulk-completes
+   * every linked order (DELIVERED → COMPLETED). Phase 18 — accountant records cash + closes
+   * the orders in one step. False (default) creates a Pending remittance the accountant
+   * marks Received later from the detail page.
+   */
+  markReceivedNow: z.boolean().optional().default(false),
 });
 export type CreateDeliveryRemittanceInput = z.infer<typeof createDeliveryRemittanceSchema>;
 
 export const listDeliveryRemittancesSchema = z.object({
   logisticsLocationId: z.string().uuid().optional(),
+  /** Filter by who recorded the remittance (Phase 18 — Sent by filter on the Finance page). */
+  sentBy: z.string().uuid().optional(),
   status: z.enum(['SENT', 'RECEIVED', 'DISPUTED']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
@@ -159,6 +170,20 @@ export const listDeliveryRemittancesSchema = z.object({
   limit: z.number().int().min(1).max(100).default(20),
 });
 export type ListDeliveryRemittancesInput = z.infer<typeof listDeliveryRemittancesSchema>;
+
+/**
+ * Phase 18 — accountant view of "delivered orders not yet on a remittance".
+ * Replaces the old TPL_MANAGER-only signature. Filters mirror the Finance page picker.
+ */
+export const listDeliveryRemittanceEligibleOrdersSchema = z.object({
+  logisticsLocationId: z.string().uuid().optional(),
+  search: z.string().trim().max(200).optional(),
+  startDate: z.string().date().optional(),
+  endDate: z.string().date().optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(500).default(100),
+});
+export type ListDeliveryRemittanceEligibleOrdersInput = z.infer<typeof listDeliveryRemittanceEligibleOrdersSchema>;
 
 export const markDeliveryRemittanceReceivedSchema = z.object({
   deliveryRemittanceId: z.string().uuid(),

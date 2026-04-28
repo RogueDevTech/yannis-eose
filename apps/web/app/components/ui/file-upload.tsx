@@ -19,6 +19,8 @@ interface FileUploadProps {
   required?: boolean;
   /** Fires whenever internal upload phase changes (use to disable submit while uploading). */
   onUploadStateChange?: (state: FileUploadUploadState) => void;
+  /** Use a compact picker variant for tight form layouts. */
+  size?: 'md' | 'sm';
 }
 
 type UploadState = FileUploadUploadState;
@@ -32,6 +34,7 @@ export function FileUpload({
   name,
   required,
   onUploadStateChange,
+  size = 'md',
 }: FileUploadProps) {
   const [state, setState] = useState<UploadState>('idle');
   const [progress, setProgress] = useState(0);
@@ -128,10 +131,12 @@ export function FileUpload({
           onClick={() => inputRef.current?.click()}
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
-          className="border-2 border-dashed border-app-border rounded-lg p-4 text-center cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors"
+          className={`border-2 border-dashed border-app-border rounded-lg text-center cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors ${
+            size === 'sm' ? 'p-2.5' : 'p-4'
+          }`}
         >
           <svg
-            className="w-8 h-8 mx-auto text-app-fg-muted mb-2"
+            className={`${size === 'sm' ? 'w-5 h-5 mb-1.5' : 'w-8 h-8 mb-2'} mx-auto text-app-fg-muted`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -143,10 +148,10 @@ export function FileUpload({
               d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"
             />
           </svg>
-          <p className="text-sm text-app-fg-muted">
+          <p className={`${size === 'sm' ? 'text-xs' : 'text-sm'} text-app-fg-muted`}>
             Click or drag file to upload
           </p>
-          <p className="text-xs text-app-fg-muted mt-1">
+          <p className={`${size === 'sm' ? 'text-[10px] mt-0.5' : 'text-xs mt-1'} text-app-fg-muted`}>
             Max {maxSizeMB}MB
           </p>
           <input

@@ -7,6 +7,8 @@ export interface Transfer {
   toLocationId: string;
   transferStatus: string;
   shrinkageReason: string | null;
+  /** Optional comment the receiver added when marking received. */
+  receiverNotes?: string | null;
   transferCost: string | null;
   createdAt: string;
   verifiedAt: string | null;

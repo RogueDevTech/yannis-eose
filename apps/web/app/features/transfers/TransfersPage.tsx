@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from '~/components/ui/button';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -14,6 +14,7 @@ import { DescriptionList } from '~/components/ui/description-list';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { Tabs } from '~/components/ui/tabs';
@@ -42,6 +43,7 @@ function formatRecordedAt(iso: string | null) {
 export function TransfersPage({ transfers, locations, products, levels, canInitiate = true }: TransfersStreamData) {
   const fetcher = useFetcher();
   const cancelFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const navigation = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
   const [viewTransfer, setViewTransfer] = useState<Transfer | null>(null);
@@ -132,9 +134,17 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
   // Filter state — synced to URL so filters persist across refreshes and can be deep-linked.
   const statusFilter = searchParams.get('status') ?? '';
+  const [uiStatusFilter, setUiStatusFilter] = useState(statusFilter);
   const fromLocationFilter = searchParams.get('fromLocationId') ?? '';
   const toLocationFilter = searchParams.get('toLocationId') ?? '';
   const productFilter = searchParams.get('productId') ?? '';
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+
+  useEffect(() => {
+    if (navigation.state === 'idle') {
+      setUiStatusFilter(statusFilter);
+    }
+  }, [statusFilter, navigation.state]);
 
   const updateFilter = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -154,19 +164,39 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
   const hasFilters = !!(statusFilter || fromLocationFilter || toLocationFilter || productFilter);
 
-  // Status counts within the current date window — drives the badge counts on each pill.
+  // Stable base set for summary cards + tab counts.
+  // Applies date/location/product filters, but intentionally excludes status tab filter.
+  const summaryTransfers = useMemo(
+    () =>
+      transfers.filter((t: Transfer) => {
+        if (!periodAllTime) {
+          const recordedIso = (t.verifiedAt ?? t.createdAt)?.slice(0, 10);
+          if (!recordedIso) return false;
+          if (recordedIso < effectiveDateRange.startDate || recordedIso > effectiveDateRange.endDate) return false;
+        }
+        if (fromLocationFilter && t.fromLocationId !== fromLocationFilter) return false;
+        if (toLocationFilter && t.toLocationId !== toLocationFilter) return false;
+        if (productFilter && t.productId !== productFilter) return false;
+        return true;
+      }),
+    [
+      transfers,
+      periodAllTime,
+      effectiveDateRange.startDate,
+      effectiveDateRange.endDate,
+      fromLocationFilter,
+      toLocationFilter,
+      productFilter,
+    ],
+  );
+
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const t of transfers) {
-      if (!periodAllTime) {
-        const recordedIso = (t.verifiedAt ?? t.createdAt)?.slice(0, 10);
-        if (!recordedIso) continue;
-        if (recordedIso < effectiveDateRange.startDate || recordedIso > effectiveDateRange.endDate) continue;
-      }
+    for (const t of summaryTransfers) {
       counts[t.transferStatus] = (counts[t.transferStatus] ?? 0) + 1;
     }
     return counts;
-  }, [transfers, periodAllTime, effectiveDateRange.startDate, effectiveDateRange.endDate]);
+  }, [summaryTransfers]);
 
   const statusTabItems = useMemo(() => {
     const total = Object.values(statusCounts).reduce((a, b) => a + b, 0);
@@ -179,20 +209,12 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
     ];
   }, [statusCounts]);
 
-  const filteredTransfers = transfers.filter((t: Transfer) => {
-    if (!periodAllTime) {
-      const recordedIso = (t.verifiedAt ?? t.createdAt)?.slice(0, 10);
-      if (!recordedIso) return false;
-      if (recordedIso < effectiveDateRange.startDate || recordedIso > effectiveDateRange.endDate) return false;
-    }
+  const filteredTransfers = summaryTransfers.filter((t: Transfer) => {
     if (statusFilter && t.transferStatus !== statusFilter) return false;
-    if (fromLocationFilter && t.fromLocationId !== fromLocationFilter) return false;
-    if (toLocationFilter && t.toLocationId !== toLocationFilter) return false;
-    if (productFilter && t.productId !== productFilter) return false;
     return true;
   });
 
-  const filteredStatusCounts = useMemo(() => {
+  const summaryStatusCounts = useMemo(() => {
     const counts: Record<string, number> = {
       PENDING: 0,
       IN_TRANSIT: 0,
@@ -200,21 +222,26 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
       DISPUTED: 0,
       CANCELLED: 0,
     };
-    for (const t of filteredTransfers) {
+    for (const t of summaryTransfers) {
       counts[t.transferStatus] = (counts[t.transferStatus] ?? 0) + 1;
     }
     return counts;
-  }, [filteredTransfers]);
+  }, [summaryTransfers]);
 
-  const filteredQuantitySent = useMemo(
-    () => filteredTransfers.reduce((sum, t) => sum + t.quantitySent, 0),
-    [filteredTransfers],
+  const summaryQuantitySent = useMemo(
+    () => summaryTransfers.reduce((sum, t) => sum + t.quantitySent, 0),
+    [summaryTransfers],
   );
 
-  const filteredQuantityReceived = useMemo(
-    () => filteredTransfers.reduce((sum, t) => sum + (t.quantityReceived ?? 0), 0),
-    [filteredTransfers],
+  const summaryQuantityReceived = useMemo(
+    () => summaryTransfers.reduce((sum, t) => sum + (t.quantityReceived ?? 0), 0),
+    [summaryTransfers],
   );
+
+  const handleStatusTabChange = (value: string) => {
+    setUiStatusFilter(value);
+    updateFilter('status', value);
+  };
 
   return (
     <div className="space-y-4">
@@ -259,36 +286,36 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
       <OverviewStatStrip
         items={[
-          { label: 'Transfer records', value: filteredTransfers.length, valueClassName: 'text-app-fg' },
+          { label: 'Transfer records', value: summaryTransfers.length, valueClassName: 'text-app-fg' },
           {
             label: 'Pending',
-            value: filteredStatusCounts.PENDING,
+            value: summaryStatusCounts.PENDING,
             valueClassName: 'text-warning-600 dark:text-warning-400',
           },
           {
             label: 'In transit',
-            value: filteredStatusCounts.IN_TRANSIT,
+            value: summaryStatusCounts.IN_TRANSIT,
             valueClassName: 'text-brand-600 dark:text-brand-400',
           },
           {
             label: 'Received',
-            value: filteredStatusCounts.RECEIVED,
+            value: summaryStatusCounts.RECEIVED,
             valueClassName: 'text-success-600 dark:text-success-400',
           },
           {
             label: 'Disputed',
-            value: filteredStatusCounts.DISPUTED,
+            value: summaryStatusCounts.DISPUTED,
             valueClassName: 'text-danger-600 dark:text-danger-400',
           },
           {
             label: 'Cancelled',
-            value: filteredStatusCounts.CANCELLED,
+            value: summaryStatusCounts.CANCELLED,
             valueClassName: 'text-app-fg-muted',
           },
-          { label: 'Qty sent', value: filteredQuantitySent, valueClassName: 'text-app-fg' },
+          { label: 'Qty sent', value: summaryQuantitySent, valueClassName: 'text-app-fg' },
           {
             label: 'Qty received',
-            value: filteredQuantityReceived,
+            value: summaryQuantityReceived,
             valueClassName: 'text-brand-600 dark:text-brand-400',
           },
         ]}
@@ -299,8 +326,8 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
       <div className="card p-3 sm:p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <Tabs
-            value={statusFilter}
-            onChange={(value) => updateFilter('status', value)}
+            value={uiStatusFilter}
+            onChange={handleStatusTabChange}
             tabs={statusTabItems}
           />
         </div>
@@ -612,6 +639,8 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 columns={columns}
                 data={filteredTransfers}
                 keyField="id"
+                loading={isLoaderRefetchBusy}
+                loadingVariant="overlay"
                 emptyTitle="No transfers yet"
                 emptyDescription="No transfers found for the selected date range."
               />
@@ -652,6 +681,12 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                         label: 'Recorded',
                         value: formatRecordedAt(viewTransfer.verifiedAt ?? viewTransfer.createdAt),
                       },
+                      ...(viewTransfer.shrinkageReason
+                        ? [{ label: 'Shrinkage reason', value: viewTransfer.shrinkageReason }]
+                        : []),
+                      ...(viewTransfer.receiverNotes
+                        ? [{ label: 'Receiver comment', value: viewTransfer.receiverNotes }]
+                        : []),
                     ]}
                   />
                 );

@@ -36,13 +36,29 @@ const PAYROLL_VIEWER_ROLES = [
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermissionOrRoles(request, { roles: PAYROLL_VIEWER_ROLES, permission: 'hr.read' });
-  const cookie = getSessionCookie(request);
   const user = await getCurrentUser(request);
   if (!user) throw redirect('/auth');
+  const cookie = getSessionCookie(request);
+
+  let allowedByRoleOrPermission = false;
+  try {
+    await requirePermissionOrRoles(request, { roles: PAYROLL_VIEWER_ROLES, permission: 'hr.read' });
+    allowedByRoleOrPermission = true;
+  } catch {
+    allowedByRoleOrPermission = false;
+  }
 
   const url = new URL(request.url);
   const initialBatchId = url.searchParams.get('batchId');
+  const prepareAccessRes = await apiRequest<unknown>('/trpc/hr.payrollPrepareAccess', { method: 'GET', cookie });
+  const prepareAccessData = prepareAccessRes.ok
+    ? (prepareAccessRes.data as {
+        result?: { data?: { allowed: boolean; departments: string[]; branches: BranchOption[] } };
+      })?.result?.data
+    : null;
+  if (!allowedByRoleOrPermission && !prepareAccessData?.allowed) {
+    throw redirect('/admin');
+  }
 
   // Critical: monthly batches + branches (the default view)
   // Secondary: adjustments + users (only mounted for HR/Finance via the Adjustments tab)
@@ -61,7 +77,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
   const branchesData = branchesRes.ok
     ? (branchesRes.data as { result?: { data?: BranchOption[] } })?.result?.data
-    : null;
+    : (prepareAccessData?.branches ?? null);
   const adjustments = adjustmentsRes.ok
     ? ((adjustmentsRes.data as { result?: { data?: Adjustment[] } })?.result?.data ?? [])
     : [];
@@ -74,6 +90,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     role: user.role,
     currentBranchId: user.currentBranchId ?? null,
     isFinanceOfficer: user.isFinanceOfficer ?? false,
+    prepareDepartments: (prepareAccessData?.departments ?? []) as ViewerInfo['prepareDepartments'],
+    prepareBranchIds: (prepareAccessData?.branches ?? []).map((b) => b.id),
   };
 
   return {
@@ -131,6 +149,21 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) return json({ error: extractError(res, 'Failed to generate batch') }, { status: safeStatus(res.status) });
     return json({ success: true });
+  }
+
+  if (intent === 'previewBatch') {
+    const rawMonth = formData.get('periodMonth')?.toString() ?? '';
+    const periodMonth = /^\d{4}-\d{2}$/.test(rawMonth) ? `${rawMonth}-01` : rawMonth;
+    const res = await apiRequest<unknown>('/trpc/hr.previewBatch', {
+      method: 'POST', cookie,
+      body: {
+        branchId: formData.get('branchId')?.toString() ?? '',
+        department: formData.get('department')?.toString() ?? '',
+        periodMonth,
+      },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to preview batch') }, { status: safeStatus(res.status) });
+    return json({ success: true, preview: (res.data as { result?: { data?: unknown } })?.result?.data ?? null });
   }
 
   if (intent === 'submitBatch') {

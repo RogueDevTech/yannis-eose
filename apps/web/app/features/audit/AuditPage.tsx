@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useSearchParams, useFetcher, useRevalidator, useNavigation } from '@remix-run/react';
+import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageNotification } from '~/components/ui/page-notification';
-import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { formatNaira } from '~/lib/format-amount';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -1396,8 +1397,7 @@ function TimeTravelPanel({
 
 export function AuditPage({ rows, total, filters, actorNames, error }: AuditPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [unknownActorModal, setUnknownActorModal] = useState<{ changedBy: string | null; displayName: string } | null>(null);
@@ -1552,13 +1552,6 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
               periodAllTime={filters.periodAllTime ?? false}
             />
           </div>
-          {isFilterLoading && (
-            <div className="flex items-end">
-              <span className="flex items-center text-app-fg-muted" aria-hidden>
-                <Spinner size="sm" className="shrink-0" />
-              </span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1606,6 +1599,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
       </div>
 
       {/* Audit log table — rows render immediately, actor names stream in */}
+      <TableLoadingOverlay show={isFilterLoading}>
       <div className="card p-0">
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
@@ -1764,6 +1758,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
           )}
         </div>
       </div>
+      </TableLoadingOverlay>
 
       {/* Pagination */}
       {totalPages > 1 && (

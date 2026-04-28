@@ -169,6 +169,11 @@ export const hrRouter = router({
       return getPayrollBatchService().listMonthlyPayrolls(input, ctx.user);
     }),
 
+  payrollPrepareAccess: authedProcedure
+    .query(async ({ ctx }) => {
+      return getPayrollBatchService().getPrepareAccess(ctx.user);
+    }),
+
   getBatch: authedProcedure
     .input(getBatchSchema)
     .query(async ({ input, ctx }) => {
@@ -179,6 +184,12 @@ export const hrRouter = router({
     .input(generateBatchSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollBatchService().generateBatch(input, ctx.user);
+    }),
+
+  previewBatch: authedProcedure
+    .input(generateBatchSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().previewBatch(input, ctx.user);
     }),
 
   submitBatch: authedProcedure

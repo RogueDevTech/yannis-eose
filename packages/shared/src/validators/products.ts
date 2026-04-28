@@ -5,7 +5,7 @@ import { z } from 'zod';
 // ============================================
 
 /** Max gallery images per offer tier (stored in `products.offers` JSON). */
-export const MAX_PRODUCT_OFFER_IMAGES = 12;
+export const MAX_PRODUCT_OFFER_IMAGES = 1;
 
 export const productOfferSchema = z.object({
   label: z.string().min(1, 'Offer label is required'),

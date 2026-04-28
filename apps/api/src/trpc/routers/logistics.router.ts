@@ -10,6 +10,7 @@ import {
   markRemittanceReceivedSchema,
   createDeliveryRemittanceSchema,
   listDeliveryRemittancesSchema,
+  listDeliveryRemittanceEligibleOrdersSchema,
   markDeliveryRemittanceReceivedSchema,
   getDeliveryRemittanceSchema,
   disputeDeliveryRemittanceSchema,
@@ -130,8 +131,13 @@ export const logisticsRouter = router({
       return getLogisticsService().markRemittanceReceived(input, ctx.user);
     }),
 
-  // Delivery remittances (3PL batches delivered orders + receipts; Finance marks received)
-  createDeliveryRemittance: permissionProcedure('logistics.remit')
+  // Delivery remittances. Phase 18 (CEO directive 2026-04-29): the accountant
+  // (Finance / Finance hat / admin) is the primary creator while 3PL partners
+  // are not on-platform. The legacy TPL_MANAGER path still works — service
+  // layer is the gate. tRPC stays as `authedProcedure` so the service can run
+  // its multi-role check; the explicit `logistics.remit` permission is no
+  // longer the right gate now that Finance is the main caller.
+  createDeliveryRemittance: authedProcedure
     .input(createDeliveryRemittanceSchema)
     .mutation(async ({ input, ctx }) => {
       return getLogisticsService().createDeliveryRemittance(input, ctx.user);
@@ -143,9 +149,14 @@ export const logisticsRouter = router({
       return getLogisticsService().listDeliveryRemittances(input, ctx.user);
     }),
 
-  listDeliveryRemittanceEligibleOrders: authedProcedure.query(async ({ ctx }) => {
-    return getLogisticsService().listDeliveryRemittanceEligibleOrders(ctx.user);
-  }),
+  listDeliveryRemittanceEligibleOrders: authedProcedure
+    .input(listDeliveryRemittanceEligibleOrdersSchema.optional())
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().listDeliveryRemittanceEligibleOrders(
+        input ?? { page: 1, limit: 100 },
+        ctx.user,
+      );
+    }),
 
   markDeliveryRemittanceReceived: permissionProcedure('finance.approve')
     .input(markDeliveryRemittanceReceivedSchema)

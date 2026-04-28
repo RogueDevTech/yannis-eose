@@ -21,6 +21,7 @@ import { withActorAndBranch } from '../common/db/with-actor';
 import { isAdminLevel, isOrgWideDepartmentHead } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schema';
 
 /**
  * Maps the four payroll departments to the staff roles each contains.
@@ -68,8 +69,8 @@ export function getManageableRolesForViewer(viewer: { role: string }): string[] 
   return [...DEPARTMENT_ROLES[dept]];
 }
 
-/** True when this user is allowed to prepare a DRAFT batch for the given (branch, department). */
-function canPrepareDept(user: SessionUser, branchId: string, dept: PayrollDepartment): boolean {
+/** True when this user is allowed to prepare a DRAFT batch by role-only policy. */
+function canPrepareDeptByRole(user: SessionUser, branchId: string, dept: PayrollDepartment): boolean {
   if (isAdminLevel(user)) return true;
   if (user.role !== DEPARTMENT_OWNER_ROLE[dept]) return false;
   if (isOrgWideDepartmentHead(user) && user.currentBranchId == null) return true;
@@ -102,6 +103,43 @@ export class PayrollBatchService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  private async isBranchTeamSupervisorForDept(
+    actorId: string,
+    branchId: string,
+    dept: PayrollDepartment,
+  ): Promise<boolean> {
+    const teamDept = dept === 'CS' ? 'CS' : dept === 'MARKETING' ? 'MARKETING' : null;
+    if (!teamDept) return false;
+    try {
+      const rows = await this.db
+        .select({ one: sql`1` })
+        .from(schema.branchTeamMembers)
+        .innerJoin(schema.branchTeams, eq(schema.branchTeams.id, schema.branchTeamMembers.teamId))
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, actorId),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+            eq(schema.branchTeams.branchId, branchId),
+            eq(schema.branchTeams.department, teamDept),
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    } catch (err) {
+      if (isBranchTeamsSchemaMissingError(err)) return false;
+      throw err;
+    }
+  }
+
+  private async canPrepareDept(user: SessionUser, branchId: string, dept: PayrollDepartment): Promise<boolean> {
+    if (canPrepareDeptByRole(user, branchId, dept)) return true;
+    // Departments without branch-team supervisor coverage can be prepared by branch HR manager.
+    if (user.role === 'HR_MANAGER' && user.currentBranchId === branchId && (dept === 'LOGISTICS' || dept === 'HR')) {
+      return true;
+    }
+    return this.isBranchTeamSupervisorForDept(user.id, branchId, dept);
+  }
+
   // ============================================
   // Generation: DRAFT batch + child payouts
   // ============================================
@@ -114,7 +152,7 @@ export class PayrollBatchService {
    * from the latest commission plans + delivered orders.
    */
   async generateBatch(input: GenerateBatchInput, actor: SessionUser) {
-    if (!canPrepareDept(actor, input.branchId, input.department)) {
+    if (!(await this.canPrepareDept(actor, input.branchId, input.department))) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: `You cannot prepare a payroll batch for ${input.department} on this branch.`,
@@ -254,6 +292,63 @@ export class PayrollBatchService {
     });
   }
 
+  async previewBatch(input: GenerateBatchInput, actor: SessionUser) {
+    if (!(await this.canPrepareDept(actor, input.branchId, input.department))) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `You cannot preview payroll for ${input.department} on this branch.`,
+      });
+    }
+    const periodStart = new Date(`${input.periodMonth}T00:00:00.000Z`);
+    const periodEnd = new Date(periodStart);
+    periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+    periodEnd.setUTCMilliseconds(periodEnd.getUTCMilliseconds() - 1);
+
+    return withActorAndBranch(this.db, { id: actor.id, currentBranchId: input.branchId }, async (tx) => {
+      const departmentRoles = DEPARTMENT_ROLES[input.department];
+      const staff = await tx
+        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.status, 'ACTIVE'),
+            eq(schema.users.primaryBranchId, input.branchId),
+            inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+          ),
+        );
+
+      const rows = [] as Array<{
+        staffId: string;
+        staffName: string;
+        staffRole: string;
+        baseSalary: number;
+        performanceBonus: number;
+        addOnsTotal: number;
+        deductionsTotal: number;
+        totalPayout: number;
+      }>;
+      for (const member of staff) {
+        const computed = (await this.computePayoutForMember(tx, member, periodStart, periodEnd))
+          ?? { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
+        rows.push({
+          staffId: member.id,
+          staffName: member.name,
+          staffRole: member.role,
+          ...computed,
+        });
+      }
+
+      return {
+        branchId: input.branchId,
+        department: input.department,
+        periodMonth: input.periodMonth,
+        staffCount: rows.length,
+        totalAmount: rows.reduce((acc, row) => acc + row.totalPayout, 0),
+        rows: rows.sort((a, b) => b.totalPayout - a.totalPayout),
+      };
+    });
+  }
+
   /**
    * Pure compute (no inserts). Mirrors `HrService.generatePayouts` math but reads
    * the same data inside the caller's transaction so totals are consistent.
@@ -380,7 +475,7 @@ export class PayrollBatchService {
 
   async submitBatch(input: SubmitBatchInput, actor: SessionUser) {
     const batch = await this.requireBatch(input.batchId);
-    if (!canPrepareDept(actor, batch.branchId, batch.department)) {
+    if (!(await this.canPrepareDept(actor, batch.branchId, batch.department))) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the owning department head (or admin) can submit this batch.' });
     }
     if (batch.status !== 'DRAFT') {
@@ -604,12 +699,25 @@ export class PayrollBatchService {
    * the batch summary stays accurate. Only allowed while status = PENDING_HR.
    */
   async addBatchAdjustment(input: AddBatchAdjustmentInput, actor: SessionUser) {
-    if (!canReviewBatch(actor)) {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only HR Manager or admins can add adjustments at this stage.' });
-    }
     const batch = await this.requireBatch(input.batchId);
-    if (batch.status !== 'PENDING_HR') {
-      throw new TRPCError({ code: 'CONFLICT', message: `Adjustments are only editable while the batch is in HR review (current: ${batch.status}).` });
+    const canPrepareDraft =
+      batch.status === 'DRAFT' &&
+      (await this.canPrepareDept(actor, batch.branchId, batch.department as PayrollDepartment));
+    const canReviewPendingHr = batch.status === 'PENDING_HR' && canReviewBatch(actor);
+    if (!canPrepareDraft && !canReviewPendingHr) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message:
+          batch.status === 'DRAFT'
+            ? 'Only eligible department preparers can adjust DRAFT batches.'
+            : 'Only HR Manager or admins can add adjustments during HR review.',
+      });
+    }
+    if (batch.status !== 'DRAFT' && batch.status !== 'PENDING_HR') {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `Adjustments are only editable in DRAFT or PENDING_HR (current: ${batch.status}).`,
+      });
     }
 
     return withActorAndBranch(
@@ -641,6 +749,62 @@ export class PayrollBatchService {
     );
   }
 
+  async getPrepareAccess(viewer: SessionUser) {
+    const departments = new Set<PayrollDepartment>();
+    const branchIds = new Set<string>();
+
+    if (isAdminLevel(viewer)) {
+      (Object.keys(DEPARTMENT_OWNER_ROLE) as PayrollDepartment[]).forEach((d) => departments.add(d));
+      const allBranches = await this.db
+        .select({ id: schema.branches.id, name: schema.branches.name })
+        .from(schema.branches);
+      return { allowed: true, departments: [...departments], branches: allBranches };
+    }
+
+    const ownerDept = (Object.keys(DEPARTMENT_OWNER_ROLE) as PayrollDepartment[])
+      .find((d) => DEPARTMENT_OWNER_ROLE[d] === viewer.role);
+    if (ownerDept) departments.add(ownerDept);
+
+    if (viewer.role === 'HR_MANAGER') {
+      departments.add('LOGISTICS');
+      departments.add('HR');
+    }
+
+    if (viewer.currentBranchId) {
+      branchIds.add(viewer.currentBranchId);
+      if (await this.isBranchTeamSupervisorForDept(viewer.id, viewer.currentBranchId, 'CS')) {
+        departments.add('CS');
+      }
+      if (await this.isBranchTeamSupervisorForDept(viewer.id, viewer.currentBranchId, 'MARKETING')) {
+        departments.add('MARKETING');
+      }
+    }
+
+    if (isOrgWideDepartmentHead(viewer) && viewer.currentBranchId == null) {
+      const allBranches = await this.db
+        .select({ id: schema.branches.id, name: schema.branches.name })
+        .from(schema.branches);
+      return {
+        allowed: departments.size > 0 && allBranches.length > 0,
+        departments: [...departments],
+        branches: allBranches,
+      };
+    }
+
+    const branches = branchIds.size
+      ? await this.db
+          .select({ id: schema.branches.id, name: schema.branches.name })
+          .from(schema.branches)
+          .where(inArray(schema.branches.id, [...branchIds]))
+      : [];
+
+    return {
+      allowed: departments.size > 0 && branches.length > 0,
+      departments: [...departments],
+      branches,
+    };
+  }
+
   // ============================================
   // Reads
   // ============================================
@@ -666,12 +830,35 @@ export class PayrollBatchService {
         conditions.push(eq(schema.payrollBatches.branchId, viewer.currentBranchId));
       }
 
-      // Heads can only see their own dept
+      // Restrict branch-scoped non-admin viewers to departments they can actually prepare/review/process.
       const ownerDept = (Object.keys(DEPARTMENT_OWNER_ROLE) as PayrollDepartment[])
         .find((d) => DEPARTMENT_OWNER_ROLE[d] === viewer.role);
       const isHeadButNotHr = ownerDept && viewer.role !== 'HR_MANAGER';
-      if (isHeadButNotHr && !canReviewBatch(viewer) && !canProcessBatch(viewer)) {
-        conditions.push(eq(schema.payrollBatches.department, ownerDept));
+      if (!canReviewBatch(viewer) && !canProcessBatch(viewer)) {
+        const allowedDepts: PayrollDepartment[] = [];
+        if (isHeadButNotHr) allowedDepts.push(ownerDept);
+        if (viewer.role === 'HR_MANAGER' && viewer.currentBranchId) {
+          allowedDepts.push('LOGISTICS', 'HR');
+        }
+        if (viewer.currentBranchId && (await this.isBranchTeamSupervisorForDept(viewer.id, viewer.currentBranchId, 'CS'))) {
+          allowedDepts.push('CS');
+        }
+        if (viewer.currentBranchId && (await this.isBranchTeamSupervisorForDept(viewer.id, viewer.currentBranchId, 'MARKETING'))) {
+          allowedDepts.push('MARKETING');
+        }
+        const uniqueAllowed = [...new Set(allowedDepts)];
+        if (uniqueAllowed.length === 0) return { batches: [], byMonth: [] };
+        if (uniqueAllowed.length === 1) {
+          const firstAllowed = uniqueAllowed[0] as PayrollDepartment;
+          conditions.push(eq(schema.payrollBatches.department, firstAllowed));
+        } else {
+          conditions.push(
+            inArray(
+              schema.payrollBatches.department,
+              uniqueAllowed as unknown as typeof schema.payrollBatches.$inferSelect['department'][],
+            ),
+          );
+        }
       }
     }
 
@@ -715,7 +902,7 @@ export class PayrollBatchService {
     const batch = await this.requireBatch(batchId);
 
     // Permission check: same scoping as list
-    const allowedAsHead = canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment);
+    const allowedAsHead = await this.canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment);
     const allowed =
       isAdminLevel(viewer) ||
       canReviewBatch(viewer) ||
@@ -734,7 +921,14 @@ export class PayrollBatchService {
     const staffIds = payouts.map((p) => p.staffId);
     const staff = staffIds.length
       ? await this.db
-          .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role })
+          .select({
+            id: schema.users.id,
+            name: schema.users.name,
+            role: schema.users.role,
+            payoutBankName: schema.users.payoutBankName,
+            payoutAccountName: schema.users.payoutAccountName,
+            payoutAccountNumber: schema.users.payoutAccountNumber,
+          })
           .from(schema.users)
           .where(inArray(schema.users.id, staffIds))
       : [];
@@ -749,7 +943,7 @@ export class PayrollBatchService {
           .orderBy(desc(schema.earningsAdjustments.createdAt))
       : [];
 
-    const allowedTransitions = this.getAllowedTransitions(batch.status as PayrollBatchStatus, viewer);
+    const allowedTransitions = await this.getAllowedTransitions(batch, viewer);
 
     return {
       batch,
@@ -757,6 +951,9 @@ export class PayrollBatchService {
         ...p,
         staffName: staffById.get(p.staffId)?.name ?? p.staffId.slice(0, 8),
         staffRole: staffById.get(p.staffId)?.role ?? null,
+        payoutBankName: hasFinanceAccess(viewer) ? (staffById.get(p.staffId)?.payoutBankName ?? null) : null,
+        payoutAccountName: hasFinanceAccess(viewer) ? (staffById.get(p.staffId)?.payoutAccountName ?? null) : null,
+        payoutAccountNumber: hasFinanceAccess(viewer) ? (staffById.get(p.staffId)?.payoutAccountNumber ?? null) : null,
       })),
       adjustments,
       allowedTransitions,
@@ -830,15 +1027,21 @@ export class PayrollBatchService {
       .where(eq(schema.payrollBatches.id, batchId));
   }
 
-  private getAllowedTransitions(status: PayrollBatchStatus, viewer: SessionUser): string[] {
+  private async getAllowedTransitions(
+    batch: { status: PayrollBatchStatus; branchId: string; department: string },
+    viewer: SessionUser,
+  ): Promise<string[]> {
     const out: string[] = [];
-    if (status === 'DRAFT' && (isAdminLevel(viewer) || viewer.role.startsWith('HEAD_OF_') || viewer.role === 'HR_MANAGER')) {
+    if (
+      batch.status === 'DRAFT' &&
+      (await this.canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment))
+    ) {
       out.push('SUBMIT');
     }
-    if (status === 'PENDING_HR' && canReviewBatch(viewer)) {
+    if (batch.status === 'PENDING_HR' && canReviewBatch(viewer)) {
       out.push('APPROVE', 'REJECT');
     }
-    if (status === 'PENDING_FINANCE' && canProcessBatch(viewer)) {
+    if (batch.status === 'PENDING_FINANCE' && canProcessBatch(viewer)) {
       out.push('MARK_PAID', 'REJECT');
     }
     return out;

@@ -1,4 +1,5 @@
 import { Link } from '@remix-run/react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -53,6 +54,7 @@ function formatDate(iso: string): string {
 }
 
 export function MarketingCrossFunnelPage({ list, stats }: PageProps) {
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const statItems = [
     { label: 'Attempts', value: stats.totalAttempts },
     { label: 'Unique customers', value: stats.uniqueCustomers },
@@ -139,6 +141,8 @@ export function MarketingCrossFunnelPage({ list, stats }: PageProps) {
               columns={columns}
               data={list.rows}
               keyField="id"
+              loading={isLoaderRefetchBusy}
+              loadingVariant="overlay"
             />
           )}
         </CardBody>

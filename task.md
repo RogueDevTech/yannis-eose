@@ -3243,3 +3243,95 @@ Replace the flat table with an accordion list:
 
 **Acceptance Criteria:**
 - [x] CLAUDE.md updated; memory entry indexed.
+
+---
+
+## Phase 18: Cash Remittance — accountant-led workflow (CEO directive 2026-04-29)
+
+**Why:** The 3PL partners are not on-platform yet, so the existing "logistics submits a remittance, finance verifies" flow doesn't run. The accountant needs to be the one who records cash receipts off-platform (e.g. logistics dropped off cash at the office) and marks the corresponding orders as `COMPLETED`. The **schema already supports this** — `delivery_remittances` + `delivery_remittance_orders` + `delivery_remittance_outcomes` are in place — we only need to flip the **roles, eligibility rules, and UX**.
+
+**Reuse, not rebuild:** Keep the existing tables. The semantics shift:
+- `sent_by` (currently the 3PL user) → repurposed as **the accountant who recorded the remittance** (with new check that they're FINANCE_OFFICER / admin-class / Finance hat).
+- `status` enum reuses the existing values:
+  - `SENT` → "Pending" (recorded, not yet confirmed received)
+  - `RECEIVED` → "Completed" (cash confirmed; orders auto-flip to `COMPLETED`)
+  - `DISPUTED` → unchanged
+- `delivery_remittance_orders` enforces "an order can only be in one remittance" already (unique on `order_id`).
+
+### Task 18.1 — Server: eligibility query + create flow gated to accountant
+
+**API changes** in `LogisticsService` (rename method group → finance-facing) and/or new `FinanceService` methods:
+
+- New: `listDeliveredEligibleOrders({ branchId?, search?, deliveredAfter?, deliveredBefore?, locationId?, page, limit })` — returns orders where `status = 'DELIVERED'` AND `id NOT IN (SELECT order_id FROM delivery_remittance_orders)`. Joins to product names + amount + delivered_at + assigned CS + logistics location for display.
+- Tighten `createRemittance` permission: caller must be `FINANCE_OFFICER` OR `hasFinanceAccess()` (Finance hat) OR admin-class. Reject `TPL_MANAGER` for now (logistics not on-platform).
+- Allow `createRemittance` to optionally accept `markReceivedNow: boolean`. When true, the same transaction:
+  - Inserts the remittance with `status = 'RECEIVED'`, `received_at = now()`, `received_by = actor.id`.
+  - Bulk-transitions every linked order from `DELIVERED` → `COMPLETED` (using the existing transition state machine; emit `order:status_changed` per order).
+- New: `markRemittanceReceived({ remittanceId, comment? })` — flips a `SENT` remittance to `RECEIVED` and bulk-transitions its orders to `COMPLETED` in one `withActorAndBranch` transaction. Idempotent — no-op if already `RECEIVED`.
+- `markRemittanceDisputed({ remittanceId, reason })` exists or wire it up — no order status change.
+- All writes go through `withActorAndBranch` so RLS + audit attribution are correct.
+
+**Acceptance Criteria:**
+- [x] `logistics.listDeliveryRemittanceEligibleOrders` returns DELIVERED orders not yet on any remittance, accessible to Finance + admin.
+- [x] `logistics.createDeliveryRemittance` requires Finance access (or legacy TPL); enforces single-location constraint for Finance callers.
+- [x] `markReceivedNow: true` creates the remittance AND completes the orders atomically (no partial state).
+- [x] `logistics.markDeliveryRemittanceReceived` flips status and transitions every linked order to `COMPLETED` in one transaction.
+- [x] CLAUDE.md "When Building the Finance Module" updated with the Phase 18 spec.
+
+### Task 18.2 — Page restructure: `/admin/finance/delivery-remittances`
+
+Replace the current 3PL-centric layout with two stacked sections, both using the **shared `Tabs` component**:
+
+**Section A — "Create remittance" (top of page)**
+- Single-row CTA: `+ Create cash remittance` opens a multi-step modal:
+  1. **Pick orders** — `DataTable` of `listDeliveredEligibleOrders` with multi-select (checkbox per row), search, optional date filter, location filter. Footer shows running total of selected order count + sum of `total_amount`.
+  2. **Receipt + notes** — file upload (`FileUpload` → S3 `RECEIPTS` folder) for one or more receipt images, optional `notes` textarea, optional `markReceivedNow` checkbox ("Already received the cash — mark this remittance Completed and complete the orders now").
+  3. **Preview & submit** — read-only summary (count + amount + receipt thumbnails + comment + intended status). Submit via fetcher.
+
+**Section B — "Recorded remittances"**
+- Tabs with global `<Tabs>` component: `All` / `Pending` / `Received` / `Disputed` (status counts as the badge per tab, like the CS queue tabs).
+- Filter strip: `From` / `To` date range, `Sent by` searchable select (lists FINANCE_OFFICER + admins + Finance-hat holders so the accountant can filter who recorded what), search by order ID.
+- Table per tab: remittance ID short, sent-by name, recorded-at, order count, total amount, receipt count, status badge. Row → opens detail page (`$id` route).
+- On detail page: receipt gallery, linked orders table (with their statuses), comment, action buttons:
+  - Pending → `Mark received` (transitions orders to COMPLETED) / `Mark disputed` (with reason).
+  - Received → read-only.
+  - Disputed → read-only with reason; admin-only "reopen" action stays out-of-scope for now.
+
+**Acceptance Criteria:**
+- [x] Tabs use the shared `<Tabs>` component (consistent with CS queue / Marketing pages).
+- [x] Sent-by filter populated from FINANCE_OFFICER + Finance hat + admin-class roles.
+- [x] Multi-select picker shows total amount + order count live as the user toggles checkboxes.
+- [x] `markReceivedNow` checkbox in the create modal is wired through to the API and marks orders COMPLETED on submit.
+- [x] Detail page Mark Received atomically flips the remittance + cascades orders to COMPLETED (existing detail page now benefits from the cascade).
+- [x] Page sidebar entry stays as "Cash remittance" (renamed in Phase 18 prework).
+
+### Task 18.3 — RBAC + sidebar
+
+- Sidebar entry already labelled "Cash remittance" (done in prework).
+- Tighten the route loader to require `finance.read` AND any of {FINANCE_OFFICER, admin-class, Finance hat}. Hide the create CTA for non-write Finance viewers (e.g. read-only auditors) but show the list.
+- Tightened seed-permissions: ensure `finance.disburse` / `finance.read` covers the page; ensure `TPL_MANAGER` does NOT have access to create / mark-received (they had it for the legacy 3PL flow — strip if present and re-run `pnpm db:seed-permissions`).
+
+**Acceptance Criteria:**
+- [x] Non-Finance roles get redirected from the page.
+- [x] Service-layer gate on `createDeliveryRemittance` / `markDeliveryRemittanceReceived` allows Finance + admin + Finance hat (TPL_MANAGER stays for legacy 3PL path).
+- [x] CLAUDE.md "When Building the Finance Module" updated to describe the accountant-led flow.
+
+### Task 18.4 — Order detail integration
+
+- The "Mark delivered" path stays as today (CS / HoLogistics / Admin marks DELIVERED). The next step is now visible on the order detail: "Awaiting cash remittance reconciliation by Finance". No CS-side button to mark COMPLETED.
+- When the order is in a Pending remittance: order detail shows a small badge linking to `/admin/finance/delivery-remittances/<remittanceId>` so anyone can see why the order is still `DELIVERED` and not yet `COMPLETED`.
+- When the order is in a Received remittance and now `COMPLETED`: same badge with "Settled in remittance #…" text.
+
+**Acceptance Criteria:**
+- [x] Order detail surfaces remittance association when present (Pending/Settled/Disputed badge linking to the remittance).
+- [x] No regressions on CS / HoLogistics mark-delivered flow.
+
+### Task 18.5 — Docs + memory
+
+- CLAUDE.md "When Building the Finance Module" + "Order Lifecycle" updated to describe the new accountant-led path (3PL pathway noted as inactive until logistics partners onboard).
+- Memory entry: `project_cash_remittance_accountant_flow.md`.
+
+**Acceptance Criteria:**
+- [x] CLAUDE.md updated; memory entry indexed.
+
+**Phase 18 build order:** 18.1 (server) → 18.3 (rbac/seed) → 18.2 (UI) → 18.4 (order detail) → 18.5 (docs). 18.1 should land + deploy before 18.2 lands so the UI never points at a missing endpoint.

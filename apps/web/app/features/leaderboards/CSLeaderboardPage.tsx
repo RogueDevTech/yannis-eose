@@ -2,8 +2,9 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { Pagination } from '~/components/ui/pagination';
-import { Spinner } from '~/components/ui/spinner';
-import { useNavigation, useSearchParams } from '@remix-run/react';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useSearchParams } from '@remix-run/react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type { CSLeaderboardEntry } from '~/features/cs/types';
 
 const LEADERBOARD_PAGE_SIZE = 10;
@@ -28,8 +29,7 @@ export function CSLeaderboardPage({
 }: CSLeaderboardPageProps) {
   const periodLabel = leaderboardPeriod === 'all_time' ? 'all time' : (filters.startDate && filters.endDate ? `${filters.startDate} – ${filters.endDate}` : 'this month');
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
   const [searchParams, setSearchParams] = useSearchParams();
   const pageParam = Number(searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
@@ -49,11 +49,6 @@ export function CSLeaderboardPage({
             endDate={dateFilters.endDate}
             periodAllTime={dateFilters.periodAllTime}
           />
-          {isFilterLoading && (
-            <span className="flex items-center text-app-fg-muted" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
         </div>
       </div>
 
@@ -61,9 +56,11 @@ export function CSLeaderboardPage({
         {(lb: CSLeaderboardEntry[]) => {
           if (lb.length === 0) {
             return (
-              <div className="card p-8 text-center">
-                <p className="text-sm text-app-fg-muted">No closer data for {periodLabel}.</p>
-              </div>
+              <TableLoadingOverlay show={isFilterLoading}>
+                <div className="card p-8 text-center">
+                  <p className="text-sm text-app-fg-muted">No closer data for {periodLabel}.</p>
+                </div>
+              </TableLoadingOverlay>
             );
           }
           // 10/page client-side. Rank still reflects global position so #1 stays #1 regardless of page.
@@ -72,6 +69,7 @@ export function CSLeaderboardPage({
           const startIdx = (safePage - 1) * LEADERBOARD_PAGE_SIZE;
           const pagedLb = lb.slice(startIdx, startIdx + LEADERBOARD_PAGE_SIZE);
           return (
+            <TableLoadingOverlay show={isFilterLoading}>
             <div className="card p-0">
               <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
                 <h2 className="text-base font-semibold text-app-fg sm:text-lg">Closer performance</h2>
@@ -157,6 +155,7 @@ export function CSLeaderboardPage({
                 </div>
               )}
             </div>
+            </TableLoadingOverlay>
           );
         }}
       </DeferredSection>

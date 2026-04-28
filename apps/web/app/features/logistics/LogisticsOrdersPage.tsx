@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useFetcher, useSearchParams, useNavigation } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -9,7 +9,8 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
-import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
@@ -96,8 +97,7 @@ export function LogisticsOrdersPage({
 }: LogisticsOrdersPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showChartView, setShowChartView] = useState(false);
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
 
@@ -444,11 +444,6 @@ export function LogisticsOrdersPage({
           }))}
           className="w-auto"
         />
-        {isFilterLoading && (
-          <span className="flex items-center text-app-fg-muted" aria-hidden>
-            <Spinner size="sm" className="shrink-0" />
-          </span>
-        )}
       </div>
 
       {showChartView ? (
@@ -459,6 +454,7 @@ export function LogisticsOrdersPage({
           dailyCounts={dailyCounts}
         />
       ) : (
+      <TableLoadingOverlay show={isFilterLoading}>
       <div className="card p-0">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
@@ -729,6 +725,7 @@ export function LogisticsOrdersPage({
           })}
         </div>
       </div>
+      </TableLoadingOverlay>
       )}
 
       {!showChartView && totalPages > 1 && (

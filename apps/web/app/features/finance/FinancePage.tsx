@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useFetcher, useSearchParams, useNavigation } from '@remix-run/react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -14,7 +14,8 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
-import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Tabs } from '~/components/ui/tabs';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -41,8 +42,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
   const approvalFetcher = useFetcher();
   const overdueFetcher = useFetcher();
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigation = useNavigation();
-  const isFilterLoading = navigation.state === 'loading';
+  const isFilterLoading = useLoaderRefetchBusy();
 
   // Auto-flag overdue invoices on page load
   useEffect(() => {
@@ -131,11 +131,6 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
               endDate={filters.endDate}
               periodAllTime={filters.periodAllTime ?? false}
             />
-            {isFilterLoading && (
-              <span className="flex items-center text-app-fg-muted" aria-hidden>
-                <Spinner size="sm" className="shrink-0" />
-              </span>
-            )}
             <Button
               variant="secondary"
               size="sm"
@@ -354,6 +349,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
           </ResponsiveFormPanel>
 
           {/* Invoice Table */}
+          <TableLoadingOverlay show={isFilterLoading}>
           <div className="card p-0 overflow-hidden rounded-xl">
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full min-w-[980px] table-fixed">
@@ -536,6 +532,7 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
               </div>
             )}
           </div>
+          </TableLoadingOverlay>
         </>
       )}
 
@@ -543,14 +540,17 @@ export function FinancePage({ data }: { data: FinanceStreamData }) {
         <DeferredSection resolve={data.approvals} skeleton="table">
           {(resolvedApprovals) => {
             const allApprovals = resolvedApprovals as ApprovalRequest[];
-            return <ApprovalsTab
-              approvals={allApprovals}
-              filters={filters}
-              searchParams={searchParams}
-              setSearchParams={setSearchParams}
-              setApprovalModal={setApprovalModal}
-              setApprovalReason={setApprovalReason}
-            />;
+            return (
+              <ApprovalsTab
+                approvals={allApprovals}
+                filters={filters}
+                searchParams={searchParams}
+                setSearchParams={setSearchParams}
+                setApprovalModal={setApprovalModal}
+                setApprovalReason={setApprovalReason}
+                tableBusy={isFilterLoading}
+              />
+            );
           }}
         </DeferredSection>
       )}
@@ -611,6 +611,7 @@ function ApprovalsTab({
   setSearchParams,
   setApprovalModal,
   setApprovalReason,
+  tableBusy = false,
 }: {
   approvals: ApprovalRequest[];
   filters: { approvalStatus: string };
@@ -618,6 +619,7 @@ function ApprovalsTab({
   setSearchParams: (p: URLSearchParams) => void;
   setApprovalModal: (v: { requestId: string; action: string } | null) => void;
   setApprovalReason: (v: string) => void;
+  tableBusy?: boolean;
 }) {
   const [page, setPage] = useState(1);
   const totalPages = Math.ceil(approvals.length / ITEMS_PER_PAGE);
@@ -653,6 +655,7 @@ function ApprovalsTab({
       </div>
 
       {/* Approval Queue Table */}
+      <TableLoadingOverlay show={tableBusy}>
       <div className="card p-0 mt-4 overflow-hidden rounded-xl">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full min-w-[920px] table-fixed">
@@ -770,6 +773,7 @@ function ApprovalsTab({
           </div>
         )}
       </div>
+      </TableLoadingOverlay>
     </>
   );
 }

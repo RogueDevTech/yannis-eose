@@ -369,6 +369,7 @@ export const formConfigSchema = z.object({
   showGender: z.boolean().optional(),
   showPreferredDeliveryDate: z.boolean().optional(),
   showPaymentMethod: z.boolean().optional(),
+  showProductImages: z.boolean().optional(),
   requireDeliveryAddress: z.boolean().optional(),
   requireDeliveryNotes: z.boolean().optional(),
   requireDeliveryState: z.boolean().optional(),

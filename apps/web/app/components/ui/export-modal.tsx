@@ -541,7 +541,14 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
           <Button type="button" variant="secondary" onClick={onClose} disabled={isExporting}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={selectedColumns.length === 0 || isExporting} loading={isExporting} loadingText="Generating…">
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={selectedColumns.length === 0 || isExporting}
+            loading={isExporting}
+            loadingText="Generating…"
+            className="bg-gradient-to-r from-brand-600 to-brand-500 border border-brand-700/30 shadow-md shadow-brand-900/20 hover:from-brand-500 hover:to-brand-400"
+          >
             Generate report
           </Button>
         </div>

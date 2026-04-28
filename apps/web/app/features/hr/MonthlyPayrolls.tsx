@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { FormSelect } from '~/components/ui/form-select';
@@ -48,8 +50,13 @@ function formatMonth(periodMonth: string): string {
 
 function canPrepareDept(viewer: ViewerInfo, dept: PayrollDepartment, branchId: string): boolean {
   if (ADMIN_ROLES.has(viewer.role)) return true;
+  if (viewer.prepareDepartments?.includes(dept) && viewer.prepareBranchIds?.includes(branchId)) return true;
+  if (viewer.role === 'HR_MANAGER' && viewer.currentBranchId === branchId && (dept === 'LOGISTICS' || dept === 'HR')) {
+    return true;
+  }
   if (viewer.role !== DEPT_OWNER_ROLE[dept]) return false;
-  return !!viewer.currentBranchId && viewer.currentBranchId === branchId;
+  if (viewer.currentBranchId == null && viewer.role.startsWith('HEAD_OF_')) return true;
+  return viewer.currentBranchId === branchId;
 }
 
 function canReview(viewer: ViewerInfo): boolean {
@@ -77,6 +84,9 @@ interface BatchDetail {
     deductionsTotal: string;
     totalPayout: string;
     status: string;
+    payoutBankName?: string | null;
+    payoutAccountName?: string | null;
+    payoutAccountNumber?: string | null;
   }>;
   adjustments: Array<{
     id: string;
@@ -87,6 +97,17 @@ interface BatchDetail {
     createdAt: string;
   }>;
   allowedTransitions: string[];
+}
+
+interface PayrollPreview {
+  staffCount: number;
+  totalAmount: number;
+  rows: Array<{
+    staffId: string;
+    staffName: string;
+    staffRole: string;
+    totalPayout: number;
+  }>;
 }
 
 interface MonthlyPayrollsProps {
@@ -107,6 +128,8 @@ export function MonthlyPayrolls({
   fetchBatchDetail,
 }: MonthlyPayrollsProps) {
   const fetcher = useFetcher();
+  const previewFetcher = useFetcher<{ success?: boolean; preview?: PayrollPreview; error?: string }>();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const [, setSearchParams] = useSearchParams();
   useFetcherToast(fetcher.data, { successMessage: 'Payroll updated' });
 
@@ -116,6 +139,9 @@ export function MonthlyPayrolls({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [generateBranchId, setGenerateBranchId] = useState<string>('');
+  const [generateDepartment, setGenerateDepartment] = useState<PayrollDepartment>('CS');
+  const [generatePeriodMonth, setGeneratePeriodMonth] = useState('');
+  const [preview, setPreview] = useState<PayrollPreview | null>(null);
   // Tracks whether the most recent fetcher transition was a generate submit — so the close-on-success
   // effect doesn't fire for OTHER actions sharing this fetcher (approve, reject, mark paid, etc.).
   const generateInFlightRef = useRef(false);
@@ -127,16 +153,21 @@ export function MonthlyPayrolls({
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   }, [showGenerate]);
 
-  // Available departments to GENERATE — admins see all, heads see only theirs, HR sees HR
+  // Available departments to GENERATE — includes backend-provided prepare access
   const generatableDepartments: PayrollDepartment[] = useMemo(() => {
     if (ADMIN_ROLES.has(viewer.role)) return ALL_DEPARTMENTS;
+    if (viewer.prepareDepartments?.length) return viewer.prepareDepartments;
+    if (viewer.role === 'HR_MANAGER') return ['LOGISTICS', 'HR'];
     const matching = ALL_DEPARTMENTS.find((d) => DEPT_OWNER_ROLE[d] === viewer.role);
     return matching ? [matching] : [];
-  }, [viewer.role]);
+  }, [viewer.role, viewer.prepareDepartments]);
 
-  // Default branch for the generate form — admin picks; head locks to their branch
+  // Default branch set for generate actions
   const generatableBranches: BranchOption[] = useMemo(() => {
     if (ADMIN_ROLES.has(viewer.role)) return branches;
+    if (viewer.prepareBranchIds?.length) {
+      return branches.filter((b) => viewer.prepareBranchIds?.includes(b.id));
+    }
     const own = branches.find((b) => b.id === viewer.currentBranchId);
     return own ? [own] : [];
   }, [viewer, branches]);
@@ -146,6 +177,16 @@ export function MonthlyPayrolls({
       setGenerateBranchId(generatableBranches[0]?.id ?? '');
     }
   }, [showGenerate, generateBranchId, generatableBranches]);
+
+  useEffect(() => {
+    if (!showGenerate) return;
+    if (generatableDepartments.length > 0 && !generatableDepartments.includes(generateDepartment)) {
+      setGenerateDepartment(generatableDepartments[0]);
+    }
+    if (!generatePeriodMonth) {
+      setGeneratePeriodMonth(currentMonth);
+    }
+  }, [showGenerate, generateDepartment, generatableDepartments, generatePeriodMonth, currentMonth]);
 
   // Open / close detail modal — fetch on open
   useEffect(() => {
@@ -210,6 +251,15 @@ export function MonthlyPayrolls({
     }
   }, [fetcher.state, fetcher.formData, fetcher.data, showGenerate]);
 
+  useEffect(() => {
+    if (!showGenerate) return;
+    if (previewFetcher.state !== 'idle') return;
+    const result = previewFetcher.data;
+    if (result?.preview) {
+      setPreview(result.preview);
+    }
+  }, [showGenerate, previewFetcher.state, previewFetcher.data]);
+
   const showGenerateButton = generatableDepartments.length > 0 && generatableBranches.length > 0;
 
   return (
@@ -223,6 +273,7 @@ export function MonthlyPayrolls({
         </div>
       )}
 
+      <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[12rem]">
       {/* Empty state */}
       {monthlyPayrolls.length === 0 && (
         <EmptyState
@@ -244,6 +295,7 @@ export function MonthlyPayrolls({
           onOpenBatch={(id) => setOpenBatchId(id)}
         />
       ))}
+      </TableLoadingOverlay>
 
       {/* Generate Batch modal — stays open until the server responds. The close-on-success effect
           above (`generate-batch lifecycle`) flips `showGenerate` to false only after fetcher returns
@@ -256,6 +308,7 @@ export function MonthlyPayrolls({
             if (generateInFlightRef.current || fetcher.state !== 'idle') return;
             setShowGenerate(false);
             setGenerateError(null);
+            setPreview(null);
           }}
           maxWidth="max-w-md"
           backdropBlur
@@ -283,16 +336,63 @@ export function MonthlyPayrolls({
               name="department"
               required
               options={generatableDepartments.map((d) => ({ value: d, label: DEPT_LABEL[d] }))}
-              defaultValue={generatableDepartments[0]}
+              value={generateDepartment}
+              onChange={(e) => {
+                setGenerateDepartment(e.target.value as PayrollDepartment);
+                setPreview(null);
+              }}
             />
             <TextInput
               label="Month"
               name="periodMonth"
               type="month"
               required
-              defaultValue={currentMonth}
+              value={generatePeriodMonth}
+              onChange={(e) => {
+                setGeneratePeriodMonth(e.target.value);
+                setPreview(null);
+              }}
               hint="Defaults to the current month. Pick another to back-fill or pre-stage."
             />
+            <div className="rounded-md border border-app-border bg-app-hover p-3 space-y-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={!generateBranchId || !generateDepartment || !generatePeriodMonth}
+                loading={previewFetcher.state === 'submitting'}
+                loadingText="Previewing…"
+                onClick={() =>
+                  previewFetcher.submit(
+                    {
+                      intent: 'previewBatch',
+                      branchId: generateBranchId,
+                      department: generateDepartment,
+                      periodMonth: generatePeriodMonth,
+                    },
+                    { method: 'post' },
+                  )
+                }
+              >
+                Preview roster & expected pay
+              </Button>
+              {preview && (
+                <div className="text-xs text-app-fg-muted space-y-1">
+                  <p>
+                    Staff: <span className="font-medium text-app-fg">{preview.staffCount}</span> · Expected total:{' '}
+                    <span className="font-medium text-app-fg"><NairaPrice amount={preview.totalAmount} /></span>
+                  </p>
+                  <div className="max-h-28 overflow-y-auto pr-1 space-y-0.5">
+                    {preview.rows.slice(0, 8).map((row) => (
+                      <p key={row.staffId}>
+                        {row.staffName} ({row.staffRole.replace(/_/g, ' ')}) — <NairaPrice amount={row.totalPayout} />
+                      </p>
+                    ))}
+                    {preview.rows.length > 8 && <p>…and {preview.rows.length - 8} more</p>}
+                  </div>
+                </div>
+              )}
+            </div>
             {generateError && (
               <div className="rounded-md border border-danger-200 dark:border-danger-700/50 bg-danger-50 dark:bg-danger-900/20 px-3 py-2 text-xs text-danger-700 dark:text-danger-300">
                 {generateError}
@@ -313,7 +413,7 @@ export function MonthlyPayrolls({
                 variant="secondary"
                 size="sm"
                 disabled={fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'generateBatch'}
-                onClick={() => { setShowGenerate(false); setGenerateError(null); }}
+                onClick={() => { setShowGenerate(false); setGenerateError(null); setPreview(null); }}
               >
                 Cancel
               </Button>
@@ -492,6 +592,11 @@ function BatchDetailModal({
       {/* Payouts list */}
       <div>
         <h4 className="text-xs font-medium text-app-fg-muted uppercase tracking-wide mb-2">Staff payouts</h4>
+        {batch.status === 'PAID' && (
+          <p className="text-xs text-success-600 dark:text-success-400 mb-2">
+            Finance marked this batch paid — every staff payout below is now PAID.
+          </p>
+        )}
         {payouts.length === 0 ? (
           <EmptyState
             title="No payouts in this batch"
@@ -508,6 +613,7 @@ function BatchDetailModal({
                   <th className="table-header !py-2 !px-0 pr-3 text-right">Add-ons</th>
                   <th className="table-header !py-2 !px-0 pr-3 text-right">Deductions</th>
                   <th className="table-header !py-2 !px-0 pr-3 text-right">Net</th>
+                  <th className="table-header !py-2 !px-0 pr-3 text-right">Status</th>
                   {batch.status === 'PENDING_HR' && canReview(viewer) && <th className="table-header !py-2 !px-0 pr-3 w-0" />}
                 </tr>
               </thead>
@@ -544,6 +650,9 @@ function BatchDetailModal({
                         {Number(p.deductionsTotal) > 0 ? <>−<NairaPrice amount={Number(p.deductionsTotal)} /></> : '—'}
                       </td>
                       <td className="py-2 pr-3 text-right font-semibold"><NairaPrice amount={Number(p.totalPayout)} /></td>
+                      <td className="py-2 pr-3 text-right">
+                        <StatusBadge status={p.status} />
+                      </td>
                       {batch.status === 'PENDING_HR' && canReview(viewer) && (
                         <td className="py-2 pr-3 text-right">
                           <Button

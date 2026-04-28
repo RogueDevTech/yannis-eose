@@ -26,28 +26,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const minQty = minQtyRaw === '' ? undefined : Number.parseInt(minQtyRaw, 10);
   const maxQty = maxQtyRaw === '' ? undefined : Number.parseInt(maxQtyRaw, 10);
 
-  const [transfersRes, productsRes, locationsRes] = await Promise.all([
+  // Fetch transfers + locations first. Products are paginated below so archived /
+  // inactive items still resolve a name (otherwise the row shows "Unknown product").
+  const [transfersRes, locationsRes] = await Promise.all([
     apiRequest<unknown>('/trpc/inventory.transfers?input=' + encodeURIComponent(JSON.stringify({})), {
       method: 'GET',
       cookie,
     }),
-    apiRequest<unknown>(
-      '/trpc/products.list?input=' + encodeURIComponent(JSON.stringify({ limit: 200, status: 'ACTIVE' })),
-      { method: 'GET', cookie },
-    ),
     apiRequest<unknown>(
       '/trpc/logistics.listLocations?input=' + encodeURIComponent(JSON.stringify({ limit: 100 })),
       { method: 'GET', cookie },
     ),
   ]);
 
+  // Walk every page of products.list (max 100 per call). Without this, transfers
+  // referencing the 101st+ product (or any INACTIVE / ARCHIVED one) silently fall
+  // through to "Unknown product" because the previous fetch was capped + ACTIVE-only.
+  type ProductRow = { id: string; name: string };
+  const products: ProductRow[] = [];
+  for (let page = 1; page <= 50; page++) {
+    const res = await apiRequest<unknown>(
+      '/trpc/products.list?input=' + encodeURIComponent(JSON.stringify({ page, limit: 100 })),
+      { method: 'GET', cookie },
+    );
+    if (!res.ok) break;
+    const pageRows =
+      (res.data as { result?: { data?: { products?: ProductRow[] } } })?.result?.data?.products ?? [];
+    if (pageRows.length === 0) break;
+    products.push(...pageRows);
+    if (pageRows.length < 100) break;
+  }
+
   const transfers =
     transfersRes.ok
       ? ((transfersRes.data as { result?: { data?: TransferConfirmationRecord[] } })?.result?.data ?? [])
-      : [];
-  const products =
-    productsRes.ok
-      ? ((productsRes.data as { result?: { data?: { products?: Array<{ id: string; name: string }> } } })?.result?.data?.products ?? [])
       : [];
   const locations =
     locationsRes.ok
@@ -123,6 +135,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const transferId = formData.get('transferId')?.toString();
     const quantityReceived = parseInt(formData.get('quantityReceived')?.toString() ?? '0', 10);
     const shrinkageReason = formData.get('shrinkageReason')?.toString()?.trim() || undefined;
+    const receiverNotes = formData.get('receiverNotes')?.toString()?.trim() || undefined;
 
     if (!transferId) {
       return json({ error: 'Transfer ID is required' }, { status: 400 });
@@ -135,6 +148,7 @@ export async function action({ request }: ActionFunctionArgs) {
         transferId,
         quantityReceived,
         ...(shrinkageReason && { shrinkageReason }),
+        ...(receiverNotes && { receiverNotes }),
       },
     });
 

@@ -47,6 +47,34 @@ function canCopyOrderSummaryForChat(
   );
 }
 
+type AllocatableLocationDescriptor = {
+  address: string | null;
+  eligible: boolean;
+  reason: string | null;
+  availabilityByProduct: Array<{
+    productId: string;
+    productName: string;
+    needed: number;
+    available: number;
+  }> | null;
+};
+
+// Builds the row description for an entry in the allocate-location dropdown.
+// When the API returns availability per product (HoCS, HoLogistics, admins,
+// LogisticsManager, TPL_MANAGER, etc.), surface "Product: N available" so the
+// allocator can pick the right hub without leaving the modal. CS_AGENTs receive
+// `availabilityByProduct: null` from the API and just see the address —
+// remaining-stock numbers are intentionally hidden from them.
+function describeAllocatableLocation(loc: AllocatableLocationDescriptor): string | undefined {
+  if (!loc.eligible) return loc.reason ?? 'Unavailable';
+  if (loc.availabilityByProduct && loc.availabilityByProduct.length > 0) {
+    return loc.availabilityByProduct
+      .map((p) => `${p.productName}: ${p.available} available`)
+      .join(' \u00b7 ');
+  }
+  return loc.address ?? undefined;
+}
+
 // ── Constants ────────────────────────────────────────────────────
 
 const STATUS_FLOW = [
@@ -968,6 +996,29 @@ export function OrderDetailPage({
           <OrderStatusBadge status={order.status} />
         </div>
       </div>
+
+      {/* Phase 18 — surface the cash-remittance association so anyone reading
+          the order knows why a DELIVERED order isn't yet COMPLETED, or where
+          the cash receipt that closed it out lives. */}
+      {order.remittanceId && (
+        <Link
+          to={`/admin/finance/delivery-remittances/${order.remittanceId}`}
+          prefetch="intent"
+          className="inline-flex items-center gap-2 rounded-md border border-app-border bg-app-elevated px-3 py-1.5 text-xs font-medium text-app-fg-muted hover:text-app-fg hover:border-brand-300 dark:hover:border-brand-700 transition-colors w-fit"
+        >
+          <span className="text-app-fg-muted">Cash remittance:</span>
+          <span className="font-mono">{order.remittanceId.slice(0, 8)}…</span>
+          <span className="text-app-fg-muted">·</span>
+          <span>
+            {order.remittanceStatus === 'RECEIVED'
+              ? 'Settled'
+              : order.remittanceStatus === 'DISPUTED'
+                ? 'Disputed'
+                : 'Pending'}
+          </span>
+          <span aria-hidden>→</span>
+        </Link>
+      )}
 
       {showActionError && actionError && (
         <PageNotification
@@ -1921,9 +1972,7 @@ export function OrderDetailPage({
               options={allocatableLocations.map((loc) => ({
                 value: loc.id,
                 label: loc.name,
-                description: loc.eligible
-                  ? (loc.address ?? undefined)
-                  : (loc.reason ?? 'Unavailable'),
+                description: describeAllocatableLocation(loc),
                 disabled: !loc.eligible,
               }))}
             />

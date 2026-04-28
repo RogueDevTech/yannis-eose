@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, useTransition } from 'react';
-import { Link, useFetcher, useNavigation, useRevalidator, useRouteLoaderData, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useRevalidator, useRouteLoaderData, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { Textarea } from '~/components/ui/textarea';
@@ -8,6 +8,8 @@ import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast } from '~/components/ui/toast';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Tabs } from '~/components/ui/tabs';
@@ -844,7 +846,7 @@ export function CSDashboardPage({
   const fetcher = useFetcher();
   const fetcherStateRef = useRef(fetcher.state);
   const revalidator = useRevalidator();
-  const navigation = useNavigation();
+  const isRouteLoaderBusy = useLoaderRefetchBusy();
   const [searchParams, setSearchParams] = useSearchParams();
   const [hotSwapSearchPending, startHotSwapSearchTransition] = useTransition();
   const claimFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
@@ -1265,7 +1267,7 @@ export function CSDashboardPage({
   const hotSwapListLoading =
     Boolean(hotSwapFrom) &&
     hotSwapOrdersPayload?.forAgentId !== hotSwapFrom &&
-    (navigation.state === 'loading' || hotSwapSearchPending);
+    (isRouteLoaderBusy || hotSwapSearchPending);
 
   const hotSwapSourceOrders = effectiveHotSwapPayload?.orders ?? [];
   const hotSwapSourceTotal = effectiveHotSwapPayload?.total ?? 0;
@@ -2474,14 +2476,9 @@ export function CSDashboardPage({
               </div>
             </div>
 
-            {hotSwapFrom && hotSwapListLoading && (
-              <div className="flex items-center justify-center gap-2 py-8 text-app-fg-muted text-sm">
-                <Spinner size="sm" />
-                Loading orders for this closer…
-              </div>
-            )}
-
-            {hotSwapFrom && !hotSwapListLoading && hotSwapSourceOrders.length > 0 && (
+            {hotSwapFrom && (
+              <TableLoadingOverlay show={hotSwapListLoading}>
+            {hotSwapSourceOrders.length > 0 ? (
               <>
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-sm text-app-fg-muted">
@@ -2578,13 +2575,15 @@ export function CSDashboardPage({
                   })}
                 </div>
               </>
-            )}
-
-            {hotSwapFrom && !hotSwapListLoading && hotSwapSourceOrders.length === 0 && (
+            ) : !hotSwapListLoading ? (
               <p className="text-sm text-app-fg-muted text-center py-4">
                 No open CS-queue orders for this closer (nothing in Unprocessed / Assigned / Engaged with them as
                 assignee). If you expected more, confirm branch context and that orders are still in the CS stage.
               </p>
+            ) : (
+              <div className="min-h-[12rem]" aria-hidden />
+            )}
+              </TableLoadingOverlay>
             )}
           </div>
 

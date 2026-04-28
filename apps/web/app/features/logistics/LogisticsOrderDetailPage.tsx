@@ -27,6 +27,25 @@ export interface RiderOption {
   logisticsLocationId: string | null;
 }
 
+export interface RichAllocatableLocation {
+  id: string;
+  name: string;
+  address: string | null;
+  whatsappGroupLink?: string | null;
+  eligible: boolean;
+  reason: string | null;
+  /**
+   * Per-product remaining stock at this location for the order's line items.
+   * Server returns `null` when the viewer is not allowed to see counts (e.g. CS_AGENT).
+   */
+  availabilityByProduct: Array<{
+    productId: string;
+    productName: string;
+    needed: number;
+    available: number;
+  }> | null;
+}
+
 export interface LogisticsOrderDetailPageProps {
   order: OrderDetail;
   history: Promise<HistoryEntry[]>;
@@ -38,6 +57,28 @@ export interface LogisticsOrderDetailPageProps {
   backLabel?: string;
   /** When provided (e.g. TPL), only these locations in allocate dropdown */
   allocatableLocations?: Location[];
+  /**
+   * Rich allocatable locations from `orders.listAllocatableLocations`. When provided,
+   * the allocate dropdown shows per-product remaining stock and ineligibility reasons
+   * (and disables ineligible options). Falls back to `allocatableLocations`/`locations`
+   * with the dispatch-locked indicator when absent.
+   */
+  richAllocatableLocations?: RichAllocatableLocation[];
+}
+
+// Builds the row description for an entry in the allocate-location dropdown when
+// the rich allocatable list is available. When `availabilityByProduct` is non-null
+// (HoCS, HoLogistics, admins, LogisticsManager, TPL_MANAGER, ...), surface the
+// remaining stock per ordered product. CS_AGENTs receive `null` from the API and
+// just see the address — counts are intentionally hidden from them.
+function describeRichAllocatableLocation(loc: RichAllocatableLocation): string | undefined {
+  if (!loc.eligible) return loc.reason ?? 'Unavailable';
+  if (loc.availabilityByProduct && loc.availabilityByProduct.length > 0) {
+    return loc.availabilityByProduct
+      .map((p) => `${p.productName}: ${p.available} available`)
+      .join(' \u00b7 ');
+  }
+  return loc.address ?? undefined;
 }
 
 const DEFAULT_BACK_LINK = '/admin/logistics/orders';
@@ -444,6 +485,7 @@ export function LogisticsOrderDetailPage({
   backLink = DEFAULT_BACK_LINK,
   backLabel = 'Logistics Orders',
   allocatableLocations: allocatableLocationsProp,
+  richAllocatableLocations,
 }: LogisticsOrderDetailPageProps) {
   const fetcher = useFetcher();
   const { toast } = useToast();
@@ -930,12 +972,21 @@ export function LogisticsOrderDetailPage({
                     disabled={isSubmitting}
                     placeholder="Select location..."
                     searchPlaceholder="Search locations..."
-                    options={allocatableLocations.map((loc) => ({
-                      value: loc.id,
-                      label: loc.name,
-                      disabled: Boolean(loc.dispatchLocked),
-                      description: loc.dispatchLocked ? 'Dispatch locked for reconciliation' : undefined,
-                    }))}
+                    options={
+                      richAllocatableLocations && richAllocatableLocations.length > 0
+                        ? richAllocatableLocations.map((loc) => ({
+                            value: loc.id,
+                            label: loc.name,
+                            disabled: !loc.eligible,
+                            description: describeRichAllocatableLocation(loc),
+                          }))
+                        : allocatableLocations.map((loc) => ({
+                            value: loc.id,
+                            label: loc.name,
+                            disabled: Boolean(loc.dispatchLocked),
+                            description: loc.dispatchLocked ? 'Dispatch locked for reconciliation' : undefined,
+                          }))
+                    }
                   />
                 </div>
                 <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={isSubmitting}>

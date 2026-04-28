@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Form, useNavigation, useSearchParams } from '@remix-run/react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { DataTable, type TableColumn } from '~/components/ui/data-table';
@@ -288,6 +289,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
     if (actionData?.error) setDismissedError(false);
   }, [actionData?.error]);
   const navigation = useNavigation();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
 
   // Close modal on successful action
   useEffect(() => {
@@ -472,6 +474,8 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
           columns={columns}
           data={categories}
           keyField="id"
+          loading={isLoaderRefetchBusy}
+          loadingVariant="overlay"
           emptyTitle="No categories found"
           emptyDescription="Create one to get started."
           emptyAction={

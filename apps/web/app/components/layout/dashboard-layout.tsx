@@ -212,12 +212,6 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.logistics,
         permission: 'logistics.write',
       },
-      {
-        label: 'Returns & Restock',
-        href: '/admin/returns',
-        icon: SidebarIcons.returns,
-        permission: 'returns.read',
-      },
     ],
   },
   {
@@ -230,9 +224,15 @@ const navStructure: NavGroupDef[] = [
         permission: 'finance.read',
       },
       {
-        label: 'Delivery Cash Remittances',
+        label: 'Cash remittance',
         href: '/admin/finance/delivery-remittances',
         icon: SidebarIcons.remittances,
+        permission: 'finance.read',
+      },
+      {
+        label: 'Payout',
+        href: '/admin/finance/payout',
+        icon: SidebarIcons.finance,
         permission: 'finance.read',
       },
       {
@@ -308,16 +308,6 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.leaderboards,
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'],
-      },
-      // Payouts: per-staff disbursement view. HR + admins via permission, Finance Officer via the
-      // explicit role allow-list. Heads of Department do NOT need raw payout visibility — they see
-      // their team's payouts inside the Monthly Payroll batch detail panel.
-      {
-        label: 'Payouts',
-        href: '/hr/payouts',
-        icon: SidebarIcons.disbursements,
-        permission: 'hr.read',
-        roles: ['FINANCE_OFFICER'],
       },
       // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
       // Head of Marketing / Head of CS hold `users.read` for other features but must not see
@@ -498,7 +488,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/finance/delivery-remittances',
     '/admin/finance/disbursements',
   ],
-  STOCK_MANAGER: ['/admin', '/admin/inventory', '/admin/transfers', '/admin/returns'],
+  STOCK_MANAGER: ['/admin', '/admin/inventory', '/admin/transfers'],
   HR_MANAGER: ['/admin', '/hr/payroll', '/hr/users'],
 };
 

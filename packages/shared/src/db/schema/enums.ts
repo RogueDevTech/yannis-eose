@@ -236,6 +236,9 @@ export const remittanceStatusEnum = pgEnum('remittance_status', [
   'DISPUTED',
 ]);
 
+/** Settlement line status for remittance outcomes (approved slice vs disputed slice). */
+export const remittanceOutcomeStatusEnum = pgEnum('remittance_outcome_status', ['APPROVED', 'DISPUTED']);
+
 /** Status of a delivery confirmation request (rider/3PL submit → HOL approve/reject). */
 export const deliveryConfirmationRequestStatusEnum = pgEnum('delivery_confirmation_request_status', [
   'PENDING',

@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -7,11 +9,12 @@ import { PageHeader } from '~/components/ui/page-header';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
-import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills';
+import { Textarea } from '~/components/ui/textarea';
 
 export interface TransferConfirmationRecord {
   id: string;
@@ -27,7 +30,12 @@ export interface TransferConfirmationRecord {
   fromLocationName: string;
   toLocationName: string;
   shrinkageReason: string | null;
+  /** Optional comment the receiver writes when marking received (incl. shrinkage notes). */
+  receiverNotes?: string | null;
   senderName?: string | null;
+  outcomeStatus?: 'APPROVED' | 'DISPUTED' | 'IN_TRANSIT' | 'RECEIVED' | 'SENT' | string;
+  outcomeQuantity?: number | null;
+  outcomeReason?: string | null;
 }
 
 export interface RemittancesAdminPageProps {
@@ -49,28 +57,41 @@ export interface RemittancesAdminPageProps {
 
 export function RemittancesAdminPage({ remittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const [searchParams, setSearchParams] = useSearchParams();
   const [markingId, setMarkingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pending' | 'processed'>('pending');
   const [quantityReceived, setQuantityReceived] = useState<Record<string, string>>({});
   const [shrinkageReason, setShrinkageReason] = useState<Record<string, string>>({});
+  const [receiverNotes, setReceiverNotes] = useState<Record<string, string>>({});
   const [confirmTarget, setConfirmTarget] = useState<TransferConfirmationRecord | null>(null);
   const [confirmMode, setConfirmMode] = useState<'receive' | 'reject'>('receive');
 
-  useFetcherToast(fetcher.data, { successMessage: 'Transfer receipt recorded' });
+  useFetcherToast(fetcher.data, { successMessage: 'Transfer recorded' });
 
   const sentRemittances = remittances.filter((r) => r.transferStatus === 'IN_TRANSIT');
-  const receivedOrDisputed = remittances.filter((r) => r.transferStatus === 'RECEIVED' || r.transferStatus === 'DISPUTED');
-  const receivedCount = remittances.filter((r) => r.transferStatus === 'RECEIVED').length;
-  const disputedCount = remittances.filter((r) => r.transferStatus === 'DISPUTED').length;
+  const receivedOrDisputed = remittances.filter(
+    (r) => r.outcomeStatus === 'APPROVED' || r.outcomeStatus === 'DISPUTED',
+  );
+  const receivedCount = remittances.filter((r) => r.outcomeStatus === 'APPROVED').length;
+  const disputedCount = remittances.filter((r) => r.outcomeStatus === 'DISPUTED').length;
   const totalQuantitySent = remittances.reduce((sum, r) => sum + r.quantitySent, 0);
-  const totalQuantityReceived = remittances.reduce((sum, r) => sum + (r.quantityReceived ?? 0), 0);
+  const totalQuantityReceived = remittances.reduce((sum, r) => {
+    if (r.outcomeStatus === 'APPROVED') return sum + (r.outcomeQuantity ?? 0);
+    return sum;
+  }, 0);
 
-  useEffect(() => {
-    if (activeTab === 'pending' && sentRemittances.length === 0 && receivedOrDisputed.length > 0) {
-      setActiveTab('processed');
-    }
-  }, [activeTab, sentRemittances.length, receivedOrDisputed.length]);
+  // Status filter pills — single source of truth for which list is shown. Drives the
+  // URL `status` param so the loader can scope server-side filtering on next load.
+  const statusValue = filters.status; // '' | IN_TRANSIT | RECEIVED | DISPUTED
+  const statusPillOptions: FilterPillOption[] = useMemo(
+    () => [
+      { value: '', label: 'All', count: remittances.length },
+      { value: 'IN_TRANSIT', label: 'Pending', count: sentRemittances.length, dotColor: 'bg-warning-500' },
+      { value: 'RECEIVED', label: 'Received', count: receivedCount, dotColor: 'bg-success-500' },
+      { value: 'DISPUTED', label: 'Disputed', count: disputedCount, dotColor: 'bg-danger-500' },
+    ],
+    [remittances.length, sentRemittances.length, receivedCount, disputedCount],
+  );
 
   useEffect(() => {
     if (fetcher.state === 'idle' && (fetcher.data as { success?: boolean } | undefined)?.success) {
@@ -90,6 +111,8 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     formData.set('quantityReceived', String(qtyNum));
     const reason = shrinkageReason[remittance.id]?.trim();
     if (reason) formData.set('shrinkageReason', reason);
+    const notes = receiverNotes[remittance.id]?.trim();
+    if (notes) formData.set('receiverNotes', notes);
     fetcher.submit(formData, { method: 'post' });
   };
 
@@ -102,6 +125,8 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     formData.set('transferId', remittance.id);
     formData.set('quantityReceived', '0');
     formData.set('shrinkageReason', reason);
+    const notes = receiverNotes[remittance.id]?.trim();
+    if (notes) formData.set('receiverNotes', notes);
     fetcher.submit(formData, { method: 'post' });
   };
 
@@ -144,7 +169,18 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
         ]}
       />
 
+      {/* Status pills first — they're the primary segmentation. The FilterPills drive
+          the URL `status` param and replace the previous "Pending receipt / Received-Disputed"
+          tab pair plus the duplicate "All statuses" dropdown. */}
       <div className="card p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterPills
+            options={statusPillOptions}
+            value={statusValue}
+            onChange={(v) => setFilterParam('status', v)}
+            size="sm"
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <SearchInput
             controlSize="sm"
@@ -153,18 +189,6 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
             value={filters.search}
             onChange={(value) => setFilterParam('search', value)}
             debounceMs={250}
-          />
-          <FormSelect
-            controlSize="sm"
-            wrapperClassName="w-full sm:w-44"
-            value={filters.status}
-            onChange={(e) => setFilterParam('status', e.target.value)}
-            options={[
-              { value: '', label: 'All statuses' },
-              { value: 'IN_TRANSIT', label: 'Pending receipt' },
-              { value: 'RECEIVED', label: 'Received' },
-              { value: 'DISPUTED', label: 'Disputed' },
-            ]}
           />
           <FormSelect
             controlSize="sm"
@@ -217,23 +241,14 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
         </div>
       </div>
 
-      <Tabs
-        value={activeTab}
-        onChange={(value) => setActiveTab(value as 'pending' | 'processed')}
-        tabs={[
-          { value: 'pending', label: `Pending receipt (${sentRemittances.length})` },
-          { value: 'processed', label: 'Received / Disputed' },
-        ]}
-      />
-
-      {activeTab === 'pending' && sentRemittances.length > 0 && (
-        <div>
-          <div className="space-y-4">
-            {sentRemittances.map((r) => (
-              <div
-                key={r.id}
-                className="card p-4 flex flex-col sm:flex-row sm:items-center gap-4 flex-wrap"
-              >
+      <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[16rem]">
+      {/* Pending list — visible on All / Pending. Each card carries the qty + comments
+          form so receivers can confirm without leaving the page. */}
+      {(statusValue === '' || statusValue === 'IN_TRANSIT') && sentRemittances.length > 0 && (
+        <div className="space-y-4">
+          {sentRemittances.map((r) => (
+            <div key={r.id} className="card p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-app-fg">{r.productName}</p>
                   <p className="text-sm text-app-fg-muted">
@@ -246,68 +261,80 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
                     Sent by: {r.senderName ?? 'Unknown user'}
                   </p>
                 </div>
-                <div className="flex items-end gap-2 flex-wrap">
-                  <TextInput
-                    label="Qty received"
-                    type="number"
-                    min={0}
-                    max={r.quantitySent}
-                    value={quantityReceived[r.id] ?? r.quantitySent}
-                    onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                    wrapperClassName="w-20"
-                    disabled={markingId === r.id}
-                  />
-                  <TextInput
-                    label="Shrinkage reason (if short)"
-                    type="text"
-                    placeholder="Optional"
-                    value={shrinkageReason[r.id] ?? ''}
-                    onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                    wrapperClassName="min-w-[180px]"
-                    disabled={markingId === r.id}
-                  />
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => {
-                      setConfirmMode('receive');
-                      setConfirmTarget(r);
-                    }}
-                    loading={markingId === r.id || fetcher.state === 'submitting'}
-                    loadingText="Saving..."
-                  >
-                    Mark received
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => {
-                      setConfirmMode('reject');
-                      setConfirmTarget(r);
-                    }}
-                    loading={markingId === r.id || fetcher.state === 'submitting'}
-                    loadingText="Saving..."
-                  >
-                    Not received
-                  </Button>
-                </div>
+                <StatusBadge status={r.transferStatus} />
               </div>
-            ))}
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <TextInput
+                  label="Qty received"
+                  type="number"
+                  min={0}
+                  max={r.quantitySent}
+                  value={quantityReceived[r.id] ?? r.quantitySent}
+                  onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                  disabled={markingId === r.id}
+                />
+                <TextInput
+                  label="Shrinkage reason (if short)"
+                  type="text"
+                  placeholder="Optional"
+                  value={shrinkageReason[r.id] ?? ''}
+                  onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                  disabled={markingId === r.id}
+                />
+                <Textarea
+                  label="Comments"
+                  placeholder="Optional notes from the receiver…"
+                  rows={2}
+                  value={receiverNotes[r.id] ?? ''}
+                  onChange={(e) => setReceiverNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                  disabled={markingId === r.id}
+                  maxLength={500}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    setConfirmMode('reject');
+                    setConfirmTarget(r);
+                  }}
+                  loading={markingId === r.id || fetcher.state === 'submitting'}
+                  loadingText="Saving..."
+                >
+                  Not received
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    setConfirmMode('receive');
+                    setConfirmTarget(r);
+                  }}
+                  loading={markingId === r.id || fetcher.state === 'submitting'}
+                  loadingText="Saving..."
+                >
+                  Mark received
+                </Button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {activeTab === 'pending' && sentRemittances.length === 0 && (
+      {(statusValue === '' || statusValue === 'IN_TRANSIT') && sentRemittances.length === 0 && (
         <EmptyState
-          title="No transfers pending receipt"
+          title="No pending transfers"
           description="All in-transit stock transfers have been processed."
           variant="inline"
         />
       )}
 
-      {activeTab === 'processed' && receivedOrDisputed.length > 0 && (
+      {/* Processed list (Received / Disputed) — visible on All / Received / Disputed. */}
+      {(statusValue === '' || statusValue === 'RECEIVED' || statusValue === 'DISPUTED') &&
+        receivedOrDisputed.length > 0 && (
         <div>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
@@ -318,13 +345,13 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
                   <th className="table-header">Sent by</th>
                   <th className="table-header text-right">Qty</th>
                   <th className="table-header">Status</th>
+                  <th className="table-header">Comments</th>
                   <th className="table-header">Sent</th>
-                  <th className="table-header text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {receivedOrDisputed.map((r) => (
-                  <tr key={r.id} className="table-row">
+                  <tr key={r.id} className="table-row align-top">
                     <td className="table-cell text-app-fg">{r.productName}</td>
                     <td className="table-cell text-app-fg-muted">
                       {r.fromLocationName} → {r.toLocationName}
@@ -332,16 +359,33 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
                     <td className="table-cell text-app-fg-muted">
                       {r.senderName ?? 'Unknown user'}
                     </td>
-                    <td className="table-cell text-right">
-                      {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : '—'}
-                    </td>
+                    <td className="table-cell text-right">{r.outcomeQuantity ?? r.quantityReceived ?? '—'}</td>
                     <td className="table-cell">
-                      <StatusBadge status={r.transferStatus} />
+                      <StatusBadge
+                        status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.transferStatus)}
+                      />
+                    </td>
+                    <td className="table-cell text-app-fg-muted text-sm">
+                      {(r.receiverNotes || r.shrinkageReason) ? (
+                        <div className="space-y-0.5 max-w-[260px]">
+                          {r.receiverNotes && (
+                            <p className="text-app-fg whitespace-pre-line break-words">
+                              {r.receiverNotes}
+                            </p>
+                          )}
+                          {(r.outcomeReason ?? r.shrinkageReason) && (
+                            <p className="text-xs text-warning-600 dark:text-warning-400">
+                              Shrinkage: {r.outcomeReason ?? r.shrinkageReason}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-app-fg-muted">—</span>
+                      )}
                     </td>
                     <td className="table-cell text-app-fg-muted">
                       {new Date(r.createdAt).toLocaleDateString()}
                     </td>
-                    <td className="table-cell text-right">—</td>
                   </tr>
                 ))}
               </tbody>
@@ -352,27 +396,43 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <p className="font-medium text-app-fg">{r.productName}</p>
-                            <StatusBadge status={r.transferStatus} />
+                  <StatusBadge
+                    status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.transferStatus)}
+                  />
                 </div>
                 <div className="text-sm text-app-fg-muted space-y-0.5">
                   <div>From → To: {r.fromLocationName} → {r.toLocationName}</div>
                   <div>Sent by: {r.senderName ?? 'Unknown user'}</div>
-                  <div>Qty: {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : '—'}</div>
+                  <div>Qty: {r.outcomeQuantity ?? r.quantityReceived ?? '—'}</div>
                   <div>Created: {new Date(r.createdAt).toLocaleDateString()}</div>
                 </div>
+                {r.receiverNotes && (
+                  <div className="text-sm rounded-md border border-app-border bg-app-hover p-2.5">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted mb-1">
+                      Receiver comment
+                    </p>
+                    <p className="text-app-fg whitespace-pre-line break-words">{r.receiverNotes}</p>
+                  </div>
+                )}
+                {(r.outcomeReason ?? r.shrinkageReason) && (
+                  <p className="text-xs text-warning-600 dark:text-warning-400">
+                    Shrinkage reason: {r.outcomeReason ?? r.shrinkageReason}
+                  </p>
+                )}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {activeTab === 'processed' && receivedOrDisputed.length === 0 && (
+      {(statusValue === 'RECEIVED' || statusValue === 'DISPUTED') && receivedOrDisputed.length === 0 && (
         <EmptyState
           title="No processed transfers yet"
           description="Received or disputed stock transfers will appear here."
           variant="inline"
         />
       )}
+      </TableLoadingOverlay>
 
       {confirmTarget && (
         <Modal
@@ -414,6 +474,14 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               <p className="text-app-fg-muted">
                 Shrinkage reason: {(shrinkageReason[confirmTarget.id] ?? '').trim()}
               </p>
+            )}
+            {(receiverNotes[confirmTarget.id] ?? '').trim() && (
+              <div className="text-app-fg-muted">
+                <p className="text-xs uppercase tracking-wide font-semibold mb-0.5">Comments</p>
+                <p className="text-app-fg whitespace-pre-line break-words">
+                  {(receiverNotes[confirmTarget.id] ?? '').trim()}
+                </p>
+              </div>
             )}
           </div>
           <div className="flex items-center justify-end gap-2 pt-2">

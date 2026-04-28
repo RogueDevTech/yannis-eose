@@ -35,6 +35,8 @@ export const verifyTransferSchema = z.object({
   transferId: z.string().uuid(),
   quantityReceived: z.number().int().min(0),
   shrinkageReason: z.string().optional(),
+  /** Optional free-text comment from the receiver (visible in admin + transfers UI). */
+  receiverNotes: z.string().max(500).optional(),
 });
 
 export type VerifyTransferInput = z.infer<typeof verifyTransferSchema>;

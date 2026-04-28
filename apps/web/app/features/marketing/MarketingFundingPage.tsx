@@ -9,7 +9,8 @@ import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { Spinner } from '~/components/ui/spinner';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
 import { Tabs } from '~/components/ui/tabs';
@@ -112,9 +113,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   /** Loader revalidation for this route (date range, section/tab, filters, pagination). */
-  const isFundingRouteLoading =
-    navigation.state === 'loading' &&
-    (navigation.location?.pathname ?? '').includes('/admin/marketing/funding');
+  const isFundingRouteLoading = useLoaderRefetchBusy();
 
   const { section: displaySection, tab: displayTab } = useMemo(() => {
     const pending =
@@ -352,11 +351,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 periodAllTime={filters.periodAllTime}
               />
             </div>
-            {isFundingRouteLoading && (
-              <span className="flex items-center text-app-fg-muted" aria-hidden>
-                <Spinner size="sm" className="shrink-0" />
-              </span>
-            )}
           </>
         }
       />
@@ -486,20 +480,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           </div>
         )}
 
-        <div className="relative min-h-[14rem]" aria-busy={isFundingRouteLoading} aria-live="polite">
-          {isFundingRouteLoading ? (
-            <div
-              className="flex min-h-[14rem] items-center justify-center py-10 px-4"
-              role="status"
-              aria-label="Loading funding data"
-            >
-              <div className="flex items-center gap-2.5 rounded-lg border border-app-border bg-app-elevated px-4 py-3 shadow-sm">
-                <Spinner size="md" className="shrink-0 text-brand-500" />
-                <span className="text-sm font-medium text-app-fg-muted">Loading this tab…</span>
-              </div>
-            </div>
-          ) : (
-            <>
+        <TableLoadingOverlay show={isFundingRouteLoading} minHeightClassName="min-h-[14rem]">
           {displaySection === 'distributing' && unifiedDistributingSlice ? (
             <>
               <UnifiedDistributingFilterBar
@@ -566,9 +547,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               )}
             </>
           )}
-            </>
-          )}
-        </div>
+        </TableLoadingOverlay>
       </div>
 
       {/* ─── Modals ───────────────────────────────────────────────────────────────── */}

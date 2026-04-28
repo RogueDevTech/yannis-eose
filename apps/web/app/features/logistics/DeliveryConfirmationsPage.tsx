@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
@@ -12,7 +14,6 @@ import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Tabs } from '~/components/ui/tabs';
 import { FormSelect } from '~/components/ui/form-select';
-import { Spinner } from '~/components/ui/spinner';
 import type { AllocatedDeliveryOrder, DeliveryConfirmationRequest } from './types';
 
 interface DeliveryConfirmationsPageProps {
@@ -56,6 +57,7 @@ export function DeliveryConfirmationsPage({
 }: DeliveryConfirmationsPageProps) {
   const fetcher = useFetcher();
   const navigation = useNavigation();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const [searchParams, setSearchParams] = useSearchParams();
   const [uiTab, setUiTab] = useState<'requests' | 'allocated'>(activeTab);
   const [approveModal, setApproveModal] = useState<{ requestId: string; orderId: string } | null>(null);
@@ -68,10 +70,6 @@ export function DeliveryConfirmationsPage({
   const allocatedCount = allocatedOrders.length;
   const isRequestsTab = uiTab === 'requests';
   const isAllocatedTab = uiTab === 'allocated';
-  const isRouteLoading = navigation.state !== 'idle';
-  const isRequestsTabLoading = isRequestsTab && isRouteLoading;
-  const isAllocatedTabLoading = isAllocatedTab && isRouteLoading;
-
   useEffect(() => {
     if (navigation.state === 'idle') {
       setUiTab(activeTab);
@@ -140,12 +138,7 @@ export function DeliveryConfirmationsPage({
             CS and logistics can confirm delivery directly from here.
           </p>
         </div>
-        {isAllocatedTabLoading && (
-          <div className="px-4 py-2 border-b border-app-border bg-app-canvas/60 text-xs text-app-fg-muted flex items-center gap-2">
-            <Spinner size="sm" className="text-brand-500" />
-            Loading allocated orders...
-          </div>
-        )}
+        <TableLoadingOverlay show={isAllocatedTab && isLoaderRefetchBusy} minHeightClassName="min-h-[12rem]">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -254,6 +247,7 @@ export function DeliveryConfirmationsPage({
             />
           )}
         </div>
+        </TableLoadingOverlay>
       </div>
       )}
 
@@ -275,12 +269,7 @@ export function DeliveryConfirmationsPage({
             options={REQUEST_STATUS_OPTIONS}
           />
         </div>
-        {isRequestsTabLoading && (
-          <div className="px-4 py-2 border-b border-app-border bg-app-canvas/60 text-xs text-app-fg-muted flex items-center gap-2">
-            <Spinner size="sm" className="text-brand-500" />
-            Loading confirmation requests...
-          </div>
-        )}
+        <TableLoadingOverlay show={isRequestsTab && isLoaderRefetchBusy} minHeightClassName="min-h-[12rem]">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -448,6 +437,7 @@ export function DeliveryConfirmationsPage({
             />
           )}
         </div>
+        </TableLoadingOverlay>
       </div>
       )}
 

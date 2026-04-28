@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -24,6 +24,8 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { DataTable, type TableColumn } from '~/components/ui/data-table';
+import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type {
   InventoryLevel, InventoryStreamData, ProductOption, LocationOption, StockMovement,
   Transfer, ReturnedOrder, Reconciliation, LocationWithLock, LowStockAlertsResult,
@@ -89,10 +91,7 @@ export function InventoryPage({
     updateLevelsParam('search', trimmed);
   };
 
-  // useNavigation: state is 'loading' while the page's loader re-runs after a
-  // search-param change. Used to render the inline spinner beside the filters.
-  const navigation = useNavigation();
-  const isLoadingLevels = navigation.state === 'loading';
+  const isLoadingLevels = useLoaderRefetchBusy();
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
   const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? 'Unknown location') : '—';
@@ -770,23 +769,6 @@ export function InventoryPage({
               ]}
               aria-label="Sort order"
             />
-            {isLoadingLevels && (
-              <span
-                className="inline-flex items-center gap-1.5 text-xs text-app-fg-muted shrink-0"
-                aria-live="polite"
-              >
-                <svg
-                  className="w-3.5 h-3.5 animate-spin text-brand-500"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  aria-hidden
-                >
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" />
-                  <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-                <span className="hidden sm:inline">Loading…</span>
-              </span>
-            )}
             {(currentProductFilter !== 'ALL' || currentLocationFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
               <button
                 type="button"
@@ -798,152 +780,154 @@ export function InventoryPage({
             )}
           </div>
         )}
-        <div className="card p-0">
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Product</th>
-                  <th className="table-header">Location</th>
-                  <th className="table-header text-right">Stock</th>
-                  <th className="table-header text-right">Reserved</th>
-                  <th className="table-header text-right">Available</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedLevels.map((level) => (
-                  <tr key={level.id} className="table-row">
-                    <td className="table-cell font-medium text-app-fg">{productName(level.productId)}</td>
-                    <td className="table-cell text-app-fg-muted">{locationName(level.locationId)}</td>
-                    <td className="table-cell text-right font-medium">{level.stockCount}</td>
-                    <td className="table-cell text-right text-warning-600 dark:text-warning-400">{level.reservedCount}</td>
-                    <td className="table-cell text-right font-medium text-success-600 dark:text-success-400">
-                      {level.stockCount - level.reservedCount}
-                    </td>
-                    <td className="table-cell">
-                      <StatusBadge status={level.status} />
-                    </td>
-                    <td className="table-cell text-right">
-                      <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                        <Link
-                          to={`/admin/inventory/${level.id}`}
-                          prefetch="intent"
-                          className="btn-primary btn-sm text-xs inline-flex items-center justify-center"
-                        >
-                          View
-                        </Link>
-                        {canAdjust && (
-                          <>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              className="text-xs"
-                              onClick={() => openAdjustModal(level, 'decrease')}
-                            >
-                              Remove stock
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              className="text-xs"
-                              onClick={() => openAdjustModal(level, 'increase')}
-                            >
-                              Add units
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {displayedLevels.length === 0 && (
+        <TableLoadingOverlay show={isLoadingLevels}>
+          <div className="card p-0">
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
                   <tr>
-                    <td colSpan={7}>
-                      <EmptyState
-                        title={levels.length === 0 ? 'No inventory data yet' : 'No inventory matches your filter'}
-                        description={levels.length === 0 ? 'Add products and receive stock to get started.' : 'Try changing the product filter or sort.'}
-                      />
-                    </td>
+                    <th className="table-header">Product</th>
+                    <th className="table-header">Location</th>
+                    <th className="table-header text-right">Stock</th>
+                    <th className="table-header text-right">Reserved</th>
+                    <th className="table-header text-right">Available</th>
+                    <th className="table-header">Status</th>
+                    <th className="table-header text-right">Actions</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile */}
-          <div className="md:hidden space-y-3 px-1">
-            {displayedLevels.map((level) => (
-              <div
-                key={level.id}
-                className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <p className="font-medium text-sm text-app-fg">{productName(level.productId)}</p>
-                    <p className="text-sm text-app-fg-muted">{locationName(level.locationId)}</p>
-                  </div>
-                  <StatusBadge status={level.status} />
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-sm">
-                  <div>
-                    <p className="text-xs text-app-fg-muted">Stock</p>
-                    <p className="font-medium text-app-fg">{level.stockCount}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-app-fg-muted">Reserved</p>
-                    <p className="font-medium text-warning-600 dark:text-warning-400">{level.reservedCount}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-app-fg-muted">Available</p>
-                    <p className="font-medium text-success-600 dark:text-success-400">{level.stockCount - level.reservedCount}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-app-border">
-                  <Link
-                    to={`/admin/inventory/${level.id}`}
-                    prefetch="intent"
-                    className="btn-primary btn-sm"
-                  >
-                    View
-                  </Link>
-                  {canAdjust && (
-                    <>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => openAdjustModal(level, 'decrease')}
-                      >
-                        Remove stock
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => openAdjustModal(level, 'increase')}
-                      >
-                        Add units
-                      </Button>
-                    </>
+                </thead>
+                <tbody>
+                  {displayedLevels.map((level) => (
+                    <tr key={level.id} className="table-row">
+                      <td className="table-cell font-medium text-app-fg">{productName(level.productId)}</td>
+                      <td className="table-cell text-app-fg-muted">{locationName(level.locationId)}</td>
+                      <td className="table-cell text-right font-medium">{level.stockCount}</td>
+                      <td className="table-cell text-right text-warning-600 dark:text-warning-400">{level.reservedCount}</td>
+                      <td className="table-cell text-right font-medium text-success-600 dark:text-success-400">
+                        {level.stockCount - level.reservedCount}
+                      </td>
+                      <td className="table-cell">
+                        <StatusBadge status={level.status} />
+                      </td>
+                      <td className="table-cell text-right">
+                        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                          <Link
+                            to={`/admin/inventory/${level.id}`}
+                            prefetch="intent"
+                            className="btn-primary btn-sm text-xs inline-flex items-center justify-center"
+                          >
+                            View
+                          </Link>
+                          {canAdjust && (
+                            <>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => openAdjustModal(level, 'decrease')}
+                              >
+                                Remove stock
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                className="text-xs"
+                                onClick={() => openAdjustModal(level, 'increase')}
+                              >
+                                Add units
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {displayedLevels.length === 0 && (
+                    <tr>
+                      <td colSpan={7}>
+                        <EmptyState
+                          title={levels.length === 0 ? 'No inventory data yet' : 'No inventory matches your filter'}
+                          description={levels.length === 0 ? 'Add products and receive stock to get started.' : 'Try changing the product filter or sort.'}
+                        />
+                      </td>
+                    </tr>
                   )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile */}
+            <div className="md:hidden space-y-3 px-1">
+              {displayedLevels.map((level) => (
+                <div
+                  key={level.id}
+                  className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="font-medium text-sm text-app-fg">{productName(level.productId)}</p>
+                      <p className="text-sm text-app-fg-muted">{locationName(level.locationId)}</p>
+                    </div>
+                    <StatusBadge status={level.status} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <p className="text-xs text-app-fg-muted">Stock</p>
+                      <p className="font-medium text-app-fg">{level.stockCount}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-app-fg-muted">Reserved</p>
+                      <p className="font-medium text-warning-600 dark:text-warning-400">{level.reservedCount}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-app-fg-muted">Available</p>
+                      <p className="font-medium text-success-600 dark:text-success-400">{level.stockCount - level.reservedCount}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-app-border">
+                    <Link
+                      to={`/admin/inventory/${level.id}`}
+                      prefetch="intent"
+                      className="btn-primary btn-sm"
+                    >
+                      View
+                    </Link>
+                    {canAdjust && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => openAdjustModal(level, 'decrease')}
+                        >
+                          Remove stock
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => openAdjustModal(level, 'increase')}
+                        >
+                          Add units
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {displayedLevels.length === 0 && (
-              <EmptyState
-                title={
-                  totalLevels === 0 && currentProductFilter === 'ALL' && currentLocationFilter === 'ALL' && !serverSearch && currentSort === 'default'
-                    ? 'No inventory data yet'
-                    : 'No inventory matches your filter'
-                }
-              />
-            )}
+              ))}
+              {displayedLevels.length === 0 && (
+                <EmptyState
+                  title={
+                    totalLevels === 0 && currentProductFilter === 'ALL' && currentLocationFilter === 'ALL' && !serverSearch && currentSort === 'default'
+                      ? 'No inventory data yet'
+                      : 'No inventory matches your filter'
+                  }
+                />
+              )}
+            </div>
           </div>
-        </div>
+        </TableLoadingOverlay>
 
         {/* Pagination — server-side, drives `page` URL param. */}
         {levelsTotalPages > 1 && (
@@ -960,7 +944,12 @@ export function InventoryPage({
       )}
 
       {activeTab === 'transfers' && hasTransfers && (
-        <TransfersTab transfers={transfers} products={products} locations={locations} />
+        <TransfersTab
+          transfers={transfers}
+          products={products}
+          locations={locations}
+          routeLoaderBusy={isLoadingLevels}
+        />
       )}
 
       {activeTab === 'delivery_deductions' && (
@@ -1189,10 +1178,12 @@ function TransfersTab({
   transfers,
   products,
   locations,
+  routeLoaderBusy = false,
 }: {
   transfers: Transfer[];
   products: ProductOption[];
   locations: LocationOption[];
+  routeLoaderBusy?: boolean;
 }) {
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'Unknown location';
@@ -1260,6 +1251,8 @@ function TransfersTab({
         columns={columns}
         data={transfers}
         keyField="id"
+        loading={routeLoaderBusy}
+        loadingVariant="overlay"
         emptyTitle="No transfers yet"
         emptyDescription="Record and manage transfers from Admin → Transfers."
       />

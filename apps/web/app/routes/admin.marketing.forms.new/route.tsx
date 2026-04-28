@@ -58,6 +58,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const buttonText = formData.get('formButtonText')?.toString();
   const accentColor = formData.get('formAccentColor')?.toString();
   const successCallbackUrl = formData.get('successCallbackUrl')?.toString()?.trim() || undefined;
+  const showProductImages = formData.get('showProductImages')?.toString() !== 'false';
   const parsedStandard = parseStandardFieldsPayload(formData.get('standardFields')?.toString());
   if (!parsedStandard.ok) {
     return json({ error: parsedStandard.error }, { status: 400 });
@@ -79,6 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
     buttonText ||
     accentColor ||
     successCallbackUrl ||
+    showProductImages === false ||
     hasStandardFields ||
     hasCustomFields
       ? {
@@ -87,6 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(buttonText ? { buttonText } : {}),
           ...(accentColor ? { accentColor } : {}),
           ...(successCallbackUrl ? { successCallbackUrl } : {}),
+          ...(showProductImages === false ? { showProductImages: false } : {}),
           standardFields,
           ...legacyStandardFlags,
           ...(hasCustomFields ? { customFields } : {}),

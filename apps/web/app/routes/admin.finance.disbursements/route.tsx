@@ -105,6 +105,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const requestsPageParam = parseInt(url.searchParams.get('requestsPage') || '1', 10);
   let requestsPage = isNaN(requestsPageParam) || requestsPageParam < 1 ? 1 : requestsPageParam;
+  const balancesSearch = url.searchParams.get('balancesSearch')?.trim() || '';
+  const balancesRole = url.searchParams.get('balancesRole') || '';
+  const balancesStatus = url.searchParams.get('balancesStatus') || '';
 
   const TAB_PAGE_LIMIT = 20;
 
@@ -127,6 +130,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     status: statusFilter ?? '',
     receiver: receiverFilter ?? '',
     search: searchFilter ?? '',
+    balancesSearch,
+    balancesRole,
+    balancesStatus,
   };
 
   const listFundingInput: Record<string, unknown> = { page, limit: 20 };
@@ -153,10 +159,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ]);
 
   const recipientBalancesAll = parseBalancesList(balancesRes);
-  const recipientBalancesTotal = recipientBalancesAll.length;
+  const filteredRecipientBalancesAll = recipientBalancesAll.filter((b) => {
+    const roleMatch = !balancesRole || balancesRole === 'ALL' || b.role === balancesRole;
+    const searchMatch = !balancesSearch || b.name.toLowerCase().includes(balancesSearch.toLowerCase());
+    const balanceValue = Number(b.balance);
+    const statusMatch = !balancesStatus
+      || balancesStatus === 'ALL'
+      || (balancesStatus === 'POSITIVE' && balanceValue > 0)
+      || (balancesStatus === 'ZERO' && balanceValue === 0)
+      || (balancesStatus === 'NEGATIVE' && balanceValue < 0);
+    return roleMatch && searchMatch && statusMatch;
+  });
+  const recipientBalancesTotal = filteredRecipientBalancesAll.length;
   const balancesTotalPages = Math.max(1, Math.ceil(recipientBalancesTotal / TAB_PAGE_LIMIT));
   balancesPage = Math.min(balancesPage, balancesTotalPages);
-  const recipientBalances = recipientBalancesAll.slice(
+  const recipientBalances = filteredRecipientBalancesAll.slice(
     (balancesPage - 1) * TAB_PAGE_LIMIT,
     balancesPage * TAB_PAGE_LIMIT,
   );

@@ -32,6 +32,12 @@ export const users = pgTable('users', {
   appTheme: text('app_theme'),
   /** Explicit font scale; NULL = base (default). One of 'base' | 'large' | 'xlarge'. */
   fontScale: text('font_scale'),
+  /** Payout beneficiary bank name (finance-only visibility). */
+  payoutBankName: text('payout_bank_name'),
+  /** Payout beneficiary account name (finance-only visibility). */
+  payoutAccountName: text('payout_account_name'),
+  /** Payout beneficiary account number (finance-only visibility). */
+  payoutAccountNumber: text('payout_account_number'),
   /**
    * "Finance hat" flag — lets a user carry Finance Officer powers on top of their primary role.
    * At most one user may have this set to true at a time (enforced by partial unique index

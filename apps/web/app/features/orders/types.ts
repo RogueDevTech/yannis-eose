@@ -188,6 +188,17 @@ export interface OrderDetailPageExtraProps {
     whatsappGroupLink?: string | null;
     eligible: boolean;
     reason: string | null;
+    /**
+     * Per-product remaining stock at this location for the order's line items.
+     * Server returns `null` when the viewer is not allowed to see counts (e.g. CS_AGENT).
+     * When non-null, the UI renders these counts inline in the allocate dropdown.
+     */
+    availabilityByProduct: Array<{
+      productId: string;
+      productName: string;
+      needed: number;
+      available: number;
+    }> | null;
   }>;
   /** WhatsApp group dispatch templates — loaded for the CS "Share to logistics company" flow. */
   logisticsDispatchTemplates?: Array<{ id: string; name: string; body: string }>;

@@ -162,7 +162,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     );
   }
 
-  return redirect(`/admin/products/${productId}`);
+  return redirect(`/admin/products/${productId}`, { status: 303 });
 }
 
 export default function ProductDetailRoute() {

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from 'react
 import { useEffect } from 'react';
 import { useSubmit } from '@remix-run/react';
 import { BranchContextRequiredModal } from '~/components/ui/branch-context-required-modal';
-import { isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
+import { isOrgWideDepartmentHead } from '~/lib/rbac';
 
 type BranchInfo = { id: string; name: string; code: string };
 
@@ -63,7 +63,7 @@ export function BranchScopeGuardProvider({
   const [actionLabel, setActionLabel] = useState<string>('this action');
 
   const needsOrgWideBranchPick =
-    (isAdminLevel({ role: role ?? '' }) || isOrgWideDepartmentHead({ role: role ?? '' })) &&
+    isOrgWideDepartmentHead({ role: role ?? '' }) &&
     currentBranchId == null &&
     branches.length > 0;
   const requiresBranchSelection = needsOrgWideBranchPick;

@@ -22,7 +22,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Order ID required', { status: 400 });
   }
 
-  const [orderRes, locationsRes, ridersRes] = await Promise.all([
+  const [orderRes, locationsRes, ridersRes, allocatableRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
       { method: 'GET', cookie },
@@ -32,16 +32,44 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
+    apiRequest<unknown>(
+      `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+      { method: 'GET', cookie },
+    ).catch(() => ({ ok: false, status: 503, data: {} as unknown })),
   ]);
 
+  type RichAllocatableLocation = {
+    id: string;
+    name: string;
+    address: string | null;
+    whatsappGroupLink?: string | null;
+    eligible: boolean;
+    reason: string | null;
+    availabilityByProduct: Array<{
+      productId: string;
+      productName: string;
+      needed: number;
+      available: number;
+    }> | null;
+  };
+
+  const emptyReturn = {
+    order: null,
+    history: Promise.resolve([]) as Promise<HistoryEntry[]>,
+    locations: [] as Location[],
+    riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>,
+    allocatableLocations: [] as Location[],
+    richAllocatableLocations: [] as RichAllocatableLocation[],
+  };
+
   if (!orderRes.ok) {
-    return { order: null, history: Promise.resolve([]) as Promise<HistoryEntry[]>, locations: [] as Location[], riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>, allocatableLocations: [] as Location[] };
+    return emptyReturn;
   }
 
   const trpcData = orderRes.data as { result?: { data?: OrderDetail } };
   const order = trpcData?.result?.data ?? null;
   if (!order) {
-    return { order: null, history: Promise.resolve([]) as Promise<HistoryEntry[]>, locations: [] as Location[], riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>, allocatableLocations: [] as Location[] };
+    return emptyReturn;
   }
 
   // TPL_MANAGER: only allow orders at their location or CONFIRMED (unallocated) so they can allocate
@@ -49,7 +77,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const atMyLocation = order.logisticsLocationId === user.logisticsLocationId;
     const unallocatedConfirmed = order.status === 'CONFIRMED' && !order.logisticsLocationId;
     if (!atMyLocation && !unallocatedConfirmed) {
-      return { order: null, history: Promise.resolve([]) as Promise<HistoryEntry[]>, locations: [] as Location[], riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>, allocatableLocations: [] as Location[] };
+      return emptyReturn;
     }
   }
 
@@ -77,12 +105,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? locations.filter((l) => l.id === user.logisticsLocationId)
       : locations;
 
+  const allocatableRich: RichAllocatableLocation[] = allocatableRes.ok
+    ? ((allocatableRes.data as { result?: { data?: RichAllocatableLocation[] } })?.result?.data ?? [])
+    : [];
+  const richAllocatableLocations =
+    user.role === 'TPL_MANAGER' && user.logisticsLocationId
+      ? allocatableRich.filter((l) => l.id === user.logisticsLocationId)
+      : allocatableRich;
+
   return {
     order,
     history: historyPromise,
     locations,
     riders: ridersData,
     allocatableLocations,
+    richAllocatableLocations,
   };
 }
 
@@ -216,7 +253,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed'] as const;
 
 export default function TplOrderDetailRoute() {
-  const { order, history, locations, riders, allocatableLocations } = useLoaderData<typeof loader>();
+  const { order, history, locations, riders, allocatableLocations, richAllocatableLocations } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
 
@@ -244,6 +281,7 @@ export default function TplOrderDetailRoute() {
       backLink="/tpl/orders"
       backLabel="Orders"
       allocatableLocations={allocatableLocations.length > 0 ? (allocatableLocations as Location[]) : undefined}
+      richAllocatableLocations={richAllocatableLocations.length > 0 ? richAllocatableLocations : undefined}
     />
   );
 }
