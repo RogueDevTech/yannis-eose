@@ -18,8 +18,8 @@ function buildCtx(overrides?: Partial<TrpcContext>): TrpcContext {
     user: {
       id: '8a8d5664-c472-4cb2-b96c-ee66ef20e6ac',
       email: 'admin@yannis.test',
-      name: 'Admin',
-      role: 'ADMIN',
+      name: 'Head of CS',
+      role: 'HEAD_OF_CS',
       logisticsLocationId: null,
       permissions: [],
       currentBranchId: null,
@@ -35,7 +35,7 @@ function buildCtx(overrides?: Partial<TrpcContext>): TrpcContext {
 }
 
 describe('branch-scoped mutation guard', () => {
-  it('blocks admin-level mutation in all-branches mode without branchId', async () => {
+  it('blocks org-wide head mutation in all-branches mode without branchId', async () => {
     const caller = testRouter.createCaller(buildCtx());
     await expect(caller.scopedMutation({})).rejects.toMatchObject({
       code: 'BAD_REQUEST',
@@ -43,7 +43,7 @@ describe('branch-scoped mutation guard', () => {
     });
   });
 
-  it('allows admin-level mutation in all-branches mode when branchId is provided', async () => {
+  it('allows org-wide head mutation in all-branches mode when branchId is provided', async () => {
     const caller = testRouter.createCaller(buildCtx());
     await expect(
       caller.scopedMutation({ branchId: 'dc0c7751-4923-4aaf-8df0-6a8f3ffef093' }),
