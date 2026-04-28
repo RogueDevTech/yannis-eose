@@ -2810,7 +2810,7 @@ export function CSDashboardPage({
                     </div>
                   </div>
                 </div>
-                <div className="table-sticky-panel isolate hidden md:block overflow-auto flex-1 min-h-0 overscroll-y-contain">
+                <div className="isolate hidden md:block overflow-auto flex-1 min-h-0 overscroll-y-contain">
                   <table className="w-full border-separate border-spacing-0">
                     <thead>
                       <tr>

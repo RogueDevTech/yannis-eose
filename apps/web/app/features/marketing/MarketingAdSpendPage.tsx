@@ -16,8 +16,8 @@ import { Spinner } from '~/components/ui/spinner';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
 import { SearchInput } from '~/components/ui/search-input';
-import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
+import { Tabs } from '~/components/ui/tabs';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -31,6 +31,7 @@ import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
   AdSpendIntervalPreview,
   AdSpendRecord,
+  AdSpendGroupLine,
   Campaign,
   LeaderboardEntry,
   MarketingAdSpendLoaderData,
@@ -389,10 +390,31 @@ export function MarketingAdSpendPage({
   const getUserName = (userId: string, resolvedUsers: User[]): string =>
     resolvedUsers.find((u) => u.id === userId)?.name ?? 'Unknown user';
 
+  const openGroupLineReceiptModal = (line: AdSpendGroupLine) => {
+    setAdSpendDetailModal({
+      id: line.id,
+      mediaBuyerId: line.mediaBuyerId,
+      productId: line.productId,
+      campaignId: line.campaignId,
+      spendAmount: line.spendAmount,
+      screenshotUrl: line.screenshotUrl,
+      spendDate: line.spendDate,
+      status: line.status,
+      approvedAt: line.approvedAt,
+      approvedBy: null,
+      rejectionReason: line.rejectionReason,
+      rejectedAt: line.rejectedAt,
+      rejectedBy: null,
+      orderCount: 0,
+      indicativeCpa: null,
+    });
+    setRejectStep(false);
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Ad spend"
+        title="Ads Expense"
         description={
           <>
             Log daily spend with Ads Manager screenshots.{' '}
@@ -750,22 +772,11 @@ export function MarketingAdSpendPage({
             {showLegacyTable ? 'Hide detailed view' : 'Detailed view'}
           </Button>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center px-4 py-3 border-b border-app-border">
-          <form onSubmit={handleAdSpendSearchSubmit} className="flex gap-2 flex-1 min-w-0">
-            <SearchInput
-              value={searchQuery}
-              onChange={(val) => setSearchQuery(val)}
-              placeholder="Search buyer, product, campaign, or entry ID..."
-              wrapperClassName="flex-1 min-w-0"
-            />
-            <Button type="submit" variant="secondary" size="sm">
-              Search
-            </Button>
-          </form>
-          <FormSelect
+        <div className="px-4 py-3 border-b border-app-border flex items-center justify-between gap-3">
+          <Tabs
             value={selectedStatus}
-            onChange={(e) => handleAdSpendStatusChange(e.target.value)}
-            options={AD_SPEND_STATUS_OPTIONS.map((opt) => ({
+            onChange={handleAdSpendStatusChange}
+            tabs={AD_SPEND_STATUS_OPTIONS.map((opt) => ({
               value: opt.value,
               label: `${opt.label}${
                 opt.value === 'ALL'
@@ -779,8 +790,25 @@ export function MarketingAdSpendPage({
                         : ''
               }`,
             }))}
-            wrapperClassName="w-auto min-w-[11rem]"
           />
+          {isFilterLoading && (
+            <span className="flex items-center text-app-fg-muted shrink-0" aria-hidden>
+              <Spinner size="sm" className="shrink-0" />
+            </span>
+          )}
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center px-4 py-3 border-b border-app-border">
+          <form onSubmit={handleAdSpendSearchSubmit} className="flex gap-2 flex-1 min-w-0">
+            <SearchInput
+              value={searchQuery}
+              onChange={(val) => setSearchQuery(val)}
+              placeholder="Search buyer, product, campaign, or entry ID..."
+              wrapperClassName="flex-1 min-w-0"
+            />
+            <Button type="submit" variant="secondary" size="sm">
+              Search
+            </Button>
+          </form>
           <SearchableSelect
             id="marketing-adspend-product-filter-main"
             value={selectedProductId}
@@ -818,11 +846,6 @@ export function MarketingAdSpendPage({
               searchPlaceholder="Search media buyers..."
             />
           )}
-          {isFilterLoading && (
-            <span className="flex items-center text-app-fg-muted" aria-hidden>
-              <Spinner size="sm" className="shrink-0" />
-            </span>
-          )}
         </div>
         <div className="p-4">
           <AdSpendDayAccordion
@@ -832,6 +855,7 @@ export function MarketingAdSpendPage({
             page={groupsPage}
             totalPages={groupsTotalPages}
             actionUrl="/admin/marketing/ad-spend"
+            onPreviewReceipt={openGroupLineReceiptModal}
           />
         </div>
       </div>
@@ -923,6 +947,37 @@ export function MarketingAdSpendPage({
                       >
                         Preview
                       </Button>
+                      {viewMode !== 'media_buyer' && (s.status ?? 'PENDING') === 'PENDING' && (
+                        <>
+                          <fetcher.Form method="post" className="inline">
+                            <input type="hidden" name="intent" value="approveAdSpend" />
+                            <input type="hidden" name="adSpendId" value={s.id} />
+                            <Button
+                              type="submit"
+                              variant="primary"
+                              size="sm"
+                              loading={
+                                fetcher.state === 'submitting' &&
+                                fetcher.formData?.get('intent') === 'approveAdSpend' &&
+                                fetcher.formData?.get('adSpendId') === s.id
+                              }
+                            >
+                              Approve
+                            </Button>
+                          </fetcher.Form>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => {
+                              setAdSpendDetailModal(s);
+                              setRejectStep(true);
+                            }}
+                          >
+                            Reject
+                          </Button>
+                        </>
+                      )}
                       {adSpendRowCanEdit(s) && (
                         <Button type="button" variant="secondary" size="sm" onClick={() => setEditTarget(s)}>
                           Edit
@@ -1014,6 +1069,37 @@ export function MarketingAdSpendPage({
                 >
                   Preview
                 </Button>
+                {viewMode !== 'media_buyer' && (s.status ?? 'PENDING') === 'PENDING' && (
+                  <>
+                    <fetcher.Form method="post" className="inline">
+                      <input type="hidden" name="intent" value="approveAdSpend" />
+                      <input type="hidden" name="adSpendId" value={s.id} />
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="sm"
+                        loading={
+                          fetcher.state === 'submitting' &&
+                          fetcher.formData?.get('intent') === 'approveAdSpend' &&
+                          fetcher.formData?.get('adSpendId') === s.id
+                        }
+                      >
+                        Approve
+                      </Button>
+                    </fetcher.Form>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setAdSpendDetailModal(s);
+                        setRejectStep(true);
+                      }}
+                    >
+                      Reject
+                    </Button>
+                  </>
+                )}
                 {adSpendRowCanEdit(s) && (
                   <Button type="button" variant="secondary" size="sm" onClick={() => setEditTarget(s)}>
                     Edit
@@ -1051,7 +1137,7 @@ export function MarketingAdSpendPage({
           contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]"
         >
           <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-            <h3 className="text-lg font-semibold text-app-fg">Ad spend</h3>
+            <h3 className="text-lg font-semibold text-app-fg">Ads Expense</h3>
             <button type="button" onClick={() => setAdSpendDetailModal(null)} className="text-app-fg-muted hover:text-app-fg">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1248,14 +1334,6 @@ export function MarketingAdSpendPage({
                   Edit entry
                 </Button>
               )}
-              <a
-                href={adSpendDetailModal.screenshotUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-secondary btn-sm inline-flex items-center gap-1.5"
-              >
-                Open in new tab
-              </a>
               <Button
                 variant="secondary"
                 size="sm"

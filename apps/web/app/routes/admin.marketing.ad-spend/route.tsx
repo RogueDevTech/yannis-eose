@@ -22,7 +22,7 @@ import {
 const AD_SPEND_PER_PAGE = 20;
 const AD_SPEND_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 
-export const meta: MetaFunction = () => [{ title: 'Ad spend — Marketing — Yannis EOSE' }];
+export const meta: MetaFunction = () => [{ title: 'Ads Expense — Marketing — Yannis EOSE' }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.read');

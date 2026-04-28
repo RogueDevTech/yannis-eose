@@ -479,7 +479,6 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
               New category
             </Button>
           }
-          stickyHeader={false}
         />
       </div>
 

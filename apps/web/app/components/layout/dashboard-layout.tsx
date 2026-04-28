@@ -65,8 +65,16 @@ interface NavItemDef {
   labelShort?: string;
   href: string;
   icon: React.ReactNode;
-  permission?: string; // undefined = all authenticated users
-  /** If set, these roles can see the item without needing the permission. */
+  /**
+   * Required permission. With no `roles`, undefined = visible to all authenticated users.
+   * If both `permission` and `roles` are set, the user can see the item with EITHER.
+   */
+  permission?: string;
+  /**
+   * Roles allowlist. When set without `permission`, the item is restricted to these roles
+   * (admin-class always bypasses). When set with `permission`, listed roles see it without
+   * needing the permission.
+   */
   roles?: string[];
 }
 
@@ -111,7 +119,7 @@ const navStructure: NavGroupDef[] = [
         permission: 'marketing.read',
       },
       {
-        label: 'Ad spend',
+        label: 'Ads Expense',
         href: '/admin/marketing/ad-spend',
         icon: SidebarIcons.marketing,
         permission: 'marketing.read',
@@ -410,10 +418,13 @@ function getNavGroupsForUser(
         // Disbursements: Finance → HoM only; HoM must not see this (they use Marketing → Funding).
         if (item.href === '/admin/finance/disbursements' && role === 'HEAD_OF_MARKETING')
           return false;
-        if (!item.permission) return true;
+        // No permission AND no roles allowlist → visible to all authed users.
+        // When `roles` is set without `permission`, the item is restricted to those roles.
+        if (!item.permission && !item.roles) return true;
         if (isSuperAdmin) return true;
         if (item.roles?.includes(user?.role ?? '')) return true;
-        return perms.includes(item.permission);
+        if (item.permission && perms.includes(item.permission)) return true;
+        return false;
       })
       .map((item) => ({
         label: forMobile ? getDisplayLabelMobile(item, user) : getDisplayLabel(item, user),
@@ -509,10 +520,12 @@ function getBottomNavItemsForUser(
       const item = hrefToItem.get(href);
       if (!item) continue;
       const allowed =
-        !item.permission ||
+        // No permission AND no roles allowlist → visible to all authed users.
+        // When `roles` is set without `permission`, restrict to those roles.
+        (!item.permission && !item.roles) ||
         isSuperAdmin ||
         (item.roles?.includes(role) ?? false) ||
-        perms.includes(item.permission) ||
+        (!!item.permission && perms.includes(item.permission)) ||
         (item.href === '/admin/analytics/audit' && canAccessGlobalAuditLog(user));
       if (allowed) {
         result.push({

@@ -14,9 +14,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, ['logistics.read', 'orders.read']);
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const statusParam = url.searchParams.get('status');
-  const statusFilter = statusParam === null ? 'PENDING' : statusParam;
-  const statusApi = statusParam === null ? 'PENDING' : (statusParam === '' ? undefined : statusParam);
+  const tabParam = url.searchParams.get('tab');
+  const activeTab = tabParam === 'allocated' ? 'allocated' : 'requests';
+  const requestStatusParam = url.searchParams.get('requestStatus');
+  const requestStatusFilter = requestStatusParam === null ? 'PENDING' : requestStatusParam;
+  const allowedRequestStatuses = new Set(['PENDING', 'APPROVED', 'REJECTED']);
+  const requestStatusApi = requestStatusParam === null
+    ? 'PENDING'
+    : (allowedRequestStatuses.has(requestStatusParam) ? requestStatusParam : undefined);
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
   const limit = 20;
 
@@ -39,7 +44,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const [res, countsRes, allocatedRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/logistics.listDeliveryConfirmationRequests?input=${encodeURIComponent(JSON.stringify({
-        status: statusApi,
+        status: requestStatusApi,
         page,
         limit,
       }))}`,
@@ -61,7 +66,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (!res.ok) {
     return json(
-      { requests: [], total: 0, page: 1, limit, statusFilter, orderCounts: {} as Record<string, number> },
+      {
+        requests: [],
+        total: 0,
+        page: 1,
+        limit,
+        activeTab,
+        requestStatusFilter,
+        orderCounts: {} as Record<string, number>,
+        allocatedOrders: [] as AllocatedDeliveryOrder[],
+        canAdjustOrder: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'].includes(user.role),
+      },
       { status: 200 },
     );
   }
@@ -85,16 +100,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       })))
     : [];
 
-  const orderCounts = countsRes.ok
+  const baseOrderCounts = countsRes.ok
     ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
     : {};
+  // Keep Allocated KPI consistent with the visible allocated table on this page.
+  const orderCounts = {
+    ...baseOrderCounts,
+    ALLOCATED: allocatedOrders.length,
+  };
 
   return json({
     requests,
     total,
     page,
     limit,
-    statusFilter,
+    activeTab,
+    requestStatusFilter,
     orderCounts,
     allocatedOrders,
     canAdjustOrder: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'].includes(user.role),
@@ -173,7 +194,8 @@ export default function DeliveryConfirmationsRoute() {
       total={data.total}
       page={data.page}
       limit={data.limit}
-      statusFilter={data.statusFilter}
+      activeTab={data.activeTab}
+      requestStatusFilter={data.requestStatusFilter}
       orderCounts={data.orderCounts ?? {}}
       allocatedOrders={data.allocatedOrders ?? []}
       canAdjustOrder={data.canAdjustOrder}

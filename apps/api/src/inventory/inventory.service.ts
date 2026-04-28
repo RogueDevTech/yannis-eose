@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, asc, desc, count, sql } from 'drizzle-orm';
+import { eq, and, or, asc, desc, count, sql, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -259,9 +259,9 @@ export class InventoryService {
   // ============================================
 
   /**
-   * Record a stock transfer between locations in one step (no 3PL receipt gate).
-   * Deducts from source, creates the ledger row as RECEIVED, and credits the destination
-   * in the same transaction as the historical verify step did.
+   * Initiate a stock transfer between locations.
+   * Deducts from source immediately and records transfer as IN_TRANSIT.
+   * Destination stock is credited only when Logistics verifies receipt.
    */
   async initiateTransfer(input: StockTransferInput, actor: SessionUser) {
     const now = new Date();
@@ -322,12 +322,12 @@ export class InventoryService {
         .values({
           productId: input.productId,
           quantitySent: input.quantity,
-          quantityReceived: input.quantity,
+          quantityReceived: null,
           fromLocationId: input.fromLocationId,
           toLocationId: input.toLocationId,
-          transferStatus: 'RECEIVED',
+          transferStatus: 'IN_TRANSIT',
           transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
-          verifiedAt: now,
+          verifiedAt: null,
         })
         .returning();
 
@@ -346,52 +346,13 @@ export class InventoryService {
         actorId: actor.id,
       });
 
-      const destLevel = await tx
-        .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, input.productId),
-            eq(schema.inventoryLevels.locationId, input.toLocationId),
-          ),
-        )
-        .limit(1);
-
-      if (destLevel[0]) {
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantity}`,
-            updatedAt: now,
-          })
-          .where(eq(schema.inventoryLevels.id, destLevel[0].id));
-      } else {
-        await tx.insert(schema.inventoryLevels).values({
-          productId: input.productId,
-          locationId: input.toLocationId,
-          stockCount: input.quantity,
-          reservedCount: 0,
-          status: 'AVAILABLE',
-        });
-      }
-
-      await tx.insert(schema.stockMovements).values({
-        productId: input.productId,
-        movementType: 'TRANSFER_IN',
-        quantity: input.quantity,
-        fromLocationId: input.fromLocationId,
-        toLocationId: input.toLocationId,
-        referenceId: newTransfer.id,
-        actorId: actor.id,
-      });
-
       return newTransfer;
     });
 
     this.events.emitToRoom('inventory', 'transfer:created', {
       transferId: transfer.id,
       productId: input.productId,
-      completed: true,
+      completed: false,
     });
 
     await this.checkLowStockAndNotify(input.productId, input.fromLocationId);
@@ -517,6 +478,156 @@ export class InventoryService {
 
     return { success: true, hasShrinkage };
    });
+  }
+
+  /**
+   * Cancel a stock transfer that was created in error.
+   *
+   * Adds the originally-sent quantity back to the source location, deducts the
+   * received quantity from the destination, and flips the transfer row to
+   * CANCELLED. Also writes two reversal movements (RETURN out of destination,
+   * INTAKE-style return into source) so the audit trail explains the swing.
+   *
+   * Hard rules:
+   *  - The transfer must not already be CANCELLED.
+   *  - Destination must currently have at least the received quantity available
+   *    (`stockCount - reservedCount`). If not, units have been allocated/shipped
+   *    and cancelling would break inventory accounting — the user must do a
+   *    Stock Adjustment instead.
+   */
+  async cancelTransfer(input: { transferId: string; reason?: string | null }, actor: SessionUser) {
+    return withActorAndBranch(this.db, actor, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(schema.stockTransfers)
+        .where(eq(schema.stockTransfers.id, input.transferId))
+        .limit(1);
+      const transfer = rows[0];
+      if (!transfer) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      }
+      if (transfer.transferStatus === 'CANCELLED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is already cancelled' });
+      }
+
+      const receivedQty = transfer.quantityReceived ?? 0;
+      const sentQty = transfer.quantitySent;
+
+      // Refuse if destination can't give the units back. We use available
+      // (stock - reserved) to avoid yanking units that are already on a CS-
+      // confirmed order.
+      if (receivedQty > 0) {
+        const destRows = await tx
+          .select()
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, transfer.productId),
+              eq(schema.inventoryLevels.locationId, transfer.toLocationId),
+            ),
+          )
+          .limit(1);
+        const dest = destRows[0];
+        const destAvailable = (dest?.stockCount ?? 0) - (dest?.reservedCount ?? 0);
+        if (!dest || destAvailable < receivedQty) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Cannot cancel — destination only has ${Math.max(0, destAvailable)} unit(s) free, but ${receivedQty} were sent there. Use a Stock Adjustment instead.`,
+          });
+        }
+      }
+
+      const now = new Date();
+
+      // 1. Deduct from destination (reverse the credit)
+      if (receivedQty > 0) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} - ${receivedQty}`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, transfer.productId),
+              eq(schema.inventoryLevels.locationId, transfer.toLocationId),
+            ),
+          );
+        await tx.insert(schema.stockMovements).values({
+          productId: transfer.productId,
+          movementType: 'TRANSFER_OUT',
+          quantity: receivedQty,
+          fromLocationId: transfer.toLocationId,
+          toLocationId: transfer.fromLocationId,
+          referenceId: transfer.id,
+          reason: input.reason
+            ? `Transfer cancelled: ${input.reason}`
+            : 'Transfer cancelled',
+          actorId: actor.id,
+        });
+      }
+
+      // 2. Add back to source (reverse the debit). We restore the originally
+      // sent quantity, not the received quantity — the source lost `sentQty`
+      // when the transfer was initiated, so that's what comes back.
+      const sourceRows = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, transfer.productId),
+            eq(schema.inventoryLevels.locationId, transfer.fromLocationId),
+          ),
+        )
+        .limit(1);
+      if (sourceRows[0]) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} + ${sentQty}`,
+            updatedAt: now,
+          })
+          .where(eq(schema.inventoryLevels.id, sourceRows[0].id));
+      } else {
+        await tx.insert(schema.inventoryLevels).values({
+          productId: transfer.productId,
+          locationId: transfer.fromLocationId,
+          stockCount: sentQty,
+          reservedCount: 0,
+          status: 'AVAILABLE',
+        });
+      }
+      await tx.insert(schema.stockMovements).values({
+        productId: transfer.productId,
+        movementType: 'TRANSFER_IN',
+        quantity: sentQty,
+        fromLocationId: transfer.toLocationId,
+        toLocationId: transfer.fromLocationId,
+        referenceId: transfer.id,
+        reason: input.reason
+          ? `Transfer cancelled: ${input.reason}`
+          : 'Transfer cancelled',
+        actorId: actor.id,
+      });
+
+      // 3. Mark the transfer row CANCELLED. We tuck the cancellation reason
+      // into shrinkage_reason since stock_transfers doesn't have a dedicated
+      // field — UI labels it correctly based on transferStatus.
+      await tx
+        .update(schema.stockTransfers)
+        .set({
+          transferStatus: 'CANCELLED',
+          shrinkageReason: input.reason?.trim() ? input.reason.trim() : transfer.shrinkageReason,
+        })
+        .where(eq(schema.stockTransfers.id, input.transferId));
+
+      this.events.emitToRoom('inventory', 'transfer:cancelled', {
+        transferId: transfer.id,
+        productId: transfer.productId,
+      });
+
+      return { success: true };
+    });
   }
 
   // ============================================
@@ -839,12 +950,40 @@ export class InventoryService {
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return this.db
+    const transfers = await this.db
       .select()
       .from(schema.stockTransfers)
       .where(whereClause)
       .orderBy(desc(schema.stockTransfers.createdAt))
       .limit(50);
+
+    if (transfers.length === 0) return transfers;
+
+    const transferIds = transfers.map((t) => t.id);
+    const senderRows = await this.db
+      .select({
+        transferId: schema.stockMovements.referenceId,
+        senderName: schema.users.name,
+      })
+      .from(schema.stockMovements)
+      .innerJoin(schema.users, eq(schema.users.id, schema.stockMovements.actorId))
+      .where(
+        and(
+          eq(schema.stockMovements.movementType, 'TRANSFER_OUT'),
+          inArray(schema.stockMovements.referenceId, transferIds),
+        ),
+      );
+
+    const senderByTransferId = new Map<string, string>();
+    for (const row of senderRows) {
+      if (!row.transferId || !row.senderName || senderByTransferId.has(row.transferId)) continue;
+      senderByTransferId.set(row.transferId, row.senderName);
+    }
+
+    return transfers.map((transfer) => ({
+      ...transfer,
+      senderName: senderByTransferId.get(transfer.id) ?? null,
+    }));
   }
 
   /**

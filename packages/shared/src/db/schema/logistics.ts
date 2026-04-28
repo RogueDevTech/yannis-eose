@@ -27,7 +27,7 @@ export const logisticsLocations = pgTable('logistics_locations', {
   coordinates: text('coordinates'),
   dispatchLocked: boolean('dispatch_locked').default(false).notNull(),
   /**
-   * Optional WhatsApp group invite link used by the CS "Share to 3PL" flow.
+   * Optional WhatsApp group invite link used by the CS "Share to logistics company" flow.
    * When set, CS can click a button on an allocated order that (a) copies the
    * rendered dispatch message to clipboard and (b) opens this group link in a new tab.
    * Group invites cannot be pre-filled with text (WhatsApp platform limit), so the

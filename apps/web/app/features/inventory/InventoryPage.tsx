@@ -23,12 +23,14 @@ import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
+import { DataTable, type TableColumn } from '~/components/ui/data-table';
 import type {
-  InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption,
+  InventoryLevel, InventoryStreamData, ProductOption, LocationOption, StockMovement,
   Transfer, ReturnedOrder, Reconciliation, LocationWithLock, LowStockAlertsResult,
 } from './types';
 import {
-  MOVEMENT_COLORS, formatMovementType,
+  MOVEMENT_COLORS,
+  formatMovementType,
   REASON_LABELS,
 } from './types';
 
@@ -44,7 +46,9 @@ export function InventoryPage({
   const hasTransfers = !!transfers;
   const hasReturns = !!returnedOrders;
 
-  type TabValue = 'levels' | 'movements' | 'transfers' | 'returns' | 'reconciliation';
+  const deliveryDeductions = movements.filter((m) => m.movementType === 'DELIVERY');
+
+  type TabValue = 'levels' | 'delivery_deductions' | 'transfers' | 'returns' | 'reconciliation';
   const [activeTab, setActiveTab] = useState<TabValue>('levels');
 
   // Stock Levels filter + sort are URL-driven so the backend can do the actual filter/sort/paginate.
@@ -181,12 +185,11 @@ export function InventoryPage({
 
   useEffect(() => {
     if (!showIntakeForm) return;
-    if (fetcher.state !== 'idle') return;
     if (!(fetcher.data as { success?: boolean } | undefined)?.success) return;
     setShowIntakeForm(false);
     setIntakeProductId('');
     setIntakeLocationId('');
-  }, [fetcher.state, fetcher.data, showIntakeForm]);
+  }, [fetcher.data, showIntakeForm]);
 
   // Low-stock threshold editor (admin-only)
   const [showThresholdModal, setShowThresholdModal] = useState(false);
@@ -196,10 +199,10 @@ export function InventoryPage({
   const thresholdFetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(thresholdFetcher.data, { successMessage: 'Low-stock threshold updated' });
   useEffect(() => {
-    if (thresholdFetcher.state === 'idle' && thresholdFetcher.data?.success) {
+    if (thresholdFetcher.data?.success) {
       setShowThresholdModal(false);
     }
-  }, [thresholdFetcher.state, thresholdFetcher.data]);
+  }, [thresholdFetcher.data]);
 
   const totalStock = levels.reduce((sum, l) => sum + l.stockCount, 0);
   const totalReserved = levels.reduce((sum, l) => sum + l.reservedCount, 0);
@@ -209,7 +212,7 @@ export function InventoryPage({
       {/* Page header */}
       <PageHeader
         title="Inventory"
-        description="Track stock levels, movements, and transfers across all locations"
+        description="Track stock levels, transfers, and reconciliations across all locations"
         actions={
           <>
             <PageRefreshButton />
@@ -259,7 +262,7 @@ export function InventoryPage({
                 size="sm"
                 onClick={() => setShowExportModal(true)}
               >
-                Export CSV
+                Generate report
               </Button>
             )}
           </>
@@ -425,7 +428,7 @@ export function InventoryPage({
                   type="submit"
                   variant="primary"
                   disabled={!intakeProductId || !intakeLocationId}
-                  loading={fetcher.state !== 'idle'}
+                  loading={fetcher.state === 'submitting'}
                   loadingText="Adding..."
                 >
                   Add Stock
@@ -638,25 +641,42 @@ export function InventoryPage({
                 </div>
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
                   {preview.map((item) => (
-                    <Link
+                    <div
                       key={item.levelId}
-                      to={`/admin/inventory/${item.levelId}`}
-                      prefetch="intent"
-                      className="rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 min-w-0 shadow-sm hover:border-warning-400 dark:hover:border-warning-600 hover:bg-app-elevated dark:hover:bg-warning-950/40 transition-colors"
-                      title={`${item.productName} — ${item.locationName}`}
+                      className="rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 min-w-0 shadow-sm"
                     >
-                      <p className="text-xs font-semibold text-app-fg leading-snug line-clamp-2">{item.productName}</p>
-                      <p className="text-[11px] text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
-                      <p
-                        className={`text-xs font-bold tabular-nums mt-1.5 ${
-                          item.availableCount <= 0
-                            ? 'text-danger-600 dark:text-danger-400'
-                            : 'text-warning-800 dark:text-warning-200'
-                        }`}
+                      <Link
+                        to={`/admin/inventory/${item.levelId}`}
+                        prefetch="intent"
+                        className="block hover:opacity-90 transition-opacity"
+                        title={`${item.productName} — ${item.locationName}`}
                       >
-                        {item.availableCount} avail
-                      </p>
-                    </Link>
+                        <p className="text-xs font-semibold text-app-fg leading-snug line-clamp-2">{item.productName}</p>
+                        <p className="text-[11px] text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
+                        <p
+                          className={`text-xs font-bold tabular-nums mt-1.5 ${
+                            item.availableCount <= 0
+                              ? 'text-danger-600 dark:text-danger-400'
+                              : 'text-warning-800 dark:text-warning-200'
+                          }`}
+                        >
+                          {item.availableCount} avail
+                        </p>
+                      </Link>
+                      {canIntake && (
+                        <div className="mt-2 pt-2 border-t border-warning-200/70 dark:border-warning-800/60">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="w-full text-xs"
+                            onClick={() => openIntakeModal({ productId: item.productId, locationId: item.locationId })}
+                          >
+                            Restock
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
                 {extra > 0 && (
@@ -679,7 +699,7 @@ export function InventoryPage({
         onChange={(v) => setActiveTab(v as TabValue)}
         tabs={[
           { value: 'levels', label: `Stock Levels (${totalLevels})` },
-          { value: 'movements', label: 'Movement Log' },
+          { value: 'delivery_deductions', label: `Delivery Deductions (${deliveryDeductions.length})` },
           ...(hasTransfers ? [{ value: 'transfers' as const, label: `Transfers (${transfers.length})` }] : []),
           ...(hasReturns ? [{ value: 'returns' as const, label: `Returns (${returnedOrders.length})` }] : []),
           ...(reconciliations != null ? [{ value: 'reconciliation' as const, label: 'Reconciliation' }] : []),
@@ -687,7 +707,7 @@ export function InventoryPage({
       />
 
       {/* Content */}
-      {activeTab === 'levels' ? (
+      {activeTab === 'levels' && (
         <>
         {/* Filter + search + sort row. Hidden only when there is no data AND no active filter. */}
         {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentLocationFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
@@ -789,7 +809,6 @@ export function InventoryPage({
                   <th className="table-header text-right">Reserved</th>
                   <th className="table-header text-right">Available</th>
                   <th className="table-header">Status</th>
-                  <th className="table-header">Last Updated</th>
                   <th className="table-header text-right">Actions</th>
                 </tr>
               </thead>
@@ -805,11 +824,6 @@ export function InventoryPage({
                     </td>
                     <td className="table-cell">
                       <StatusBadge status={level.status} />
-                    </td>
-                    <td className="table-cell text-app-fg-muted">
-                      {new Date(level.updatedAt).toLocaleDateString('en-NG', {
-                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                      })}
                     </td>
                     <td className="table-cell text-right">
                       <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
@@ -848,7 +862,7 @@ export function InventoryPage({
                 ))}
                 {displayedLevels.length === 0 && (
                   <tr>
-                    <td colSpan={8}>
+                    <td colSpan={7}>
                       <EmptyState
                         title={levels.length === 0 ? 'No inventory data yet' : 'No inventory matches your filter'}
                         description={levels.length === 0 ? 'Add products and receive stock to get started.' : 'Try changing the product filter or sort.'}
@@ -943,99 +957,18 @@ export function InventoryPage({
           </div>
         )}
         </>
-      ) : (
-        <DeferredSection resolve={movements} skeleton="table">
-          {(resolvedMovements) => (
-            <div className="card p-0">
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="table-header">Type</th>
-                      <th className="table-header">Product</th>
-                      <th className="table-header text-right">Quantity</th>
-                      <th className="table-header">From</th>
-                      <th className="table-header">To</th>
-                      <th className="table-header">Reason</th>
-                      <th className="table-header">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {resolvedMovements.map((m: StockMovement) => (
-                      <tr key={m.id} className="table-row">
-                        <td className="table-cell">
-                          <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
-                            {formatMovementType(m.movementType)}
-                          </span>
-                        </td>
-                        <td className="table-cell font-medium text-app-fg">{productName(m.productId)}</td>
-                        <td className="table-cell text-right font-medium">
-                          <span className={m.quantity > 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}>
-                            {m.quantity > 0 ? '+' : ''}{m.quantity}
-                          </span>
-                        </td>
-                        <td className="table-cell text-app-fg-muted">
-                          {locationName(m.fromLocationId)}
-                        </td>
-                        <td className="table-cell text-app-fg-muted">
-                          {locationName(m.toLocationId)}
-                        </td>
-                        <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">
-                          {m.reason ?? '\u2014'}
-                        </td>
-                        <td className="table-cell text-app-fg-muted">
-                          {new Date(m.createdAt).toLocaleDateString('en-NG', {
-                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                          })}
-                        </td>
-                      </tr>
-                    ))}
-                    {resolvedMovements.length === 0 && (
-                      <tr>
-                        <td colSpan={7}>
-                          <EmptyState title="No stock movements recorded yet" />
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile */}
-              <div className="md:hidden space-y-3 px-1">
-                {resolvedMovements.map((m: StockMovement) => (
-                  <div key={m.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
-                        {formatMovementType(m.movementType)}
-                      </span>
-                      <span className={`font-medium ${m.quantity > 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
-                        {m.quantity > 0 ? '+' : ''}{m.quantity} units
-                      </span>
-                    </div>
-                    <p className="text-sm font-medium text-app-fg mb-0.5">{productName(m.productId)}</p>
-                    <p className="text-sm text-app-fg-muted">
-                      {locationName(m.fromLocationId)} {m.fromLocationId && m.toLocationId ? '→' : ''} {locationName(m.toLocationId)}
-                    </p>
-                    <p className="text-xs text-app-fg-muted mt-0.5">
-                      {new Date(m.createdAt).toLocaleDateString('en-NG', {
-                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                      })}
-                      {m.reason && ` — ${m.reason}`}
-                    </p>
-                  </div>
-                ))}
-                {resolvedMovements.length === 0 && (
-                  <EmptyState title="No stock movements yet" />
-                )}
-              </div>
-            </div>
-          )}
-        </DeferredSection>
       )}
 
       {activeTab === 'transfers' && hasTransfers && (
         <TransfersTab transfers={transfers} products={products} locations={locations} />
+      )}
+
+      {activeTab === 'delivery_deductions' && (
+        <DeliveryDeductionsTab
+          movements={deliveryDeductions}
+          productName={productName}
+          locationName={locationName}
+        />
       )}
 
       {activeTab === 'returns' && hasReturns && (
@@ -1061,6 +994,197 @@ export function InventoryPage({
 
 /* ── Transfers Tab ── */
 
+function DeliveryDeductionsTab({
+  movements,
+  productName,
+  locationName,
+}: {
+  movements: StockMovement[];
+  productName: (id: string) => string;
+  locationName: (id: string | null) => string;
+}) {
+  const [selectedMovement, setSelectedMovement] = useState<StockMovement | null>(null);
+  const selectedOrderId =
+    selectedMovement && typeof selectedMovement.referenceId === 'string' && selectedMovement.referenceId.length > 0
+      ? selectedMovement.referenceId
+      : null;
+
+  return (
+    <>
+      <div className="card p-0">
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr>
+                <th className="table-header">Type</th>
+                <th className="table-header">Product</th>
+                <th className="table-header">Customer</th>
+                <th className="table-header text-right">Qty</th>
+                <th className="table-header">From</th>
+                <th className="table-header">To</th>
+                <th className="table-header">Date</th>
+                <th className="table-header text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movements.map((m) => (
+                <tr key={m.id} className="table-row">
+                  <td className="table-cell">
+                    <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
+                      {formatMovementType(m.movementType)}
+                    </span>
+                  </td>
+                  <td className="table-cell font-medium text-app-fg">{productName(m.productId)}</td>
+                  <td className="table-cell text-app-fg">
+                    {m.referenceCustomerName ?? '—'}
+                  </td>
+                  <td className="table-cell text-right font-medium text-danger-600 dark:text-danger-400 tabular-nums">
+                    -{Math.abs(m.quantity)}
+                  </td>
+                  <td className="table-cell text-app-fg-muted">{locationName(m.fromLocationId)}</td>
+                  <td className="table-cell text-app-fg-muted">{locationName(m.toLocationId)}</td>
+                  <td className="table-cell text-app-fg-muted whitespace-nowrap text-xs sm:text-sm">
+                    {new Date(m.createdAt).toLocaleDateString('en-NG', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </td>
+                  <td className="table-cell text-right">
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedMovement(m)}>
+                      View
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {movements.length === 0 && (
+                <tr>
+                  <td colSpan={8}>
+                    <EmptyState
+                      title="No delivery deductions yet"
+                      description="Stock reductions from delivered orders will appear here."
+                    />
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="md:hidden space-y-3 px-1">
+          {movements.map((m) => (
+            <div key={m.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
+                  {formatMovementType(m.movementType)}
+                </span>
+                <span className="font-medium text-danger-600 dark:text-danger-400 tabular-nums">
+                  -{Math.abs(m.quantity)}
+                </span>
+              </div>
+              <div className="space-y-1 text-sm">
+                <p className="font-medium text-app-fg">{productName(m.productId)}</p>
+                <p className="text-app-fg-muted">{m.referenceCustomerName ?? '—'}</p>
+                <p className="text-app-fg-muted">{locationName(m.fromLocationId)} → {locationName(m.toLocationId)}</p>
+                <p className="text-xs text-app-fg-muted">
+                  {new Date(m.createdAt).toLocaleDateString('en-NG', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </p>
+              </div>
+              <div className="pt-2 border-t border-app-border">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedMovement(m)}>
+                  View
+                </Button>
+              </div>
+            </div>
+          ))}
+          {movements.length === 0 && (
+            <EmptyState
+              title="No delivery deductions yet"
+              description="Stock reductions from delivered orders will appear here."
+            />
+          )}
+        </div>
+      </div>
+
+      <Modal
+        open={!!selectedMovement}
+        onClose={() => setSelectedMovement(null)}
+        maxWidth="max-w-lg"
+        aria-labelledby="delivery-deduction-detail-title"
+      >
+        {selectedMovement && (
+          <div className="card border-0 shadow-none space-y-4 p-4 sm:p-6">
+            <div className="flex items-center justify-between gap-2">
+              <h3 id="delivery-deduction-detail-title" className="text-lg font-semibold text-app-fg">
+                Delivery deduction
+              </h3>
+              <button
+                type="button"
+                onClick={() => setSelectedMovement(null)}
+                className="text-app-fg-muted hover:text-app-fg shrink-0"
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <DescriptionList
+              items={[
+                { label: 'Customer', value: selectedMovement.referenceCustomerName ?? '—' },
+                {
+                  label: 'Order',
+                  value: selectedOrderId ? (
+                    <OrderIdBadge id={selectedOrderId} linkTo={`/admin/orders/${selectedOrderId}`} />
+                  ) : (
+                    '—'
+                  ),
+                },
+                { label: 'Product', value: productName(selectedMovement.productId) },
+                { label: 'From', value: locationName(selectedMovement.fromLocationId) },
+                { label: 'To', value: locationName(selectedMovement.toLocationId) },
+                { label: 'Quantity', value: `-${Math.abs(selectedMovement.quantity)}` },
+                {
+                  label: 'Date',
+                  value: new Date(selectedMovement.createdAt).toLocaleDateString('en-NG', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
+                },
+              ]}
+            />
+
+            <div className="flex items-center gap-2">
+              {selectedOrderId && (
+                <Link
+                  to={`/admin/orders/${selectedOrderId}`}
+                  className="btn-primary btn-sm"
+                  onClick={() => setSelectedMovement(null)}
+                >
+                  Open order
+                </Link>
+              )}
+              <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedMovement(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
+  );
+}
+
 function TransfersTab({
   transfers,
   products,
@@ -1072,70 +1196,73 @@ function TransfersTab({
 }) {
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'Unknown location';
+  const formatRecordedAt = (dateIso: string) =>
+    new Date(dateIso).toLocaleDateString('en-NG', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+  const columns: TableColumn<Transfer>[] = [
+    {
+      key: 'product',
+      header: 'Product',
+      render: (t) => <span className="font-medium text-app-fg">{productName(t.productId)}</span>,
+      minWidth: 'min-w-[160px]',
+    },
+    {
+      key: 'from',
+      header: 'From',
+      render: (t) => <span className="text-app-fg-muted">{locationName(t.fromLocationId)}</span>,
+      hideOnMobile: true,
+    },
+    {
+      key: 'to',
+      header: 'To',
+      render: (t) => <span className="text-app-fg-muted">{locationName(t.toLocationId)}</span>,
+      hideOnMobile: true,
+    },
+    {
+      key: 'route',
+      header: 'Route',
+      className: 'sm:hidden',
+      render: (t) => (
+        <span className="text-xs text-app-fg-muted">
+          {locationName(t.fromLocationId)} → {locationName(t.toLocationId)}
+        </span>
+      ),
+    },
+    {
+      key: 'qty',
+      header: 'Qty',
+      align: 'right',
+      render: (t) => (
+        <span className="font-medium tabular-nums text-app-fg">{t.quantityReceived ?? t.quantitySent}</span>
+      ),
+    },
+    {
+      key: 'recorded',
+      header: 'Recorded',
+      hideOnMobile: true,
+      render: (t) => (
+        <span className="text-xs sm:text-sm text-app-fg-muted whitespace-nowrap">
+          {formatRecordedAt(t.verifiedAt ?? t.createdAt)}
+        </span>
+      ),
+    },
+  ];
 
   return (
-    <div className="card p-0">
-      <p className="px-4 pt-3 pb-1 text-sm text-app-fg-muted">
-        Read-only list. Use <span className="text-app-fg">Admin → Transfers</span> to record a movement.
-      </p>
-      <div className="hidden md:block overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr>
-              <th className="table-header">Product</th>
-              <th className="table-header">From</th>
-              <th className="table-header">To</th>
-              <th className="table-header text-right">Qty</th>
-              <th className="table-header">Recorded</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transfers.map((t) => (
-                <tr key={t.id} className="table-row">
-                  <td className="table-cell font-medium text-app-fg">{productName(t.productId)}</td>
-                  <td className="table-cell text-app-fg-muted">{locationName(t.fromLocationId)}</td>
-                  <td className="table-cell text-app-fg-muted">{locationName(t.toLocationId)}</td>
-                  <td className="table-cell text-right font-medium">{t.quantityReceived ?? t.quantitySent}</td>
-                  <td className="table-cell text-app-fg-muted text-sm">
-                    {t.verifiedAt
-                      ? new Date(t.verifiedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                      : new Date(t.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </td>
-                </tr>
-              ))}
-            {transfers.length === 0 && (
-              <tr>
-                <td colSpan={5}>
-                  <EmptyState title="No transfers" description="No transfer records for your scope." />
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="md:hidden space-y-3 px-1 pb-3">
-        {transfers.map((t) => (
-            <div key={t.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
-              <div className="font-medium text-app-fg text-sm">{productName(t.productId)}</div>
-              <div className="flex items-center gap-2 text-sm text-app-fg-muted">
-                <span>{locationName(t.fromLocationId)}</span>
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
-                <span>{locationName(t.toLocationId)}</span>
-              </div>
-              <p className="text-sm text-app-fg">
-                Qty:{' '}
-                <span className="font-medium">{t.quantityReceived ?? t.quantitySent}</span>
-              </p>
-              <p className="text-xs text-app-fg-muted">
-                {t.verifiedAt
-                  ? new Date(t.verifiedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                  : new Date(t.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-              </p>
-            </div>
-          ))}
-        {transfers.length === 0 && <EmptyState title="No transfers" />}
-      </div>
+    <div className="card p-4 sm:p-6">
+      <DataTable
+        caption="Stock transfers"
+        columns={columns}
+        data={transfers}
+        keyField="id"
+        emptyTitle="No transfers yet"
+        emptyDescription="Record and manage transfers from Admin → Transfers."
+      />
     </div>
   );
 }

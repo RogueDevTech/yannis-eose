@@ -17,6 +17,7 @@ import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills
 import { SearchInput } from '~/components/ui/search-input';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { Checkbox } from '~/components/ui/checkbox';
+import { Pagination } from '~/components/ui/pagination';
 
 // ── Remove confirmation modal ─────────────────────────────────────────────────
 
@@ -397,10 +398,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return Response.json({ error: 'Unknown intent' }, { status: 400 });
 }
 
+/** Page size for the Branch members table. Tuned to fit a viewport without scrolling. */
+const MEMBERS_PAGE_SIZE = 20;
+
 function BranchMembersPanel({ members }: { members: OverviewMember[] }) {
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
   const [search, setSearch] = useState('');
   const [removeTarget, setRemoveTarget] = useState<OverviewMember | null>(null);
+  const [page, setPage] = useState(1);
 
   const pillOptions = useMemo((): FilterPillOption[] => {
     const byDept = new Map<string, number>();
@@ -424,6 +429,23 @@ function BranchMembersPanel({ members }: { members: OverviewMember[] }) {
       return true;
     });
   }, [members, deptFilter, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / MEMBERS_PAGE_SIZE));
+
+  // Snap back to page 1 whenever filters change so the user isn't stranded on a
+  // page that no longer has rows.
+  useEffect(() => {
+    setPage(1);
+  }, [deptFilter, search]);
+
+  // Defensive: if `members` shrinks (e.g. someone is removed) and the current
+  // page is now empty, step back rather than rendering nothing.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const pageStart = (page - 1) * MEMBERS_PAGE_SIZE;
+  const pageRows = filtered.slice(pageStart, pageStart + MEMBERS_PAGE_SIZE);
 
   if (members.length === 0) {
     return (
@@ -473,7 +495,7 @@ function BranchMembersPanel({ members }: { members: OverviewMember[] }) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((m) => (
+                {pageRows.map((m) => (
                   <tr key={m.userId} className="table-row">
                     <td className="table-cell">
                       <span className="font-medium text-app-fg">{m.name}</span>
@@ -522,6 +544,18 @@ function BranchMembersPanel({ members }: { members: OverviewMember[] }) {
               </tbody>
             </table>
           </div>
+          {totalPages > 1 && (
+            <div className="border-t border-app-border px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-app-fg-muted">
+                Showing {pageStart + 1}–{Math.min(pageStart + MEMBERS_PAGE_SIZE, filtered.length)} of {filtered.length}
+              </p>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+              />
+            </div>
+          )}
         </div>
       )}
 

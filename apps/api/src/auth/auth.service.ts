@@ -28,6 +28,11 @@ const RESET_TOKEN_TTL = 1800; // 30 minutes
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly sessionTtl: number;
+  /**
+   * Extended session TTL used when the user opts into "Remember me" at sign-in.
+   * Defaults to 30 days; override with SESSION_TTL_REMEMBER_SECONDS.
+   */
+  private readonly sessionTtlRemember: number;
   private readonly maxLoginAttempts: number;
   private readonly rateLimitWindow: number;
 
@@ -39,6 +44,10 @@ export class AuthService {
     private readonly branchTeams: BranchTeamsService,
   ) {
     this.sessionTtl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10); // 24 hours
+    this.sessionTtlRemember = parseInt(
+      process.env['SESSION_TTL_REMEMBER_SECONDS'] ?? '2592000', // 30 days
+      10,
+    );
     this.maxLoginAttempts = 5;
     this.rateLimitWindow = 900; // 15 minutes in seconds
   }
@@ -51,7 +60,8 @@ export class AuthService {
     email: string,
     password: string,
     clientIp: string,
-  ): Promise<{ token: string; user: SessionUser }> {
+    rememberMe = false,
+  ): Promise<{ token: string; user: SessionUser; ttlSeconds: number }> {
     // Rate limit check
     await this.checkRateLimit(clientIp);
 
@@ -134,9 +144,12 @@ export class AuthService {
     };
 
     // Persist session in DB, then cache in Redis when available.
-    await this.sessionStore.createSession(token, sessionUser, this.sessionTtl);
+    // Remember-me extends both the Redis/DB session TTL and the cookie max-age (handled by the
+    // controller using the returned `ttlSeconds`).
+    const ttlSeconds = rememberMe ? this.sessionTtlRemember : this.sessionTtl;
+    await this.sessionStore.createSession(token, sessionUser, ttlSeconds);
 
-    return { token, user: sessionUser };
+    return { token, user: sessionUser, ttlSeconds };
   }
 
   /**

@@ -55,6 +55,9 @@ export function AuthPage({ needsSetup }: AuthPageProps) {
   );
 }
 
+/** localStorage key for the remembered sign-in email. Password is NEVER stored. */
+const REMEMBERED_EMAIL_KEY = 'yannis-remembered-email';
+
 function LoginForm({
   isSubmitting,
   actionData,
@@ -65,6 +68,8 @@ function LoginForm({
   const [dismissedError, setDismissedError] = useState(false);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const nav = useNavigation();
   const prevNavState = useRef(nav.state);
 
@@ -81,7 +86,28 @@ function LoginForm({
     if (actionData?.success) setDismissedSuccess(false);
   }, [actionData?.error, actionData?.success]);
 
-  const onInputChange = () => {};
+  // Restore the previously-remembered email on mount. Password is never stored — the
+  // user always retypes it. The checkbox stays checked so a second sign-in just refreshes
+  // the saved value.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const remembered = window.localStorage.getItem(REMEMBERED_EMAIL_KEY);
+    if (remembered) {
+      setEmail(remembered);
+      setRememberMe(true);
+    }
+  }, []);
+
+  // Persist (or clear) the remembered email when the user submits.
+  // On checked + non-empty email → save. On unchecked → wipe any prior value.
+  const persistRememberedEmail = () => {
+    if (typeof window === 'undefined') return;
+    if (rememberMe && email.trim()) {
+      window.localStorage.setItem(REMEMBERED_EMAIL_KEY, email.trim());
+    } else {
+      window.localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+    }
+  };
 
   return (
     <>
@@ -112,7 +138,7 @@ function LoginForm({
         />
       )}
 
-      <Form method="post" className="space-y-4">
+      <Form method="post" className="space-y-4" onSubmit={persistRememberedEmail}>
         <input type="hidden" name="intent" value="login" />
 
         <div>
@@ -130,7 +156,8 @@ function LoginForm({
             required
             className={`input ${mobileInput}`}
             placeholder="you@company.com"
-            onChange={onInputChange}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
           />
         </div>
 
@@ -158,7 +185,6 @@ function LoginForm({
               required
               className={`input pr-10 ${mobileInput}`}
               placeholder="Enter your password"
-              onChange={onInputChange}
             />
             <button
               type="button"
@@ -203,6 +229,21 @@ function LoginForm({
             </button>
           </div>
         </div>
+
+        <label
+          htmlFor="rememberMe"
+          className="flex items-center gap-2 cursor-pointer select-none text-sm text-app-fg-muted"
+        >
+          <input
+            id="rememberMe"
+            name="rememberMe"
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+            className="h-4 w-4 rounded border-app-border text-brand-600 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
+          />
+          <span>Remember me on this device</span>
+        </label>
 
         <Button type="submit" variant="primary" className="w-full" loading={isSubmitting} loadingText="Signing in...">
           Sign in

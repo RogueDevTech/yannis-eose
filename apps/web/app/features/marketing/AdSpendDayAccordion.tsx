@@ -42,6 +42,8 @@ interface AdSpendDayAccordionProps {
   totalPages: number;
   /** Remix action URL for approve/reject intents. */
   actionUrl: string;
+  /** Open a receipt/screenshot inside the parent modal. */
+  onPreviewReceipt: (line: AdSpendGroupLine) => void;
 }
 
 export function AdSpendDayAccordion({
@@ -51,12 +53,10 @@ export function AdSpendDayAccordion({
   page,
   totalPages,
   actionUrl,
+  onPreviewReceipt,
 }: AdSpendDayAccordionProps) {
-  const [openKeys, setOpenKeys] = useState<Set<string>>(() => {
-    // Default-expand the first group on a fresh load — saves one click for the
-    // common case (MB checking what they just submitted).
-    return new Set(groups[0] ? [`${groups[0].spendDate}::${groups[0].mediaBuyerId}`] : []);
-  });
+  // Default to fully collapsed so long lists stay scannable.
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
 
   const toggle = (key: string) => {
     setOpenKeys((prev) => {
@@ -147,6 +147,7 @@ export function AdSpendDayAccordion({
                             line={line}
                             canModerate={canModerate}
                             actionUrl={actionUrl}
+                            onPreviewReceipt={onPreviewReceipt}
                           />
                         ))}
                       </tbody>
@@ -160,6 +161,7 @@ export function AdSpendDayAccordion({
                         line={line}
                         canModerate={canModerate}
                         actionUrl={actionUrl}
+                        onPreviewReceipt={onPreviewReceipt}
                       />
                     ))}
                   </div>
@@ -181,9 +183,10 @@ interface LineRowProps {
   line: AdSpendGroupLine;
   canModerate: boolean;
   actionUrl: string;
+  onPreviewReceipt: (line: AdSpendGroupLine) => void;
 }
 
-function LineRow({ line, canModerate, actionUrl }: LineRowProps) {
+function LineRow({ line, canModerate, actionUrl, onPreviewReceipt }: LineRowProps) {
   const fetcher = useFetcher();
   const submitting = fetcher.state !== 'idle';
 
@@ -236,14 +239,13 @@ function LineRow({ line, canModerate, actionUrl }: LineRowProps) {
         )}
       </td>
       <td className="px-4 py-2">
-        <a
-          href={line.screenshotUrl}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="button"
+          onClick={() => onPreviewReceipt(line)}
           className="text-brand-500 hover:text-brand-600 underline"
         >
           View
-        </a>
+        </button>
       </td>
       <td className="px-4 py-2">
         <StatusBadge status={line.status} />
@@ -284,7 +286,7 @@ function LineRow({ line, canModerate, actionUrl }: LineRowProps) {
   );
 }
 
-function LineCardMobile({ line, canModerate, actionUrl }: LineRowProps) {
+function LineCardMobile({ line, canModerate, actionUrl, onPreviewReceipt }: LineRowProps) {
   const fetcher = useFetcher();
   const submitting = fetcher.state !== 'idle';
 
@@ -319,14 +321,13 @@ function LineCardMobile({ line, canModerate, actionUrl }: LineRowProps) {
             View ad
           </a>
         )}
-        <a
-          href={line.screenshotUrl}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="button"
+          onClick={() => onPreviewReceipt(line)}
           className="text-brand-500 hover:text-brand-600 underline"
         >
           View screenshot
-        </a>
+        </button>
       </div>
       {canModerate && line.status === 'PENDING' && (
         <div className="flex gap-2">

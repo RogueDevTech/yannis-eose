@@ -550,7 +550,7 @@ export function DisbursementsPage({
               periodAllTime={filters.periodAllTime}
             />
             <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-              Export CSV
+              Generate report
             </Button>
             {canCreate && (
               <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
@@ -565,6 +565,9 @@ export function DisbursementsPage({
         open={showExportModal}
         onClose={() => setShowExportModal(false)}
         config={EXPORT_CONFIGS.disbursements}
+        picklists={{
+          recipients: recipients.map((r) => ({ id: r.id, name: r.name })),
+        }}
         initialFilters={{
           status: optimisticStatus !== 'ALL' ? optimisticStatus : undefined,
           receiverId: optimisticReceiver !== 'ALL' ? optimisticReceiver : undefined,

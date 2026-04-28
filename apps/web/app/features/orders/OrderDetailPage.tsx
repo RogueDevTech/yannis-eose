@@ -1508,8 +1508,13 @@ export function OrderDetailPage({
                         order.status === 'DISPATCHED' ||
                         order.status === 'IN_TRANSIT') &&
                       !logisticsLocationWithGroupLink && (
-                        <p className="text-xs text-warning-600 dark:text-warning-400">
-                          Add a WhatsApp group link on this allocated logistics location to enable manual share actions.
+                        // Don't tell CS to add the group link — that's the
+                        // Logistics admin's job (set on the location at create
+                        // time). CS just needs to know the link isn't there
+                        // yet so the "Open group" button is missing for a
+                        // reason.
+                        <p className="text-xs text-app-fg-muted">
+                          WhatsApp group not configured for this logistics location yet — ask Logistics to add it.
                         </p>
                       )}
                     {canMarkDelivered && (

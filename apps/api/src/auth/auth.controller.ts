@@ -144,7 +144,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
-    @Body() body: { email: string; password: string },
+    @Body() body: { email: string; password: string; rememberMe?: boolean },
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -153,14 +153,14 @@ export class AuthController {
       req.socket.remoteAddress ??
       'unknown';
 
-    const { token, user } = await this.authService.login(
+    const { token, user, ttlSeconds } = await this.authService.login(
       body.email,
       body.password,
       clientIp,
+      body.rememberMe === true,
     );
 
-    const maxAge = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10) * 1000;
-    res.cookie('yannis_session', token, sessionCookieOpts(maxAge));
+    res.cookie('yannis_session', token, sessionCookieOpts(ttlSeconds * 1000));
 
     return {
       message: 'Login successful',

@@ -57,14 +57,14 @@ export function InlineNotification({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <p className={`text-sm min-w-0 break-words ${classes.text}`}>{message}</p>
         {items.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             {items.map((item, index) =>
               item.onClick ? (
                 <button
                   key={item.label + index}
                   type="button"
                   onClick={item.onClick}
-                  className={`text-sm shrink-0 ${classes.link} bg-transparent border-none cursor-pointer p-0`}
+                  className={`text-sm ${classes.link} bg-transparent border-none cursor-pointer p-0`}
                 >
                   {item.label} →
                 </button>
@@ -72,7 +72,7 @@ export function InlineNotification({
                 <Link
                   key={item.href}
                   to={item.href}
-                  className={`text-sm shrink-0 ${classes.link}`}
+                  className={`text-sm ${classes.link}`}
                 >
                   {item.label} →
                 </Link>

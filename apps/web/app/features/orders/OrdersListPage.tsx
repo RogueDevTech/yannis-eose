@@ -19,10 +19,10 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { Textarea } from '~/components/ui/textarea';
 import { ExportModal } from '~/components/ui/export-modal';
+import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { STATUS_OPTIONS, STATUS_LABELS, STATUS_TEXT_CLASS, formatStatus } from '~/features/shared/order-status';
-import { exportToCsv } from '~/lib/csv-export';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import type { Order } from './types';
@@ -105,6 +105,7 @@ export function OrdersListPage({
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showSelectedExportModal, setShowSelectedExportModal] = useState(false);
 
   // Sync URL params to local state when loader data changes (e.g. back/forward)
   useEffect(() => {
@@ -290,31 +291,6 @@ export function OrdersListPage({
     });
   };
 
-  const submitBulkExport = () => {
-    const exportData = selectedOrders.map((o) => ({
-      id: o.id,
-      customer: o.customerName,
-      ...(showCSAgentColumn && { assignedCs: o.assignedCsName ?? '—' }),
-      phone: o.customerPhoneDisplay,
-      status: o.status,
-      amount: o.totalAmount ?? '',
-      created: new Date(o.createdAt).toLocaleDateString(),
-    }));
-    exportToCsv(
-      exportData,
-      [
-        { key: 'id', label: 'Order ID' },
-        { key: 'customer', label: 'Customer' },
-        ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
-        { key: 'phone', label: 'Phone' },
-        { key: 'status', label: 'Status' },
-        { key: 'amount', label: 'Amount' },
-        { key: 'created', label: 'Created' },
-      ],
-      `orders-selected-${new Date().toISOString().split('T')[0]}.csv`,
-    );
-  };
-
   const canBulkAction = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'STOCK_MANAGER';
 
   const statusOptions = STATUS_OPTIONS.map((status) => ({
@@ -374,7 +350,7 @@ export function OrdersListPage({
             size="sm"
               onClick={() => setShowExportModal(true)}
           >
-            Export CSV
+            Generate report
           </Button>
         </div>
       </div>
@@ -481,7 +457,7 @@ export function OrdersListPage({
                 </span>
               )}
               {/* Export selected */}
-              <Button variant="secondary" size="sm" onClick={submitBulkExport}>
+              <Button variant="secondary" size="sm" onClick={() => setShowSelectedExportModal(true)}>
                 Export Selected
               </Button>
             </div>
@@ -514,6 +490,33 @@ export function OrdersListPage({
           )}
         </div>
       )}
+
+      <LocalExportModal
+        open={showSelectedExportModal}
+        onClose={() => setShowSelectedExportModal(false)}
+        title="Export Selected Orders"
+        description="Choose format and columns for selected orders."
+        filenamePrefix="orders-selected"
+        rows={selectedOrders.map((o) => ({
+          id: o.id,
+          customer: o.customerName,
+          assignedCs: o.assignedCsName ?? '—',
+          phone: o.customerPhoneDisplay,
+          status: o.status,
+          amount: o.totalAmount ?? '',
+          created: new Date(o.createdAt).toLocaleDateString(),
+        }))}
+        columns={[
+          { key: 'id', label: 'Order ID' },
+          { key: 'customer', label: 'Customer' },
+          ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
+          { key: 'phone', label: 'Phone' },
+          { key: 'status', label: 'Status' },
+          { key: 'amount', label: 'Amount' },
+          { key: 'created', label: 'Created' },
+        ]}
+        defaultColumns={showCSAgentColumn ? ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'] : ['id', 'customer', 'status', 'amount', 'created']}
+      />
 
       {/* Filters bar */}
       <div className="card">
@@ -860,6 +863,9 @@ export function OrdersListPage({
         open={showExportModal}
         onClose={() => setShowExportModal(false)}
         config={EXPORT_CONFIGS.cs_orders}
+        picklists={{
+          csAgents: (csAgentsForFilter ?? []).map((a) => ({ id: a.agentId, name: a.agentName })),
+        }}
         initialFilters={{
           status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
           search: searchQuery || undefined,

@@ -8,7 +8,8 @@ export type ExportReportActionData =
 
 export async function handleExportReportAction(request: Request) {
   const cookie = getSessionCookie(request);
-  const formData = await request.formData();
+  // Read from a clone so route actions can still parse the original request body.
+  const formData = await request.clone().formData();
   const intent = formData.get('intent')?.toString();
   if (intent !== 'exportReport') return null;
 
