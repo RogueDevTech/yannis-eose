@@ -40,7 +40,7 @@ cp apps/edge-worker/.env.example apps/edge-worker/.env
 | `DATABASE_URL` | Postgres connection string | `postgres://user:pass@host:5432/yannis` |
 | `REDIS_URL` | Redis connection string | `redis://127.0.0.1:6379` (local) |
 | `PORT` | API port | `4444` |
-| `CORS_ORIGIN` | Frontend URL | `http://localhost:4000` |
+| `CORS_ORIGIN` | Frontend URL | `http://localhost:4003` |
 | `SESSION_TTL_SECONDS` | Session lifetime | `86400` |
 
 **Required env vars for `apps/web/.env`:**
@@ -94,12 +94,12 @@ pnpm turbo dev
 
 # Or start individually:
 pnpm turbo dev --filter=@yannis/api     # API on port 4444
-pnpm turbo dev --filter=@yannis/web     # Web on port 4000
+pnpm turbo dev --filter=@yannis/web     # Web on port 4003
 ```
 
 ### 6. Verify
 
-- **Web app**: http://localhost:4000
+- **Web app**: http://localhost:4003
 - **API**: http://localhost:4444
 - **Swagger docs**: http://localhost:4444/api/docs
 - **tRPC**: http://localhost:4444/trpc/health.ping
@@ -228,7 +228,7 @@ setOrdersService(this.ordersService);
 1. Add Zod schema in `packages/shared/src/validators/{module}.ts`
 2. Add service method in `apps/api/src/{module}/{module}.service.ts`
 3. Add procedure in `apps/api/src/trpc/routers/{module}.router.ts`
-4. Use `rolesProcedure('ROLE_A', 'ROLE_B')` for RBAC
+4. Use `permissionProcedure('domain.resource.action')` for RBAC (permission-first)
 5. Call from frontend via `apiRequest()` in route loader/action
 
 ### Adding a New Route (Frontend)
@@ -254,6 +254,32 @@ pnpm exec playwright test --ui
 # Specific test file
 pnpm exec playwright test e2e/01-order-lifecycle.spec.ts
 ```
+
+### RBAC Catalog and Matrix Workflow
+
+- Permission codes are namespaced and dot-scoped (example: `users.staff.create`, `cs.team.overview.view`).
+- **Staff create (`/hr/users/new`) — template baseline vs overrides**
+  - Choosing a **Role** sets the default **SYSTEM** role template on the user (mapped by `mappedRole`); the matrix shows those codes as **inherited** (effective “on”) without writing every code to `user_permissions`.
+  - `users.create` persists `roleTemplateId` on the new user. `applyPermissionOverrides` runs only when the form posts a non-empty `permissionOverrides` JSON object (`true` = explicit grant, `false` = explicit revoke).
+  - Effective runtime permissions remain: `role template ∪ legacy role_permissions ∪ user grants − revokes` (see `PermissionsService.getEffectivePermissions`).
+  - Changing **Permission template** in the dropdown updates the inherited baseline in the matrix before submit; use that when onboarding someone from a custom template instead of the role default.
+- User **edit** uses the same matrix with stored overrides from `getUserMatrix`.
+- After changing permission catalog or role mappings, always run:
+
+```bash
+pnpm --filter @yannis/shared db:seed-permissions
+pnpm --filter @yannis/shared db:audit-permission-coverage
+```
+
+#### Manual QA checklist (create user permissions)
+
+Run against a seeded dev/staging DB (`db:seed-permissions` applied).
+
+1. Open `/hr/users/new`, pick a role (e.g. CS Agent) — matrix appears and **Inherited:** is greater than zero when the template has grants.
+2. Submit without toggling any permission — new user can perform actions allowed by the template; `user_permissions` has no extra rows unless you had overrides.
+3. Toggle one permission off (explicit revoke) or on (explicit grant), submit — only divergences persist in `user_permissions`; inherited rest still come from the template.
+4. If multiple templates exist, change **Permission template** — inherited counts/labels update; saved user should carry the selected `roleTemplateId`.
+5. Environment missing role templates — `users.create` should return a clear error mentioning migrations + `db:seed-permissions` (precondition failed path).
 
 ### Building for Production
 

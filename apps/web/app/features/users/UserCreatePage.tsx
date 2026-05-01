@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Form, useActionData, useNavigation, Link } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
@@ -18,8 +18,10 @@ import type {
   UserCreateLocation,
   UserCreateCommissionPlan,
   UserCreateBranch,
+  PermissionCatalogItem,
 } from './types';
 import { formatRole } from './types';
+import { PermissionMatrix } from './PermissionMatrix';
 
 // HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
 import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
@@ -55,6 +57,9 @@ export function UserCreatePage({
   branches,
   activeHeads,
   currentFinanceOfficer,
+  roleTemplates,
+  permissionCatalog,
+  templatePermissionsById,
   usersBasePath = '/hr/users',
 }: UserCreateLoaderData & { usersBasePath?: string }) {
   const actionData = useActionData<{ error?: string; success?: boolean; requiresApproval?: boolean; message?: string }>();
@@ -75,6 +80,7 @@ export function UserCreatePage({
 
   const [selectedRole, setSelectedRole] = useState('');
   const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
   const [assignFinanceHat, setAssignFinanceHat] = useState(false);
@@ -84,6 +90,8 @@ export function UserCreatePage({
   // Local 10-digit phone (the part after +234). Validated to start with 7/8/9
   // so we never submit a number outside the Nigerian mobile prefix range.
   const [phoneLocal, setPhoneLocal] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [permissionOverrides, setPermissionOverrides] = useState<Record<string, boolean>>({});
   const phoneIsComplete = /^[789]\d{9}$/.test(phoneLocal);
   const phoneError = phoneLocal.length > 0 && !phoneIsComplete
     ? phoneLocal.length < 10
@@ -131,6 +139,42 @@ export function UserCreatePage({
 
   const filteredPlans = plans.filter((p) => !selectedRole || p.role === selectedRole);
 
+  const templateByRole = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of roleTemplates ?? []) {
+      if (t.kind === 'SYSTEM' && t.mappedRole) map.set(t.mappedRole, t.id);
+    }
+    return map;
+  }, [roleTemplates]);
+
+  useEffect(() => {
+    if (!selectedRole) return;
+    const tid = templateByRole.get(selectedRole);
+    if (tid) setSelectedTemplateId(tid);
+  }, [selectedRole, templateByRole]);
+
+  const toggleBranch = (id: string) => {
+    setSelectedBranchIds((prev) => {
+      if (prev.includes(id)) {
+        const next = prev.filter((branchId) => branchId !== id);
+        if (selectedBranchId === id) {
+          setSelectedBranchId(next[0] ?? '');
+        }
+        return next;
+      }
+      if (!selectedBranchId) {
+        setSelectedBranchId(id);
+      }
+      return [...prev, id];
+    });
+  };
+
+  useEffect(() => {
+    setPermissionOverrides({});
+  }, [selectedTemplateId, selectedRole]);
+
+  const templatePermissionCodes = selectedTemplateId ? templatePermissionsById[selectedTemplateId] ?? [] : [];
+
   return (
     <div className="w-full space-y-6">
       <Breadcrumb items={[{ label: 'Users', to: usersBasePath }, { label: 'Add User' }]} />
@@ -177,7 +221,10 @@ export function UserCreatePage({
         {showProductAssignment && selectedProductIds.length > 0 && (
           <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
         )}
+        <input type="hidden" name="branchIds" value={JSON.stringify(selectedBranchIds)} />
         <input type="hidden" name="primaryBranchId" value={selectedBranchId} />
+        {selectedTemplateId ? <input type="hidden" name="roleTemplateId" value={selectedTemplateId} /> : null}
+        <input type="hidden" name="permissionOverrides" value={JSON.stringify(permissionOverrides)} />
         {showLogisticsLocation ? <input type="hidden" name="logisticsLocationId" value={logisticsLocationId} /> : null}
         {compensationMode === 'existing' && filteredPlans.length > 0 ? (
           <input type="hidden" name="commissionPlanId" value={commissionPlanId} />
@@ -207,6 +254,28 @@ export function UserCreatePage({
               )}
             </div>
 
+            {/* Permission template is resolved automatically from the role
+                (the SYSTEM template for the selected role). The picker used to
+                live here but most HR users never need to override it; the
+                matrix below shows the effective permissions and lets them
+                add/remove individual codes. The state still tracks the
+                resolved template id so the matrix and the submit payload
+                continue to work. */}
+
+            {selectedRole && permissionCatalog.length > 0 && (
+              <div className="sm:col-span-2 space-y-1">
+                <p className="text-xs text-app-fg-muted">
+                  Pre-checked rows come from the role you picked. Add or remove for this user — only your changes are stored as overrides.
+                </p>
+                <PermissionMatrix
+                  permissions={permissionCatalog as PermissionCatalogItem[]}
+                  templateCodes={templatePermissionCodes}
+                  overrides={permissionOverrides}
+                  onOverridesChange={setPermissionOverrides}
+                />
+              </div>
+            )}
+
             <div>
               <TextInput
                 id="name"
@@ -230,17 +299,35 @@ export function UserCreatePage({
               />
             </div>
 
-            <div>
+            <div className="sm:col-span-2 space-y-3">
+              <label className="block text-sm font-medium text-app-fg-muted">Branch Memberships</label>
+              <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
+                {branches
+                  .filter((branch: UserCreateBranch) => branch.status === 'ACTIVE')
+                  .map((branch: UserCreateBranch) => (
+                    <label
+                      key={branch.id}
+                      className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+                    >
+                      <Checkbox
+                        checked={selectedBranchIds.includes(branch.id)}
+                        onChange={() => toggleBranch(branch.id)}
+                      />
+                      <span className="text-sm text-app-fg">{branch.name}</span>
+                      <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
+                    </label>
+                  ))}
+              </div>
               <SearchableSelect
                 id="primaryBranchId"
                 label="Primary Branch"
                 required
                 placeholder="Select primary branch"
-                searchPlaceholder="Search branches..."
+                searchPlaceholder="Search selected branches..."
                 value={selectedBranchId}
                 onChange={setSelectedBranchId}
                 options={branches
-                  .filter((branch: UserCreateBranch) => branch.status === 'ACTIVE')
+                  .filter((branch: UserCreateBranch) => selectedBranchIds.includes(branch.id))
                   .map((branch: UserCreateBranch) => ({
                     value: branch.id,
                     label: branch.name,
@@ -248,7 +335,7 @@ export function UserCreatePage({
                   }))}
               />
               <p className="text-xs text-app-fg-muted mt-1">
-                Determines the default branch context and data scope on first login.
+                Choose all branches this user belongs to, then pick one as their default branch.
               </p>
             </div>
 
@@ -538,7 +625,14 @@ export function UserCreatePage({
           <Link to={usersBasePath} className="btn-secondary w-full sm:w-auto">
             Cancel
           </Link>
-          <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isSubmitting} loadingText="Creating..." disabled={!selectedRole || !phoneIsComplete}>
+          <Button
+            type="submit"
+            variant="primary"
+            className="w-full sm:w-auto"
+            loading={isSubmitting}
+            loadingText="Creating..."
+            disabled={!selectedRole || !phoneIsComplete || selectedBranchIds.length === 0 || !selectedBranchId}
+          >
             Create User
           </Button>
         </div>

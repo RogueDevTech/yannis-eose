@@ -63,7 +63,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
     abortRef.current = controller;
 
     try {
-      const apiUrl = window.__ENV?.API_URL || 'http://localhost:4000';
+      const apiUrl = window.__ENV?.API_URL || 'http://localhost:4444';
       const searchParam = encodeURIComponent(JSON.stringify({ search: q, limit: 5 }));
 
       const [ordersRes, productsRes, usersRes] = await Promise.all([

@@ -360,6 +360,28 @@ export type {
   AddBatchAdjustmentInput,
 } from './hr';
 
+// Staff Onboarding validators
+export {
+  onboardingStatusSchema,
+  staffGenderSchema,
+  updateOnboardingProfileSchema,
+  hrUpdateOnboardingSchema,
+  submitOnboardingSchema,
+  approveOnboardingSchema,
+  getOnboardingSchema,
+} from './staff-onboarding';
+
+export type {
+  OnboardingStatus,
+  StaffGender,
+  SupportingDocument,
+  UpdateOnboardingProfileInput,
+  HrUpdateOnboardingInput,
+  SubmitOnboardingInput,
+  ApproveOnboardingInput,
+  GetOnboardingInput,
+} from './staff-onboarding';
+
 // Push Notification Center validators
 export {
   savePushSubscriptionSchema,

@@ -1,6 +1,7 @@
 import { redirect } from '@remix-run/node';
 import { isNetworkErrorLike } from './network-error';
 import { canAccessGlobalAuditLog } from './rbac';
+import { canonicalPermissionCode } from './permission-codes';
 
 /**
  * Server-side API helper for Remix loaders/actions.
@@ -34,6 +35,9 @@ export function defaultTodayRange(): { startDate: string; endDate: string } {
 
 /** Default request timeout in ms. Deferred promises must resolve before Remix single-fetch timeout (~5s). */
 const DEFAULT_API_TIMEOUT_MS = 8_000;
+
+/** `/auth/me` can run on layout revalidation after tab resume — slightly longer than default to reduce false timeouts. */
+const AUTH_ME_TIMEOUT_MS = 15_000;
 
 /** Timeout used for deferred loader requests so they resolve before server timeout. */
 export const DEFERRED_LOADER_TIMEOUT_MS = 4_000;
@@ -136,20 +140,57 @@ export function getSessionCookie(request: Request): string | undefined {
   return request.headers.get('Cookie') ?? undefined;
 }
 
+export interface GetCurrentUserOptions {
+  /**
+   * When the session cookie is present but `/auth/me` fails with a transient error (5xx, timeout,
+   * network), return null instead of throwing. Use only on public auth routes so a cold API or
+   * brief outage does not replace the login form with a global 503.
+   */
+  softNetwork?: boolean;
+}
+
+function isTransientAuthMeFailure(status: number): boolean {
+  return (
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    status === 408 ||
+    status === 429 ||
+    (status >= 500 && status < 600)
+  );
+}
+
+function throwSessionCheckUnavailable(): never {
+  throw new Response(
+    JSON.stringify({
+      message:
+        'We could not reach the server to verify your session. If you were signed in, try refreshing once your connection is stable.',
+      code: 'API_UNAVAILABLE',
+    }),
+    { status: 503, headers: { 'Content-Type': 'application/json' } },
+  );
+}
+
 /**
  * Get the current user from the session.
- * Returns null if not authenticated or if the API is unreachable/times out.
+ * Returns null when there is no cookie or the API returns 401 (invalid/expired session).
+ * On transient API failures (503/504/5xx from network or server), throws Response(503) so layout
+ * loaders do not mis-treat a blip as logout — unless `softNetwork: true`.
  */
-export async function getCurrentUser(request: Request) {
+export async function getCurrentUser(request: Request, options?: GetCurrentUserOptions) {
   const cookie = getSessionCookie(request);
   if (!cookie) return null;
 
   const res = await apiRequest<{
-    user: {
+    user?: {
       id: string;
       email: string;
       name: string;
       role: string;
+      roleTemplateId?: string | null;
+      scopeGlobal?: boolean;
+      scopeOrgWideHead?: boolean;
+      scopeTeamSupervisor?: boolean;
       permissions?: string[];
       logisticsLocationId?: string | null;
       currentBranchId?: string | null;
@@ -158,11 +199,47 @@ export async function getCurrentUser(request: Request) {
       /** Set when this session is in Mirror Mode — see CLAUDE.md "Mirror Mode". */
       mirroredBy?: { id: string; name: string; role: string } | null;
     };
-  }>('/auth/me', { method: 'POST', cookie });
+  }>('/auth/me', { method: 'POST', cookie, timeoutMs: AUTH_ME_TIMEOUT_MS });
 
-  if (!res.ok) return null;
+  if (res.ok) {
+    const u = res.data.user;
+    return u ?? null;
+  }
 
-  return res.data.user;
+  if (res.status === 401) return null;
+
+  if (isTransientAuthMeFailure(res.status)) {
+    if (options?.softNetwork) return null;
+    throwSessionCheckUnavailable();
+  }
+
+  return null;
+}
+
+/**
+ * Build the `/admin/unauthorized` redirect target with the canonical permission
+ * codes the actor would need encoded in the query string. The unauthorized page
+ * renders the `<PermissionRequiredModal>` and surfaces these codes so admins
+ * can map the message back to the role-template matrix without guessing.
+ */
+function buildUnauthorizedRedirect(
+  request: Request,
+  required: string[],
+  options?: { roles?: string[]; action?: string },
+): string {
+  const params = new URLSearchParams();
+  const canonical = Array.from(new Set(required.map((c) => canonicalPermissionCode(c))));
+  if (canonical.length > 0) params.set('required', canonical.join(','));
+  if (options?.roles && options.roles.length > 0) params.set('roles', options.roles.join(','));
+  if (options?.action) params.set('action', options.action);
+  try {
+    const from = new URL(request.url).pathname;
+    if (from && from !== '/admin/unauthorized') params.set('from', from);
+  } catch {
+    // Non-standard URL — skip the from param.
+  }
+  const qs = params.toString();
+  return qs ? `/admin/unauthorized?${qs}` : '/admin/unauthorized';
 }
 
 /**
@@ -172,7 +249,9 @@ export async function getCurrentUser(request: Request) {
 export async function requireRole(request: Request, allowedRoles: string[]) {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  if (!allowedRoles.includes(user.role)) throw redirect('/admin/unauthorized');
+  if (!allowedRoles.includes(user.role)) {
+    throw redirect(buildUnauthorizedRedirect(request, [], { roles: allowedRoles }));
+  }
   return user;
 }
 
@@ -188,18 +267,23 @@ export async function requirePermission(
   email: string;
   name: string;
   role: string;
+  roleTemplateId?: string | null;
+  scopeGlobal?: boolean;
+  scopeOrgWideHead?: boolean;
+  scopeTeamSupervisor?: boolean;
   permissions?: string[];
   logisticsLocationId?: string | null;
   currentBranchId?: string | null;
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  // SUPER_ADMIN and ADMIN bypass all permission checks.
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return user;
-  const codes = Array.isArray(permissionCode) ? permissionCode : [permissionCode];
-  const perms = user.permissions ?? [];
+  if (user.role === 'SUPER_ADMIN') return user;
+  const codes = (Array.isArray(permissionCode) ? permissionCode : [permissionCode]).map((c) =>
+    canonicalPermissionCode(c),
+  );
+  const perms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const hasAny = codes.some((c) => perms.includes(c));
-  if (!hasAny) throw redirect('/admin/unauthorized');
+  if (!hasAny) throw redirect(buildUnauthorizedRedirect(request, codes));
   return user;
 }
 
@@ -213,13 +297,14 @@ export async function requirePermissionOrRoles(
 ): Promise<{ id: string; email: string; name: string; role: string; permissions?: string[] }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  // Keep admin-class behavior aligned with requirePermission().
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return user;
+  if (user.role === 'SUPER_ADMIN') return user;
   if (options.roles.includes(user.role)) return user;
-  const codes = Array.isArray(options.permission) ? options.permission : [options.permission];
-  const perms = user.permissions ?? [];
+  const codes = (Array.isArray(options.permission) ? options.permission : [options.permission]).map((c) =>
+    canonicalPermissionCode(c),
+  );
+  const perms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const hasAny = codes.some((c) => perms.includes(c));
-  if (!hasAny) throw redirect('/admin/unauthorized');
+  if (!hasAny) throw redirect(buildUnauthorizedRedirect(request, codes, { roles: options.roles }));
   return user;
 }
 
@@ -244,11 +329,26 @@ export async function requireStaffAccountsAccess(
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return user;
-  if (user.role === 'HR_MANAGER' || user.role === 'FINANCE_OFFICER' || user.isFinanceOfficer === true) {
+  if (user.role === 'SUPER_ADMIN') return user;
+  const perms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+  if (
+    perms.includes('users.staff.view') ||
+    perms.includes('users.staff.create') ||
+    perms.includes('users.staff.update') ||
+    perms.includes('users.staff.deactivate')
+  ) {
     return user;
   }
-  throw redirect('/admin/unauthorized');
+  if (user.role === 'FINANCE_OFFICER' || user.isFinanceOfficer === true) {
+    return user;
+  }
+  throw redirect(
+    buildUnauthorizedRedirect(
+      request,
+      ['users.staff.view', 'users.staff.create', 'users.staff.update', 'users.staff.deactivate'],
+      { roles: ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER', 'FINANCE_OFFICER'], action: 'manage staff accounts' },
+    ),
+  );
 }
 
 /**
@@ -268,7 +368,11 @@ export async function requireGlobalAuditAccess(
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   if (canAccessGlobalAuditLog(user)) return user;
-  throw redirect('/admin/unauthorized');
+  throw redirect(
+    buildUnauthorizedRedirect(request, ['audit.read', 'finance.costs.view'], {
+      action: 'view the global audit log',
+    }),
+  );
 }
 
 /**

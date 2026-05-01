@@ -3,7 +3,9 @@
 START APP
 cd apps/api && pnpm dev
 cd apps/web && pnpm dev
+pnpm --filter @yannis/api dev
 
+pnpm db:seed-permissions
 
 LOCAL REDIS
 brew services list           # see status
@@ -23,6 +25,8 @@ cd packages/shared && pnpm db:seed       # Seed test data (optional)
 cd ../.. && pnpm turbo dev               # Start all apps
 ```
 migrate
+
+pnpm db:migrate:app
 cd packages/shared && pnpm run db:migrate
 cd apps/api && npm run dev
 cd apps/web && npm run dev
@@ -42,7 +46,7 @@ cd apps/web && npm run dev
 
 
 **URLs:**
-- Web: http://localhost:4000
+- Web: http://localhost:4003
 - API: http://localhost:4444
 - Swagger: http://localhost:4444/api/docs
 - Edge Worker: http://localhost:8787

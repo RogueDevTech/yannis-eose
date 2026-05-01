@@ -73,6 +73,10 @@ export interface DeliveryRemittancesPageProps {
   /** Phase 18 — total eligible on server (modal shows this when only a slice is fetched). */
   eligibleTotal: number;
   summary: DeliveryRemittanceSummary;
+  /** Phase 21 — true when the actor can record a new cash remittance. */
+  canCreateRemittance: boolean;
+  /** Phase 21 — true when the actor can mark a remittance Received (cascades DELIVERED→COMPLETED). */
+  canMarkReceived: boolean;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -98,6 +102,7 @@ export function DeliveryRemittancesPage({
   eligibleOrders,
   eligibleTotal,
   summary,
+  canCreateRemittance,
 }: DeliveryRemittancesPageProps) {
   const [, setSearchParams] = useSearchParams();
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
@@ -153,15 +158,17 @@ export function DeliveryRemittancesPage({
             <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
               Generate report
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setShowCreateModal(true)}
-              disabled={eligibleTotal === 0}
-              title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
-            >
-              + Create cash remittance
-            </Button>
+            {canCreateRemittance && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setShowCreateModal(true)}
+                disabled={eligibleTotal === 0}
+                title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
+              >
+                + Create cash remittance
+              </Button>
+            )}
           </>
         }
       />
@@ -356,7 +363,7 @@ export function DeliveryRemittancesPage({
             description={
               hasFilters
                 ? 'Try adjusting your filters'
-                : '3PL locations will appear here once they submit remittances'
+                : 'Cash remittances will appear here once Finance records them'
             }
           />
         )}

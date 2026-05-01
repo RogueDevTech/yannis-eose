@@ -283,6 +283,9 @@ importers:
       postgres:
         specifier: ^3.4.8
         version: 3.4.8
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       uuidv7:
         specifier: ^1.2.1
         version: 1.2.1
@@ -323,9 +326,6 @@ importers:
       eslint-config-prettier:
         specifier: ^9.1.0
         version: 9.1.2(eslint@8.57.1)
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3

@@ -25,13 +25,13 @@ export default defineConfig({
     tsconfigPaths(),
   ],
   server: {
-    port: 4000,
+    port: 4003,
     strictPort: false,
     allowedHosts: ['.trycloudflare.com'],
     hmr: {
       protocol: 'ws',
       host: 'localhost',
-      port: 4000,
+      port: 4003,
     },
     proxy: {
       '/socket.io': {

@@ -9,6 +9,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import type { DeliveryRemittanceDetail } from '~/features/finance/DeliveryRemittancesPage';
 import { DeliveryRemittanceDetailPage } from '~/features/finance/DeliveryRemittanceDetailPage';
 
@@ -58,14 +59,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     for (const u of usersData) userMap[u.id] = u.name;
   }
 
+  // Phase 21 — Mark Received / Dispute buttons honour `finance.cashRemittance.markReceived`
+  // alongside the legacy `finance.approve` and admin-class. Same gate the API enforces.
+  const userPerms = (user?.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const hasApprovePermission =
-    isAdminLevel(user) || (user?.permissions?.includes('finance.approve') ?? false);
+    isAdminLevel(user) ||
+    userPerms.includes(canonicalPermissionCode('finance.approve')) ||
+    userPerms.includes(canonicalPermissionCode('finance.cashRemittance.markReceived'));
 
   return { detail, hasApprovePermission, userMap };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  await requirePermission(request, 'finance.approve');
+  // Phase 21 — accept either legacy `finance.approve` or the granular
+  // `finance.cashRemittance.markReceived` permission. The service-layer gate
+  // in `logistics.service.ts` performs the same widened check.
+  await requirePermission(request, ['finance.approve', 'finance.cashRemittance.markReceived']);
   const cookie = getSessionCookie(request);
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
 

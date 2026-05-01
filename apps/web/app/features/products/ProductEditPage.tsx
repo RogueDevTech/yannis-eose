@@ -246,10 +246,16 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
             {offers.map((offer, index) => (
               <div
                 key={index}
-                className="flex flex-col gap-4 p-4 rounded-lg bg-app-hover border border-app-border"
+                className="rounded-xl border border-app-border bg-app-elevated/40 dark:bg-app-hover/30 p-3 shadow-sm"
               >
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-4">
-                  <div className="flex-1 min-w-[280px]">
+                <div
+                  className={
+                    offers.length > 1
+                      ? 'grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_4.5rem_7rem_minmax(0,12.5rem)_2.75rem] sm:gap-x-2 sm:items-end'
+                      : 'grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_4.5rem_7rem_minmax(0,12.5rem)] sm:gap-x-2 sm:items-end'
+                  }
+                >
+                  <div className="min-w-0 sm:col-span-1">
                     <TextInput
                       id={`offer-label-${index}`}
                       label="Label"
@@ -257,21 +263,24 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
                       placeholder="e.g. Buy 1 Get 1 Free"
                       value={offer.label}
                       onChange={(e) => updateOffer(index, 'label', e.target.value)}
+                      disabled={product.status === 'ARCHIVED'}
                     />
                   </div>
-                  <div className="w-full sm:w-32 sm:flex-shrink-0">
+                  <div className="min-w-0">
                     <TextInput
                       id={`offer-qty-${index}`}
-                      label="Total Qty"
+                      label="Qty"
+                      title="Total units in this tier"
                       type="number"
                       required
                       min={1}
                       placeholder="2"
                       value={offer.qty}
                       onChange={(e) => updateOffer(index, 'qty', e.target.value)}
+                      disabled={product.status === 'ARCHIVED'}
                     />
                   </div>
-                  <div className="w-full sm:w-32 sm:flex-shrink-0">
+                  <div className="min-w-0">
                     <FormField label="Price (&#8358;)" htmlFor={`offer-price-${index}`}>
                       <AmountInput
                         id={`offer-price-${index}`}
@@ -280,30 +289,37 @@ export function ProductEditPage({ product, categories, actionData, productId }: 
                         placeholder="16,500.00"
                         value={offer.price}
                         onChange={(v) => updateOffer(index, 'price', v)}
+                        disabled={product.status === 'ARCHIVED'}
                       />
                     </FormField>
                   </div>
+                  <div className="min-w-0 max-sm:max-w-[200px]">
+                    <OfferImagesEditor
+                      imageUrls={offer.imageUrls}
+                      onChange={(urls) => setOfferImageUrls(index, urls)}
+                      compact
+                      disabled={isSaving || product.status === 'ARCHIVED'}
+                      onUploadStateChange={(s) =>
+                        setOfferUploadStates((prev) => ({ ...prev, [index]: s }))
+                      }
+                    />
+                  </div>
                   {offers.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeOffer(index)}
-                      className="p-1.5 text-danger-500 hover:text-danger-700 dark:hover:text-danger-400 transition-colors self-end sm:self-auto"
-                      title="Remove offer"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                      </svg>
-                    </button>
+                    <div className="flex justify-end sm:justify-center pb-1 sm:pb-0.5">
+                      <button
+                        type="button"
+                        onClick={() => removeOffer(index)}
+                        className="p-1.5 rounded-lg text-danger-500 hover:text-danger-700 dark:hover:text-danger-400 hover:bg-danger-500/10 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                        title="Remove tier"
+                        disabled={product.status === 'ARCHIVED'}
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                        </svg>
+                      </button>
+                    </div>
                   )}
                 </div>
-                <OfferImagesEditor
-                  imageUrls={offer.imageUrls}
-                  onChange={(urls) => setOfferImageUrls(index, urls)}
-                  disabled={isSaving || product.status === 'ARCHIVED'}
-                  onUploadStateChange={(s) =>
-                    setOfferUploadStates((prev) => ({ ...prev, [index]: s }))
-                  }
-                />
               </div>
             ))}
           </div>

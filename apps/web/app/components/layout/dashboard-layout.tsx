@@ -23,6 +23,7 @@ import { playNotificationSound, unlockAudioContext } from '~/lib/notification-so
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
+import { OnboardingNudge } from './onboarding-nudge';
 import { canAccessGlobalAuditLog } from '~/lib/rbac';
 
 interface Notification {
@@ -334,6 +335,12 @@ const navStructure: NavGroupDef[] = [
         permission: 'branches.manage',
       },
       {
+        label: 'Role templates',
+        href: '/admin/settings/role-templates',
+        icon: SidebarIcons.settings,
+        permission: 'rbac.manage_templates',
+      },
+      {
         label: 'Permission Requests',
         href: '/admin/permission-requests',
         icon: SidebarIcons.audit,
@@ -358,16 +365,22 @@ const navStructure: NavGroupDef[] = [
   },
 ];
 
-/** Role-based nav label overrides (UI only). CS/Media agents see "My Orders" etc. */
-function getDisplayLabel(item: NavItemDef, user: { role: string } | null): string {
-  const role = user?.role;
-  if (item.href === '/admin/cs/orders' && role === 'CS_AGENT') return 'My Orders';
-  if (item.href === '/admin/marketing/orders' && role === 'MEDIA_BUYER') return 'My Orders';
+/** Capability-based nav label overrides (UI only). CS/Media agents see "My Orders" etc. */
+function getDisplayLabel(
+  item: NavItemDef,
+  user: { role: string; permissions?: string[] } | null,
+): string {
+  const perms = user?.permissions ?? [];
+  if (item.href === '/admin/cs/orders' && perms.includes('cs.leaderboard')) return 'My Orders';
+  if (item.href === '/admin/marketing/orders' && perms.includes('marketing.orders')) return 'My Orders';
   return item.label;
 }
 
 /** Label for mobile (bottom nav + More modal): uses labelShort when set. */
-function getDisplayLabelMobile(item: NavItemDef, user: { role: string } | null): string {
+function getDisplayLabelMobile(
+  item: NavItemDef,
+  user: { role: string; permissions?: string[] } | null,
+): string {
   return item.labelShort ?? getDisplayLabel(item, user);
 }
 
@@ -376,8 +389,8 @@ function getNavGroupsForUser(
   options?: { forMobile?: boolean },
 ): SidebarGroup[] {
   const result: SidebarGroup[] = [];
-  // ADMIN shares SUPER_ADMIN sidebar visibility.
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
+  // Broad sidebar visibility: SuperAdmin (system role) or explicit CEO/overview capability.
+  const navBypass = user?.role === 'SUPER_ADMIN' || (user?.permissions?.includes('ceo.overview') ?? false);
   const perms = user?.permissions ?? [];
   const role = user?.role ?? '';
   const forMobile = options?.forMobile === true;
@@ -411,7 +424,7 @@ function getNavGroupsForUser(
         // No permission AND no roles allowlist → visible to all authed users.
         // When `roles` is set without `permission`, the item is restricted to those roles.
         if (!item.permission && !item.roles) return true;
-        if (isSuperAdmin) return true;
+        if (navBypass) return true;
         if (item.roles?.includes(user?.role ?? '')) return true;
         if (item.permission && perms.includes(item.permission)) return true;
         return false;
@@ -501,7 +514,7 @@ function getBottomNavItemsForUser(
   const role = user.role ?? '';
   const priorityHrefs = BOTTOM_NAV_PRIORITY_BY_ROLE[role];
   if (priorityHrefs) {
-    const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+    const navBypass = user.role === 'SUPER_ADMIN' || (user.permissions?.includes('ceo.overview') ?? false);
     const perms = user.permissions ?? [];
     const result: BottomNavItem[] = [];
     const hrefToItem = new Map(FLAT_NAV_ITEMS.map((item) => [item.href, item]));
@@ -513,7 +526,7 @@ function getBottomNavItemsForUser(
         // No permission AND no roles allowlist → visible to all authed users.
         // When `roles` is set without `permission`, restrict to those roles.
         (!item.permission && !item.roles) ||
-        isSuperAdmin ||
+        navBypass ||
         (item.roles?.includes(role) ?? false) ||
         (!!item.permission && perms.includes(item.permission)) ||
         (item.href === '/admin/analytics/audit' && canAccessGlobalAuditLog(user));
@@ -1080,6 +1093,10 @@ export function DashboardLayout(props: DashboardLayoutProps) {
           branches={props.branches ?? []}
         >
           <DashboardLayoutInner {...props} />
+          {/* Phase 22 — login-time onboarding nudge. Suppressed during mirroring
+              (the inner component sets data-mirror on <html>). Skip persists
+              for the session via sessionStorage. */}
+          <OnboardingNudge enabled={!isMirroring && !!props.user} />
         </BranchScopeGuardProvider>
       </NotificationsStateProvider>
     </ToastProvider>

@@ -4,6 +4,7 @@ export const S3_FOLDERS = {
   DELIVERY_PROOF: 'delivery-proof',
   INVOICES: 'invoices',
   PRODUCT_IMAGES: 'product-images',
+  ONBOARDING_DOCS: 'onboarding-docs',
 } as const;
 
 export type S3Folder = (typeof S3_FOLDERS)[keyof typeof S3_FOLDERS];

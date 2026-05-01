@@ -10,6 +10,18 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   role: userRoleEnum('role').notNull(),
+  /**
+   * Optional pointer to a permission template row (`role_templates`).
+   * Effective permissions are computed from template grants + `user_permissions` overrides.
+   */
+  roleTemplateId: uuid('role_template_id'),
+  /**
+   * Explicit access-scope flags (permission-first RBAC).
+   * These replace implicit "org-wide head" behavior over time.
+   */
+  scopeGlobal: boolean('scope_global').default(false).notNull(),
+  scopeOrgWideHead: boolean('scope_org_wide_head').default(false).notNull(),
+  scopeTeamSupervisor: boolean('scope_team_supervisor').default(false).notNull(),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   capacity: integer('capacity').default(10).notNull(),
   // Links TPL_MANAGER and TPL_RIDER to their logistics location.
@@ -55,6 +67,14 @@ export const users = pgTable('users', {
     .$type<Record<string, boolean>>()
     .default({})
     .notNull(),
+  /**
+   * Lifetime login counter — incremented on every successful login. Captured by the
+   * temporal trigger so each tick lands in `users_history` and surfaces in the
+   * audit log automatically (no separate audit_events table).
+   */
+  loginCount: integer('login_count').default(0).notNull(),
+  /** Most recent successful login timestamp. Paired with `loginCount` for audit. */
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   ...temporalColumns,
   ...timestampColumns,
 });

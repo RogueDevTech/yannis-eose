@@ -25,3 +25,4 @@ export * from './messaging';
 export * from './auth-sessions';
 export * from './mirror-sessions';
 export * from './push';
+export * from './staff-onboarding';

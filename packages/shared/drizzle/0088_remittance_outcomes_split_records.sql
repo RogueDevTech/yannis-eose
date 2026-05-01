@@ -10,16 +10,16 @@ END
 $$;
 
 CREATE TABLE IF NOT EXISTS stock_transfer_outcomes (
-  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   transfer_id uuid NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
   status remittance_outcome_status NOT NULL,
   quantity integer NOT NULL,
   reason text,
   recorded_at timestamptz NOT NULL DEFAULT now(),
-  recorded_by text NOT NULL REFERENCES users(id),
+  recorded_by uuid NOT NULL REFERENCES users(id),
   valid_from timestamptz NOT NULL DEFAULT now(),
   valid_to timestamptz,
-  modified_by text
+  modified_by uuid
 );
 
 CREATE INDEX IF NOT EXISTS stock_transfer_outcomes_transfer_idx
@@ -53,17 +53,17 @@ CREATE TRIGGER trg_stock_transfer_outcomes_history_immutable
   FOR EACH ROW EXECUTE FUNCTION yannis_history_immutable();
 
 CREATE TABLE IF NOT EXISTS delivery_remittance_outcomes (
-  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   delivery_remittance_id uuid NOT NULL REFERENCES delivery_remittances(id) ON DELETE CASCADE,
   status remittance_outcome_status NOT NULL,
   amount numeric(12, 2) NOT NULL,
   order_count integer NOT NULL,
   reason text,
   recorded_at timestamptz NOT NULL DEFAULT now(),
-  recorded_by text NOT NULL REFERENCES users(id),
+  recorded_by uuid NOT NULL REFERENCES users(id),
   valid_from timestamptz NOT NULL DEFAULT now(),
   valid_to timestamptz,
-  modified_by text
+  modified_by uuid
 );
 
 CREATE INDEX IF NOT EXISTS delivery_remittance_outcomes_remittance_idx

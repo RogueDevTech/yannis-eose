@@ -83,6 +83,7 @@ export function MarketingAdSpendPage({
   campaigns,
   filters,
   viewMode = 'admin',
+  canApproveAdSpend = false,
   groups,
   groupsPage,
   groupsTotalPages,
@@ -843,7 +844,7 @@ export function MarketingAdSpendPage({
             <AdSpendDayAccordion
               groups={groups}
               showMediaBuyerColumn={viewMode !== 'media_buyer'}
-              canModerate={viewMode !== 'media_buyer'}
+              canModerate={canApproveAdSpend}
               page={groupsPage}
               totalPages={groupsTotalPages}
               actionUrl="/admin/marketing/ad-spend"
@@ -941,7 +942,7 @@ export function MarketingAdSpendPage({
                       >
                         Preview
                       </Button>
-                      {viewMode !== 'media_buyer' && (s.status ?? 'PENDING') === 'PENDING' && (
+                      {canApproveAdSpend && (s.status ?? 'PENDING') === 'PENDING' && (
                         <>
                           <fetcher.Form method="post" className="inline">
                             <input type="hidden" name="intent" value="approveAdSpend" />
@@ -1063,7 +1064,7 @@ export function MarketingAdSpendPage({
                 >
                   Preview
                 </Button>
-                {viewMode !== 'media_buyer' && (s.status ?? 'PENDING') === 'PENDING' && (
+                {canApproveAdSpend && (s.status ?? 'PENDING') === 'PENDING' && (
                   <>
                     <fetcher.Form method="post" className="inline">
                       <input type="hidden" name="intent" value="approveAdSpend" />
@@ -1258,7 +1259,7 @@ export function MarketingAdSpendPage({
             </div>
           </div>
           <div className="flex flex-col gap-3 pt-3 border-t border-app-border shrink-0 px-4 sm:px-5 pb-4">
-            {viewMode !== 'media_buyer' && adSpendDetailModal.status === 'PENDING' && !rejectStep && (
+            {canApproveAdSpend && adSpendDetailModal.status === 'PENDING' && !rejectStep && (
               <div className="flex flex-wrap items-center gap-2">
                 <fetcher.Form method="post" className="inline">
                   <input type="hidden" name="intent" value="approveAdSpend" />
@@ -1282,7 +1283,7 @@ export function MarketingAdSpendPage({
                 </Button>
               </div>
             )}
-            {viewMode !== 'media_buyer' && adSpendDetailModal.status === 'PENDING' && rejectStep && (
+            {canApproveAdSpend && adSpendDetailModal.status === 'PENDING' && rejectStep && (
               <fetcher.Form method="post" className="space-y-2 max-w-lg">
                 <input type="hidden" name="intent" value="rejectAdSpend" />
                 <input type="hidden" name="adSpendId" value={adSpendDetailModal.id} />

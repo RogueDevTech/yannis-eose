@@ -1,6 +1,7 @@
 import { json } from '@remix-run/node';
 import { apiRequest, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import type {
   AdSpendRecord,
   AdSpendStatusCounts,
@@ -275,16 +276,42 @@ export function buildLeaderboardInput(
 }
 
 export interface MarketingRoleFlags {
+  /** Data-scoping flag — Media Buyers see only their own data. Stays role-shaped. */
   isMediaBuyer: boolean;
+  /** Capability — can approve/reject funding requests AND record outgoing funding. */
   isFundingAdmin: boolean;
+  /** Capability — can submit a funding request (MB → HoM, or HoM → Finance). */
   canRequestFunding: boolean;
+  /** Capability — can approve or reject Media Buyer ad-spend submissions. */
+  canApproveAdSpend: boolean;
 }
 
-export function getMarketingRoleFlags(role: string): MarketingRoleFlags {
+/**
+ * Phase 21: capability flags now honour permission codes alongside legacy roles
+ * so a custom role template can grant just `marketing.funding.request` (or
+ * `marketing.funding.approve` / `marketing.adSpend.approve`) without inheriting
+ * MEDIA_BUYER / HEAD_OF_MARKETING / FINANCE_OFFICER wholesale.
+ *
+ * `isMediaBuyer` is intentionally NOT permission-driven — it's a data-scope flag
+ * (filter queries to the buyer's own rows), not an authorization gate.
+ */
+export function getMarketingRoleFlags(
+  user: { role: string; permissions?: string[] } | string,
+): MarketingRoleFlags {
+  const role = typeof user === 'string' ? user : user.role;
+  const perms = typeof user === 'string' ? [] : user.permissions ?? [];
+  const has = (code: string) => perms.includes(code) || perms.includes(canonicalPermissionCode(code));
+
   const isMediaBuyer = role === 'MEDIA_BUYER';
-  const isFundingAdmin = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role);
-  const canRequestFunding = isMediaBuyer || role === 'HEAD_OF_MARKETING';
-  return { isMediaBuyer, isFundingAdmin, canRequestFunding };
+  const isFundingAdmin =
+    ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role) ||
+    has('marketing.funding.approve');
+  const canRequestFunding =
+    isMediaBuyer || role === 'HEAD_OF_MARKETING' || has('marketing.funding.request');
+  const canApproveAdSpend =
+    ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'].includes(role) ||
+    has('marketing.adSpend.approve');
+  return { isMediaBuyer, isFundingAdmin, canRequestFunding, canApproveAdSpend };
 }
 
 export async function runMarketingFundingAction(cookie: string, formData: FormData) {

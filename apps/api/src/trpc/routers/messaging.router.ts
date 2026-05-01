@@ -150,8 +150,11 @@ export const messagingRouter = router({
    * Create a message template. HoCS / Admin / SuperAdmin can create branch-shared templates;
    * CS agents can also author their own (visible to the team but only editable by the
    * creator and Heads).
+   *
+   * Phase 21: gated by `messaging.templates.create` permission so custom role templates
+   * can grant template authoring without inheriting CS_AGENT or HEAD_OF_CS wholesale.
    */
-  'templates.create': authedProcedure
+  'templates.create': permissionProcedure('messaging.templates.create')
     .input(
       z.object({
         name: z.string().min(2).max(100),
@@ -160,11 +163,6 @@ export const messagingRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_AGENT'];
-      if (!allowedRoles.includes(ctx.user.role)) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS agents and CS leadership can create templates' });
-      }
-
       const db = getDb();
       assertSupportedTemplatePlaceholders(input.body);
       await db.insert(schema.messageTemplates).values({
@@ -182,8 +180,11 @@ export const messagingRouter = router({
    * Update template name, body, or status (archive/restore).
    * - HoCS / Admin / SuperAdmin: can update any template in their scope.
    * - CS_AGENT: can only update templates they themselves created.
+   *
+   * Phase 21: gated by `messaging.templates.update` permission. The CS_AGENT-can-only-edit-own
+   * rule below remains a service-side check on top of the permission gate.
    */
-  'templates.update': authedProcedure
+  'templates.update': permissionProcedure('messaging.templates.update')
     .input(
       z.object({
         templateId: z.string().uuid(),
@@ -193,11 +194,6 @@ export const messagingRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_AGENT'];
-      if (!allowedRoles.includes(ctx.user.role)) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS agents and CS leadership can edit templates' });
-      }
-
       const db = getDb();
 
       // CS agents may only edit their own templates. Heads can edit anything.

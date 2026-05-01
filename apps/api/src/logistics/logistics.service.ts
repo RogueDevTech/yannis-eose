@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { eq, and, desc, ilike, count, lt, gte, lte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
+import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import type {
   CreateProviderInput,
   UpdateProviderInput,
@@ -39,6 +39,19 @@ export class LogisticsService {
     private readonly notifications: NotificationsService,
     @Inject(forwardRef(() => OrdersService)) private readonly ordersService: OrdersService,
   ) {}
+
+  /**
+   * Phase 20 — true if the actor's effective permissions include any of the
+   * given codes (after canonicalization). Used to gate cash-remittance actions
+   * by permission instead of hardcoded role, so a custom role template with
+   * `finance.cashRemittance.create` can create remittances without holding
+   * `FINANCE_OFFICER` itself.
+   */
+  private actorHasAnyPermission(actor: SessionUser, ...codes: string[]): boolean {
+    const required = codes.map((c) => canonicalPermissionCode(c));
+    const have = new Set((actor.permissions ?? []).map((c) => canonicalPermissionCode(c)));
+    return required.some((c) => have.has(c));
+  }
 
   // ============================================
   // Providers
@@ -522,9 +535,14 @@ export class LogisticsService {
 
   /**
    * HEAD_OF_LOGISTICS marks a remittance as received. Updates inventory at toLocationId and notifies 3PL.
+   *
+   * Phase 21: also accepts the `logistics.transferRemittance.markReceived` permission so
+   * a custom role template can grant this without inheriting all of HEAD_OF_LOGISTICS.
    */
   async markRemittanceReceived(input: MarkRemittanceReceivedInput, actor: SessionUser) {
-    if (actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
+    const isLegacyRole = actor.role === 'HEAD_OF_LOGISTICS' || isAdminLevel(actor);
+    const hasPerm = this.actorHasAnyPermission(actor, 'logistics.transferRemittance.markReceived');
+    if (!isLegacyRole && !hasPerm) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Logistics can mark remittances as received' });
     }
 
@@ -627,8 +645,13 @@ export class LogisticsService {
     // so the accountant records remittances directly. The legacy TPL_MANAGER path
     // stays alive for when a 3PL actually onboards. Finance roles include the
     // primary FINANCE_OFFICER, anyone with the Finance hat, and admin-class.
+    // Phase 20: also accept the explicit `finance.cashRemittance.create` permission
+    // so a custom role template can grant just this capability.
     const isTplCaller = actor.role === 'TPL_MANAGER' && !!actor.logisticsLocationId;
-    const isFinanceCaller = hasFinanceAccess(actor) || isAdminLevel(actor);
+    const isFinanceCaller =
+      hasFinanceAccess(actor) ||
+      isAdminLevel(actor) ||
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
     if (!isTplCaller && !isFinanceCaller) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -1013,11 +1036,14 @@ export class LogisticsService {
    * Finance marks a delivery remittance as received (payment confirmed). Notifies 3PL location.
    */
   async markDeliveryRemittanceReceived(input: MarkDeliveryRemittanceReceivedInput, actor: SessionUser) {
-    // Phase 18: Finance / admin / Finance-hat holders can mark received. The
-    // legacy "FINANCE_OFFICER only" check is widened so the Finance hat holder
-    // (the only role that's layered on top of another) can run the close-out
-    // flow without escalating their primary role.
-    if (!hasFinanceAccess(actor) && !isAdminLevel(actor)) {
+    // Phase 18: Finance / admin / Finance-hat holders can mark received.
+    // Phase 20: also accept the explicit `finance.cashRemittance.markReceived`
+    // permission so custom role templates can grant just this capability.
+    if (
+      !hasFinanceAccess(actor) &&
+      !isAdminLevel(actor) &&
+      !this.actorHasAnyPermission(actor, 'finance.cashRemittance.markReceived')
+    ) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Finance or Super Admin can mark delivery remittances as received',
@@ -1195,8 +1221,13 @@ export class LogisticsService {
     // path. Finance / admin / Finance-hat get the full multi-location list,
     // optionally narrowed by a logistics location filter (for one-cash-drop-
     // per-location remittances).
+    // Phase 20: also accept `finance.cashRemittance.create` so any custom role
+    // that can create remittances can preview the eligible orders.
     const isTplCaller = actor.role === 'TPL_MANAGER' && !!actor.logisticsLocationId;
-    const isFinanceCaller = hasFinanceAccess(actor) || isAdminLevel(actor);
+    const isFinanceCaller =
+      hasFinanceAccess(actor) ||
+      isAdminLevel(actor) ||
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
     if (!isTplCaller && !isFinanceCaller) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -1349,7 +1380,13 @@ export class LogisticsService {
   // ============================================
 
   async submitDeliveryConfirmation(input: SubmitDeliveryConfirmationInput, actor: SessionUser) {
-    if (actor.role !== 'TPL_RIDER' && actor.role !== 'TPL_MANAGER' && actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
+    const isLegacyRole =
+      actor.role === 'TPL_RIDER' ||
+      actor.role === 'TPL_MANAGER' ||
+      actor.role === 'HEAD_OF_LOGISTICS' ||
+      isAdminLevel(actor);
+    const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.submit');
+    if (!isLegacyRole && !hasPerm) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only riders or 3PL managers can submit delivery confirmations',
@@ -1422,7 +1459,9 @@ export class LogisticsService {
   }
 
   async listDeliveryConfirmationRequests(input: ListDeliveryConfirmationRequestsInput, actor: SessionUser) {
-    if (actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
+    const isLegacyRole = actor.role === 'HEAD_OF_LOGISTICS' || isAdminLevel(actor);
+    const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
+    if (!isLegacyRole && !hasPerm) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can list delivery confirmation requests',
@@ -1486,7 +1525,9 @@ export class LogisticsService {
   }
 
   async approveDeliveryConfirmation(input: ApproveDeliveryConfirmationInput, actor: SessionUser) {
-    if (actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
+    const isLegacyRole = actor.role === 'HEAD_OF_LOGISTICS' || isAdminLevel(actor);
+    const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
+    if (!isLegacyRole && !hasPerm) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can approve delivery confirmations',
@@ -1556,7 +1597,9 @@ export class LogisticsService {
   }
 
   async rejectDeliveryConfirmation(input: RejectDeliveryConfirmationInput, actor: SessionUser) {
-    if (actor.role !== 'HEAD_OF_LOGISTICS' && (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN')) {
+    const isLegacyRole = actor.role === 'HEAD_OF_LOGISTICS' || isAdminLevel(actor);
+    const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
+    if (!isLegacyRole && !hasPerm) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can reject delivery confirmations',

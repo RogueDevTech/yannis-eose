@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
@@ -29,6 +29,8 @@ import type {
   UserPushStatus,
   ActiveHeadUser,
   FinanceHatHolder,
+  RoleTemplateOption,
+  PermissionCatalogItem,
 } from './types';
 import { USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
@@ -39,6 +41,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { RadioGroup } from '~/components/ui/radio-group';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
+import { PermissionMatrix } from './PermissionMatrix';
 
 // HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
 const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
@@ -95,6 +98,7 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
 
 export function UserDetailPage({
   user,
+  roleTemplates,
   products,
   locations,
   plans,
@@ -111,6 +115,9 @@ export function UserDetailPage({
   activeHeads,
   currentFinanceOfficer,
   branchesList,
+  permissionCatalog,
+  templatePermissionsById,
+  userPermissionOverrides,
   canDisburseToThisUser = false,
   isSuperAdmin = false,
   isViewerHeadOfMarketing = false,
@@ -155,6 +162,9 @@ export function UserDetailPage({
   // check synchronously whether the selected role+branch is already taken by another user.
   const [resolvedActiveHeads, setResolvedActiveHeads] = useState<ActiveHeadUser[] | null>(null);
   const [resolvedBranches, setResolvedBranches] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [resolvedRoleTemplates, setResolvedRoleTemplates] = useState<RoleTemplateOption[] | null>(null);
+  const [resolvedPermissionCatalog, setResolvedPermissionCatalog] = useState<PermissionCatalogItem[]>([]);
+  const [resolvedTemplatePermissionsById, setResolvedTemplatePermissionsById] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     if (actionData?.error) setDismissedError(false);
@@ -238,6 +248,65 @@ export function UserDetailPage({
 
   // Edit form state
   const [selectedRole, setSelectedRole] = useState(user.role);
+  const [selectedPrimaryBranchId, setSelectedPrimaryBranchId] = useState(user.primaryBranchId ?? '');
+  const [selectedBranchIdsEdit, setSelectedBranchIdsEdit] = useState<string[]>(
+    (user.branchMemberships ?? []).map((membership) => membership.branchId),
+  );
+  const [selectedTemplateId, setSelectedTemplateId] = useState(user.roleTemplateId ?? '');
+  const [permissionOverridesEdit, setPermissionOverridesEdit] = useState<Record<string, boolean>>({});
+
+  const templateByRole = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of resolvedRoleTemplates ?? []) {
+      if (t.kind === 'SYSTEM' && t.mappedRole) map.set(t.mappedRole, t.id);
+    }
+    return map;
+  }, [resolvedRoleTemplates]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (roleTemplates) {
+      roleTemplates.then((rows) => {
+        if (!cancelled) setResolvedRoleTemplates(rows);
+      }).catch(() => {
+        if (!cancelled) setResolvedRoleTemplates([]);
+      });
+    }
+    if (permissionCatalog) {
+      permissionCatalog.then((rows) => {
+        if (!cancelled) setResolvedPermissionCatalog(rows);
+      }).catch(() => {
+        if (!cancelled) setResolvedPermissionCatalog([]);
+      });
+    }
+    if (templatePermissionsById) {
+      templatePermissionsById.then((rows) => {
+        if (!cancelled) setResolvedTemplatePermissionsById(rows);
+      }).catch(() => {
+        if (!cancelled) setResolvedTemplatePermissionsById({});
+      });
+    }
+    if (userPermissionOverrides) {
+      userPermissionOverrides.then((rows) => {
+        if (!cancelled) setPermissionOverridesEdit(rows);
+      }).catch(() => {
+        if (!cancelled) setPermissionOverridesEdit({});
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [roleTemplates, permissionCatalog, templatePermissionsById, userPermissionOverrides]);
+
+  useEffect(() => {
+    if (!selectedRole) return;
+    const mapped = templateByRole.get(selectedRole);
+    if (mapped) setSelectedTemplateId(mapped);
+  }, [selectedRole, templateByRole]);
+
+  useEffect(() => {
+    setPermissionOverridesEdit({});
+  }, [selectedTemplateId, selectedRole]);
 
   const pendingConflict =
     HEAD_ROLES.includes(selectedRole) &&
@@ -246,13 +315,13 @@ export function UserDetailPage({
       ? resolvedActiveHeads.find((h) => {
           if (h.role !== selectedRole || h.id === user.id) return false;
           if (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)) return true;
-          return !!user.primaryBranchId && h.primaryBranchId === user.primaryBranchId;
+          return !!selectedPrimaryBranchId && h.primaryBranchId === selectedPrimaryBranchId;
         })
       : undefined;
   const pendingConflictBranchName = pendingConflict
     ? ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
       ? 'The organization'
-      : resolvedBranches?.find((b) => b.id === user.primaryBranchId)?.name ?? 'This branch'
+      : resolvedBranches?.find((b) => b.id === selectedPrimaryBranchId)?.name ?? 'This branch'
     : null;
 
   const [assignFinanceHat, setAssignFinanceHat] = useState(user.isFinanceOfficer === true);
@@ -274,9 +343,11 @@ export function UserDetailPage({
   const assignedProductIdsKey = [...(user.assignedProductIds ?? [])].sort().join(',');
   useEffect(() => {
     setSelectedRole(user.role);
+    setSelectedPrimaryBranchId(user.primaryBranchId ?? '');
+    setSelectedBranchIdsEdit((user.branchMemberships ?? []).map((membership) => membership.branchId));
     setSelectedProductIds(user.assignedProductIds ? [...user.assignedProductIds] : []);
     setLogisticsLocationEdit(user.logisticsLocationId ?? '');
-  }, [user.id, user.updatedAt, user.role, assignedProductIdsKey, user.logisticsLocationId]);
+  }, [user.id, user.updatedAt, user.role, assignedProductIdsKey, user.logisticsLocationId, user.primaryBranchId, user.branchMemberships]);
 
   // Capacity is only meaningful for roles that work an individual workload — CS agents
   // (max concurrent orders) and Media Buyers (max concurrent campaigns). Managers / heads
@@ -295,6 +366,22 @@ export function UserDetailPage({
     setSelectedProductIds((prev) =>
       prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
     );
+  };
+
+  const toggleBranchEdit = (id: string) => {
+    setSelectedBranchIdsEdit((prev) => {
+      if (prev.includes(id)) {
+        const next = prev.filter((branchId) => branchId !== id);
+        if (selectedPrimaryBranchId === id) {
+          setSelectedPrimaryBranchId(next[0] ?? '');
+        }
+        return next;
+      }
+      if (!selectedPrimaryBranchId) {
+        setSelectedPrimaryBranchId(id);
+      }
+      return [...prev, id];
+    });
   };
 
   const gradient = ROLE_AVATAR_GRADIENTS[user.role] ?? 'from-brand-500 to-brand-700';
@@ -372,6 +459,20 @@ export function UserDetailPage({
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <PageRefreshButton />
+                  {/* Phase 22 — onboarding record button. Self-view links to the
+                      self-service page; HR-class viewers link to the user-scoped
+                      onboarding view. Server-side auth ensures the destination
+                      route gates correctly. */}
+                  <Link
+                    to={isSelfView ? '/onboarding' : `/hr/users/${user.id}/onboarding`}
+                    className="btn-secondary btn-sm flex items-center gap-1.5"
+                    title="Onboarding profile"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z" />
+                    </svg>
+                    Onboarding
+                  </Link>
                   {/* Mirror: `branches.canMirrorToUser` — not behind restrictHeadView. Disabled when preview-only (nested mirror). */}
                   {!isSelfView && viewerShowsMirror && (
                     mirrorSubmitDisabled ? (
@@ -478,6 +579,18 @@ export function UserDetailPage({
               </svg>
               {tenure}
             </span>
+            {(user.loginCount ?? 0) > 0 && (
+              <span
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted"
+                title={user.lastLoginAt ? `Last sign-in ${new Date(user.lastLoginAt).toLocaleString('en-NG')}` : 'Sign-in history'}
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                </svg>
+                {user.loginCount} sign-in{user.loginCount === 1 ? '' : 's'}
+                {user.lastLoginAt && ` · ${getTimeSince(new Date(user.lastLoginAt))}`}
+              </span>
+            )}
             {user.phone && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1171,6 +1284,10 @@ export function UserDetailPage({
           }}
         >
           <input type="hidden" name="intent" value="update" />
+          <input type="hidden" name="branchIds" value={JSON.stringify(selectedBranchIdsEdit)} />
+          <input type="hidden" name="primaryBranchId" value={selectedPrimaryBranchId} />
+          {selectedTemplateId ? <input type="hidden" name="roleTemplateId" value={selectedTemplateId} /> : null}
+          <input type="hidden" name="permissionOverrides" value={JSON.stringify(permissionOverridesEdit)} />
           {showProductAssignment && selectedProductIds.length > 0 && (
             <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
           )}
@@ -1239,6 +1356,23 @@ export function UserDetailPage({
                     }}
                   </DeferredSection>
                 )}
+                {resolvedRoleTemplates && resolvedRoleTemplates.length > 0 && (
+                  <div className="mt-3">
+                    <SearchableSelect
+                      id="roleTemplateIdUi"
+                      label="Permission template"
+                      placeholder="Select a template"
+                      searchPlaceholder="Search templates..."
+                      value={selectedTemplateId}
+                      onChange={setSelectedTemplateId}
+                      options={resolvedRoleTemplates.map((t) => ({
+                        value: t.id,
+                        label: `${t.name} (${t.kind})`,
+                        description: t.key,
+                      }))}
+                    />
+                  </div>
+                )}
               </div>
               <div>
                 <TextInput id="name" name="name" type="text" label="Full Name" defaultValue={user.name} />
@@ -1246,6 +1380,48 @@ export function UserDetailPage({
               <div>
                 <TextInput id="email" name="email" type="email" label="Email Address" defaultValue={user.email} />
                 <p className="text-xs text-warning-600 dark:text-warning-400 mt-1">Email changes require SuperAdmin approval before taking effect.</p>
+              </div>
+              <div className="sm:col-span-2 space-y-3">
+                <label className="block text-sm font-medium text-app-fg-muted">Branch Memberships</label>
+                <DeferredSection resolve={branchesList ?? Promise.resolve([])} skeleton="inline">
+                  {(branches: Array<{ id: string; name: string; code: string; status: string }>) => (
+                    <>
+                      <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
+                        {branches
+                          .filter((branch) => branch.status === 'ACTIVE')
+                          .map((branch) => (
+                            <label
+                              key={branch.id}
+                              className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+                            >
+                              <Checkbox
+                                checked={selectedBranchIdsEdit.includes(branch.id)}
+                                onChange={() => toggleBranchEdit(branch.id)}
+                              />
+                              <span className="text-sm text-app-fg">{branch.name}</span>
+                              <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
+                            </label>
+                          ))}
+                      </div>
+                      <SearchableSelect
+                        id="primaryBranchId"
+                        label="Primary Branch"
+                        required
+                        placeholder="Select primary branch"
+                        searchPlaceholder="Search selected branches..."
+                        value={selectedPrimaryBranchId}
+                        onChange={setSelectedPrimaryBranchId}
+                        options={branches
+                          .filter((branch) => selectedBranchIdsEdit.includes(branch.id))
+                          .map((branch) => ({
+                            value: branch.id,
+                            label: branch.name,
+                            description: branch.code,
+                          }))}
+                      />
+                    </>
+                  )}
+                </DeferredSection>
               </div>
               <div>
                 {user.status === 'DEACTIVATED' ? (
@@ -1294,6 +1470,15 @@ export function UserDetailPage({
               </div>
             </div>
           </div>
+          )}
+
+          {!canEditLimited && resolvedPermissionCatalog.length > 0 && (
+            <PermissionMatrix
+              permissions={resolvedPermissionCatalog}
+              templateCodes={selectedTemplateId ? (resolvedTemplatePermissionsById[selectedTemplateId] ?? []) : []}
+              overrides={permissionOverridesEdit}
+              onOverridesChange={setPermissionOverridesEdit}
+            />
           )}
 
           {/* Finance hat — org-wide singleton. Admin-only; hidden for team-lead edits. */}
@@ -1426,7 +1611,14 @@ export function UserDetailPage({
 
           <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
             <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={() => setActiveTab('overview')}>Cancel</Button>
-            <Button type="submit" variant="primary" className="w-full sm:w-auto" loading={isUpdating} loadingText="Saving...">
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full sm:w-auto"
+              loading={isUpdating}
+              loadingText="Saving..."
+              disabled={selectedBranchIdsEdit.length === 0 || !selectedPrimaryBranchId}
+            >
               Save Changes
             </Button>
           </div>

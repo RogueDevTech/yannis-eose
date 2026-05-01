@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   ForbiddenException,
+  Inject,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -18,6 +19,20 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
+import { eq } from 'drizzle-orm';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { db as schema } from '@yannis/shared';
+import { DRIZZLE } from '../database/database.module';
+
+/**
+ * Parent domain for split web/API hosts (e.g. `.example.com`).
+ * Only applied in production: if set while visiting `localhost`, browsers reject the cookie
+ * (Domain mismatch) — Remix forwards Set-Cookie but the session never sticks → instant logout.
+ */
+function resolvedSessionCookieDomain(): string | undefined {
+  if (process.env['NODE_ENV'] !== 'production') return undefined;
+  return process.env['SESSION_COOKIE_DOMAIN']?.trim() || undefined;
+}
 
 /** When web (e.g. yannis.*) and API (e.g. api-yannis.*) differ, set e.g. `.roguedevtech.com` so Socket.io receives `Cookie`. */
 function sessionCookieOpts(maxAgeMs: number): {
@@ -29,7 +44,7 @@ function sessionCookieOpts(maxAgeMs: number): {
   domain?: string;
 } {
   const isProduction = process.env['NODE_ENV'] === 'production';
-  const domain = process.env['SESSION_COOKIE_DOMAIN']?.trim();
+  const domain = resolvedSessionCookieDomain();
   return {
     httpOnly: true,
     secure: isProduction,
@@ -42,7 +57,7 @@ function sessionCookieOpts(maxAgeMs: number): {
 
 function sessionClearCookieOpts(): { path: string; domain?: string; secure?: boolean; sameSite?: 'strict' | 'lax' } {
   const isProduction = process.env['NODE_ENV'] === 'production';
-  const domain = process.env['SESSION_COOKIE_DOMAIN']?.trim();
+  const domain = resolvedSessionCookieDomain();
   return {
     path: '/',
     ...(domain ? { domain } : {}),
@@ -56,6 +71,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
     private readonly permissionsService: PermissionsService,
+    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
   /**
@@ -275,16 +291,34 @@ export class AuthController {
   @Post('me')
   @HttpCode(HttpStatus.OK)
   async me(@CurrentUser() user: SessionUser) {
-    if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
-      const perms = await this.permissionsService.getEffectivePermissions(user.id, user.role);
-      user = { ...user, permissions: Array.from(perms) };
-    } else {
-      user = { ...user, permissions: [] };
-    }
-    const appTheme = await this.usersService.getAppThemePreference(user.id);
-    const fontScale = await this.usersService.getFontScalePreference(user.id);
-    user = { ...user, appTheme, fontScale };
-    return { user };
+    const [dbUser] = await this.db
+      .select({
+        roleTemplateId: schema.users.roleTemplateId,
+        scopeGlobal: schema.users.scopeGlobal,
+        scopeOrgWideHead: schema.users.scopeOrgWideHead,
+        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
+        role: schema.users.role,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, user.id))
+      .limit(1);
+
+    let merged: SessionUser = {
+      ...user,
+      roleTemplateId: dbUser?.roleTemplateId ?? user.roleTemplateId ?? null,
+      scopeGlobal: dbUser?.scopeGlobal ?? user.scopeGlobal ?? false,
+      scopeOrgWideHead: dbUser?.scopeOrgWideHead ?? user.scopeOrgWideHead ?? false,
+      scopeTeamSupervisor: dbUser?.scopeTeamSupervisor ?? user.scopeTeamSupervisor ?? false,
+      role: (dbUser?.role as string | undefined) ?? user.role,
+    };
+
+    const perms = await this.permissionsService.getEffectivePermissions(merged.id);
+    merged = { ...merged, permissions: Array.from(perms) };
+
+    const appTheme = await this.usersService.getAppThemePreference(merged.id);
+    const fontScale = await this.usersService.getFontScalePreference(merged.id);
+    merged = { ...merged, appTheme, fontScale };
+    return { user: merged };
   }
 
   private extractSessionToken(request: Request): string | undefined {

@@ -109,6 +109,21 @@ export interface FinanceHatHolder {
   name: string;
 }
 
+export interface RoleTemplateOption {
+  id: string;
+  key: string;
+  name: string;
+  kind: string;
+  mappedRole: string | null;
+}
+
+export interface PermissionCatalogItem {
+  code: string;
+  resource: string;
+  action: string;
+  description: string | null;
+}
+
 export interface UserCreateLoaderData {
   products: UserCreateProduct[];
   locations: UserCreateLocation[];
@@ -116,6 +131,9 @@ export interface UserCreateLoaderData {
   branches: UserCreateBranch[];
   activeHeads: ActiveHeadUser[];
   currentFinanceOfficer: FinanceHatHolder | null;
+  roleTemplates: RoleTemplateOption[];
+  permissionCatalog: PermissionCatalogItem[];
+  templatePermissionsById: Record<string, string[]>;
 }
 
 // ─── User Detail Page Types ──────────────────────────────
@@ -137,6 +155,14 @@ export interface UserDetail {
   primaryBranchId: string | null;
   /** True when this user wears the org-wide Finance hat (deputization). */
   isFinanceOfficer?: boolean;
+  roleTemplateId?: string | null;
+  scopeGlobal?: boolean;
+  scopeOrgWideHead?: boolean;
+  scopeTeamSupervisor?: boolean;
+  /** Lifetime sign-in counter — bumped each successful login. */
+  loginCount?: number;
+  /** Most recent successful sign-in timestamp. */
+  lastLoginAt?: string | null;
   createdAt: string;
   updatedAt: string;
   branchMemberships?: UserBranchMembership[];
@@ -240,6 +266,7 @@ export interface UserPushStatus {
 
 export interface UserDetailLoaderData {
   user: UserDetail;
+  roleTemplates?: Promise<RoleTemplateOption[]>;
   products: Promise<UserCreateProduct[]>;
   locations: Promise<UserCreateLocation[]>;
   plans: Promise<UserCreateCommissionPlan[]>;
@@ -256,6 +283,9 @@ export interface UserDetailLoaderData {
   activeHeads?: Promise<ActiveHeadUser[]>;
   currentFinanceOfficer?: Promise<FinanceHatHolder | null>;
   branchesList?: Promise<Array<{ id: string; name: string; code: string; status: string }>>;
+  permissionCatalog?: Promise<PermissionCatalogItem[]>;
+  templatePermissionsById?: Promise<Record<string, string[]>>;
+  userPermissionOverrides?: Promise<Record<string, boolean>>;
   canDisburseToThisUser?: boolean;
   isSuperAdmin?: boolean;
   isViewerHeadOfMarketing?: boolean;

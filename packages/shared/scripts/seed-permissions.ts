@@ -11,6 +11,7 @@
 import { config } from 'dotenv';
 import path from 'path';
 import postgres from 'postgres';
+import { canonicalPermissionCode } from '../src/rbac/permission-codes';
 
 // Load .env from repo root (when run via pnpm from packages/shared, cwd is packages/shared)
 config({ path: path.resolve(process.cwd(), '../../.env') });
@@ -71,26 +72,177 @@ const PERMISSIONS: Array<{ code: string; resource: string; action: string; descr
   { code: 'hr.read', resource: 'hr', action: 'read', description: 'View HR & payroll' },
   { code: 'hr.write', resource: 'hr', action: 'write', description: 'Manage HR (plans, payouts, adjustments)' },
   { code: 'hr.approveAdjustment', resource: 'hr', action: 'approveAdjustment', description: 'Approve HR adjustments' },
-  { code: 'users.read', resource: 'users', action: 'read', description: 'View users/staff list' },
-  { code: 'users.create', resource: 'users', action: 'create', description: 'Create users' },
-  { code: 'users.update', resource: 'users', action: 'update', description: 'Update users' },
-  { code: 'users.deactivate', resource: 'users', action: 'deactivate', description: 'Deactivate users' },
+  { code: 'users.staff.view', resource: 'users.staff', action: 'view', description: 'View users/staff list' },
+  { code: 'users.staff.create', resource: 'users.staff', action: 'create', description: 'Create users' },
+  { code: 'users.staff.update', resource: 'users.staff', action: 'update', description: 'Update users' },
+  { code: 'users.staff.deactivate', resource: 'users.staff', action: 'deactivate', description: 'Deactivate users' },
+  // Legacy aliases kept for coverage/tooling during rollout (canonicalized at seed/runtime).
+  { code: 'users.read', resource: 'users', action: 'read', description: 'Legacy alias for users.staff.view' },
+  { code: 'users.create', resource: 'users', action: 'create', description: 'Legacy alias for users.staff.create' },
+  { code: 'users.update', resource: 'users', action: 'update', description: 'Legacy alias for users.staff.update' },
+  { code: 'users.deactivate', resource: 'users', action: 'deactivate', description: 'Legacy alias for users.staff.deactivate' },
   { code: 'audit.read', resource: 'audit', action: 'read', description: 'View audit trail' },
   { code: 'settings.write', resource: 'settings', action: 'write', description: 'Update system settings' },
   { code: 'rider.dashboard', resource: 'rider', action: 'dashboard', description: 'Rider dashboard' },
   { code: 'cart.read', resource: 'cart', action: 'read', description: 'View cart abandonment data (CS dashboard)' },
   { code: 'branches.manage', resource: 'branches', action: 'manage', description: 'Create, update, and assign users to branches (SuperAdmin only)' },
   { code: 'branches.view_all', resource: 'branches', action: 'view_all', description: 'View data across all branches (global visibility bypass) — grant sparingly' },
+  { code: 'cs.scope.global', resource: 'cs.scope', action: 'global', description: 'Allow CS workflows across all branches' },
+  { code: 'marketing.scope.global', resource: 'marketing.scope', action: 'global', description: 'Allow Marketing workflows across all branches' },
+  { code: 'logistics.scope.global', resource: 'logistics.scope', action: 'global', description: 'Allow Logistics workflows across all branches' },
+  { code: 'notifications.broadcast', resource: 'notifications', action: 'broadcast', description: 'Create broadcasts / manage push automations' },
+  { code: 'cart.delete', resource: 'cart', action: 'delete', description: 'Delete abandoned cart records' },
+  { code: 'rbac.templates.manage', resource: 'rbac.templates', action: 'manage', description: 'Create/edit permission role templates' },
+  { code: 'marketing.requestFunding.orgWide', resource: 'marketing', action: 'requestFundingOrgWide', description: 'Request upstream funding without an active branch context' },
+  { code: 'mirror.any', resource: 'mirror', action: 'any', description: 'Mirror any eligible user (dangerous — SuperAdmin only)' },
+  { code: 'mirror.cs_team', resource: 'mirror', action: 'cs_team', description: 'Mirror CS agents (Head of CS powers)' },
+  { code: 'mirror.marketing_team', resource: 'mirror', action: 'marketing_team', description: 'Mirror media buyers (Head of Marketing powers)' },
+  { code: 'mirror.logistics_chain', resource: 'mirror', action: 'logistics_chain', description: 'Mirror logistics chain roles (Head of Logistics powers)' },
+  { code: 'team.supervise_cs', resource: 'team', action: 'supervise_cs', description: 'Supervise CS agents within branch teams' },
+  { code: 'team.supervise_marketing', resource: 'team', action: 'supervise_marketing', description: 'Supervise media buyers within branch teams' },
+  { code: 'team.supervise_logistics', resource: 'team', action: 'supervise_logistics', description: 'Supervise logistics roles within branch teams' },
+  // Phase 20 — fine-grained capabilities split out from hardcoded role checks.
+  // Granting these to a custom role lets you redistribute work without giving
+  // away the whole HEAD_OF_MARKETING / FINANCE_OFFICER role.
+  { code: 'marketing.funding.request', resource: 'marketing.funding', action: 'request', description: 'Submit a funding request (Media Buyer → HoM, or HoM → Finance)' },
+  { code: 'marketing.funding.approve', resource: 'marketing.funding', action: 'approve', description: 'Approve or reject a funding request (HoM, Finance, Admin)' },
+  { code: 'marketing.adSpend.approve', resource: 'marketing.ad_spend', action: 'approve', description: 'Approve or reject Media Buyer ad-spend submissions' },
+  { code: 'finance.cashRemittance.create', resource: 'finance.cash_remittance', action: 'create', description: 'Record a cash remittance (accountant-led close-out of delivered orders)' },
+  { code: 'finance.cashRemittance.markReceived', resource: 'finance.cash_remittance', action: 'mark_received', description: 'Mark a cash remittance Received and cascade orders to COMPLETED' },
+  // Phase 21 — additional fine-grained capabilities for router/service gates that
+  // were previously hardcoded role lists.
+  { code: 'orders.createOffline', resource: 'orders', action: 'createOffline', description: 'Create an offline order (CS manual entry)' },
+  { code: 'messaging.templates.create', resource: 'messaging.templates', action: 'create', description: 'Create CS message templates (SMS / WhatsApp / WhatsApp group)' },
+  { code: 'messaging.templates.update', resource: 'messaging.templates', action: 'update', description: 'Update or archive CS message templates' },
+  { code: 'logistics.transferRemittance.markReceived', resource: 'logistics.transfer_remittance', action: 'mark_received', description: 'Mark a 3PL→warehouse stock transfer remittance as received (HoLogistics)' },
+  { code: 'logistics.deliveryConfirmation.submit', resource: 'logistics.delivery_confirmation', action: 'submit', description: 'Submit a delivery confirmation request (rider / 3PL manager / HoLogistics)' },
+  { code: 'logistics.deliveryConfirmation.review', resource: 'logistics.delivery_confirmation', action: 'review', description: 'List, approve, or reject pending delivery confirmation requests (HoLogistics)' },
+  // Phase 22 — staff onboarding (HR record-keeping; does not gate account login).
+  { code: 'hr.onboarding.read', resource: 'hr.onboarding', action: 'read', description: 'View any staff member\'s onboarding profile' },
+  { code: 'hr.onboarding.write', resource: 'hr.onboarding', action: 'write', description: 'Edit any staff member\'s onboarding profile' },
+  { code: 'hr.onboarding.approve', resource: 'hr.onboarding', action: 'approve', description: 'Approve a submitted staff onboarding profile (locks edits for staff)' },
 ];
+
+const CANONICAL_PERMISSIONS: Array<{ code: string; resource: string; action: string; description?: string }> = [
+  ...new Map(
+    PERMISSIONS.map((p) => {
+      const code = canonicalPermissionCode(p.code);
+      const parts = code.split('.');
+      const action = parts.at(-1) ?? p.action;
+      const resource = parts.slice(0, -1).join('.') || p.resource;
+      return [code, { ...p, code, resource, action }];
+    }),
+  ).values(),
+];
+
+const ALL_PERMISSION_CODES: string[] = CANONICAL_PERMISSIONS.map((p) => p.code);
 
 // role -> permission codes
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: [], // bypasses all checks - no need to store
-  HEAD_OF_MARKETING: ['marketing.read', 'marketing.funding', 'marketing.fundingSummary', 'marketing.leaderboard', 'marketing.checkHighCpa', 'marketing.offerTemplate', 'marketing.campaigns', 'marketing.teamOverview', 'marketing.orders', 'products.read', 'users.read', 'audit.read'],
-  MEDIA_BUYER: ['marketing.read', 'marketing.adSpend', 'marketing.leaderboard', 'marketing.campaigns', 'marketing.orders', 'products.read'],
-  HEAD_OF_CS: ['orders.read', 'orders.reassign', 'orders.bulkTransition', 'orders.bulkAssign', 'orders.csWorkloads', 'orders.releaseLocks', 'orders.inactiveAgents', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.mergeDuplicate', 'orders.dismissDuplicate', 'cs.teamOverview', 'cs.leaderboard', 'cart.read', 'users.read', 'audit.read'],
-  CS_AGENT: ['orders.read', 'orders.csLeaderboard', 'orders.callbackQueue', 'orders.scheduledCallbacks', 'orders.flaggedDuplicates', 'orders.dismissDuplicate', 'cs.leaderboard', 'cart.read'],
-  FINANCE_OFFICER: ['finance.read', 'finance.costView', 'finance.approve', 'finance.disburse', 'marketing.read', 'marketing.fundingSummary', 'orders.read', 'audit.read', 'users.read'],
+  ADMIN: ALL_PERMISSION_CODES,
+  BRANCH_ADMIN: [
+    'orders.read',
+    'users.read',
+    'audit.read',
+    'products.read',
+    'categories.read',
+    'inventory.read',
+    'logistics.read',
+    'marketing.read',
+    'finance.read',
+    'hr.read',
+    'settings.write',
+    'branches.manage',
+  ],
+  HEAD_OF_MARKETING: [
+    'marketing.read',
+    'marketing.funding',
+    'marketing.fundingSummary',
+    'marketing.leaderboard',
+    'marketing.checkHighCpa',
+    'marketing.offerTemplate',
+    'marketing.campaigns',
+    'marketing.teamOverview',
+    'marketing.orders',
+    'marketing.requestFunding.orgWide',
+    // Phase 20 — explicit moderation + request capabilities (replaces hardcoded role checks)
+    'marketing.funding.request',
+    'marketing.funding.approve',
+    'marketing.adSpend.approve',
+    'products.read',
+    'users.read',
+    'audit.read',
+    'mirror.marketing_team',
+    'team.supervise_marketing',
+    'marketing.scope.global',
+  ],
+  MEDIA_BUYER: [
+    'marketing.read',
+    'marketing.adSpend',
+    'marketing.leaderboard',
+    'marketing.campaigns',
+    'marketing.orders',
+    'products.read',
+    // Phase 20 — MB requests funding from HoM via this capability
+    'marketing.funding.request',
+  ],
+  HEAD_OF_CS: [
+    'orders.read',
+    'orders.reassign',
+    'orders.bulkTransition',
+    'orders.bulkAssign',
+    'orders.csWorkloads',
+    'orders.releaseLocks',
+    'orders.inactiveAgents',
+    'orders.csLeaderboard',
+    'orders.callbackQueue',
+    'orders.scheduledCallbacks',
+    'orders.flaggedDuplicates',
+    'orders.mergeDuplicate',
+    'orders.dismissDuplicate',
+    'cs.teamOverview',
+    'cs.leaderboard',
+    'cart.read',
+    'users.read',
+    'audit.read',
+    'mirror.cs_team',
+    'team.supervise_cs',
+    'cs.scope.global',
+    // Phase 21
+    'orders.createOffline',
+    'messaging.templates.create',
+    'messaging.templates.update',
+  ],
+  CS_AGENT: [
+    'orders.read',
+    'orders.csLeaderboard',
+    'orders.callbackQueue',
+    'orders.scheduledCallbacks',
+    'orders.flaggedDuplicates',
+    'orders.dismissDuplicate',
+    'cs.leaderboard',
+    'cart.read',
+    // Phase 21
+    'orders.createOffline',
+    'messaging.templates.create',
+    'messaging.templates.update',
+  ],
+  FINANCE_OFFICER: [
+    'finance.read',
+    'finance.costView',
+    'finance.approve',
+    'finance.disburse',
+    'marketing.read',
+    'marketing.fundingSummary',
+    'orders.read',
+    'audit.read',
+    'users.read',
+    // Phase 20 — fine-grained Finance capabilities
+    'marketing.funding.approve',
+    'finance.cashRemittance.create',
+    'finance.cashRemittance.markReceived',
+  ],
   HEAD_OF_LOGISTICS: [
     'orders.read',
     'orders.bulkTransition',
@@ -106,6 +258,13 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'inventory.createReconciliation',
     'inventory.resolveReconciliation',
     'audit.read',
+    'mirror.logistics_chain',
+    'team.supervise_logistics',
+    'logistics.scope.global',
+    // Phase 21 — explicit gates for transfer remittance receipt + delivery confirmations
+    'logistics.transferRemittance.markReceived',
+    'logistics.deliveryConfirmation.submit',
+    'logistics.deliveryConfirmation.review',
   ],
   STOCK_MANAGER: [
     'inventory.read',
@@ -124,9 +283,37 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'categories.read',
     'categories.write',
   ],
-  TPL_MANAGER: ['inventory.read', 'inventory.verifyTransfer', 'inventory.returnedOrders', 'inventory.createReconciliation', 'inventory.reconciliations', 'logistics.read', 'logistics.remit', 'orders.read', 'transfers.read', 'returns.read'],
-  TPL_RIDER: ['rider.dashboard'],
-  HR_MANAGER: ['hr.read', 'hr.write', 'users.read', 'users.create', 'users.update', 'audit.read'],
+  TPL_MANAGER: [
+    'inventory.read',
+    'inventory.verifyTransfer',
+    'inventory.returnedOrders',
+    'inventory.createReconciliation',
+    'inventory.reconciliations',
+    'logistics.read',
+    'logistics.remit',
+    'orders.read',
+    'transfers.read',
+    'returns.read',
+    // Phase 21 — 3PL managers submit delivery confirmations for HoL approval
+    'logistics.deliveryConfirmation.submit',
+  ],
+  TPL_RIDER: [
+    'rider.dashboard',
+    // Phase 21 — riders submit delivery confirmations from the field
+    'logistics.deliveryConfirmation.submit',
+  ],
+  HR_MANAGER: [
+    'hr.read',
+    'hr.write',
+    'users.read',
+    'users.create',
+    'users.update',
+    'audit.read',
+    // Phase 22 — HR owns the onboarding workflow.
+    'hr.onboarding.read',
+    'hr.onboarding.write',
+    'hr.onboarding.approve',
+  ],
   // hr.approveAdjustment: SuperAdmin only (not in any role — bypass)
   // finance.initMaterializedViews: SuperAdmin only (not in any role — bypass)
 };
@@ -144,7 +331,7 @@ async function seedPermissions() {
 
   // Insert permissions — add any missing (ON CONFLICT DO NOTHING)
   let permInserted = 0;
-  for (const p of PERMISSIONS) {
+  for (const p of CANONICAL_PERMISSIONS) {
     const result = await sql`
       INSERT INTO permissions (id, code, resource, action, description)
       VALUES (gen_random_uuid(), ${p.code}, ${p.resource}, ${p.action}, ${p.description ?? null})
@@ -167,7 +354,7 @@ async function seedPermissions() {
     if (role === 'SUPER_ADMIN') continue;
     const ids = new Set<string>();
     for (const code of codes) {
-      const permId = permMap.get(code);
+      const permId = permMap.get(canonicalPermissionCode(code));
       if (permId) ids.add(permId);
     }
     roleAllowedPermIds.set(role, ids);
@@ -195,7 +382,7 @@ async function seedPermissions() {
   for (const [role, codes] of Object.entries(ROLE_PERMISSIONS)) {
     if (role === 'SUPER_ADMIN') continue;
     for (const code of codes) {
-      const permId = permMap.get(code);
+      const permId = permMap.get(canonicalPermissionCode(code));
       if (permId) {
         const result = await sql`
           INSERT INTO role_permissions (role, permission_id)
@@ -208,8 +395,75 @@ async function seedPermissions() {
     }
   }
 
-  console.log(`  Permissions: ${permInserted} new, ${PERMISSIONS.length - permInserted} already existed`);
+  console.log(`  Permissions: ${permInserted} new, ${CANONICAL_PERMISSIONS.length - permInserted} already existed`);
   console.log(`  Role assignments: ${rpDeleted} revoked, ${rpInserted} new added`);
+
+  // Ensure a SYSTEM role_template exists for every role we have permissions
+  // for. Without these rows, the /hr/users/new page can't pre-check anything
+  // because there's no template to baseline against. Idempotent — uses
+  // ON CONFLICT (key) DO NOTHING so re-runs don't churn rows.
+  let templatesInserted = 0;
+  for (const roleKey of Object.keys(ROLE_PERMISSIONS)) {
+    if (roleKey === 'SUPER_ADMIN') continue; // bypasses all permission checks; no template needed
+    const templateKey = `SYSTEM.${roleKey}`;
+    const niceName = roleKey
+      .split('_')
+      .map((s) => s[0] + s.slice(1).toLowerCase())
+      .join(' ');
+    const result = await sql`
+      INSERT INTO role_templates (key, name, kind, status, locked, mapped_role)
+      VALUES (${templateKey}, ${niceName}, 'SYSTEM', 'ACTIVE', true, ${roleKey}::user_role)
+      ON CONFLICT (key) DO NOTHING
+      RETURNING id
+    `;
+    if (result.length > 0) templatesInserted++;
+  }
+  if (templatesInserted > 0) {
+    console.log(`  System role templates: ${templatesInserted} new added`);
+  }
+
+  // Keep SYSTEM role_templates.role_template_permissions in sync with role_permissions
+  // (runtime effective perms prefer template rows when role_template_id is set).
+  const systemTemplates = await sql`
+    SELECT id, mapped_role::text AS mapped_role
+    FROM role_templates
+    WHERE kind = 'SYSTEM' AND mapped_role IS NOT NULL
+  `;
+
+  let rtpDeleted = 0;
+  let rtpInserted = 0;
+  for (const t of systemTemplates) {
+    const roleKey = t.mapped_role as string;
+    const allowed = roleAllowedPermIds.get(roleKey);
+    if (!allowed) continue;
+
+    const allRtp = await sql`
+      SELECT permission_id
+      FROM role_template_permissions
+      WHERE role_template_id = ${t.id} AND valid_to IS NULL
+    `;
+    for (const row of allRtp) {
+      if (!allowed.has(row.permission_id as string)) {
+        await sql`
+          DELETE FROM role_template_permissions
+          WHERE role_template_id = ${t.id} AND permission_id = ${row.permission_id}
+        `;
+        rtpDeleted++;
+      }
+    }
+
+    for (const permId of allowed) {
+      const result = await sql`
+        INSERT INTO role_template_permissions (role_template_id, permission_id)
+        VALUES (${t.id}, ${permId})
+        ON CONFLICT DO NOTHING
+        RETURNING role_template_id
+      `;
+      if (result.length > 0) rtpInserted++;
+    }
+  }
+
+  console.log(`  System template perms: ${rtpDeleted} revoked, ${rtpInserted} new added`);
   console.log('  Done.\n');
   await sql.end();
 }

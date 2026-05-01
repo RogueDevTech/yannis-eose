@@ -762,6 +762,9 @@ export class OrdersService {
         return { crossFunnelAttempt: true };
       }
     }
+    const recentSamePhoneOrder = orderInput.customerPhoneHash
+      ? await this.findRecentPhoneOrder(orderInput.customerPhoneHash)
+      : null;
 
     const insertOrder = async (
       dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
@@ -790,6 +793,8 @@ export class OrdersService {
           status: 'UNPROCESSED',
           orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
           customFields: orderInput.customFields ?? null,
+          isDuplicate: recentSamePhoneOrder ? 'FLAGGED' : null,
+          duplicateOfId: recentSamePhoneOrder?.id ?? null,
         })
         .returning();
       const created = rows[0];
@@ -966,6 +971,7 @@ export class OrdersService {
       mediaBuyerId: input.mediaBuyerId ?? null,
       fallbackBranchId: sessionBranchId ?? null,
     });
+    const recentSamePhoneOrder = await this.findRecentPhoneOrder(customerPhoneHash);
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
@@ -992,6 +998,8 @@ export class OrdersService {
           totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
           status: 'CS_ASSIGNED',
           orderSource: 'offline',
+          isDuplicate: recentSamePhoneOrder ? 'FLAGGED' : null,
+          duplicateOfId: recentSamePhoneOrder?.id ?? null,
         })
         .returning();
 
@@ -4589,13 +4597,25 @@ export class OrdersService {
    * Detect potential duplicates for a new order.
    * Checks for orders with the same phone hash + product within 6 hours.
    */
-  async detectDuplicates(phoneHash: string, _productIds: string[]) {
+  async detectDuplicates(phoneHash: string, productIds: string[]) {
+    if (productIds.length === 0) return [];
     const potential = await this.db
       .select()
       .from(schema.orders)
       .where(
         and(
           eq(schema.orders.customerPhoneHash, phoneHash),
+          exists(
+            this.db
+              .select({ one: sql`1` })
+              .from(schema.orderItems)
+              .where(
+                and(
+                  eq(schema.orderItems.orderId, schema.orders.id),
+                  inArray(schema.orderItems.productId, productIds),
+                ),
+              ),
+          ),
           sql`${schema.orders.createdAt} >= NOW() - INTERVAL '6 hours'`,
           sql`${schema.orders.isDuplicate} IS NULL OR ${schema.orders.isDuplicate} = 'DISMISSED'`,
           sql`${schema.orders.status} != 'CANCELLED'`,
@@ -4608,6 +4628,22 @@ export class OrdersService {
       ...order,
       customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
     }));
+  }
+
+  private async findRecentPhoneOrder(phoneHash: string) {
+    const [recent] = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.customerPhoneHash, phoneHash),
+          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '6 hours'`,
+          sql`${schema.orders.status} != 'CANCELLED'`,
+        ),
+      )
+      .orderBy(desc(schema.orders.createdAt))
+      .limit(1);
+    return recent ?? null;
   }
 
   /**

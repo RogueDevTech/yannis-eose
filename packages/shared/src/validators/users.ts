@@ -7,6 +7,7 @@ import { z } from 'zod';
 export const userRoleSchema = z.enum([
   'SUPER_ADMIN',
   'ADMIN',
+  'BRANCH_ADMIN',
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
   'HEAD_OF_CS',
@@ -80,6 +81,20 @@ export const createStaffSchema = z.object({
   role: userRoleSchema,
   status: z.enum(['PENDING', 'ACTIVE']).default('PENDING'),
 
+  /**
+   * Optional explicit permission template selection. When omitted, the server assigns the SYSTEM
+   * template mapped to `role` (if present).
+   */
+  roleTemplateId: z.string().uuid().optional(),
+  /**
+   * Fine-grained grants/revokes applied after template grants.
+   * `true` = grant, `false` = revoke (even if the template grants it).
+   */
+  permissionOverrides: z.record(z.boolean()).optional(),
+  scopeGlobal: z.boolean().optional(),
+  scopeOrgWideHead: z.boolean().optional(),
+  scopeTeamSupervisor: z.boolean().optional(),
+
   // Role-specific settings
   capacity: z.number().int().min(1).max(100).optional(),
   logisticsLocationId: z.string().uuid().optional(),
@@ -92,6 +107,7 @@ export const createStaffSchema = z.object({
   compensation: userCompensationSchema.optional(),
 
   // Branch assignment
+  branchIds: z.array(z.string().uuid()).min(1, 'Select at least one branch').optional(),
   primaryBranchId: z.string().uuid().optional(),
 
   /**
@@ -110,12 +126,26 @@ export const createStaffSchema = z.object({
     'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)',
   ),
 }).superRefine((data, ctx) => {
-  // Every non-SuperAdmin user must have a primary branch at creation time.
+  // Every non-SuperAdmin user must have at least one branch and a primary branch.
+  if (data.role !== 'SUPER_ADMIN' && (!data.branchIds || data.branchIds.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['branchIds'],
+      message: 'At least one branch is required for non-SuperAdmin users',
+    });
+  }
   if (data.role !== 'SUPER_ADMIN' && !data.primaryBranchId) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['primaryBranchId'],
       message: 'Primary branch is required for non-SuperAdmin users',
+    });
+  }
+  if (data.primaryBranchId && data.branchIds && !data.branchIds.includes(data.primaryBranchId)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['primaryBranchId'],
+      message: 'Primary branch must be one of the selected branches',
     });
   }
 });
@@ -131,6 +161,11 @@ export const updateStaffSchema = z.object({
   name: z.string().min(2).optional(),
   email: z.string().email().optional(),
   role: userRoleSchema.optional(),
+  roleTemplateId: z.string().uuid().nullable().optional(),
+  permissionOverrides: z.record(z.boolean()).optional(),
+  scopeGlobal: z.boolean().optional(),
+  scopeOrgWideHead: z.boolean().optional(),
+  scopeTeamSupervisor: z.boolean().optional(),
   capacity: z.number().int().min(1).max(100).optional(),
   logisticsLocationId: z.string().uuid().nullable().optional(),
   status: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
@@ -141,6 +176,8 @@ export const updateStaffSchema = z.object({
   visibleOrderStatuses: z.array(visibleOrderStatusSchema).nullable().optional(),
   restrictProductAccess: z.boolean().optional(),
   productIds: z.array(z.string().uuid()).optional(),
+  branchIds: z.array(z.string().uuid()).min(1).optional(),
+  primaryBranchId: z.string().uuid().optional(),
   /**
    * Toggle the Finance hat. Setting to `true` auto-clears the flag from whoever previously held it
    * (atomic swap inside the same transaction). Setting to `false` revokes without reassigning.

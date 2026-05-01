@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -51,7 +52,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const isCSAgent = user.role === 'CS_AGENT';
   const assignedCsId = isCSAgent ? user.id : csAgentIdParam;
-  const canCreateOffline = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(user.role);
+  // Phase 21 — capability gate now permission-driven so a custom role with
+  // `orders.createOffline` can show the offline-entry button without inheriting CS_AGENT.
+  const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+  const canCreateOffline =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    user.role === 'HEAD_OF_CS' ||
+    user.role === 'CS_AGENT' ||
+    userPerms.includes(canonicalPermissionCode('orders.createOffline'));
 
   const listInput = {
     page,

@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import type { TrpcContext } from './context';
 import type { UserRole } from '@yannis/shared';
+import { canonicalPermissionCode } from '@yannis/shared';
 import {
   hasFinanceAccess,
   stripFinanceFields,
@@ -115,7 +116,10 @@ function extractInputBranchId(input: unknown, depth = 0): string | null {
 const requireBranchScopeForGlobalAdminMutations = t.middleware(async ({ ctx, type, path, meta, input, getRawInput, next }) => {
   if (type !== 'mutation') return next();
   if (!ctx.user) return next();
-  const needsExplicitBranchOnScopedMutations = isOrgWideDepartmentHead(ctx.user);
+  const needsExplicitBranchOnScopedMutations = isOrgWideDepartmentHead({
+    role: ctx.user.role,
+    scopeOrgWideHead: ctx.user.scopeOrgWideHead,
+  });
   if (!needsExplicitBranchOnScopedMutations) return next();
   if (ctx.currentBranchId !== null) return next();
   const isBranchScopedMutation =
@@ -129,7 +133,7 @@ const requireBranchScopeForGlobalAdminMutations = t.middleware(async ({ ctx, typ
   if (
     typeof path === 'string' &&
     path === 'marketing.requestFunding' &&
-    ctx.user.role === 'HEAD_OF_MARKETING'
+    (ctx.user.role === 'HEAD_OF_MARKETING' || (ctx.user.permissions ?? []).includes('marketing.requestFunding.orgWide'))
   ) {
     return next();
   }
@@ -171,20 +175,21 @@ export function rolesProcedure(...roles: UserRole[]) {
 
 /**
  * Permission-restricted procedure factory.
- * SUPER_ADMIN and ADMIN bypass all checks. Others must have at least one of the required permissions.
+ * SUPER_ADMIN bypasses all checks. Everyone else must have at least one of the required permissions.
  * Usage: permissionProcedure('users.create') or permissionProcedure('orders.read', 'orders.reassign')
  */
 export function permissionProcedure(...permissionCodes: string[]) {
   return authedProcedure.use(async ({ ctx, next }) => {
-    if (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN') {
+    if (ctx.user.role === 'SUPER_ADMIN') {
       return next({ ctx });
     }
-    const perms = ctx.user.permissions ?? [];
-    const hasAny = permissionCodes.some((code) => perms.includes(code));
+    const required = permissionCodes.map((code) => canonicalPermissionCode(code));
+    const perms = new Set((ctx.user.permissions ?? []).map((code) => canonicalPermissionCode(code)));
+    const hasAny = required.some((code) => perms.has(code));
     if (!hasAny) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: `Missing required permission: ${permissionCodes.join(' or ')}`,
+        message: `Missing required permission: ${required.join(' or ')}`,
       });
     }
     return next({ ctx });

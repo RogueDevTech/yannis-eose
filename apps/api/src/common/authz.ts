@@ -6,17 +6,14 @@
 import { hasFinanceAccess } from './utils/strip-finance-fields';
 
 /**
- * Admin-level roles: bypass permission checks, see all branches, have full
- * operational authority. SUPER_ADMIN additionally may manage other Admins
- * and is a singleton (see isSuperAdminOnly). ADMIN is NOT a singleton.
+ * Legacy admin-class role labels (still stored on `users.role`).
+ * Authorization is permission-first — do NOT treat these as automatic bypass.
  */
 export const ADMIN_LEVEL_ROLES = new Set<string>(['SUPER_ADMIN', 'ADMIN']);
 
 /**
- * Returns true for SUPER_ADMIN or ADMIN — the two roles that bypass
- * permission checks and have cross-branch visibility.
- * Use this anywhere the old code wrote `role === 'SUPER_ADMIN'` to grant
- * elevated access or skip permission gates.
+ * Returns true for SUPER_ADMIN or ADMIN role strings — convenience for HR/promotion
+ * flows and other legacy “admin-class” labeling only.
  */
 export function isAdminLevel(user: { role: string }): boolean {
   return ADMIN_LEVEL_ROLES.has(user.role);
@@ -38,16 +35,31 @@ export const ORG_WIDE_DEPARTMENT_HEAD_ROLES = new Set<string>([
   'HEAD_OF_LOGISTICS',
 ]);
 
-export function isOrgWideDepartmentHead(user: { role: string }): boolean {
+export function isOrgWideDepartmentHead(user: {
+  role: string;
+  scopeOrgWideHead?: boolean;
+}): boolean {
+  if (user.scopeOrgWideHead === true) return true;
   return ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(user.role);
 }
 
 /**
  * Returns true if the user is allowed to see cross-branch data.
- * SUPER_ADMIN, ADMIN, and org-wide department heads (CS / Marketing / Logistics).
+ * Permission-first: grant via global scope permissions (plus SUPER_ADMIN).
  */
-export function canViewAllBranches(user: { role: string; permissions?: string[] }): boolean {
-  return ADMIN_LEVEL_ROLES.has(user.role) || isOrgWideDepartmentHead(user);
+export function canViewAllBranches(user: {
+  role: string;
+  permissions?: string[];
+}): boolean {
+  if (user.role === 'SUPER_ADMIN') return true;
+  const permissionSet = new Set(user.permissions ?? []);
+  return (
+    permissionSet.has('branches.view_all') ||
+    permissionSet.has('branches.scope.global') ||
+    permissionSet.has('cs.scope.global') ||
+    permissionSet.has('marketing.scope.global') ||
+    permissionSet.has('logistics.scope.global')
+  );
 }
 
 /** Session fields needed for global audit log / mirror-session audit access. */
@@ -63,7 +75,7 @@ export type GlobalAuditAccessUser = {
  * Admin + finance (primary or hat) see org-wide rows; others need `audit.read`.
  */
 export function canAccessGlobalAuditLog(user: GlobalAuditAccessUser): boolean {
-  if (isAdminLevel(user)) return true;
+  if (isSuperAdminOnly(user)) return true;
   if (hasFinanceAccess(user)) return true;
   if (user.permissions?.includes('audit.read')) return true;
   return false;
@@ -75,7 +87,7 @@ export function canAccessGlobalAuditLog(user: GlobalAuditAccessUser): boolean {
  */
 export function shouldScopeGlobalAuditToBranch(user: GlobalAuditAccessUser): boolean {
   if (!canAccessGlobalAuditLog(user)) return false;
-  if (isAdminLevel(user) || hasFinanceAccess(user)) return false;
+  if (isSuperAdminOnly(user) || hasFinanceAccess(user)) return false;
   return Boolean(user.currentBranchId);
 }
 
@@ -117,6 +129,7 @@ export function canMirror(
   actor: {
     id: string;
     role: string;
+    permissions?: string[];
     currentBranchId?: string | null;
     mirroredBy?: { id: string } | null;
   },
@@ -129,12 +142,23 @@ export function canMirror(
   // Cannot mirror admin-level users
   if (ADMIN_LEVEL_ROLES.has(target.role)) return false;
 
-  if (ADMIN_LEVEL_ROLES.has(actor.role)) return true;
+  if (actor.role === 'SUPER_ADMIN') return true;
+
+  const perms = actor.permissions ?? [];
+  if (perms.includes('mirror.any')) return true;
 
   if (isOrgWideDepartmentHead(actor)) {
-    if (actor.role === 'HEAD_OF_CS' && target.role === 'CS_AGENT') return true;
-    if (actor.role === 'HEAD_OF_MARKETING' && target.role === 'MEDIA_BUYER') return true;
-    if (actor.role === 'HEAD_OF_LOGISTICS' && HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role))
+    if ((actor.role === 'HEAD_OF_CS' || perms.includes('mirror.cs_team')) && target.role === 'CS_AGENT')
+      return true;
+    if (
+      (actor.role === 'HEAD_OF_MARKETING' || perms.includes('mirror.marketing_team')) &&
+      target.role === 'MEDIA_BUYER'
+    )
+      return true;
+    if (
+      (actor.role === 'HEAD_OF_LOGISTICS' || perms.includes('mirror.logistics_chain')) &&
+      HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role)
+    )
       return true;
     return false;
   }

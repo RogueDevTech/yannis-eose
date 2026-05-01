@@ -23,6 +23,10 @@ function lowestOfferPrice(offers: ProductOffer[]): number {
   return Math.min(...offers.map((o) => o.price));
 }
 
+function normalizeProductName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
@@ -33,6 +37,35 @@ export class ProductsService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  private async assertProductNameAvailable(
+    tx: Pick<PostgresJsDatabase<typeof schema>, 'select'>,
+    name: string,
+    excludeProductId?: string,
+  ) {
+    const normalized = normalizeProductName(name);
+    const whereParts = [
+      sql`lower(trim(${schema.products.name})) = ${normalized}`,
+      inArray(schema.products.status, ['ACTIVE', 'INACTIVE']),
+    ];
+
+    if (excludeProductId) {
+      whereParts.push(sql`${schema.products.id} <> ${excludeProductId}`);
+    }
+
+    const [existing] = await tx
+      .select({ id: schema.products.id, name: schema.products.name, status: schema.products.status })
+      .from(schema.products)
+      .where(and(...whereParts))
+      .limit(1);
+
+    if (existing) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `A non-archived product named "${existing.name}" already exists.`,
+      });
+    }
+  }
+
   /**
    * Catalog visibility for MEDIA_BUYER only: assigned products when restrict_product_access
    * is set, or when they have any user_product_assignments row. Other roles unchanged.
@@ -42,11 +75,7 @@ export class ProductsService {
     viewerId: string,
     role: string,
   ): Promise<{ allowedProductIds: string[] | null }> {
-    if ((role === 'SUPER_ADMIN' || role === 'ADMIN')) {
-      return { allowedProductIds: null };
-    }
-
-    if (role !== 'MEDIA_BUYER') {
+    if (role === 'SUPER_ADMIN') {
       return { allowedProductIds: null };
     }
 
@@ -90,6 +119,7 @@ export class ProductsService {
       return await this.db
         .transaction(async (tx) => {
           await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
+          await this.assertProductNameAvailable(tx, input.name);
 
           const rows = await tx
             .insert(schema.products)
@@ -308,6 +338,10 @@ export class ProductsService {
           message:
             'Only Super Admin may archive from the product edit form. On the products list, use Request archive to submit an approval request.',
         });
+      }
+
+      if (input.name !== undefined) {
+        await this.assertProductNameAvailable(tx, input.name, input.productId);
       }
 
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };

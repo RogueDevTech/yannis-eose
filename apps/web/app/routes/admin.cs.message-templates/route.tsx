@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData, useFetcher } from '@remix-run/react';
 import { useEffect, useRef, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -43,7 +44,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 
   const templates: MessageTemplate[] = res.ok ? (res.data?.result?.data ?? []) : [];
-  return { templates, currentUserId: user.id, currentUserRole: user.role };
+  // Phase 21 — `messaging.templates.update` lets a custom role edit any template
+  // without inheriting HEAD_OF_CS or admin-class.
+  const userPerms = ((user as { permissions?: string[] }).permissions ?? []).map((p) =>
+    canonicalPermissionCode(p),
+  );
+  const canEditAnyTemplate =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    user.role === 'HEAD_OF_CS' ||
+    userPerms.includes(canonicalPermissionCode('messaging.templates.update'));
+  return {
+    templates,
+    currentUserId: user.id,
+    currentUserRole: user.role,
+    canEditAnyTemplate,
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -275,13 +291,10 @@ function BodyEditor({
 }
 
 export default function MessageTemplatesRoute() {
-  const { templates, currentUserId, currentUserRole } = useLoaderData<typeof loader>();
+  const { templates, currentUserId, canEditAnyTemplate } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
-  // Heads / Admins can edit any template. CS agents can only edit ones they authored.
-  const canEditAnyTemplate =
-    currentUserRole === 'SUPER_ADMIN' ||
-    currentUserRole === 'ADMIN' ||
-    currentUserRole === 'HEAD_OF_CS';
+  // Heads / Admins / `messaging.templates.update` holders can edit any template.
+  // CS agents can only edit ones they authored.
   const canEditTemplate = (tpl: MessageTemplate) =>
     canEditAnyTemplate || tpl.createdBy === currentUserId;
   useFetcherToast(fetcher.data, { successMessage: 'Template saved' });

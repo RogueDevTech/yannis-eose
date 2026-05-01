@@ -4,6 +4,7 @@ import postgres from 'postgres';
 import Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
 import { RedisHealthService } from './redis-health.service';
+import { MigrationRunnerService } from './migration-runner.service';
 import { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
 
 export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
@@ -74,6 +75,10 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
       },
     },
     RedisHealthService,
+    // Auto-runs pending SQL migrations on application bootstrap. Failure to
+    // migrate aborts startup, which fails the docker health check, which
+    // fails the deploy. See migration-runner.service.ts for the contract.
+    MigrationRunnerService,
   ],
   exports: [DRIZZLE, PG_CLIENT, REDIS, RedisHealthService],
 })

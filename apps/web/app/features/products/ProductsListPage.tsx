@@ -91,7 +91,7 @@ export function ProductsListPage({
   canInstantArchiveProduct = false,
 }: ProductsListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ACTIVE');
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Product | null>(null);
   const [archiveReason, setArchiveReason] = useState('');

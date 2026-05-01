@@ -96,18 +96,19 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
                           {offer.qty} unit{offer.qty !== 1 ? 's' : ''}
                         </p>
                       </div>
-                      <span className="text-sm font-semibold text-app-fg tabular-nums">
-                        &#8358;{Number(offer.price).toLocaleString()}
-                      </span>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-sm font-semibold text-app-fg tabular-nums">
+                          &#8358;{Number(offer.price).toLocaleString()}
+                        </span>
+                        {offer.imageUrls && offer.imageUrls.length > 0 && (
+                          <div className="w-16 h-16 max-w-[200px] rounded border border-app-border overflow-hidden shrink-0">
+                            <img src={offer.imageUrls[0]} alt="" className="w-full h-full object-cover" />
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    {offer.imageUrls && offer.imageUrls.length > 0 && (
-                      <ul className="flex flex-wrap gap-1.5">
-                        {offer.imageUrls.map((url) => (
-                          <li key={url} className="w-14 h-14 rounded border border-app-border overflow-hidden shrink-0">
-                            <img src={url} alt="" className="w-full h-full object-cover" />
-                          </li>
-                        ))}
-                      </ul>
+                    {offer.imageUrls && offer.imageUrls.length > 1 && (
+                      <p className="text-xs text-app-fg-muted">+{offer.imageUrls.length - 1} more image{offer.imageUrls.length - 1 === 1 ? '' : 's'}</p>
                     )}
                   </div>
                 ))}

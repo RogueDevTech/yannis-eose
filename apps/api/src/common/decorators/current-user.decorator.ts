@@ -6,6 +6,15 @@ export interface SessionUser {
   email: string;
   name: string;
   role: string;
+  /** Assigned permission template — drives default permission bundles. */
+  roleTemplateId?: string | null;
+  /**
+   * Explicit scope flags for permission-first RBAC (see migration 0093).
+   * These are mirrored on the frontend via `/auth/me`.
+   */
+  scopeGlobal?: boolean;
+  scopeOrgWideHead?: boolean;
+  scopeTeamSupervisor?: boolean;
   logisticsLocationId: string | null;
   permissions?: string[];
   /** Active branch for multi-branch context. NULL = cross-branch (SuperAdmin). */

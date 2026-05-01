@@ -21,6 +21,8 @@ interface FileUploadProps {
   onUploadStateChange?: (state: FileUploadUploadState) => void;
   /** Use a compact picker variant for tight form layouts. */
   size?: 'md' | 'sm';
+  /** Minimal dropzone for dense grids (icon + short copy; no tall drag hint stack). */
+  variant?: 'default' | 'minimal';
 }
 
 type UploadState = FileUploadUploadState;
@@ -35,6 +37,7 @@ export function FileUpload({
   required,
   onUploadStateChange,
   size = 'md',
+  variant = 'default',
 }: FileUploadProps) {
   const [state, setState] = useState<UploadState>('idle');
   const [progress, setProgress] = useState(0);
@@ -44,10 +47,23 @@ export function FileUpload({
   const [error, setError] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const stateRef = useRef<UploadState>('idle');
 
   useEffect(() => {
+    stateRef.current = state;
     onUploadStateChange?.(state);
   }, [state, onUploadStateChange]);
+
+  useEffect(
+    () => () => {
+      // If the component unmounts mid-upload (e.g. picker hidden after max images),
+      // ensure parents relying on upload state don't stay stuck in "uploading".
+      if (stateRef.current === 'uploading') {
+        onUploadStateChange?.('idle');
+      }
+    },
+    [onUploadStateChange],
+  );
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -131,29 +147,58 @@ export function FileUpload({
           onClick={() => inputRef.current?.click()}
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
-          className={`border-2 border-dashed border-app-border rounded-lg text-center cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors ${
-            size === 'sm' ? 'p-2.5' : 'p-4'
-          }`}
+          className={
+            variant === 'minimal'
+              ? 'flex items-center gap-2 min-h-[2.75rem] px-2 py-1.5 border-2 border-dashed border-app-border rounded-lg cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors text-left'
+              : `border-2 border-dashed border-app-border rounded-lg text-center cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors ${
+                  size === 'sm' ? 'p-2.5' : 'p-4'
+                }`
+          }
         >
-          <svg
-            className={`${size === 'sm' ? 'w-5 h-5 mb-1.5' : 'w-8 h-8 mb-2'} mx-auto text-app-fg-muted`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"
-            />
-          </svg>
-          <p className={`${size === 'sm' ? 'text-xs' : 'text-sm'} text-app-fg-muted`}>
-            Click or drag file to upload
-          </p>
-          <p className={`${size === 'sm' ? 'text-[10px] mt-0.5' : 'text-xs mt-1'} text-app-fg-muted`}>
-            Max {maxSizeMB}MB
-          </p>
+          {variant === 'minimal' ? (
+            <>
+              <svg
+                className="w-5 h-5 shrink-0 text-brand-500 dark:text-brand-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"
+                />
+              </svg>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-app-fg leading-tight">Choose or drop</p>
+                <p className="text-[10px] text-app-fg-muted leading-tight mt-0.5">Max {maxSizeMB}MB</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <svg
+                className={`${size === 'sm' ? 'w-5 h-5 mb-1.5' : 'w-8 h-8 mb-2'} mx-auto text-app-fg-muted`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"
+                />
+              </svg>
+              <p className={`${size === 'sm' ? 'text-xs' : 'text-sm'} text-app-fg-muted`}>
+                Click or drag file to upload
+              </p>
+              <p className={`${size === 'sm' ? 'text-[10px] mt-0.5' : 'text-xs mt-1'} text-app-fg-muted`}>
+                Max {maxSizeMB}MB
+              </p>
+            </>
+          )}
           <input
             ref={inputRef}
             type="file"
@@ -165,14 +210,30 @@ export function FileUpload({
       )}
 
       {state === 'uploading' && (
-        <div className="border border-app-border rounded-lg p-4 space-y-2">
+        <div
+          className={
+            variant === 'minimal'
+              ? 'border border-app-border rounded-lg p-2 space-y-1.5'
+              : 'border border-app-border rounded-lg p-4 space-y-2'
+          }
+        >
           <div className="flex items-center gap-2">
-            <svg className="w-4 h-4 text-brand-500 animate-spin" viewBox="0 0 24 24" fill="none">
+            <svg
+              className={`text-brand-500 animate-spin ${variant === 'minimal' ? 'w-3.5 h-3.5' : 'w-4 h-4'}`}
+              viewBox="0 0 24 24"
+              fill="none"
+            >
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            <span className="text-sm text-app-fg-muted truncate">{fileName}</span>
-            <span className="text-xs text-app-fg-muted ml-auto">{fileSize}</span>
+            <span
+              className={`text-app-fg-muted truncate ${variant === 'minimal' ? 'text-xs' : 'text-sm'}`}
+            >
+              {fileName}
+            </span>
+            <span className={`text-app-fg-muted ml-auto ${variant === 'minimal' ? 'text-[10px]' : 'text-xs'}`}>
+              {fileSize}
+            </span>
           </div>
           <div className="w-full bg-app-hover rounded-full h-1.5">
             <div
@@ -184,14 +245,26 @@ export function FileUpload({
       )}
 
       {state === 'done' && (
-        <div className="border border-success-200 dark:border-success-700/50 bg-success-50/50 dark:bg-success-900/10 rounded-lg p-3">
-          <div className="flex items-start gap-3">
+        <div
+          className={
+            variant === 'minimal'
+              ? 'border border-success-200 dark:border-success-700/50 bg-success-50/50 dark:bg-success-900/10 rounded-lg p-2'
+              : 'border border-success-200 dark:border-success-700/50 bg-success-50/50 dark:bg-success-900/10 rounded-lg p-3'
+          }
+        >
+          <div className={`flex items-start gap-3 ${variant === 'minimal' ? 'gap-2' : ''}`}>
             {previewUrl && (
-              <img src={previewUrl} alt="Preview" className="w-12 h-12 rounded object-cover flex-shrink-0" />
+              <img
+                src={previewUrl}
+                alt="Preview"
+                className={`rounded object-cover flex-shrink-0 ${variant === 'minimal' ? 'w-10 h-10' : 'w-12 h-12'}`}
+              />
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-app-fg truncate">{fileName}</p>
-              <p className="text-xs text-app-fg-muted">{fileSize}</p>
+              <p className={`font-medium text-app-fg truncate ${variant === 'minimal' ? 'text-xs' : 'text-sm'}`}>
+                {fileName}
+              </p>
+              <p className={`text-app-fg-muted ${variant === 'minimal' ? 'text-[10px]' : 'text-xs'}`}>{fileSize}</p>
             </div>
             <button
               type="button"
@@ -209,13 +282,25 @@ export function FileUpload({
 
       {state === 'error' && (
         <div className="space-y-2">
-          <div className="border border-danger-200 dark:border-danger-700/50 bg-danger-50/50 dark:bg-danger-900/10 rounded-lg p-3">
-            <p className="text-sm text-danger-700 dark:text-danger-400">{error}</p>
+          <div
+            className={
+              variant === 'minimal'
+                ? 'border border-danger-200 dark:border-danger-700/50 bg-danger-50/50 dark:bg-danger-900/10 rounded-lg p-2'
+                : 'border border-danger-200 dark:border-danger-700/50 bg-danger-50/50 dark:bg-danger-900/10 rounded-lg p-3'
+            }
+          >
+            <p
+              className={`text-danger-700 dark:text-danger-400 ${variant === 'minimal' ? 'text-xs' : 'text-sm'}`}
+            >
+              {error}
+            </p>
           </div>
           <button
             type="button"
             onClick={handleRemove}
-            className="text-sm text-brand-600 dark:text-brand-400 hover:underline"
+            className={`text-brand-600 dark:text-brand-400 hover:underline ${
+              variant === 'minimal' ? 'text-xs' : 'text-sm'
+            }`}
           >
             Try again
           </button>

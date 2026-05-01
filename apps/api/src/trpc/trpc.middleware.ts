@@ -7,6 +7,10 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { PermissionsService } from '../permissions/permissions.service';
 import { canViewAllBranches } from '../common/authz';
 import { SessionStoreService } from '../auth/session-store.service';
+import { eq } from 'drizzle-orm';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { db as schema } from '@yannis/shared';
+import { DRIZZLE } from '../database/database.module';
 
 @Injectable()
 export class TrpcMiddleware implements NestMiddleware {
@@ -15,6 +19,7 @@ export class TrpcMiddleware implements NestMiddleware {
   constructor(
     @Inject(SessionStoreService) private readonly sessionStore: SessionStoreService,
     private readonly permissionsService: PermissionsService,
+    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
   async use(req: Request, res: Response, _next: NextFunction) {
@@ -97,17 +102,36 @@ export class TrpcMiddleware implements NestMiddleware {
 
     const user = await this.sessionStore.getSession(token);
     if (!user) return null;
-    if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
-      const perms = await this.permissionsService.getEffectivePermissions(user.id, user.role);
-      user.permissions = Array.from(perms);
-    } else {
-      user.permissions = [];
-    }
-    (req as Request & { user: SessionUser }).user = user;
+
+    const [dbUser] = await this.db
+      .select({
+        roleTemplateId: schema.users.roleTemplateId,
+        scopeGlobal: schema.users.scopeGlobal,
+        scopeOrgWideHead: schema.users.scopeOrgWideHead,
+        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
+        role: schema.users.role,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, user.id))
+      .limit(1);
+
+    const merged: SessionUser = {
+      ...user,
+      roleTemplateId: dbUser?.roleTemplateId ?? user.roleTemplateId ?? null,
+      scopeGlobal: dbUser?.scopeGlobal ?? user.scopeGlobal ?? false,
+      scopeOrgWideHead: dbUser?.scopeOrgWideHead ?? user.scopeOrgWideHead ?? false,
+      scopeTeamSupervisor: dbUser?.scopeTeamSupervisor ?? user.scopeTeamSupervisor ?? false,
+      role: (dbUser?.role as string | undefined) ?? user.role,
+    };
+
+    const perms = await this.permissionsService.getEffectivePermissions(merged.id);
+    merged.permissions = Array.from(perms);
+
+    (req as Request & { user: SessionUser }).user = merged;
 
     // Guard: non-global users must always have a branch in their session.
-    const branchId = user.currentBranchId ?? null;
-    if (!canViewAllBranches(user) && !branchId) {
+    const branchId = merged.currentBranchId ?? null;
+    if (!canViewAllBranches(merged) && !branchId) {
       res.status(401).json({
         error: { message: 'Session has no branch context. Please log in again.' },
       });
@@ -122,8 +146,8 @@ export class TrpcMiddleware implements NestMiddleware {
     await this.sessionStore.touchSession(token, ttl);
 
     return {
-      userId: user.id,
-      role: user.role,
+      userId: merged.id,
+      role: merged.role,
       branchId: branchId ?? '',
     };
   }

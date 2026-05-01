@@ -69,6 +69,12 @@ import { setCacheService } from './routers/dashboard.router';
 import { ReportsModule } from '../reports/reports.module';
 import { ReportsService } from '../reports/reports.service';
 import { setReportsService } from './routers/reports.router';
+import { setRoleTemplatesService } from './routers/role-templates.router';
+import { RoleTemplatesService } from '../permissions/role-templates.service';
+import { setPermissionsDb } from './routers/permissions.router';
+import { OnboardingModule } from '../onboarding/onboarding.module';
+import { OnboardingService } from '../onboarding/onboarding.service';
+import { setOnboardingService } from './routers/onboarding.router';
 
 @Module({
   imports: [
@@ -81,6 +87,7 @@ import { setReportsService } from './routers/reports.router';
     BranchesModule,
     CacheModule,
     ReportsModule,
+    OnboardingModule,
   ],
   providers: [TrpcMiddleware],
 })
@@ -107,6 +114,8 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly cacheService: CacheService,
     private readonly reportsService: ReportsService,
     private readonly branchTeamsService: BranchTeamsService,
+    private readonly roleTemplatesService: RoleTemplatesService,
+    private readonly onboardingService: OnboardingService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -146,6 +155,9 @@ export class TrpcModule implements NestModule, OnModuleInit {
     });
     setCacheService(this.cacheService);
     setReportsService(this.reportsService);
+    setRoleTemplatesService(this.roleTemplatesService);
+    setPermissionsDb(this.db as Parameters<typeof setPermissionsDb>[0]);
+    setOnboardingService(this.onboardingService);
   }
 
   configure(consumer: MiddlewareConsumer) {
