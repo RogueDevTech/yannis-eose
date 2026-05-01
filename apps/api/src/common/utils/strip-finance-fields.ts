@@ -41,6 +41,10 @@ const SENSITIVE_FIELDS = new Set([
  * REST endpoints may not have permissions populated — fall back to role/flag check.
  */
 export function hasFinanceAccess(user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean }): boolean {
+  // SUPER_ADMIN's `permissions` array is empty by design — every gate
+  // short-circuits for them at the middleware layer. REST contexts can land
+  // here without the permissions populated, so keep the explicit role bypass.
+  if (user.role === 'SUPER_ADMIN') return true;
   if (user.permissions?.includes('finance.costView')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
   if (user.isFinanceOfficer === true) return true;
