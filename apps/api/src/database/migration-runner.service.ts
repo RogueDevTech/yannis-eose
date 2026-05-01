@@ -1,7 +1,12 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import type { OnApplicationBootstrap } from '@nestjs/common';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, runSqlMigrations } from '@yannis/shared';
+import { db as schema } from '@yannis/shared';
+// Deep relative import on purpose — the migrations runner pulls in `node:fs` /
+// `node:path` and must NOT be re-exported from `@yannis/shared`'s public barrel
+// (Vite chokes on the Node built-ins for the web bundle). Webpack already
+// includes `packages/` in ts-loader so this resolves cleanly at build time.
+import { runSqlMigrations } from '../../../../packages/shared/src/migrations/run-sql-migrations';
 import { DRIZZLE } from './database.tokens';
 
 /**
