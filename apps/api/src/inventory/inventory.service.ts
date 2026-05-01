@@ -19,6 +19,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
+import { isMissingRelationError } from '../common/db/missing-relation';
 
 /** Virtual buffer: show 10% less stock to prevent overselling during bursts */
 const VIRTUAL_BUFFER_RATIO = 0.10;
@@ -1012,20 +1013,32 @@ export class InventoryService {
       senderByTransferId.set(row.transferId, row.senderName);
     }
 
-    const outcomeRows =
-      transferIds.length > 0
-        ? await this.db
-            .select({
-              transferId: schema.stockTransferOutcomes.transferId,
-              outcomeStatus: schema.stockTransferOutcomes.status,
-              outcomeQuantity: schema.stockTransferOutcomes.quantity,
-              outcomeReason: schema.stockTransferOutcomes.reason,
-              outcomeRecordedAt: schema.stockTransferOutcomes.recordedAt,
-            })
-            .from(schema.stockTransferOutcomes)
-            .where(inArray(schema.stockTransferOutcomes.transferId, transferIds))
-            .orderBy(desc(schema.stockTransferOutcomes.recordedAt))
-        : [];
+    let outcomeRows: Array<{
+      transferId: string;
+      outcomeStatus: 'APPROVED' | 'DISPUTED';
+      outcomeQuantity: number;
+      outcomeReason: string | null;
+      outcomeRecordedAt: Date;
+    }> = [];
+    if (transferIds.length > 0) {
+      try {
+        outcomeRows = await this.db
+          .select({
+            transferId: schema.stockTransferOutcomes.transferId,
+            outcomeStatus: schema.stockTransferOutcomes.status,
+            outcomeQuantity: schema.stockTransferOutcomes.quantity,
+            outcomeReason: schema.stockTransferOutcomes.reason,
+            outcomeRecordedAt: schema.stockTransferOutcomes.recordedAt,
+          })
+          .from(schema.stockTransferOutcomes)
+          .where(inArray(schema.stockTransferOutcomes.transferId, transferIds))
+          .orderBy(desc(schema.stockTransferOutcomes.recordedAt));
+      } catch (err) {
+        if (!isMissingRelationError(err, 'stock_transfer_outcomes')) throw err;
+        // Fallback to transfer-level status fields if the outcomes split table is absent.
+        outcomeRows = [];
+      }
+    }
 
     const outcomesByTransfer = new Map<string, typeof outcomeRows>();
     for (const row of outcomeRows) {

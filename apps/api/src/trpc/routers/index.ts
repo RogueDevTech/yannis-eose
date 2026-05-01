@@ -19,6 +19,9 @@ import { permissionRequestsRouter } from './permission-requests.router';
 import { branchesRouter } from './branches.router';
 import { messagingRouter } from './messaging.router';
 import { reportsRouter } from './reports.router';
+import { roleTemplatesRouter } from './role-templates.router';
+import { permissionsRouter } from './permissions.router';
+import { onboardingRouter } from './onboarding.router';
 
 /**
  * Root tRPC router — merges all module routers.
@@ -45,6 +48,9 @@ export const appRouter = router({
   branches: branchesRouter,
   messaging: messagingRouter,
   reports: reportsRouter,
+  roleTemplates: roleTemplatesRouter,
+  permissions: permissionsRouter,
+  onboarding: onboardingRouter,
 });
 
 export type AppRouter = typeof appRouter;

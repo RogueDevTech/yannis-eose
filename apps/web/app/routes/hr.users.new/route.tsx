@@ -11,6 +11,8 @@ import type {
   UserCreateLoaderData,
   ActiveHeadUser,
   FinanceHatHolder,
+  RoleTemplateOption,
+  PermissionCatalogItem,
 } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -27,13 +29,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
-  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, financeHolderRes] = await Promise.all([
+  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, financeHolderRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
+    await Promise.all([
     apiRequest<unknown>(`/trpc/products.list?input=${productsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/users.getCurrentFinanceOfficer', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/permissions.listTemplateBaselines', { method: 'GET', cookie }),
   ]);
 
   const extractData = (res: { ok: boolean; data: unknown }, key: string) => {
@@ -43,6 +49,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const data = result?.data as Record<string, unknown> | undefined;
     return (data?.[key] as unknown[]) ?? [];
   };
+
+  /** Same SYSTEM templates as `roleTemplates.list`, returned when staff has baselines but list failed (defensive). */
+  const roleTemplatesFromBaselines = (): RoleTemplateOption[] => {
+    if (!templateBaselinesRes.ok) return [];
+    const rows =
+      (
+        templateBaselinesRes.data as {
+          result?: { data?: { templates?: Array<{ id: string; key: string; name: string; kind: string; mappedRole: string | null }> } };
+        }
+      )?.result?.data?.templates ?? [];
+    return rows.map((t) => ({
+      id: t.id,
+      key: t.key,
+      name: t.name,
+      kind: t.kind,
+      mappedRole: t.mappedRole ?? null,
+    }));
+  };
+
+  let roleTemplates = templatesRes.ok
+    ? (((templatesRes.data as { result?: { data?: { templates?: RoleTemplateOption[] } } })?.result?.data?.templates) ??
+        [])
+    : [];
+  if (roleTemplates.length === 0) {
+    roleTemplates = roleTemplatesFromBaselines();
+  }
+  const permissionCatalog = permissionCatalogRes.ok
+    ? (((permissionCatalogRes.data as { result?: { data?: { permissions?: PermissionCatalogItem[] } } })?.result?.data?.permissions) ??
+        [])
+    : [];
+  const templatePermissionsById = templateBaselinesRes.ok
+    ? (((templateBaselinesRes.data as { result?: { data?: { byTemplateId?: Record<string, string[]> } } })?.result?.data?.byTemplateId) ??
+        {})
+    : {};
 
   return {
     products: extractData(productsRes, 'products') as UserCreateProduct[],
@@ -57,6 +97,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     currentFinanceOfficer: (financeHolderRes.ok
       ? (financeHolderRes.data as { result?: { data?: FinanceHatHolder | null } })?.result?.data ?? null
       : null) as FinanceHatHolder | null,
+    roleTemplates,
+    permissionCatalog,
+    templatePermissionsById,
   };
 }
 
@@ -71,6 +114,8 @@ export async function action({ request }: ActionFunctionArgs) {
   const role = formData.get('role')?.toString() ?? '';
   const status = formData.get('status')?.toString() ?? 'ACTIVE';
   const primaryBranchId = formData.get('primaryBranchId')?.toString() || undefined;
+  const branchIdsStr = formData.get('branchIds')?.toString();
+  const roleTemplateId = formData.get('roleTemplateId')?.toString() || undefined;
 
   if (!name || !email || !role) {
     return json({ error: 'Name, email, and role are required' }, { status: 400 });
@@ -97,6 +142,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const phone = formData.get('phone')?.toString() || undefined;
 
   const isFinanceOfficer = formData.get('isFinanceOfficer') === 'true';
+  const permissionOverridesRaw = formData.get('permissionOverrides')?.toString();
 
   // Build request body (password is auto-generated on the backend)
   const body: Record<string, unknown> = {
@@ -104,7 +150,9 @@ export async function action({ request }: ActionFunctionArgs) {
     phone,
     restrictProductAccess,
     primaryBranchId,
+    branchIds: [],
     isFinanceOfficer,
+    roleTemplateId,
   };
 
   if (capacityStr) body.capacity = parseInt(capacityStr, 10) || 10;
@@ -115,6 +163,21 @@ export async function action({ request }: ActionFunctionArgs) {
     // ignore invalid JSON
   }
   if (commissionPlanId) body.commissionPlanId = commissionPlanId;
+  try {
+    if (branchIdsStr) body.branchIds = JSON.parse(branchIdsStr);
+  } catch {
+    // ignore invalid JSON
+  }
+  if (permissionOverridesRaw) {
+    try {
+      const parsed = JSON.parse(permissionOverridesRaw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        body.permissionOverrides = parsed;
+      }
+    } catch {
+      // ignore malformed overrides payload
+    }
+  }
 
   // Build inline compensation if any values were provided (and no existing plan selected)
   const hasCompensation = fixedSalaryStr || bonusStr || commissionValueStr || upsellCommissionValueStr;

@@ -22,7 +22,7 @@ export class PaymentsController {
     @Query('trxref') trxref: string | undefined,
     @Res() res: Response,
   ) {
-    const thankYouBase = process.env.PAYSTACK_CALLBACK_BASE_URL || process.env.APP_URL || 'http://localhost:4000';
+    const thankYouBase = process.env.PAYSTACK_CALLBACK_BASE_URL || process.env.APP_URL || 'http://localhost:4003';
     const thankYouUrl = `${thankYouBase.replace(/\/$/, '')}/payment/thank-you`;
     const errorUrl = `${thankYouBase.replace(/\/$/, '')}/payment/error`;
 

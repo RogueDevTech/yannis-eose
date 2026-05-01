@@ -184,7 +184,7 @@ function AgentWorkloadDetailModal({
     setQueueOrders(null);
     setQueueLoadError(null);
 
-    const apiUrl = typeof window !== 'undefined' ? window.__ENV?.API_URL || 'http://localhost:4000' : '';
+    const apiUrl = typeof window !== 'undefined' ? window.__ENV?.API_URL || 'http://localhost:4444' : '';
     const input = encodeURIComponent(JSON.stringify({ agentId: agent.agentId }));
 
     void (async () => {
@@ -941,7 +941,7 @@ export function CSDashboardPage({
       campaignName: null,
       mediaBuyerName: null,
     });
-    const apiUrl = typeof window !== 'undefined' ? window.__ENV?.API_URL || 'http://localhost:4000' : '';
+    const apiUrl = typeof window !== 'undefined' ? window.__ENV?.API_URL || 'http://localhost:4444' : '';
     const input = encodeURIComponent(JSON.stringify({ orderId }));
     void (async () => {
       try {

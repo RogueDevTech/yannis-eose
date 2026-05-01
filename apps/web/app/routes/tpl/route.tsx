@@ -17,7 +17,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let user;
   try {
     user = await getCurrentUser(request);
-  } catch {
+  } catch (e) {
+    if (e instanceof Response) throw e;
     user = null;
   }
 

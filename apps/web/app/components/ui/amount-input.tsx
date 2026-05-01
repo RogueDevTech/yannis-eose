@@ -18,6 +18,7 @@ interface AmountInputProps {
   prefix?: string;
   /** Allow negative values (e.g. HR adjustments) */
   allowNegative?: boolean;
+  disabled?: boolean;
 }
 
 export function AmountInput({
@@ -31,6 +32,7 @@ export function AmountInput({
   className = 'input',
   prefix,
   allowNegative = false,
+  disabled = false,
 }: AmountInputProps) {
   const isControlled = controlledValue !== undefined;
   const [internalRaw, setInternalRaw] = useState(() => {
@@ -66,6 +68,7 @@ export function AmountInput({
         id={id}
         placeholder={placeholder}
         required={required}
+        disabled={disabled}
         value={displayValue}
         onChange={handleChange}
         className={prefix ? `${className} pl-12` : className}

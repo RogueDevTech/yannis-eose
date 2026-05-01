@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
@@ -15,10 +16,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // TPL_MANAGER specifically (their legacy view stays in /tpl/* if/when 3PL
   // onboards). HR / CS / Marketing don't need access; using `finance.read` as
   // the catch-all permission for granted users.
-  await requirePermissionOrRoles(request, {
+  const user = await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
     permission: 'finance.read',
   });
+  // Phase 21 — capability flags for the page actions. Same gates as the API
+  // (`logistics.service.ts` for `createDeliveryRemittance` / `markDeliveryRemittanceReceived`).
+  const userPerms = ((user as { permissions?: string[]; isFinanceOfficer?: boolean }).permissions ?? []).map(
+    (p) => canonicalPermissionCode(p),
+  );
+  const isFinanceLike =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    user.role === 'FINANCE_OFFICER' ||
+    (user as { isFinanceOfficer?: boolean }).isFinanceOfficer === true;
+  const canCreateRemittance =
+    isFinanceLike || userPerms.includes(canonicalPermissionCode('finance.cashRemittance.create'));
+  const canMarkReceived =
+    isFinanceLike || userPerms.includes(canonicalPermissionCode('finance.cashRemittance.markReceived'));
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
 
@@ -158,6 +173,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     eligibleOrders,
     eligibleTotal,
     summary,
+    canCreateRemittance,
+    canMarkReceived,
   };
 }
 
@@ -221,6 +238,8 @@ export default function AdminFinanceDeliveryRemittancesRoute() {
       eligibleOrders={data.eligibleOrders}
       eligibleTotal={data.eligibleTotal}
       summary={data.summary}
+      canCreateRemittance={data.canCreateRemittance}
+      canMarkReceived={data.canMarkReceived}
     />
   );
 }

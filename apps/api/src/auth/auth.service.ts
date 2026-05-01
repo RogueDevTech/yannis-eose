@@ -18,11 +18,43 @@ import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { SessionStoreService } from './session-store.service';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { PermissionsService } from '../permissions/permissions.service';
+import { withActor } from '../common/db/with-actor';
 
 const RATE_LIMIT_PREFIX = 'login_rate:';
 const RESET_TOKEN_PREFIX = 'pwd_reset:';
 const SALT_ROUNDS = 12;
 const RESET_TOKEN_TTL = 1800; // 30 minutes
+
+/**
+ * CEO directive: every session expires at 23:59 local time on the calendar day the
+ * user signed in. Africa/Lagos is UTC+1 with no DST, so we compute end-of-day in
+ * Lagos and convert back to UTC seconds-from-now. Override the offset hours via
+ * `SESSION_DAILY_EXPIRY_TZ_OFFSET_HOURS` if the tenant relocates.
+ *
+ * Floor of 60s so a login at 23:59:30 still creates a usable session (it just
+ * rolls over very soon after).
+ */
+function secondsUntilEndOfLocalDay(): number {
+  const offsetHours = parseFloat(process.env['SESSION_DAILY_EXPIRY_TZ_OFFSET_HOURS'] ?? '1');
+  const offsetMs = offsetHours * 3_600_000;
+  const nowMs = Date.now();
+  const localMs = nowMs + offsetMs;
+  const localNow = new Date(localMs);
+  const localEod = new Date(
+    Date.UTC(
+      localNow.getUTCFullYear(),
+      localNow.getUTCMonth(),
+      localNow.getUTCDate(),
+      23,
+      59,
+      59,
+      999,
+    ),
+  );
+  const eodUtcMs = localEod.getTime() - offsetMs;
+  return Math.max(60, Math.ceil((eodUtcMs - nowMs) / 1000));
+}
 
 @Injectable()
 export class AuthService {
@@ -42,6 +74,7 @@ export class AuthService {
     private readonly notifications: NotificationsService,
     private readonly sessionStore: SessionStoreService,
     private readonly branchTeams: BranchTeamsService,
+    private readonly permissions: PermissionsService,
   ) {
     this.sessionTtl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10); // 24 hours
     this.sessionTtlRemember = parseInt(
@@ -67,7 +100,22 @@ export class AuthService {
 
     // Find user by email
     const [user] = await this.db
-      .select()
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        name: schema.users.name,
+        role: schema.users.role,
+        status: schema.users.status,
+        passwordHash: schema.users.passwordHash,
+        logisticsLocationId: schema.users.logisticsLocationId,
+        appTheme: schema.users.appTheme,
+        fontScale: schema.users.fontScale,
+        isFinanceOfficer: schema.users.isFinanceOfficer,
+        roleTemplateId: schema.users.roleTemplateId,
+        scopeGlobal: schema.users.scopeGlobal,
+        scopeOrgWideHead: schema.users.scopeOrgWideHead,
+        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
+      })
       .from(schema.users)
       .where(eq(schema.users.email, email))
       .limit(1);
@@ -136,6 +184,10 @@ export class AuthService {
       email: user.email,
       name: user.name,
       role: user.role,
+      roleTemplateId: user.roleTemplateId ?? null,
+      scopeGlobal: user.scopeGlobal === true,
+      scopeOrgWideHead: user.scopeOrgWideHead === true,
+      scopeTeamSupervisor: user.scopeTeamSupervisor === true,
       logisticsLocationId: user.logisticsLocationId,
       currentBranchId,
       appTheme: user.appTheme ?? null,
@@ -143,10 +195,44 @@ export class AuthService {
       isFinanceOfficer: user.isFinanceOfficer === true,
     };
 
+    // CEO directive: sessions ALWAYS expire at 23:59 local time on the calendar day
+    // the user signed in, regardless of remember-me. The remember-me flag is now
+    // strictly a hint to the client to remember the email locally — it does NOT
+    // extend session TTL beyond today. The `rememberMe` parameter and
+    // `sessionTtlRemember` config are kept for backwards compatibility with older
+    // tenants that may still want extended sessions; flip the env
+    // `SESSION_DAILY_EXPIRY_DISABLED=true` to fall back to the old rolling TTL.
+    const dailyExpiryDisabled = process.env['SESSION_DAILY_EXPIRY_DISABLED'] === 'true';
+    const ttlSeconds = dailyExpiryDisabled
+      ? rememberMe
+        ? this.sessionTtlRemember
+        : this.sessionTtl
+      : secondsUntilEndOfLocalDay();
+
+    // Bump login_count + last_login_at as the user themselves so the temporal
+    // trigger writes a users_history row attributed to them. The audit log
+    // (audit.globalLog) picks this up automatically — no separate audit_events
+    // table is needed. Login lands in the audit feed alongside profile/role edits.
+    try {
+      await withActor(this.db, sessionUser, async (tx) => {
+        await tx
+          .update(schema.users)
+          .set({
+            loginCount: sql`${schema.users.loginCount} + 1`,
+            lastLoginAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.users.id, user.id));
+      });
+    } catch (err) {
+      // Login attribution is best-effort — if the audit write fails the user can still
+      // sign in. Surface the error in logs so we notice if the trigger / column drifts.
+      this.logger.warn(
+        `login_audit_write_failed user=${user.id} reason=${(err as Error).message}`,
+      );
+    }
+
     // Persist session in DB, then cache in Redis when available.
-    // Remember-me extends both the Redis/DB session TTL and the cookie max-age (handled by the
-    // controller using the returned `ttlSeconds`).
-    const ttlSeconds = rememberMe ? this.sessionTtlRemember : this.sessionTtl;
     await this.sessionStore.createSession(token, sessionUser, ttlSeconds);
 
     return { token, user: sessionUser, ttlSeconds };
@@ -187,7 +273,22 @@ export class AuthService {
     }
 
     const targetRows = await this.db
-      .select()
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        name: schema.users.name,
+        role: schema.users.role,
+        status: schema.users.status,
+        logisticsLocationId: schema.users.logisticsLocationId,
+        appTheme: schema.users.appTheme,
+        fontScale: schema.users.fontScale,
+        isFinanceOfficer: schema.users.isFinanceOfficer,
+        primaryBranchId: schema.users.primaryBranchId,
+        roleTemplateId: schema.users.roleTemplateId,
+        scopeGlobal: schema.users.scopeGlobal,
+        scopeOrgWideHead: schema.users.scopeOrgWideHead,
+        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
+      })
       .from(schema.users)
       .where(eq(schema.users.id, targetUserId))
       .limit(1);
@@ -199,8 +300,15 @@ export class AuthService {
       throw new BadRequestException('Cannot mirror an inactive user.');
     }
 
+    const actorPermSet = await this.permissions.getEffectivePermissions(actor.id);
     const syncMirror = canMirror(
-      { id: actor.id, role: actor.role, currentBranchId: actor.currentBranchId, mirroredBy: actor.mirroredBy },
+      {
+        id: actor.id,
+        role: actor.role,
+        permissions: Array.from(actorPermSet),
+        currentBranchId: actor.currentBranchId,
+        mirroredBy: actor.mirroredBy,
+      },
       { id: target.id, role: target.role, primaryBranchId: target.primaryBranchId },
     );
     const viaSupervision =
@@ -215,7 +323,13 @@ export class AuthService {
 
     // Resolve the target user's branch context the same way login does.
     let currentBranchId: string | null = null;
-    if (!canViewAllBranches({ role: target.role })) {
+    const targetPermSet = await this.permissions.getEffectivePermissions(target.id);
+    if (
+      !canViewAllBranches({
+        role: target.role,
+        permissions: Array.from(targetPermSet),
+      })
+    ) {
       const memberships = await this.db
         .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
         .from(schema.userBranches)
@@ -247,6 +361,10 @@ export class AuthService {
       email: target.email,
       name: target.name,
       role: target.role,
+      roleTemplateId: target.roleTemplateId ?? null,
+      scopeGlobal: target.scopeGlobal === true,
+      scopeOrgWideHead: target.scopeOrgWideHead === true,
+      scopeTeamSupervisor: target.scopeTeamSupervisor === true,
       logisticsLocationId: target.logisticsLocationId,
       currentBranchId,
       // Surface the target's appearance so the admin sees the app exactly as the
@@ -303,7 +421,21 @@ export class AuthService {
 
     // Re-hydrate the original user fresh from DB.
     const actorRows = await this.db
-      .select()
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        name: schema.users.name,
+        role: schema.users.role,
+        logisticsLocationId: schema.users.logisticsLocationId,
+        appTheme: schema.users.appTheme,
+        fontScale: schema.users.fontScale,
+        isFinanceOfficer: schema.users.isFinanceOfficer,
+        primaryBranchId: schema.users.primaryBranchId,
+        roleTemplateId: schema.users.roleTemplateId,
+        scopeGlobal: schema.users.scopeGlobal,
+        scopeOrgWideHead: schema.users.scopeOrgWideHead,
+        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
+      })
       .from(schema.users)
       .where(eq(schema.users.id, originalActorId))
       .limit(1);
@@ -313,7 +445,13 @@ export class AuthService {
     }
 
     let currentBranchId: string | null = null;
-    if (!canViewAllBranches({ role: actor.role })) {
+    const actorPermSet = await this.permissions.getEffectivePermissions(actor.id);
+    if (
+      !canViewAllBranches({
+        role: actor.role,
+        permissions: Array.from(actorPermSet),
+      })
+    ) {
       const memberships = await this.db
         .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
         .from(schema.userBranches)
@@ -328,6 +466,10 @@ export class AuthService {
       email: actor.email,
       name: actor.name,
       role: actor.role,
+      roleTemplateId: actor.roleTemplateId ?? null,
+      scopeGlobal: actor.scopeGlobal === true,
+      scopeOrgWideHead: actor.scopeOrgWideHead === true,
+      scopeTeamSupervisor: actor.scopeTeamSupervisor === true,
       logisticsLocationId: actor.logisticsLocationId,
       currentBranchId,
       appTheme: currentSession.appTheme ?? null,
@@ -467,8 +609,8 @@ export class AuthService {
 
     const user: SessionUser = sessionData;
 
-    // SUPER_ADMIN and ADMIN can switch to any branch; others must be a member
-    if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
+    // Global scope / explicit view-all can switch to any branch; others must be a member
+    if (!canViewAllBranches(user)) {
       const membership = await this.db
         .select({ branchId: schema.userBranches.branchId })
         .from(schema.userBranches)

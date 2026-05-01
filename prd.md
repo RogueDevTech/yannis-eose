@@ -134,6 +134,42 @@ The system is divided into **7 interlocking functional modules** plus a **univer
 | Manage message templates | Yes | Branch only | No | No | Yes | No | No | No | No | No | No | No |
 | Configure dispatch mode | Yes | Branch only | No | No | Yes | No | No | No | No | No | No | No |
 
+### 5.3 Permission-first RBAC (locked — April 2026)
+
+**Purpose:** The matrix in §5.2 remains the *product* intent. **Runtime enforcement** is **permission-first**: access is driven by **effective permission codes** (+ explicit scope flags where applicable), not by role labels alone. **Custom role templates** may grant any permission; the legacy `users.role` enum is a **label / compatibility** field for HR and reporting, not the sole authority gate.
+
+**Non-negotiables**
+
+- **`SUPER_ADMIN`** is the only principal that may receive **unconditional** tRPC `permissionProcedure` bypass. Do **not** reintroduce **`ADMIN`** (or other roles) as a blanket bypass beside `SUPER_ADMIN`.
+- **Effective permissions (non–SuperAdmin)** = **SYSTEM/CUSTOM role template** ∪ **legacy `role_permissions` for `users.role`** ∪ **`user_permissions` grants** − **revokes**.
+- **System role templates** (`role_templates.kind = SYSTEM`, `locked = true` for protected presets) stay aligned with the seeded catalog; migration `0093` backfills templates from `role_permissions`.
+- **Finance field stripping** uses `hasFinanceAccess()` (primary role, Finance hat, **or** `finance.costView`) — not “admin-class” shortcut.
+- **Mirror Mode** and **global audit** gates use **permissions + scope** (see `apps/api/src/common/authz.ts`); do not expand mirror targets without a product decision.
+
+**Operational commands**
+
+- After changing permission definitions or `ROLE_PERMISSIONS` in seed: `pnpm --filter @yannis/shared db:seed-permissions`
+- Static string coverage of `permissionProcedure('…')` codes: `pnpm --filter @yannis/shared db:audit-permission-coverage`
+
+**Canonical implementation files (do not drift)**
+
+| Concern | Location |
+|--------|----------|
+| Effective permissions + sensitive permission list | `apps/api/src/permissions/permissions.service.ts` |
+| tRPC middleware / session merge | `apps/api/src/trpc/trpc.middleware.ts`, `apps/api/src/trpc/trpc.ts` |
+| Scope, mirror, branch visibility | `apps/api/src/common/authz.ts` |
+| Finance strip | `apps/api/src/common/utils/strip-finance-fields.ts` |
+| Schema | `packages/shared/src/db/schema/rbac.ts`, `packages/shared/src/db/schema/users.ts` |
+| Migration (templates + user scope columns) | `packages/shared/drizzle/0093_permission_first_role_templates.sql` |
+| Seed + SYSTEM template reconciliation | `packages/shared/scripts/seed-permissions.ts` |
+| Role template CRUD | `apps/api/src/permissions/role-templates.service.ts`, `apps/api/src/trpc/routers/role-templates.router.ts` |
+| Permission catalog API | `apps/api/src/trpc/routers/permissions.router.ts` |
+| Staff create / template + scope | `apps/api/src/users/users.service.ts`, `apps/web/app/features/users/UserCreatePage.tsx`, `apps/web/app/routes/hr.users.new/route.tsx` |
+| Role templates admin UI | `apps/web/app/features/settings/RoleTemplatesPage.tsx`, `apps/web/app/routes/admin.settings.role-templates/route.tsx` |
+| Sidebar / nav capability patterns | `apps/web/app/components/layout/dashboard-layout.tsx`, `apps/web/app/lib/rbac.ts` |
+
+**Locked agent context (Cursor):** `.cursor/rules/permission-first-rbac.mdc` (`alwaysApply: true`). **Companion docs:** `CLAUDE.md` (Permission-first RBAC pointer), `task.md` (Locked: Permission-first RBAC).
+
 ---
 
 ## 5a. Multi-Branch Architecture

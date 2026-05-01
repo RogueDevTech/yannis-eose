@@ -77,19 +77,14 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Create an offline order (CS manual entry). Creator is set as assignee. Any CS role can use (no permission required).
+   * Create an offline order (CS manual entry). Creator is set as assignee.
+   * Phase 21: gated by `orders.createOffline` permission so a custom role can be granted just this capability
+   * without inheriting all of CS_AGENT.
    */
-  createOffline: authedProcedure
+  createOffline: permissionProcedure('orders.createOffline')
     .meta({ branchScopedMutation: true })
     .input(createOfflineOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
-      if (!ctx.user?.id || !allowedRoles.includes(ctx.user.role)) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Only CS agents and Head of CS can create offline orders',
-        });
-      }
       const { branchId, ...offlineInput } = input;
       return getOrdersService().createOffline(offlineInput, ctx.user.id, branchId ?? ctx.currentBranchId);
     }),

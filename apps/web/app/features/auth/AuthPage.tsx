@@ -8,7 +8,7 @@ import type { AuthActionData, AuthPageProps } from './types';
 const mobileInput =
   'max-lg:!bg-app-elevated max-lg:!border-app-border max-lg:!text-app-fg max-lg:!placeholder-app-fg-muted';
 
-export function AuthPage({ needsSetup }: AuthPageProps) {
+export function AuthPage({ needsSetup, redirectTo }: AuthPageProps) {
   const actionData = useActionData<AuthActionData>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
@@ -45,9 +45,17 @@ export function AuthPage({ needsSetup }: AuthPageProps) {
           </div>
 
           {needsSetup ? (
-            <SetupForm isSubmitting={isSubmitting} actionData={actionData} />
+            <SetupForm
+              isSubmitting={isSubmitting}
+              actionData={actionData}
+              redirectTo={redirectTo}
+            />
           ) : (
-            <LoginForm isSubmitting={isSubmitting} actionData={actionData} />
+            <LoginForm
+              isSubmitting={isSubmitting}
+              actionData={actionData}
+              redirectTo={redirectTo}
+            />
           )}
         </div>
       </div>
@@ -61,9 +69,11 @@ const REMEMBERED_EMAIL_KEY = 'yannis-remembered-email';
 function LoginForm({
   isSubmitting,
   actionData,
+  redirectTo,
 }: {
   isSubmitting: boolean;
   actionData?: AuthActionData;
+  redirectTo: string | null;
 }) {
   const [dismissedError, setDismissedError] = useState(false);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
@@ -140,6 +150,7 @@ function LoginForm({
 
       <Form method="post" className="space-y-4" onSubmit={persistRememberedEmail}>
         <input type="hidden" name="intent" value="login" />
+        {redirectTo ? <input type="hidden" name="redirectTo" value={redirectTo} /> : null}
 
         <div>
           <label
@@ -256,9 +267,11 @@ function LoginForm({
 function SetupForm({
   isSubmitting,
   actionData,
+  redirectTo,
 }: {
   isSubmitting: boolean;
   actionData?: AuthActionData;
+  redirectTo: string | null;
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const [dismissedError, setDismissedError] = useState(false);
@@ -303,6 +316,7 @@ function SetupForm({
 
       <Form method="post" className="space-y-4">
         <input type="hidden" name="intent" value="setup" />
+        {redirectTo ? <input type="hidden" name="redirectTo" value={redirectTo} /> : null}
 
         <div>
           <label

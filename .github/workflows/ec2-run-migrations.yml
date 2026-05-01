@@ -1,0 +1,76 @@
+# Manual migration-only job on EC2: pulls the latest API image (contains packages/shared/drizzle SQL),
+# then runs infrastructure/deploy/run-migrations.sh over SSH.
+#
+# Use when you need to apply pending migrations without a full web deploy, or to retry after a failed migrate.
+name: EC2 — run database migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment (must define EC2_HOST, EC2_SSH_KEY, AWS_* secrets)
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+      aws_region:
+        description: AWS region for ECR login (must match EC2 / ECR)
+        required: false
+        default: eu-north-1
+        type: string
+
+concurrency:
+  group: ec2-migrations-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Pull API image + run migrations on EC2
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.aws_region || 'eu-north-1' }}
+
+      - name: Run migrations on EC2 via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            if ! command -v aws >/dev/null 2>&1; then
+              echo "AWS CLI not found on EC2 host — install awscli or run migrations manually."
+              exit 1
+            fi
+            cd /opt/yannis-eose
+            if [ ! -f docker-compose.prod.yml ] || [ ! -f run-migrations.sh ]; then
+              echo "Missing docker-compose.prod.yml or run-migrations.sh under /opt/yannis-eose. Deploy at least once from CI first."
+              exit 1
+            fi
+            export SECRET_NAME="${SECRET_NAME:-yanis-eose}"
+            export AWS_REGION="${{ github.event.inputs.aws_region || 'eu-north-1' }}"
+            chmod +x ./refresh-env.sh 2>/dev/null || true
+            if [ -x ./refresh-env.sh ]; then ./refresh-env.sh || true; fi
+            if ! grep -q '^DATABASE_URL=' .env 2>/dev/null; then
+              echo "DATABASE_URL missing from .env"
+              exit 1
+            fi
+            ECR_REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ github.event.inputs.aws_region || 'eu-north-1' }}.amazonaws.com"
+            aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+            export ECR_REGISTRY="${ECR_REGISTRY}"
+            export IMAGE_TAG=dev-latest
+            echo "→ Pulling latest API image (${IMAGE_TAG}) so migrations match repo..."
+            docker compose -f docker-compose.prod.yml pull api
+            chmod +x ./run-migrations.sh
+            export PGSSLMODE="${PGSSLMODE:-require}"
+            echo "→ Running migrations..."
+            ./run-migrations.sh
+            echo "→ Done."

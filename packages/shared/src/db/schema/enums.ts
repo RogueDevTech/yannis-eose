@@ -330,3 +330,18 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'PAYMENT_RECEIVED',
   'ORDER_ARCHIVED',
 ]);
+
+/** Staff onboarding workflow — non-blocking record-keeping flow. */
+export const onboardingStatusEnum = pgEnum('onboarding_status', [
+  'NOT_STARTED',
+  'IN_PROGRESS',
+  'SUBMITTED',
+  'APPROVED',
+]);
+
+export const staffGenderEnum = pgEnum('staff_gender', [
+  'MALE',
+  'FEMALE',
+  'OTHER',
+  'PREFER_NOT_TO_SAY',
+]);

@@ -104,17 +104,16 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
                   <div className="text-sm font-semibold text-app-fg sm:text-right">
                     &#8358;{Number(offer.price).toLocaleString()}
                   </div>
+                  {offer.imageUrls && offer.imageUrls.length > 0 && (
+                    <div className="w-24 h-24 max-w-[200px] rounded-md border border-app-border overflow-hidden bg-app-elevated shrink-0">
+                      <a href={offer.imageUrls[0]} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                        <img src={offer.imageUrls[0]} alt="" className="w-full h-full object-cover" />
+                      </a>
+                    </div>
+                  )}
                 </div>
-                {offer.imageUrls && offer.imageUrls.length > 0 && (
-                  <ul className="flex flex-wrap gap-2">
-                    {offer.imageUrls.map((url) => (
-                      <li key={url} className="w-20 h-20 rounded-md border border-app-border overflow-hidden bg-app-elevated shrink-0">
-                        <a href={url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
-                          <img src={url} alt="" className="w-full h-full object-cover" />
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
+                {offer.imageUrls && offer.imageUrls.length > 1 && (
+                  <p className="text-xs text-app-fg-muted">+{offer.imageUrls.length - 1} more image{offer.imageUrls.length - 1 === 1 ? '' : 's'}</p>
                 )}
               </div>
             ))}

@@ -3,7 +3,15 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getCurrentUser } from '~/lib/api.server';
 
-const ALLOWED_FOLDERS = new Set(['screenshots', 'receipts', 'delivery-proof', 'invoices', 'product-images']);
+const ALLOWED_FOLDERS = new Set([
+  'screenshots',
+  'receipts',
+  'delivery-proof',
+  'invoices',
+  'product-images',
+  // Phase 22 — staff onboarding profile uploads
+  'onboarding-docs',
+]);
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 interface UploadUrlRequest {

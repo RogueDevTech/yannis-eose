@@ -14,7 +14,7 @@ export const meta: MetaFunction = () => {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await getCurrentUser(request);
+  const user = await getCurrentUser(request, { softNetwork: true });
   if (user) return redirect('/admin');
 
   const url = new URL(request.url);

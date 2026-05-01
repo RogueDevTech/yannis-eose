@@ -19,6 +19,34 @@ function isAllowedRedirectPath(path: string): boolean {
   }
 }
 
+/** Decode after `isAllowedRedirectPath` — safe single decode for redirect Location. */
+function safeRedirectTarget(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** Prefer POST body (form hidden field); URL query is often absent on Remix `Form` POST. */
+function resolveRedirectTo(request: Request, formData: FormData): string | null {
+  const fromForm = formData.get('redirectTo')?.toString().trim();
+  if (fromForm && isAllowedRedirectPath(fromForm)) {
+    return safeRedirectTarget(fromForm);
+  }
+  const raw = new URL(request.url).searchParams.get('redirectTo');
+  if (raw && isAllowedRedirectPath(raw)) {
+    return safeRedirectTarget(raw);
+  }
+  return null;
+}
+
+function allowedRedirectFromUrl(request: Request): string | null {
+  const raw = new URL(request.url).searchParams.get('redirectTo');
+  if (!raw || !isAllowedRedirectPath(raw)) return null;
+  return safeRedirectTarget(raw);
+}
+
 export const meta: MetaFunction = () => {
   return [
     { title: 'Yannis EOSE — Login' },
@@ -30,13 +58,13 @@ export const meta: MetaFunction = () => {
  * Loader — if already authenticated, redirect by role or to redirectTo if valid.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
+  const redirectTo = allowedRedirectFromUrl(request);
+
   try {
-    const user = await getCurrentUser(request);
+    const user = await getCurrentUser(request, { softNetwork: true });
     if (user) {
-      const url = new URL(request.url);
-      const redirectTo = url.searchParams.get('redirectTo');
-      if (redirectTo && isAllowedRedirectPath(redirectTo)) {
-        return redirect(decodeURIComponent(redirectTo));
+      if (redirectTo) {
+        return redirect(redirectTo);
       }
       if (user.role === 'TPL_MANAGER') return redirect('/tpl');
       if (user.role === 'TPL_RIDER') return redirect('/rider');
@@ -55,7 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // API unreachable — show login form
   }
 
-  return { needsSetup };
+  return { needsSetup, redirectTo };
 }
 
 /**
@@ -73,6 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 async function handleLogin(request: Request, formData: FormData) {
+  const postRedirect = resolveRedirectTo(request, formData);
   const email = formData.get('email')?.toString() ?? '';
   const password = formData.get('password')?.toString() ?? '';
   const rememberMe = formData.get('rememberMe')?.toString() === 'on';
@@ -119,11 +148,9 @@ async function handleLogin(request: Request, formData: FormData) {
     headers.append('Set-Cookie', c);
   }
 
-  const url = new URL(request.url);
-  const redirectTo = url.searchParams.get('redirectTo');
   let target: string;
-  if (redirectTo && isAllowedRedirectPath(redirectTo)) {
-    target = decodeURIComponent(redirectTo);
+  if (postRedirect) {
+    target = postRedirect;
   } else {
     const role = res.data?.user?.role;
     target = role === 'TPL_MANAGER' ? '/tpl' : role === 'TPL_RIDER' ? '/rider' : '/admin';
@@ -170,9 +197,7 @@ async function handleSetup(request: Request, formData: FormData) {
     for (const c of loginRes.setCookies) {
       headers.append('Set-Cookie', c);
     }
-    const url = new URL(request.url);
-    const redirectTo = url.searchParams.get('redirectTo');
-    const target = redirectTo && isAllowedRedirectPath(redirectTo) ? decodeURIComponent(redirectTo) : '/admin';
+    const target = resolveRedirectTo(request, formData) ?? '/admin';
     return redirect(target, { headers });
   }
 
@@ -191,7 +216,7 @@ async function handleSetup(request: Request, formData: FormData) {
 }
 
 export default function AuthRoute() {
-  const { needsSetup } = useLoaderData<typeof loader>();
+  const { needsSetup, redirectTo } = useLoaderData<typeof loader>();
 
-  return <AuthPage needsSetup={needsSetup} />;
+  return <AuthPage needsSetup={needsSetup} redirectTo={redirectTo} />;
 }

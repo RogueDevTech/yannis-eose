@@ -2,7 +2,7 @@
  * Column-Level Security — Finance Field Stripping
  *
  * Recursively strips sensitive financial fields from any data structure
- * unless the user has SUPER_ADMIN or FINANCE_OFFICER role.
+ * unless the user is explicitly authorized (see `hasFinanceAccess`).
  *
  * PRD Ref: Section 11.3 (Column-Level Security)
  * Fields protected: costPrice, landed_cost, margin, factoryCost,
@@ -33,7 +33,7 @@ const SENSITIVE_FIELDS = new Set([
 
 /**
  * Check if user has access to financial fields.
- * SUPER_ADMIN and ADMIN bypass. Others qualify via:
+ * SUPER_ADMIN bypasses. Others qualify via:
  *   - `finance.costView` permission
  *   - `FINANCE_OFFICER` primary role
  *   - the "Finance hat" flag (`isFinanceOfficer`) — lets any user carry finance powers on top of
@@ -41,7 +41,6 @@ const SENSITIVE_FIELDS = new Set([
  * REST endpoints may not have permissions populated — fall back to role/flag check.
  */
 export function hasFinanceAccess(user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean }): boolean {
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
   if (user.permissions?.includes('finance.costView')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
   if (user.isFinanceOfficer === true) return true;

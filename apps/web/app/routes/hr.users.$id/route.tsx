@@ -23,6 +23,8 @@ import type {
   UserPushStatus,
   ActiveHeadUser,
   FinanceHatHolder,
+  RoleTemplateOption,
+  PermissionCatalogItem,
 } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -122,6 +124,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       if (!res.ok) return [];
       const d = res.data as { result?: { data?: { products: UserCreateProduct[] } } };
       return d?.result?.data?.products ?? [];
+    })
+    .catch(() => []);
+
+  const roleTemplates: Promise<RoleTemplateOption[]> = apiRequest<unknown>(
+    '/trpc/roleTemplates.list',
+    { method: 'GET', cookie },
+  )
+    .then((res) => {
+      if (!res.ok) return [];
+      const d = res.data as { result?: { data?: { templates?: RoleTemplateOption[] } } };
+      return d?.result?.data?.templates ?? [];
     })
     .catch(() => []);
 
@@ -362,6 +375,39 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         .catch(() => null)
     : Promise.resolve(null);
 
+  const permissionCatalog: Promise<PermissionCatalogItem[]> = apiRequest<unknown>(
+    '/trpc/permissions.listCatalog',
+    { method: 'GET', cookie },
+  )
+    .then((res) => {
+      if (!res.ok) return [];
+      const d = res.data as { result?: { data?: { permissions?: PermissionCatalogItem[] } } };
+      return d?.result?.data?.permissions ?? [];
+    })
+    .catch(() => []);
+
+  const templatePermissionsById: Promise<Record<string, string[]>> = apiRequest<unknown>(
+    '/trpc/permissions.listTemplateBaselines',
+    { method: 'GET', cookie },
+  )
+    .then((res) => {
+      if (!res.ok) return {};
+      const d = res.data as { result?: { data?: { byTemplateId?: Record<string, string[]> } } };
+      return d?.result?.data?.byTemplateId ?? {};
+    })
+    .catch(() => ({}));
+
+  const userPermissionOverrides: Promise<Record<string, boolean>> = apiRequest<unknown>(
+    `/trpc/permissions.getUserMatrix?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
+    { method: 'GET', cookie },
+  )
+    .then((res) => {
+      if (!res.ok) return {};
+      const d = res.data as { result?: { data?: { userOverrides?: Record<string, boolean> } } };
+      return d?.result?.data?.userOverrides ?? {};
+    })
+    .catch(() => ({}));
+
     const mirrorRes = await apiRequest<unknown>(
       `/trpc/branches.canMirrorToUser?input=${encodeURIComponent(JSON.stringify({ targetUserId: profileUser.id }))}`,
       { method: 'GET', cookie },
@@ -385,6 +431,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     return {
       user,
+      roleTemplates,
       products,
       locations,
       plans,
@@ -398,6 +445,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       stockMovements,
       financeActivity,
       pushStatus,
+      permissionCatalog,
+      templatePermissionsById,
+      userPermissionOverrides,
       activeHeads,
       currentFinanceOfficer,
       branchesList,
@@ -446,7 +496,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
           logisticsLocationId: string | null;
           restrictProductAccess: boolean;
           assignedProductIds?: string[];
+          branchMemberships?: Array<{ branchId: string }>;
+          primaryBranchId?: string | null;
           isFinanceOfficer?: boolean;
+          roleTemplateId?: string | null;
         };
       };
     };
@@ -461,6 +514,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     const body: Record<string, unknown> = { userId };
     const prevAssignedKey = [...(target.assignedProductIds ?? [])].sort().join('\0');
+    const prevBranchIdsKey = [...(target.branchMemberships ?? []).map((membership) => membership.branchId)].sort().join('\0');
 
     const name = formData.get('name')?.toString().trim() ?? '';
     if (name.length >= 2 && name !== target.name) {
@@ -475,6 +529,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const role = formData.get('role')?.toString();
     if (role && role !== target.role) {
       body.role = role;
+    }
+
+    const roleTemplateId = formData.get('roleTemplateId')?.toString() ?? '';
+    const nextTemplate = roleTemplateId || null;
+    if (nextTemplate !== (target.roleTemplateId ?? null)) {
+      body.roleTemplateId = nextTemplate;
     }
 
     const status = formData.get('status')?.toString();
@@ -529,6 +589,44 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const nextHat = formData.get('isFinanceOfficer')?.toString() === 'true';
       if (nextHat !== !!target.isFinanceOfficer) {
         body.isFinanceOfficer = nextHat;
+      }
+    }
+
+    if (formData.has('branchIds')) {
+      const branchIdsRaw = formData.get('branchIds')?.toString() ?? '';
+      try {
+        const parsed = JSON.parse(branchIdsRaw) as unknown;
+        if (Array.isArray(parsed) && parsed.every((id): id is string => typeof id === 'string')) {
+          const nextBranchIds = [...new Set(parsed)];
+          const nextBranchIdsKey = [...nextBranchIds].sort().join('\0');
+          if (nextBranchIdsKey !== prevBranchIdsKey) {
+            body.branchIds = nextBranchIds;
+          }
+        }
+      } catch {
+        // ignore malformed branchIds payload
+      }
+    }
+    if (formData.has('primaryBranchId')) {
+      const primaryBranchId = formData.get('primaryBranchId')?.toString() ?? '';
+      const nextPrimary = primaryBranchId || null;
+      const prevPrimary = target.primaryBranchId ?? null;
+      if (nextPrimary !== prevPrimary && nextPrimary) {
+        body.primaryBranchId = nextPrimary;
+      }
+    }
+
+    if (formData.has('permissionOverrides')) {
+      const raw = formData.get('permissionOverrides')?.toString() ?? '';
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            body.permissionOverrides = parsed;
+          }
+        } catch {
+          // ignore malformed overrides payload
+        }
       }
     }
 

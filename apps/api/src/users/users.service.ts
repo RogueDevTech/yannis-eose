@@ -12,12 +12,16 @@ import type {
   ListUsersInput,
   ResetPasswordInput,
 } from '@yannis/shared';
+import { canonicalPermissionCode } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { AuthService } from '../auth/auth.service';
 import { withActor } from '../common/db/with-actor';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isAdminLevelRole } from '../common/authz';
+
+type DbTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
 
 @Injectable()
 export class UsersService {
@@ -29,6 +33,63 @@ export class UsersService {
     private readonly notificationsService: NotificationsService,
     private readonly permissionsService: PermissionsService,
   ) {}
+
+  private defaultScopeForRole(role: string): { scopeGlobal: boolean; scopeOrgWideHead: boolean } {
+    if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
+      return { scopeGlobal: true, scopeOrgWideHead: false };
+    }
+    if (role === 'HEAD_OF_CS' || role === 'HEAD_OF_MARKETING' || role === 'HEAD_OF_LOGISTICS') {
+      return { scopeGlobal: false, scopeOrgWideHead: true };
+    }
+    return { scopeGlobal: false, scopeOrgWideHead: false };
+  }
+
+  private async resolveRoleTemplateIdForEnumRole(role: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ id: schema.roleTemplates.id })
+      .from(schema.roleTemplates)
+      .where(and(eq(schema.roleTemplates.kind, 'SYSTEM'), eq(schema.roleTemplates.mappedRole, role as never)))
+      .limit(1);
+    return rows[0]?.id ?? null;
+  }
+
+  private async applyPermissionOverrides(
+    tx: DbTx,
+    params: { userId: string; overrides: Record<string, boolean>; actorId: string },
+  ): Promise<void> {
+    const normalizedOverrides = Object.entries(params.overrides).reduce<Record<string, boolean>>(
+      (acc, [code, granted]) => {
+        acc[canonicalPermissionCode(code)] = granted;
+        return acc;
+      },
+      {},
+    );
+    const codes = Object.keys(normalizedOverrides);
+    if (codes.length === 0) return;
+
+    const permRows = await tx
+      .select({ id: schema.permissions.id, code: schema.permissions.code })
+      .from(schema.permissions)
+      .where(inArray(schema.permissions.code, codes));
+
+    const byCode = new Map(permRows.map((p) => [p.code, p.id]));
+    for (const code of codes) {
+      const permId = byCode.get(code);
+      if (!permId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Unknown permission code: ${code}` });
+      }
+      await tx
+        .delete(schema.userPermissions)
+        .where(and(eq(schema.userPermissions.userId, params.userId), eq(schema.userPermissions.permissionId, permId)));
+
+      await tx.insert(schema.userPermissions).values({
+        userId: params.userId,
+        permissionId: permId,
+        granted: normalizedOverrides[code] === true,
+        grantedBy: params.actorId,
+      });
+    }
+  }
 
   /**
    * Generate a secure random password.
@@ -73,15 +134,20 @@ export class UsersService {
   ): boolean {
     if (!actor) return false;
     if (actor.id === target.id) return true;
-    if (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN' || actor.role === 'HR_MANAGER') return true;
+    if (actor.role === 'SUPER_ADMIN' || actor.role === 'HR_MANAGER') return true;
 
     const perms = actor.permissions ?? [];
     if (perms.includes('users.read') || perms.includes('hr.read')) return true;
 
-    if (actor.role === 'HEAD_OF_CS' && target.role === 'CS_AGENT') return true;
-    if (actor.role === 'HEAD_OF_MARKETING' && target.role === 'MEDIA_BUYER') return true;
+    if ((perms.includes('cs.teamOverview') || perms.includes('team.supervise_cs')) && target.role === 'CS_AGENT')
+      return true;
     if (
-      actor.role === 'HEAD_OF_LOGISTICS' &&
+      (perms.includes('marketing.teamOverview') || perms.includes('team.supervise_marketing')) &&
+      target.role === 'MEDIA_BUYER'
+    )
+      return true;
+    if (
+      perms.includes('team.supervise_logistics') &&
       ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'].includes(target.role)
     ) {
       return true;
@@ -388,37 +454,58 @@ export class UsersService {
       });
     }
 
-    // SUPER_ADMIN already rejected above; ADMIN is global (no primary branch required).
-    if (input.role !== 'ADMIN') {
-      if (!input.primaryBranchId) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Primary branch is required for non-SuperAdmin users',
-        });
-      }
+    const requestedBranchIds = [...new Set(input.branchIds ?? [])];
+    if (input.primaryBranchId && !requestedBranchIds.includes(input.primaryBranchId)) {
+      requestedBranchIds.push(input.primaryBranchId);
+    }
+    if (requestedBranchIds.length === 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'At least one branch is required',
+      });
+    }
+    if (!input.primaryBranchId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Primary branch is required',
+      });
+    }
 
-      const activeBranchRows = await this.db
-        .select({ id: schema.branches.id })
-        .from(schema.branches)
-        .where(
-          and(
-            eq(schema.branches.id, input.primaryBranchId),
-            eq(schema.branches.status, 'ACTIVE'),
-          ),
-        )
-        .limit(1);
+    const activeBranchRows = await this.db
+      .select({ id: schema.branches.id })
+      .from(schema.branches)
+      .where(
+        and(
+          inArray(schema.branches.id, requestedBranchIds),
+          eq(schema.branches.status, 'ACTIVE'),
+        ),
+      );
 
-      if (!activeBranchRows[0]) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Primary branch must exist and be active',
-        });
-      }
+    if (activeBranchRows.length !== requestedBranchIds.length) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'One or more selected branches are missing or inactive',
+      });
     }
 
     // Auto-generate a secure password for the new user
     const plainPassword = this.generatePassword();
     const passwordHash = await this.authService.hashPassword(plainPassword);
+
+    const defaults = this.defaultScopeForRole(input.role);
+    const roleTemplateId =
+      input.roleTemplateId ?? (await this.resolveRoleTemplateIdForEnumRole(input.role));
+    if (!roleTemplateId) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'Role templates are not initialized for this environment. Run migrations + `pnpm db:seed-permissions`.',
+      });
+    }
+
+    const scopeGlobal = input.scopeGlobal ?? defaults.scopeGlobal;
+    const scopeOrgWideHead = input.scopeOrgWideHead ?? defaults.scopeOrgWideHead;
+    const scopeTeamSupervisor = input.scopeTeamSupervisor ?? false;
 
     // Captured during the atomic Finance-hat swap so we can notify the displaced holder
     // after the transaction commits.
@@ -490,6 +577,10 @@ export class UsersService {
           email: input.email.toLowerCase(),
           passwordHash,
           role: input.role,
+          roleTemplateId,
+          scopeGlobal,
+          scopeOrgWideHead,
+          scopeTeamSupervisor,
           status: 'PENDING', // New users stay PENDING until first login (then auth sets ACTIVE)
           capacity: input.capacity ?? 10,
           logisticsLocationId: input.logisticsLocationId ?? null,
@@ -520,16 +611,14 @@ export class UsersService {
         });
       }
 
-      if (input.primaryBranchId) {
-        await tx
-          .insert(schema.userBranches)
-          .values({
-            userId: createdUser.id,
-            branchId: input.primaryBranchId,
-            isPrimary: true,
-            roleInBranch: null,
-          });
-      }
+      await tx.insert(schema.userBranches).values(
+        requestedBranchIds.map((branchId) => ({
+          userId: createdUser.id,
+          branchId,
+          isPrimary: branchId === input.primaryBranchId,
+          roleInBranch: null,
+        })),
+      );
 
       if (input.productIds && input.productIds.length > 0) {
         await tx.insert(schema.userProductAssignments).values(
@@ -538,6 +627,15 @@ export class UsersService {
             productId,
           })),
         );
+      }
+
+      const createOverrides = input.permissionOverrides ?? {};
+      if (Object.keys(createOverrides).length > 0) {
+        await this.applyPermissionOverrides(tx, {
+          userId: createdUser.id,
+          overrides: createOverrides,
+          actorId: actor.id,
+        });
       }
 
       return createdUser;
@@ -623,6 +721,12 @@ export class UsersService {
         commissionPlanId: schema.users.commissionPlanId,
         primaryBranchId: schema.users.primaryBranchId,
         isFinanceOfficer: schema.users.isFinanceOfficer,
+        roleTemplateId: schema.users.roleTemplateId,
+        scopeGlobal: schema.users.scopeGlobal,
+        scopeOrgWideHead: schema.users.scopeOrgWideHead,
+        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
+        loginCount: schema.users.loginCount,
+        lastLoginAt: schema.users.lastLoginAt,
         createdAt: schema.users.createdAt,
         updatedAt: schema.users.updatedAt,
       })
@@ -833,8 +937,18 @@ export class UsersService {
       .from(schema.users)
       .where(
         and(
-          or(eq(schema.users.role, 'CS_AGENT'), eq(schema.users.role, 'HEAD_OF_CS')),
           eq(schema.users.status, 'ACTIVE'),
+          or(
+            eq(schema.users.role, 'CS_AGENT'),
+            eq(schema.users.role, 'HEAD_OF_CS'),
+            sql<boolean>`EXISTS (
+              SELECT 1
+              FROM branch_team_members btm
+              INNER JOIN branch_teams bt ON bt.id = btm.team_id
+              WHERE btm.user_id = ${schema.users.id}
+                AND bt.department = 'CS'
+            )`,
+          ),
         ),
       )
       .orderBy(asc(schema.users.name));
@@ -875,8 +989,11 @@ export class UsersService {
       .from(schema.users)
       .where(
         and(
-          inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER']),
           inArray(schema.users.status, ['ACTIVE', 'PENDING']),
+          or(
+            inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER']),
+            eq(schema.users.scopeOrgWideHead, true),
+          ),
         ),
       )
       .orderBy(asc(schema.users.name));
@@ -915,6 +1032,10 @@ export class UsersService {
         name: schema.users.name,
         email: schema.users.email,
         role: schema.users.role,
+        roleTemplateId: schema.users.roleTemplateId,
+        scopeGlobal: schema.users.scopeGlobal,
+        scopeOrgWideHead: schema.users.scopeOrgWideHead,
+        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
         capacity: schema.users.capacity,
         logisticsLocationId: schema.users.logisticsLocationId,
         phone: schema.users.phone,
@@ -932,6 +1053,59 @@ export class UsersService {
     }
 
     const beforeRow = existingRows[0];
+    const existingMembershipRows = await this.db
+      .select({ branchId: schema.userBranches.branchId })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.userId, input.userId));
+    const existingBranchIds = [...new Set(existingMembershipRows.map((r) => r.branchId))];
+    const nextBranchIds =
+      input.branchIds !== undefined ? [...new Set(input.branchIds)] : [...existingBranchIds];
+    if (input.primaryBranchId && !nextBranchIds.includes(input.primaryBranchId)) {
+      nextBranchIds.push(input.primaryBranchId);
+    }
+    const nextPrimaryBranchId = input.primaryBranchId ?? beforeRow.primaryBranchId ?? null;
+    if (nextBranchIds.length > 0 && nextPrimaryBranchId && !nextBranchIds.includes(nextPrimaryBranchId)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Primary branch must be one of the selected branches.',
+      });
+    }
+
+    const effectiveRole = input.role ?? beforeRow.role;
+    if (effectiveRole !== 'SUPER_ADMIN' && nextBranchIds.length === 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'At least one branch is required.',
+      });
+    }
+    if (
+      effectiveRole !== 'SUPER_ADMIN' &&
+      (input.branchIds !== undefined || input.primaryBranchId !== undefined) &&
+      !nextPrimaryBranchId
+    ) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Primary branch is required.',
+      });
+    }
+    if (nextBranchIds.length > 0) {
+      const activeBranchRows = await this.db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(
+          and(
+            inArray(schema.branches.id, nextBranchIds),
+            eq(schema.branches.status, 'ACTIVE'),
+          ),
+        );
+      if (activeBranchRows.length !== nextBranchIds.length) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'One or more selected branches are missing or inactive.',
+        });
+      }
+    }
+
     const assignmentRowsBefore = await this.db
       .select({ productId: schema.userProductAssignments.productId })
       .from(schema.userProductAssignments)
@@ -956,10 +1130,18 @@ export class UsersService {
     // not identity): capacity, productIds, visibleOrderStatuses. Cannot change role, status,
     // email, phone, name, logistics location, commission plan, or the Finance hat.
     // Team-leads cannot edit each other or themselves — that stays admin territory.
-    const actorIsTeamLead = actor.role === 'HEAD_OF_CS' || actor.role === 'HEAD_OF_MARKETING';
+    const p = actor.permissions ?? [];
+    const actorIsCsLead =
+      p.includes('cs.teamOverview') || p.includes('team.supervise_cs') || actor.scopeTeamSupervisor === true;
+    const actorIsMarketingLead =
+      p.includes('marketing.teamOverview') ||
+      p.includes('team.supervise_marketing') ||
+      actor.scopeTeamSupervisor === true;
+
+    const actorIsTeamLead = actorIsCsLead || actorIsMarketingLead;
     const targetFitsTeamLeadScope =
-      (actor.role === 'HEAD_OF_CS' && beforeRow.role === 'CS_AGENT') ||
-      (actor.role === 'HEAD_OF_MARKETING' && beforeRow.role === 'MEDIA_BUYER');
+      (actorIsCsLead && beforeRow.role === 'CS_AGENT') ||
+      (actorIsMarketingLead && beforeRow.role === 'MEDIA_BUYER');
     const sameBranch =
       !!actor.currentBranchId &&
       beforeRow.primaryBranchId === actor.currentBranchId;
@@ -968,10 +1150,9 @@ export class UsersService {
       if (!targetFitsTeamLeadScope) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message:
-            actor.role === 'HEAD_OF_CS'
-              ? 'You can only edit CS Agents on your team. Contact an administrator for anything else.'
-              : 'You can only edit Media Buyers on your team. Contact an administrator for anything else.',
+          message: actorIsCsLead
+            ? 'You can only edit CS Agents on your team. Contact an administrator for anything else.'
+            : 'You can only edit Media Buyers on your team. Contact an administrator for anything else.',
         });
       }
       if (!sameBranch) {
@@ -1058,7 +1239,7 @@ export class UsersService {
     // Enforce org-wide singleton heads + per-branch HR_MANAGER when the role field is in the payload.
     const ORG_WIDE_HEAD_ROLES_UPDATE = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
     const roleBeingSet = input.role ?? beforeRow.role;
-    const mergedPrimary = beforeRow.primaryBranchId ?? null;
+    const mergedPrimary = nextPrimaryBranchId;
     if (input.role) {
       if (
         ORG_WIDE_HEAD_ROLES_UPDATE.includes(
@@ -1169,6 +1350,25 @@ export class UsersService {
     if (input.name !== undefined) updateFields['name'] = input.name;
     if (input.email !== undefined) updateFields['email'] = input.email.toLowerCase();
     if (input.role !== undefined) updateFields['role'] = input.role;
+
+    // Permission templates + explicit scope flags
+    if (input.roleTemplateId !== undefined) {
+      updateFields['roleTemplateId'] = input.roleTemplateId;
+    } else if (input.role !== undefined) {
+      const tplId = await this.resolveRoleTemplateIdForEnumRole(input.role);
+      if (tplId) updateFields['roleTemplateId'] = tplId;
+    }
+
+    if (input.scopeGlobal !== undefined) updateFields['scopeGlobal'] = input.scopeGlobal;
+    if (input.scopeOrgWideHead !== undefined) updateFields['scopeOrgWideHead'] = input.scopeOrgWideHead;
+    if (input.scopeTeamSupervisor !== undefined) updateFields['scopeTeamSupervisor'] = input.scopeTeamSupervisor;
+
+    if (input.role !== undefined) {
+      const d = this.defaultScopeForRole(input.role);
+      if (input.scopeGlobal === undefined) updateFields['scopeGlobal'] = d.scopeGlobal;
+      if (input.scopeOrgWideHead === undefined) updateFields['scopeOrgWideHead'] = d.scopeOrgWideHead;
+    }
+
     if (input.capacity !== undefined) updateFields['capacity'] = input.capacity;
     if (input.logisticsLocationId !== undefined) updateFields['logisticsLocationId'] = input.logisticsLocationId;
     if (input.status !== undefined) updateFields['status'] = input.status;
@@ -1192,6 +1392,7 @@ export class UsersService {
     if (input.visibleOrderStatuses !== undefined) updateFields['visibleOrderStatuses'] = input.visibleOrderStatuses;
     if (input.restrictProductAccess !== undefined) updateFields['restrictProductAccess'] = input.restrictProductAccess;
     if (input.isFinanceOfficer !== undefined) updateFields['isFinanceOfficer'] = input.isFinanceOfficer;
+    if (input.primaryBranchId !== undefined) updateFields['primaryBranchId'] = input.primaryBranchId;
 
     // Finance-hat swap: if we're turning the hat ON for this user, clear it from the current
     // holder first in the same transaction. Turning it OFF is a plain revoke (no swap needed).
@@ -1212,7 +1413,7 @@ export class UsersService {
           .set({ isFinanceOfficer: false, updatedAt: new Date() })
           .where(and(eq(schema.users.isFinanceOfficer, true), ne(schema.users.id, input.userId)));
       }
-      return tx
+      const updatedRowsTx = await tx
         .update(schema.users)
         .set(updateFields)
         .where(eq(schema.users.id, input.userId))
@@ -1230,6 +1431,20 @@ export class UsersService {
           isFinanceOfficer: schema.users.isFinanceOfficer,
           updatedAt: schema.users.updatedAt,
         });
+      if (input.branchIds !== undefined || input.primaryBranchId !== undefined) {
+        await tx
+          .delete(schema.userBranches)
+          .where(eq(schema.userBranches.userId, input.userId));
+        await tx.insert(schema.userBranches).values(
+          nextBranchIds.map((branchId) => ({
+            userId: input.userId,
+            branchId,
+            isPrimary: branchId === nextPrimaryBranchId,
+            roleInBranch: null,
+          })),
+        );
+      }
+      return updatedRowsTx;
     });
 
     const updated = updatedRows[0];
@@ -1257,6 +1472,17 @@ export class UsersService {
             })),
           );
         }
+      });
+    }
+
+    const updateOverrides = input.permissionOverrides ?? {};
+    if (Object.keys(updateOverrides).length > 0) {
+      await withActor(this.db, actor, async (tx) => {
+        await this.applyPermissionOverrides(tx, {
+          userId: input.userId,
+          overrides: updateOverrides,
+          actorId: actor.id,
+        });
       });
     }
 
@@ -1335,10 +1561,12 @@ export class UsersService {
    * - Others: forbidden.
    */
   async deactivate(userId: string, actor: SessionUser) {
-    if (actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN') {
+    const can =
+      actor.role === 'SUPER_ADMIN' || (actor.permissions ?? []).includes('users.deactivate');
+    if (!can) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only Super Admins and Admins can deactivate users.',
+        message: 'Missing users.deactivate permission.',
       });
     }
     if (userId === actor.id) {
@@ -1347,19 +1575,17 @@ export class UsersService {
         message: 'Cannot deactivate your own account',
       });
     }
-    // Admins cannot deactivate other admin-level users. Only SuperAdmin can do that.
-    if (actor.role === 'ADMIN') {
-      const [target] = await this.db
-        .select({ role: schema.users.role })
-        .from(schema.users)
-        .where(eq(schema.users.id, userId))
-        .limit(1);
-      if (target && (target.role === 'SUPER_ADMIN' || target.role === 'ADMIN')) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Admins cannot deactivate another Admin or the SuperAdmin. Only the SuperAdmin can.',
-        });
-      }
+    const [targetRoleRow] = await this.db
+      .select({ role: schema.users.role })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (actor.role !== 'SUPER_ADMIN' && targetRoleRow && isAdminLevelRole(targetRoleRow.role as string)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only SuperAdmin can deactivate admin-level accounts.',
+      });
     }
 
     const updated = await withActor(this.db, actor, async (tx) => {

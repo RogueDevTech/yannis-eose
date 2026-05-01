@@ -18,7 +18,8 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (!headers.has('Set-Cookie')) {
-    const domain = process.env['SESSION_COOKIE_DOMAIN']?.trim();
+    const domain =
+      process.env['NODE_ENV'] === 'production' ? process.env['SESSION_COOKIE_DOMAIN']?.trim() : undefined;
     const domainPart = domain ? `; Domain=${domain}` : '';
     const securePart = process.env['NODE_ENV'] === 'production' ? '; Secure; SameSite=Strict' : '; SameSite=Lax';
     headers.set(

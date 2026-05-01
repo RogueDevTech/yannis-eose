@@ -16,7 +16,6 @@ import {
 } from '@remix-run/react';
 import { PwaInstallPrompt } from '~/components/ui/pwa-install-prompt';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
-import { useRevalidateOnAppResume } from '~/hooks/useRevalidateOnAppResume';
 import { useServerAppThemeSync } from '~/hooks/useServerAppThemeSync';
 import { useServerFontScaleSync } from '~/hooks/useServerFontScaleSync';
 import { ScrollToTopButton } from '~/components/ui/scroll-to-top-button';
@@ -134,7 +133,6 @@ export default function App() {
     location.pathname.startsWith('/tpl') ||
     location.pathname.startsWith('/rider');
 
-  useRevalidateOnAppResume(isLoggedInArea);
   useServerAppThemeSync(isLoggedInArea);
   useServerFontScaleSync(isLoggedInArea);
   useScrollToTopOnRouteChange();
@@ -211,7 +209,22 @@ export default function App() {
           dangerouslySetInnerHTML={{
             __html: `
           if ('serviceWorker' in navigator) {
-            window.addEventListener('load', function() {
+            var isLocalDevHost =
+              window.location.hostname === 'localhost' ||
+              window.location.hostname === '127.0.0.1';
+            if (isLocalDevHost) {
+              // Dev guard: avoid stale cached JS chunks from service worker during HMR.
+              // A stale SW can keep serving old assets and leave the app stuck on boot splash.
+              navigator.serviceWorker.getRegistrations().then(function(regs) {
+                regs.forEach(function(reg) { reg.unregister(); });
+              });
+              if (window.caches && typeof window.caches.keys === 'function') {
+                window.caches.keys().then(function(keys) {
+                  keys.forEach(function(key) { window.caches.delete(key); });
+                });
+              }
+            } else {
+              window.addEventListener('load', function() {
               navigator.serviceWorker.register('/sw.js').then(function(reg) {
                 // If there's already a waiting worker on load (e.g. tab was kept open), fire immediately
                 if (reg.waiting && navigator.serviceWorker.controller) {
@@ -245,7 +258,8 @@ export default function App() {
                   window.dispatchEvent(new CustomEvent('yannis:push-received', { detail: event.data }));
                 }
               });
-            });
+              });
+            }
           }
         `,
           }}

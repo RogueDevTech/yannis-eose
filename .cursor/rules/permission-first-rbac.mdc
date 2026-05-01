@@ -1,0 +1,39 @@
+---
+description: Permission-first RBAC — locked context (migration + canonical files)
+alwaysApply: true
+---
+
+# Permission-first RBAC (locked)
+
+## Non-negotiables
+
+- **Authorization is permission-first.** Do not reintroduce **ADMIN** (or other role) as an unconditional bypass beside **`SUPER_ADMIN`** at the tRPC `permissionProcedure` layer.
+- **Effective permissions** for non–SuperAdmin users = **role template ∪ legacy `role_permissions` ∪ `user_permissions` grants − revokes** (`PermissionsService.getEffectivePermissions`).
+- **SUPER_ADMIN** is the only role that may be treated as full-catalog / immutable template semantics; keep **system templates `locked`** except documented emergencies.
+
+## Canonical files (do not drift)
+
+| Area | Path |
+|------|------|
+| Effective perms + sensitive list | `apps/api/src/permissions/permissions.service.ts` |
+| tRPC gates | `apps/api/src/trpc/trpc.ts`, `apps/api/src/trpc/trpc.middleware.ts` |
+| Scope / mirror / branch helpers | `apps/api/src/common/authz.ts` |
+| Finance strip gate | `apps/api/src/common/utils/strip-finance-fields.ts` |
+| Schema + migration | `packages/shared/src/db/schema/rbac.ts`, `packages/shared/drizzle/0093_permission_first_role_templates.sql` |
+| Seed + catalog | `packages/shared/scripts/seed-permissions.ts` |
+| SYSTEM template sync from seed | same script (reconciles `role_template_permissions` for `kind = SYSTEM`) |
+| Role template CRUD | `apps/api/src/permissions/role-templates.service.ts`, `apps/api/src/trpc/routers/role-templates.router.ts` |
+| Permission catalog API | `apps/api/src/trpc/routers/permissions.router.ts` |
+| Staff create + scope/template | `apps/api/src/users/users.service.ts`, `apps/web/app/features/users/UserCreatePage.tsx`, `apps/web/app/routes/hr.users.new/route.tsx` |
+| Role templates UI | `apps/web/app/features/settings/RoleTemplatesPage.tsx`, `apps/web/app/routes/admin.settings.role-templates/route.tsx` |
+| Sidebar / capability labels | `apps/web/app/components/layout/dashboard-layout.tsx`, `apps/web/app/lib/rbac.ts` |
+
+## Operational commands
+
+- After changing permission strings or `ROLE_PERMISSIONS`: `pnpm --filter @yannis/shared db:seed-permissions`
+- Coverage spot-check: `pnpm --filter @yannis/shared db:audit-permission-coverage`
+
+## When editing guards
+
+- Prefer **`actor.permissions?.includes('…')`** and **scope flags** (`scopeGlobal`, `scopeOrgWideHead`, `scopeTeamSupervisor`) over raw `role ===` for **access decisions**, unless the check is legacy-compat-only and documented.
+- Do not remove **`withActor` / actor injection** on writes touched by RBAC changes.

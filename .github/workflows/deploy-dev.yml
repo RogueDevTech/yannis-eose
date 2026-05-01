@@ -92,6 +92,7 @@ jobs:
             infrastructure/deploy/docker-compose.prod.yml \
             infrastructure/nginx/nginx.conf \
             infrastructure/deploy/refresh-env.sh \
+            infrastructure/deploy/run-migrations.sh \
             ubuntu@${EC2_HOST}:/opt/yannis-eose/
 
       - name: Deploy on EC2 via SSH
@@ -133,6 +134,13 @@ jobs:
               docker compose -f docker-compose.prod.yml down 2>/dev/null || true
               echo "→ Pulling images..."
               docker compose -f docker-compose.prod.yml pull
+              chmod +x ./run-migrations.sh 2>/dev/null || true
+              echo "→ Running DB migrations (before bringing up app)..."
+              if [ -x ./run-migrations.sh ]; then
+                ./run-migrations.sh
+              else
+                echo "WARNING: run-migrations.sh missing or not executable — relying on API boot-time migrate only."
+              fi
               echo "→ Starting containers..."
               docker compose -f docker-compose.prod.yml up -d
               echo "→ Waiting 20s for containers to start..."

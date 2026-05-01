@@ -12,7 +12,7 @@ export default defineConfig({
     ['list'],
   ],
   use: {
-    baseURL: process.env.BASE_URL ?? 'http://localhost:4000',
+    baseURL: process.env.BASE_URL ?? 'http://localhost:4003',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -31,7 +31,7 @@ export default defineConfig({
     ? undefined
     : {
         command: 'pnpm turbo dev --filter=web --filter=api',
-        url: 'http://localhost:4000',
+        url: 'http://localhost:4003',
         reuseExistingServer: true,
         timeout: 30000,
       },

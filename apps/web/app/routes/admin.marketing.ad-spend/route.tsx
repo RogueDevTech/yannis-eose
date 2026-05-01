@@ -32,7 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     url,
     'last_48_hours',
   );
-  const { isMediaBuyer, isFundingAdmin } = getMarketingRoleFlags(user.role);
+  const { isMediaBuyer, isFundingAdmin, canApproveAdSpend } = getMarketingRoleFlags(user);
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const searchRaw = url.searchParams.get('search')?.trim();
@@ -231,6 +231,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const data: MarketingAdSpendLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',
+    canApproveAdSpend,
     adSpend: adSpendData?.records ?? [],
     totalAdSpend: totalRows,
     adSpendTotal: adSpendData?.totalSpend ?? '0',

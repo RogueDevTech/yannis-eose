@@ -103,6 +103,15 @@ yannis-eose/
 
 ## Database Principles
 
+### Migrations auto-run on app startup (Phase 19, 2026-04-29)
+The API runs every pending SQL migration in [packages/shared/drizzle/*.sql](packages/shared/drizzle/) on `OnApplicationBootstrap` before NestJS starts accepting requests. If any migration fails, the app **aborts boot** → docker health check fails → the deploy pipeline catches the failed health check and rolls back. Successful deploys are by definition migrated deploys.
+
+- Implementation: [apps/api/src/database/migration-runner.service.ts](apps/api/src/database/migration-runner.service.ts). Reads SQL files in alpha (= numeric, since we name them `0042_…`) order, tracks applied filenames in `_yannis_applied_migrations` (created on first boot), runs each unapplied file inside its own transaction.
+- We deliberately do **not** use `drizzle-kit migrate` here — the journal at [packages/shared/drizzle/meta/_journal.json](packages/shared/drizzle/meta/_journal.json) only catches drizzle-kit-generated files, but most of our migrations are hand-written (RLS, triggers, history-table syncs). The custom runner is journal-free: it sees the directory, period.
+- Escape hatch: set `MIGRATIONS_AUTORUN=false` on a single instance to boot without running migrations. Use only when you need to debug a stuck migration; never in normal prod.
+- Do **NOT** require a separate `psql -f` step in the deploy pipeline anymore. The `psql` route stays as a one-off fallback if the auto-runner is intentionally disabled. The docker-compose deploy in `infrastructure/deploy/` runs the API with the runner enabled by default.
+- Hand-written migrations work without `_journal.json` entries — the runner doesn't read it. But if you also use `pnpm db:generate` on the schema, the journal still gets updated; the runner just ignores it.
+
 ### UUIDv7 Everywhere
 All primary keys use UUIDv7 (timestamp-ordered). This improves B-tree index performance and gives a free creation timestamp embedded in every ID. Never use auto-incrementing integers or UUIDv4.
 
@@ -554,6 +563,16 @@ Deep-link mapper in `notifications.service.ts::getLinkPathForType` routes any `h
 - Branch context flows through `withActorAndBranch(this.db, { id, currentBranchId }, ...)` — every batch write sets both `yannis.current_user_id` and `yannis.current_branch_id` so RLS + audit attribution work.
 
 Files to know: [apps/api/src/hr/payroll-batch.service.ts](apps/api/src/hr/payroll-batch.service.ts), [apps/api/src/hr/hr.service.ts](apps/api/src/hr/hr.service.ts), [apps/api/src/trpc/routers/hr.router.ts](apps/api/src/trpc/routers/hr.router.ts), [apps/web/app/features/hr/MonthlyPayrolls.tsx](apps/web/app/features/hr/MonthlyPayrolls.tsx), [apps/web/app/features/hr/CommissionPlansPage.tsx](apps/web/app/features/hr/CommissionPlansPage.tsx), [apps/web/app/routes/hr.payroll/route.tsx](apps/web/app/routes/hr.payroll/route.tsx), [apps/web/app/routes/hr.plans/route.tsx](apps/web/app/routes/hr.plans/route.tsx), [apps/web/app/routes/hr.payroll-batch.$id/route.tsx](apps/web/app/routes/hr.payroll-batch.$id/route.tsx), [packages/shared/drizzle/0067_payroll_batches.sql](packages/shared/drizzle/0067_payroll_batches.sql).
+
+---
+
+## Permission-first RBAC (locked)
+
+**Authoritative product write-up:** [prd.md](prd.md) **§5.3** (Permission-first RBAC). **Build / merge checklist:** [task.md](task.md) **Locked: Permission-first RBAC**. **Cursor lockfile (always-on):** [.cursor/rules/permission-first-rbac.mdc](.cursor/rules/permission-first-rbac.mdc).
+
+- Authorization is **permission-first**; **`SUPER_ADMIN`** is the only unrestricted `permissionProcedure` bypass — do not treat **`ADMIN`** as automatic full permission.
+- Effective perms = template ∪ legacy `role_permissions` ∪ user overrides (see `PermissionsService`).
+- After catalog changes: `pnpm --filter @yannis/shared db:seed-permissions`; audit: `pnpm --filter @yannis/shared db:audit-permission-coverage`.
 
 ---
 

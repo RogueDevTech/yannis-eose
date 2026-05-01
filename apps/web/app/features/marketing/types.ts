@@ -361,6 +361,14 @@ export interface MarketingAdSpendLoaderData {
   leaderboardPeriod: 'this_month' | 'all_time';
   filters: MarketingDateFilters;
   viewMode: 'admin' | 'media_buyer';
+  /**
+   * Phase 21: true when the actor can approve / reject ad-spend submissions
+   * (legacy roles `SUPER_ADMIN` / `ADMIN` / `HEAD_OF_MARKETING`, OR a custom role
+   * with `marketing.adSpend.approve`). Distinct from `viewMode` because admin
+   * roles without moderation power (e.g. data-only Finance) shouldn't see the
+   * Approve/Reject buttons even though they're not in media-buyer view.
+   */
+  canApproveAdSpend: boolean;
   /** Grouped accordion view (Phase 17). Groups are page-sliced — pagination is on groups. */
   groups: AdSpendGroup[];
   groupsTotal: number;

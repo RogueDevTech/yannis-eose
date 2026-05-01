@@ -499,6 +499,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 onApprove={setApprovingRequestId}
                 onReject={setRejectingRequestId}
                 emptyMessage={transferEmptyMessage}
+                canApproveFunding={canSendFunding}
               />
             </>
           ) : (
@@ -543,6 +544,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                   onApprove={() => {}}
                   onReject={() => {}}
                   emptyMessage={requestsEmptyMessage}
+                  canApproveFunding={canSendFunding}
                 />
               )}
             </>
@@ -1177,6 +1179,7 @@ function UnifiedDistributingTable({
   onApprove,
   onReject,
   emptyMessage,
+  canApproveFunding,
 }: {
   slice: NonNullable<MarketingFundingLoaderData['distributingEntries']>;
   users: User[];
@@ -1185,6 +1188,8 @@ function UnifiedDistributingTable({
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
   emptyMessage: string;
+  /** Phase 21 — gate Approve/Reject on `marketing.funding.approve` or legacy admin/HoM/Finance role. */
+  canApproveFunding: boolean;
 }) {
   const userNameById = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown user';
   return (
@@ -1232,7 +1237,7 @@ function UnifiedDistributingTable({
                           <Button type="button" variant="ghost" size="sm" className="text-xs" onClick={() => onOpenDetails(entry)}>
                             View
                           </Button>
-                          {isPendingRequest && (
+                          {isPendingRequest && canApproveFunding && (
                             <>
                               <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => onApprove(entry.id)}>
                                 Approve
@@ -1304,7 +1309,7 @@ function UnifiedDistributingTable({
                   <Button type="button" variant="ghost" size="sm" className="text-xs" onClick={() => onOpenDetails(entry)}>
                     View
                   </Button>
-                  {entry.status === 'PENDING' && (
+                  {entry.status === 'PENDING' && canApproveFunding && (
                     <>
                       <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => onApprove(entry.id)}>
                         Approve
@@ -1523,6 +1528,7 @@ function RequestsTable({
   onApprove,
   onReject,
   emptyMessage,
+  canApproveFunding,
 }: {
   slice: FundingRequestsSliceData;
   users: User[];
@@ -1532,6 +1538,13 @@ function RequestsTable({
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
   emptyMessage: string;
+  /**
+   * Phase 21 — true when the actor can approve/reject funding requests.
+   * In `mb-requests` mode the table only renders for users who already passed
+   * `canDistribute`, but not all canDistribute users have approve rights (e.g.
+   * a custom role with `marketing.read` but no `marketing.funding.approve`).
+   */
+  canApproveFunding: boolean;
 }) {
   const showRequester = mode === 'mb-requests';
 
@@ -1555,7 +1568,10 @@ function RequestsTable({
               const canResend =
                 mode === 'my-requests' && r.requesterId === currentUserId && r.status === 'PENDING';
               const canApprove =
-                mode === 'mb-requests' && r.status === 'PENDING' && r.requesterId !== currentUserId;
+                canApproveFunding &&
+                mode === 'mb-requests' &&
+                r.status === 'PENDING' &&
+                r.requesterId !== currentUserId;
               return (
                 <tr key={r.id} className="table-row">
                   {showRequester && (
@@ -1630,7 +1646,10 @@ function RequestsTable({
           const canResend =
             mode === 'my-requests' && r.requesterId === currentUserId && r.status === 'PENDING';
           const canApprove =
-            mode === 'mb-requests' && r.status === 'PENDING' && r.requesterId !== currentUserId;
+            canApproveFunding &&
+            mode === 'mb-requests' &&
+            r.status === 'PENDING' &&
+            r.requesterId !== currentUserId;
           return (
             <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
               <div className="flex items-center justify-between">

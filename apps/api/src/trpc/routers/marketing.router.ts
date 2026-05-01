@@ -144,7 +144,10 @@ export const marketingRouter = router({
     }),
 
   /** Media Buyer or Head of Marketing: submit a funding request. MB notifies HoM; HoM notifies SuperAdmin + Finance. */
-  requestFunding: authedProcedure
+  // Phase 20 — gated by `marketing.funding.request` permission. Both MEDIA_BUYER
+  // and HEAD_OF_MARKETING templates carry this code; the service decides who
+  // the request goes TO based on the caller's role (MB→HoM, HoM→Finance).
+  requestFunding: permissionProcedure('marketing.funding.request')
     .meta({ branchScopedMutation: true })
     .input(
       z.object({
@@ -154,14 +157,16 @@ export const marketingRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'MEDIA_BUYER' && ctx.user.role !== 'HEAD_OF_MARKETING') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Media Buyers or Head of Marketing can request funding' });
-      }
+      // The service still needs the role to decide the target audience for the
+      // notification (HoM if MB asks; Finance + SuperAdmin if HoM asks).
+      // Custom roles with the permission default to the MB→HoM flow.
+      const requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING' =
+        ctx.user.role === 'HEAD_OF_MARKETING' ? 'HEAD_OF_MARKETING' : 'MEDIA_BUYER';
       return getMarketingService().requestFunding(
         input.amount,
         input.reason ?? '',
         ctx.user.id,
-        ctx.user.role as 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
+        requesterRole,
         input.branchId ?? ctx.currentBranchId,
       );
     }),
@@ -190,14 +195,11 @@ export const marketingRouter = router({
       );
     }),
 
-  /** HoM/SuperAdmin/Finance: approve a funding request (after sending money manually) by attaching receipt. Notifies Media Buyer. */
-  approveFundingRequest: authedProcedure
+  /** Phase 20: gated by `marketing.funding.approve` (HoM, Finance, Admin templates carry it). */
+  approveFundingRequest: permissionProcedure('marketing.funding.approve')
     .meta({ branchScopedMutation: true })
     .input(approveFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.role !== 'FINANCE_OFFICER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing, Finance Officer, or Super Admin can approve funding requests' });
-      }
       return getMarketingService().approveFundingRequest(
         input.requestId,
         input.receiptUrl,
@@ -206,14 +208,11 @@ export const marketingRouter = router({
       );
     }),
 
-  /** HoM/SuperAdmin/Finance: reject a funding request. Notifies Media Buyer. */
-  rejectFundingRequest: authedProcedure
+  /** Phase 20: same `marketing.funding.approve` permission covers both approve and reject. */
+  rejectFundingRequest: permissionProcedure('marketing.funding.approve')
     .meta({ branchScopedMutation: true })
     .input(rejectFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.role !== 'FINANCE_OFFICER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing, Finance Officer, or Super Admin can reject funding requests' });
-      }
       return getMarketingService().rejectFundingRequest(input.requestId, input.reason, ctx.user.id);
     }),
 
@@ -280,23 +279,19 @@ export const marketingRouter = router({
       return getMarketingService().previewAdSpendInterval(input, ctx.user.id, ctx.currentBranchId);
     }),
 
-  approveAdSpend: authedProcedure
+  /** Phase 20: gated by `marketing.adSpend.approve` (HoM + Admin templates). */
+  approveAdSpend: permissionProcedure('marketing.adSpend.approve')
     .meta({ branchScopedMutation: true })
     .input(approveAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can approve ad spend' });
-      }
       return getMarketingService().approveAdSpend(input.adSpendId, ctx.user.id);
     }),
 
-  rejectAdSpend: authedProcedure
+  /** Phase 20: same `marketing.adSpend.approve` covers both approve and reject. */
+  rejectAdSpend: permissionProcedure('marketing.adSpend.approve')
     .meta({ branchScopedMutation: true })
     .input(rejectAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      if (ctx.user.role !== 'HEAD_OF_MARKETING' && (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Marketing or Super Admin can reject ad spend' });
-      }
       return getMarketingService().rejectAdSpend(input.adSpendId, input.reason, ctx.user.id);
     }),
 

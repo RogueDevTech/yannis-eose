@@ -25,6 +25,7 @@ import { SettingsModule } from './settings/settings.module';
 import { CartModule } from './cart/cart.module';
 import { PermissionRequestsModule } from './permission-requests/permission-requests.module';
 import { PaymentsModule } from './payments/payments.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 
 @Module({
   imports: [
@@ -35,7 +36,7 @@ import { PaymentsModule } from './payments/payments.module';
     OrdersModule, UsersModule, ProductsModule, InventoryModule,
     LogisticsModule, MarketingModule, FinanceModule, HrModule,
     NotificationsModule, VoipModule, SettingsModule, CartModule,
-    PermissionRequestsModule, PaymentsModule,
+    PermissionRequestsModule, PaymentsModule, OnboardingModule,
   ],
   controllers: [AppController],
   providers: [
