@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
@@ -52,11 +53,20 @@ export function DeliveryRemittanceDetailPage({
     <div className="space-y-4">
       <PageHeader
         title={detail.status === 'SENT' ? 'Review cash remittance' : 'Cash remittance'}
-        description={`${detail.locationName ?? 'Unknown location'} · ${detail.orderCount} order(s)`}
+        description={`${
+          detail.locationName
+            ? detail.locationProviderName
+              ? `${detail.locationName} — ${detail.locationProviderName}`
+              : detail.locationName
+            : 'Unknown location'
+        } · ${detail.orderCount} order(s)`}
         actions={
-          <Link to="/admin/finance/delivery-remittances" className="btn-secondary btn-sm inline-flex">
-            Back to list
-          </Link>
+          <>
+            <PageRefreshButton />
+            <Link to="/admin/finance/delivery-remittances" className="btn-secondary btn-sm inline-flex">
+              Back to list
+            </Link>
+          </>
         }
       />
 

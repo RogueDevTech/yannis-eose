@@ -3,9 +3,11 @@ import { Form, useFetcher, useNavigation } from '@remix-run/react';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Button } from '~/components/ui/button';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
+import { DescriptionList } from '~/components/ui/description-list';
 import { FormField } from '~/components/ui/form-field';
 import { FormSelect } from '~/components/ui/form-select';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -48,7 +50,7 @@ export interface StaffOnboardingPageProps {
   record: OnboardingRecord;
   /**
    * `self`  — the actor IS the subject. Form follows lock rules (SUBMITTED/APPROVED → read-only).
-   * `hr`    — the actor is HR / admin viewing someone else. Always editable; Approve shown when SUBMITTED.
+   * `hr`    — HR / admin viewing a staff member. Fields are read-only; staff edit on `/admin/onboarding`. Approve when SUBMITTED.
    */
   mode: 'self' | 'hr';
   /** Action endpoint — defaults to current route. */
@@ -61,9 +63,7 @@ export interface StaffOnboardingPageProps {
 const GENDER_OPTIONS = [
   { value: '', label: 'Select…' },
   { value: 'MALE', label: 'Male' },
-  { value: 'FEMALE', label: 'Female' },
-  { value: 'OTHER', label: 'Other' },
-  { value: 'PREFER_NOT_TO_SAY', label: 'Prefer not to say' },
+  { value: 'FEMALE', label: 'Female' }
 ];
 
 function formatStatusLabel(status: OnboardingStatus): string {
@@ -79,6 +79,155 @@ function formatStatusLabel(status: OnboardingStatus): string {
   }
 }
 
+function formatGenderLabel(gender: OnboardingRecord['gender']): string {
+  if (!gender) return '';
+  const row = GENDER_OPTIONS.find((o) => o.value === gender);
+  return row?.label ?? gender;
+}
+
+function formatDobDisplay(isoDate: string | null): string {
+  if (!isoDate) return '';
+  const d = new Date(isoDate.includes('T') ? isoDate : `${isoDate}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString('en-NG', { dateStyle: 'long' });
+}
+
+function DocumentOpenLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex w-fit items-center rounded-md border border-app-border bg-app-elevated px-3 py-2 text-sm font-medium text-brand-600 shadow-sm transition-colors hover:border-brand-400/40 hover:bg-app-hover dark:text-brand-400"
+    >
+      {label}
+      <span className="ml-1.5 text-xs font-normal text-app-fg-muted">↗</span>
+    </a>
+  );
+}
+
+function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
+  const genderDisplay = formatGenderLabel(record.gender);
+  const dobDisplay = formatDobDisplay(record.dateOfBirth);
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader title="Personal details" description="Information on file from the staff member." />
+        <CardBody>
+          <DescriptionList
+            layout="grid"
+            divided
+            items={[
+              {
+                label: 'Gender',
+                value: genderDisplay || <span className="text-app-fg-muted">Not provided</span>,
+              },
+              {
+                label: 'Date of birth',
+                value: dobDisplay || <span className="text-app-fg-muted">Not provided</span>,
+              },
+              {
+                label: 'Residential address',
+                value: record.residentialAddress?.trim() ? (
+                  <span className="whitespace-pre-wrap">{record.residentialAddress}</span>
+                ) : (
+                  <span className="text-app-fg-muted">Not provided</span>
+                ),
+                fullWidth: true,
+              },
+              {
+                label: 'Proof of address',
+                value: record.proofOfAddressUrl ? (
+                  <DocumentOpenLink href={record.proofOfAddressUrl} label="Open proof of address" />
+                ) : (
+                  <span className="text-app-fg-muted">Not provided</span>
+                ),
+                fullWidth: true,
+              },
+            ]}
+          />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Supporting documents"
+          description="Additional documents supplied with onboarding."
+        />
+        <CardBody className="space-y-2">
+          {record.supportingDocuments.length === 0 ? (
+            <p className="text-sm text-app-fg-muted">No supporting documents attached.</p>
+          ) : (
+            <ul className="space-y-2">
+              {record.supportingDocuments.map((doc, idx) => (
+                <li
+                  key={`${doc.url}-${idx}`}
+                  className="flex flex-col gap-2 rounded-lg border border-app-border bg-app-elevated/80 p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-app-fg">{doc.label?.trim() || 'Untitled document'}</p>
+                  </div>
+                  <DocumentOpenLink href={doc.url} label="Open file" />
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardBody>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <GuarantorReadOnlyCard index={1} record={record} />
+        <GuarantorReadOnlyCard index={2} record={record} />
+      </div>
+    </div>
+  );
+}
+
+function GuarantorReadOnlyCard({ index, record }: { index: 1 | 2; record: OnboardingRecord }) {
+  const prefix = `guarantor${index}` as const;
+  const letterUrl = record[`${prefix}LetterUrl` as const];
+  const name = record[`${prefix}Name` as const];
+  const phone = record[`${prefix}Phone` as const];
+  const email = record[`${prefix}Email` as const];
+  const relationship = record[`${prefix}Relationship` as const];
+  const address = record[`${prefix}Address` as const];
+
+  const empty = <span className="text-app-fg-muted">Not provided</span>;
+
+  return (
+    <Card>
+      <CardHeader title={`Guarantor ${index}`} description="Reference and signed letter on file." />
+      <CardBody>
+        <DescriptionList
+          layout="grid"
+          divided
+          items={[
+            { label: 'Full name', value: name?.trim() ? name : empty },
+            { label: 'Phone', value: phone?.trim() ? phone : empty },
+            { label: 'Email', value: email?.trim() ? email : empty },
+            { label: 'Relationship', value: relationship?.trim() ? relationship : empty },
+            {
+              label: 'Address',
+              value: address?.trim() ? <span className="whitespace-pre-wrap">{address}</span> : empty,
+              fullWidth: true,
+            },
+            {
+              label: 'Signed letter',
+              value: letterUrl ? (
+                <DocumentOpenLink href={letterUrl} label="Open signed letter" />
+              ) : (
+                empty
+              ),
+              fullWidth: true,
+            },
+          ]}
+        />
+      </CardBody>
+    </Card>
+  );
+}
+
 export function StaffOnboardingPage({
   subject,
   record,
@@ -92,9 +241,9 @@ export function StaffOnboardingPage({
 
   useFetcherToast(fetcher.data, { successMessage: 'Onboarding saved' });
 
-  // Lock rules: staff lose write access once SUBMITTED or APPROVED. HR keeps writing.
+  // Lock rules: staff lose write access once SUBMITTED or APPROVED. HR profile view is always read-only for fields.
   const lockedForStaff = record.status === 'SUBMITTED' || record.status === 'APPROVED';
-  const readOnly = mode === 'self' && lockedForStaff;
+  const readOnly = (mode === 'self' && lockedForStaff) || mode === 'hr';
 
   const [proofUrl, setProofUrl] = useState(record.proofOfAddressUrl ?? '');
   const [g1Letter, setG1Letter] = useState(record.guarantor1LetterUrl ?? '');
@@ -146,7 +295,7 @@ export function StaffOnboardingPage({
         description={
           mode === 'self'
             ? 'Help HR keep accurate records. You can save and come back anytime — submit when you\'re ready.'
-            : 'HR view — edit any field on behalf of this staff member, or approve when their submission looks good.'
+            : 'Review the packet below (documents open in a new tab). Staff edit from Your onboarding; approve here once verification is complete.'
         }
         actions={
           <div className="flex items-center gap-2">
@@ -157,11 +306,12 @@ export function StaffOnboardingPage({
             {approvedDate ? (
               <span className="text-xs text-app-fg-muted">Approved {approvedDate}</span>
             ) : null}
+            <PageRefreshButton />
           </div>
         }
       />
 
-      {readOnly ? (
+      {readOnly && mode === 'self' ? (
         <div className="rounded-lg border border-app-border bg-app-hover/50 p-3 text-sm text-app-fg-muted">
           {record.status === 'APPROVED'
             ? 'Your onboarding has been approved by HR and is now locked. Contact HR if anything needs to change.'
@@ -171,184 +321,172 @@ export function StaffOnboardingPage({
           ) : null}
         </div>
       ) : null}
+      {readOnly && mode === 'hr' ? (
+        <div className="rounded-lg border border-dashed border-app-border bg-app-elevated/40 px-4 py-3 text-sm text-app-fg-muted">
+          <span className="font-medium text-app-fg">HR review</span>
+          {' · '}
+          Only the staff member can edit this packet from{' '}
+          <span className="text-app-fg font-medium">Your onboarding</span>. Use the sections below to verify details and
+          open documents; approve when the submission is complete.
+        </div>
+      ) : null}
 
-      <Form
-        method="post"
-        action={actionUrl}
-        onSubmit={(e) => {
-          // We always submit via fetcher so the toast wires up; the underlying
-          // <Form> just keeps default native validation behaviour for required fields.
-          e.preventDefault();
-          handleSaveDraft(e.currentTarget);
-        }}
-        className="space-y-4"
-      >
-        <input type="hidden" name="intent" value="updateOnboarding" />
+      {readOnly ? (
+        <div className="space-y-4">
+          <OnboardingReadOnlyView record={record} />
 
-        {/* ── Personal details ───────────────────────────── */}
-        <Card>
-          <CardHeader title="Personal details" description="The basics HR needs on file." />
-          <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="Gender">
-              <FormSelect
-                name="gender"
-                defaultValue={record.gender ?? ''}
-                disabled={readOnly}
-                options={GENDER_OPTIONS}
-              />
-            </FormField>
-            <FormField label="Date of birth">
-              <TextInput
-                type="date"
-                name="dateOfBirth"
-                defaultValue={record.dateOfBirth ?? ''}
-                disabled={readOnly}
-                max={new Date().toISOString().slice(0, 10)}
-              />
-            </FormField>
-            <FormField label="Residential address" className="sm:col-span-2">
-              <Textarea
-                name="residentialAddress"
-                rows={2}
-                defaultValue={record.residentialAddress ?? ''}
-                disabled={readOnly}
-                placeholder="Street, area, city, state"
-              />
-            </FormField>
-            <FormField label="Proof of address" hint="Utility bill or bank statement (PDF / image, ≤10MB)" className="sm:col-span-2">
-              {readOnly ? (
-                proofUrl ? (
-                  <a
-                    href={proofUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-brand-500 hover:text-brand-600"
-                  >
-                    View uploaded file
-                  </a>
-                ) : (
-                  <p className="text-sm text-app-fg-muted">No file uploaded.</p>
-                )
-              ) : (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {mode === 'hr' && record.status === 'SUBMITTED' ? (
+              <Button
+                type="button"
+                variant="primary"
+                loading={isApproving}
+                onClick={() => setConfirmApprove(true)}
+              >
+                Approve onboarding
+              </Button>
+            ) : null}
+          </div>
+
+          {fetcher.data?.error ? (
+            <p className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-200">
+              {fetcher.data.error}
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <Form
+          method="post"
+          action={actionUrl}
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSaveDraft(e.currentTarget);
+          }}
+          className="space-y-4"
+        >
+          <input type="hidden" name="intent" value="updateOnboarding" />
+
+          <Card>
+            <CardHeader title="Personal details" description="The basics HR needs on file." />
+            <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField label="Gender">
+                <FormSelect name="gender" defaultValue={record.gender ?? ''} options={GENDER_OPTIONS} />
+              </FormField>
+              <FormField label="Date of birth">
+                <TextInput
+                  type="date"
+                  name="dateOfBirth"
+                  defaultValue={record.dateOfBirth ?? ''}
+                  max={new Date().toISOString().slice(0, 10)}
+                />
+              </FormField>
+              <FormField label="Residential address" className="sm:col-span-2">
+                <Textarea
+                  name="residentialAddress"
+                  rows={2}
+                  defaultValue={record.residentialAddress ?? ''}
+                  placeholder="Street, area, city, state"
+                />
+              </FormField>
+              <FormField label="Proof of address" hint="Utility bill or bank statement (PDF / image, ≤10MB)" className="sm:col-span-2">
                 <FileUpload
                   folder={S3_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
                   maxSizeMB={10}
                   onUpload={setProofUrl}
                 />
-              )}
-              {!readOnly && proofUrl ? (
-                <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {proofUrl}</p>
-              ) : null}
-            </FormField>
-          </CardBody>
-        </Card>
+                {proofUrl ? (
+                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {proofUrl}</p>
+                ) : null}
+              </FormField>
+            </CardBody>
+          </Card>
 
-        {/* ── Supporting documents ────────────────────────── */}
-        <Card>
-          <CardHeader
-            title="Supporting documents"
-            description="Anything else HR should keep on file (NIN, NYSC, certificates)."
-          />
-          <CardBody className="space-y-3">
-            {supportingDocs.length === 0 ? (
-              <p className="text-sm text-app-fg-muted">No documents attached yet.</p>
-            ) : (
-              <ul className="space-y-2">
-                {supportingDocs.map((doc, idx) => (
-                  <li
-                    key={`${doc.url}-${idx}`}
-                    className="flex items-center justify-between rounded-md border border-app-border bg-app-elevated px-3 py-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-app-fg">{doc.label || 'Untitled document'}</p>
-                      <a
-                        href={doc.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="truncate text-xs text-brand-500 hover:text-brand-600 break-all"
-                      >
-                        {doc.url}
-                      </a>
-                    </div>
-                    {!readOnly ? (
+          <Card>
+            <CardHeader
+              title="Supporting documents"
+              description="Anything else HR should keep on file (NIN, NYSC, certificates)."
+            />
+            <CardBody className="space-y-3">
+              {supportingDocs.length === 0 ? (
+                <p className="text-sm text-app-fg-muted">No documents attached yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {supportingDocs.map((doc, idx) => (
+                    <li
+                      key={`${doc.url}-${idx}`}
+                      className="flex items-center justify-between rounded-md border border-app-border bg-app-elevated px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-app-fg">{doc.label || 'Untitled document'}</p>
+                        <a
+                          href={doc.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="truncate text-xs text-brand-500 hover:text-brand-600 break-all"
+                        >
+                          {doc.url}
+                        </a>
+                      </div>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() =>
-                          setSupportingDocs((prev) => prev.filter((_, i) => i !== idx))
-                        }
+                        onClick={() => setSupportingDocs((prev) => prev.filter((_, i) => i !== idx))}
                       >
                         Remove
                       </Button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {!readOnly ? (
+                    </li>
+                  ))}
+                </ul>
+              )}
               <AddSupportingDocument
                 onAdd={(doc) => setSupportingDocs((prev) => [...prev, doc])}
                 disabled={supportingDocs.length >= 20}
               />
-            ) : null}
-          </CardBody>
-        </Card>
+            </CardBody>
+          </Card>
 
-        {/* ── Guarantors ──────────────────────────────────── */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <GuarantorCard
-            index={1}
-            record={record}
-            readOnly={readOnly}
-            letterUrl={g1Letter}
-            onLetterUpload={setG1Letter}
-          />
-          <GuarantorCard
-            index={2}
-            record={record}
-            readOnly={readOnly}
-            letterUrl={g2Letter}
-            onLetterUpload={setG2Letter}
-          />
-        </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <GuarantorCard
+              index={1}
+              record={record}
+              readOnly={false}
+              letterUrl={g1Letter}
+              onLetterUpload={setG1Letter}
+            />
+            <GuarantorCard
+              index={2}
+              record={record}
+              readOnly={false}
+              letterUrl={g2Letter}
+              onLetterUpload={setG2Letter}
+            />
+          </div>
 
-        {/* ── Footer actions ──────────────────────────────── */}
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {!readOnly ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button type="submit" variant="secondary" loading={isSavingDraft || navigation.state === 'submitting'}>
               Save draft
             </Button>
-          ) : null}
-          {mode === 'self' && record.status === 'IN_PROGRESS' ? (
-            <Button
-              type="button"
-              variant="primary"
-              loading={isSubmitting}
-              onClick={() => setConfirmSubmit(true)}
-            >
-              Submit for HR review
-            </Button>
-          ) : null}
-          {mode === 'hr' && record.status === 'SUBMITTED' ? (
-            <Button
-              type="button"
-              variant="primary"
-              loading={isApproving}
-              onClick={() => setConfirmApprove(true)}
-            >
-              Approve onboarding
-            </Button>
-          ) : null}
-        </div>
+            {mode === 'self' && record.status === 'IN_PROGRESS' ? (
+              <Button
+                type="button"
+                variant="primary"
+                loading={isSubmitting}
+                onClick={() => setConfirmSubmit(true)}
+              >
+                Submit for HR review
+              </Button>
+            ) : null}
+          </div>
 
-        {fetcher.data?.error ? (
-          <p className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-200">
-            {fetcher.data.error}
-          </p>
-        ) : null}
-      </Form>
+          {fetcher.data?.error ? (
+            <p className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-200">
+              {fetcher.data.error}
+            </p>
+          ) : null}
+        </Form>
+      )}
 
       <ConfirmActionModal
         open={confirmSubmit}
@@ -370,7 +508,7 @@ export function StaffOnboardingPage({
         open={confirmApprove}
         onClose={() => setConfirmApprove(false)}
         title="Approve this onboarding?"
-        description="The staff member will be notified, and the form will be permanently locked for them. You can still edit on their behalf."
+        description="The staff member will be notified. Their onboarding will stay approved and locked for edits unless you coordinate a correction with them."
         confirmLabel="Approve"
         variant="warning"
         loading={isApproving}
@@ -398,8 +536,8 @@ function AddSupportingDocument({
   const ready = label.trim().length > 0 && url.trim().length > 0;
 
   return (
-    <div className="grid grid-cols-1 gap-2 rounded-md border border-app-border bg-app-hover/40 p-3 sm:grid-cols-[2fr,3fr,auto] sm:items-end">
-      <FormField label="Label">
+    <div className="flex flex-col gap-3 rounded-md border border-app-border bg-app-hover/40 p-3">
+      <FormField label="Document label">
         <TextInput
           value={label}
           onChange={(e) => setLabel(e.target.value)}
@@ -408,7 +546,7 @@ function AddSupportingDocument({
           disabled={disabled}
         />
       </FormField>
-      <FormField label="File">
+      <FormField label="File" hint="PDF or image, ≤10MB">
         {url ? (
           <p className="rounded-md border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg-muted break-all">{url}</p>
         ) : (
@@ -421,20 +559,22 @@ function AddSupportingDocument({
           />
         )}
       </FormField>
-      <Button
-        type="button"
-        variant="primary"
-        size="sm"
-        disabled={!ready || disabled}
-        onClick={() => {
-          if (!ready) return;
-          onAdd({ label: label.trim(), url: url.trim() });
-          setLabel('');
-          setUrl('');
-        }}
-      >
-        Add document
-      </Button>
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          disabled={!ready || disabled}
+          onClick={() => {
+            if (!ready) return;
+            onAdd({ label: label.trim(), url: url.trim() });
+            setLabel('');
+            setUrl('');
+          }}
+        >
+          Add document
+        </Button>
+      </div>
     </div>
   );
 }

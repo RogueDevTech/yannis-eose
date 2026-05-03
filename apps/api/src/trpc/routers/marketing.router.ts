@@ -30,7 +30,6 @@ import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService } from './branches.router';
-import { isAdminLevel } from '../../common/authz';
 
 let marketingServiceInstance: MarketingService | null = null;
 
@@ -55,9 +54,9 @@ export const marketingRouter = router({
       const bId = branchId ?? ctx.currentBranchId ?? null;
       const perms = ctx.user.permissions ?? [];
       const hasFundingPerm =
+        ctx.user.role === 'SUPER_ADMIN' ||
         perms.includes('marketing.funding') ||
-        perms.includes('finance.disburse') ||
-        isAdminLevel(ctx.user);
+        perms.includes('finance.disburse');
       if (!hasFundingPerm) {
         if (!bId) {
           throw new TRPCError({
@@ -102,7 +101,20 @@ export const marketingRouter = router({
   fundingRequestStatusCounts: authedProcedure
     .input(fundingRequestStatusCountsSchema)
     .query(async ({ input, ctx }) => {
-      return getMarketingService().fundingRequestStatusCounts(input, ctx.user, ctx.currentBranchId);
+      // Migration 0106 — same scoping rule as listFundingRequests. Non-admin
+      // viewers without an explicit `requesterId` see counts for their own
+      // inbox (target = caller) plus legacy NULL-target rows.
+      const isAdminClass = ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
+      const askingForOwnOutbound = input.requesterId === ctx.user.id;
+      const scopedTargetUserId =
+        !isAdminClass && !askingForOwnOutbound
+          ? (input.targetUserId ?? ctx.user.id)
+          : input.targetUserId;
+      return getMarketingService().fundingRequestStatusCounts(
+        { ...input, targetUserId: scopedTargetUserId },
+        ctx.user,
+        ctx.currentBranchId,
+      );
     }),
 
   fundingSummary: permissionProcedure('marketing.fundingSummary')
@@ -143,10 +155,18 @@ export const marketingRouter = router({
       return getMarketingService().listFundingBalances(ctx.user, ctx.currentBranchId);
     }),
 
-  /** Media Buyer or Head of Marketing: submit a funding request. MB notifies HoM; HoM notifies SuperAdmin + Finance. */
-  // Phase 20 — gated by `marketing.funding.request` permission. Both MEDIA_BUYER
-  // and HEAD_OF_MARKETING templates carry this code; the service decides who
-  // the request goes TO based on the caller's role (MB→HoM, HoM→Finance).
+  /** Recipient candidates for the Request Funding modal (migration 0106). MBs get
+   *  HoMs in their branch + Finance Officers (org-wide); HoMs get Finance Officers. */
+  listFundingRequestRecipients: permissionProcedure('marketing.funding.request')
+    .query(async ({ ctx }) => {
+      const requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING' =
+        ctx.user.role === 'HEAD_OF_MARKETING' ? 'HEAD_OF_MARKETING' : 'MEDIA_BUYER';
+      return getMarketingService().listFundingRequestRecipients(requesterRole, ctx.currentBranchId);
+    }),
+
+  /** Media Buyer or Head of Marketing: submit a funding request to a specific recipient.
+   *  MB picks HoM (default, branch-scoped) or Finance Officer; HoM picks Finance.
+   *  Pre-migration-0106 broadcast flow remains as the fallback when no target is given. */
   requestFunding: permissionProcedure('marketing.funding.request')
     .meta({ branchScopedMutation: true })
     .input(
@@ -154,12 +174,16 @@ export const marketingRouter = router({
         amount: z.coerce.number().min(0),
         reason: z.string().max(500).optional().default(''),
         branchId: z.string().uuid().optional(),
+        /**
+         * Recipient user (CEO directive 2026-05-03). When set, only that user
+         * (plus admin-class) sees the request and can approve/reject.
+         * The service validates the target's role + branch scope. When omitted
+         * (legacy clients), the service falls back to broadcast-by-role.
+         */
+        targetUserId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      // The service still needs the role to decide the target audience for the
-      // notification (HoM if MB asks; Finance + SuperAdmin if HoM asks).
-      // Custom roles with the permission default to the MB→HoM flow.
       const requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING' =
         ctx.user.role === 'HEAD_OF_MARKETING' ? 'HEAD_OF_MARKETING' : 'MEDIA_BUYER';
       return getMarketingService().requestFunding(
@@ -168,6 +192,7 @@ export const marketingRouter = router({
         ctx.user.id,
         requesterRole,
         input.branchId ?? ctx.currentBranchId,
+        input.targetUserId,
       );
     }),
 
@@ -179,10 +204,29 @@ export const marketingRouter = router({
       const requesterId = ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : input.requesterId;
       const excludeSelfAsRequester =
         ctx.user.role !== 'MEDIA_BUYER' && !requesterId && input.excludeSelfAsRequester;
+
+      // Migration 0106 — auto-scope inbox views to requests targeted at the
+      // caller. Admin-class (SuperAdmin / Admin) bypass scoping and see every
+      // request. MBs are already self-scoped via `requesterId`. For everyone
+      // else (HoM, Finance, branch heads), we apply `targetUserId = ctx.user.id`
+      // when the caller isn't asking for their own outbound — turning the
+      // "all pending requests" view into "my inbox". Legacy NULL-target rows
+      // (pre-migration broadcasts) are still included so historical audiences
+      // keep visibility until those rows close out.
+      const isAdminClass = ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
+      const askingForOwnOutbound = requesterId === ctx.user.id;
+      const targetUserId =
+        !isAdminClass && !askingForOwnOutbound
+          ? (input.targetUserId ?? ctx.user.id)
+          : input.targetUserId;
+      const includeLegacyNullTarget = !isAdminClass && !askingForOwnOutbound;
+
       return getMarketingService().listFundingRequests(
         {
           requesterId,
           excludeSelfAsRequester,
+          targetUserId,
+          includeLegacyNullTarget,
           callerId: ctx.user.id,
           startDate: input.startDate,
           endDate: input.endDate,
@@ -202,6 +246,7 @@ export const marketingRouter = router({
     .mutation(async ({ input, ctx }) => {
       return getMarketingService().approveFundingRequest(
         input.requestId,
+        input.amount,
         input.receiptUrl,
         ctx.user,
         input.branchId ?? ctx.currentBranchId,
@@ -213,7 +258,34 @@ export const marketingRouter = router({
     .meta({ branchScopedMutation: true })
     .input(rejectFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().rejectFundingRequest(input.requestId, input.reason, ctx.user.id);
+      return getMarketingService().rejectFundingRequest(input.requestId, input.reason, {
+        id: ctx.user.id,
+        role: ctx.user.role,
+      });
+    }),
+
+  /**
+   * "Back-and-forth" timeline for one funding flow — pass a transferId or requestId and
+   * the service stitches together the request + transfer rows + their event sequence.
+   * Permission gate lives in the service (party / admin / Finance) so we use `authedProcedure`.
+   */
+  getFundingFlow: authedProcedure
+    .input(
+      z
+        .object({
+          transferId: z.string().uuid().optional(),
+          requestId: z.string().uuid().optional(),
+        })
+        .refine((v) => v.transferId || v.requestId, {
+          message: 'Provide transferId or requestId',
+        }),
+    )
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().getFundingFlow(input, {
+        id: ctx.user.id,
+        role: ctx.user.role,
+        permissions: ctx.user.permissions ?? [],
+      });
     }),
 
   // ── Ad Spend ─────────────────────────────────────
@@ -321,6 +393,13 @@ export const marketingRouter = router({
         ctx.currentBranchId,
       );
     }),
+
+  /** Org-wide profitability config (target ROAS + green/red threshold). Drives the
+   * Profitability column color on `/admin/marketing/team` and the ROAS pill color on
+   * `/admin/marketing/leaderboard`. SuperAdmin sets it on Settings → System. */
+  profitabilityConfig: permissionProcedure('marketing.read').query(async () => {
+    return getMarketingService().getProfitabilityConfig();
+  }),
 
   // ── Media Buyer Leaderboard ─────────────────────
   leaderboard: permissionProcedure('marketing.leaderboard')

@@ -53,6 +53,8 @@ export const fundingRequestStatusCountsSchema = z.object({
   /** When true, count only requests submitted BY *other* users than the caller — i.e.
    * MB requests pending approval from HoM ("inbox" view). Mutually exclusive with `requesterId`. */
   excludeSelfAsRequester: z.boolean().optional(),
+  /** Migration 0106 — count only requests targeted at this user (post-broadcast flow). */
+  targetUserId: z.string().uuid().optional(),
 });
 export type FundingRequestStatusCountsInput = z.infer<typeof fundingRequestStatusCountsSchema>;
 
@@ -70,6 +72,9 @@ export const listFundingRequestsSchema = z.object({
    * inbox so it doesn't include the HoM's own outbound requests to Finance. Mutually
    * exclusive with `requesterId`; if both are set the explicit `requesterId` wins. */
   excludeSelfAsRequester: z.boolean().optional(),
+  /** Migration 0106 — list only requests targeted at this user. The router auto-applies
+   * this for non-admin viewers so they only see their own inbox. */
+  targetUserId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
@@ -86,6 +91,8 @@ export type GetFundingBalanceInput = z.infer<typeof getFundingBalanceSchema>;
 
 export const approveFundingRequestSchema = z.object({
   requestId: z.string().uuid(),
+  /** Amount actually sent (must be ≤ requested amount; server enforces cap). */
+  amount: z.coerce.number().positive().multipleOf(0.01),
   receiptUrl: z.string().url().min(1),
 });
 export type ApproveFundingRequestInput = z.infer<typeof approveFundingRequestSchema>;
@@ -302,6 +309,7 @@ export const STANDARD_FIELD_KEYS = [
   'deliveryState',
   'gender',
   'preferredDeliveryDate',
+  'customerEmail',
   'paymentMethod',
 ] as const;
 export const standardFormFieldSchema = z.object({
@@ -368,6 +376,7 @@ export const formConfigSchema = z.object({
   showDeliveryState: z.boolean().optional(),
   showGender: z.boolean().optional(),
   showPreferredDeliveryDate: z.boolean().optional(),
+  showCustomerEmail: z.boolean().optional(),
   showPaymentMethod: z.boolean().optional(),
   showProductImages: z.boolean().optional(),
   requireDeliveryAddress: z.boolean().optional(),
@@ -375,10 +384,12 @@ export const formConfigSchema = z.object({
   requireDeliveryState: z.boolean().optional(),
   requireGender: z.boolean().optional(),
   requirePreferredDeliveryDate: z.boolean().optional(),
+  requireCustomerEmail: z.boolean().optional(),
   requirePaymentMethod: z.boolean().optional(),
-  // Custom options for select fields
+  // Custom options for select fields (additional / standard fields on the public form)
   deliveryStateOptions: z.array(z.string().max(100)).max(50).optional(),
   preferredDeliveryDateOptions: z.array(z.string().max(100)).max(20).optional(),
+  genderOptions: z.array(z.string().max(100)).max(20).optional(),
   standardFields: z.array(standardFormFieldSchema).max(STANDARD_FIELD_KEYS.length).optional(),
   // Legacy: pre-builder advanced field array. Kept for backward compatibility — the new
   // builder writes to `customFields` instead.

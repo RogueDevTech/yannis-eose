@@ -80,6 +80,7 @@ export interface UserCreateLocation {
   id: string;
   name: string;
   address: string;
+  providerName: string | null;
 }
 
 export interface UserCreateCommissionPlan {
@@ -104,11 +105,6 @@ export interface ActiveHeadUser {
   status?: string;
 }
 
-export interface FinanceHatHolder {
-  id: string;
-  name: string;
-}
-
 export interface RoleTemplateOption {
   id: string;
   key: string;
@@ -122,6 +118,8 @@ export interface PermissionCatalogItem {
   resource: string;
   action: string;
   description: string | null;
+  /** Legacy dotted codes that map to this canonical permission (from seed map). */
+  legacyAliases?: string[];
 }
 
 export interface UserCreateLoaderData {
@@ -130,10 +128,11 @@ export interface UserCreateLoaderData {
   plans: UserCreateCommissionPlan[];
   branches: UserCreateBranch[];
   activeHeads: ActiveHeadUser[];
-  currentFinanceOfficer: FinanceHatHolder | null;
   roleTemplates: RoleTemplateOption[];
   permissionCatalog: PermissionCatalogItem[];
   templatePermissionsById: Record<string, string[]>;
+  /** Session branch or sole ACTIVE branch — used to pre-check memberships on Add User. */
+  defaultMembershipBranchId: string | null;
 }
 
 // ─── User Detail Page Types ──────────────────────────────
@@ -153,8 +152,6 @@ export interface UserDetail {
   assignedProductIds?: string[];
   commissionPlanId: string | null;
   primaryBranchId: string | null;
-  /** True when this user wears the org-wide Finance hat (deputization). */
-  isFinanceOfficer?: boolean;
   roleTemplateId?: string | null;
   scopeGlobal?: boolean;
   scopeOrgWideHead?: boolean;
@@ -198,6 +195,7 @@ export interface UserAdjustment {
 }
 
 export interface UserAuditEntry {
+  /** Entity id from `_history` — not unique per row; multiple versions share it. */
   id: string;
   action: string;
   tableName: string;
@@ -264,6 +262,18 @@ export interface UserPushStatus {
   totalPushSent: number;
 }
 
+/** Resolved from `onboarding.get` for the profile subject (staff onboarding workflow). */
+export type UserOnboardingSummary =
+  | { ok: true; status: string; submittedAt: string | null; approvedAt: string | null }
+  | { ok: false; reason: 'forbidden' | 'error' };
+
+/** SSR result for `permissions.listCatalog` — distinguishes API failure from an empty catalog. */
+export type PermissionCatalogBundle = {
+  items: PermissionCatalogItem[];
+  /** True when the request was not OK (401/503/timeout) or the payload could not be parsed. */
+  requestFailed: boolean;
+};
+
 export interface UserDetailLoaderData {
   user: UserDetail;
   roleTemplates?: Promise<RoleTemplateOption[]>;
@@ -281,11 +291,17 @@ export interface UserDetailLoaderData {
   financeActivity: Promise<{ approvals: UserApprovalRecord[]; total: number }> | null;
   pushStatus?: Promise<UserPushStatus | null>;
   activeHeads?: Promise<ActiveHeadUser[]>;
-  currentFinanceOfficer?: Promise<FinanceHatHolder | null>;
   branchesList?: Promise<Array<{ id: string; name: string; code: string; status: string }>>;
-  permissionCatalog?: Promise<PermissionCatalogItem[]>;
+  permissionCatalog?: Promise<PermissionCatalogBundle>;
   templatePermissionsById?: Promise<Record<string, string[]>>;
-  userPermissionOverrides?: Promise<Record<string, boolean>>;
+  /** Overview Permissions card — sparse deltas + template baseline + RBAC union for chips (`intent: stamp_preview`). */
+  userStampPreview?: Promise<{
+    userOverrides: Record<string, boolean>;
+    templateCodes: string[];
+    effectiveCodes: string[];
+  }>;
+  /** Settings PermissionMatrix sparse deltas — template baseline via `listTemplateBaselines` + `intent: edit_matrix`. */
+  userEditPermissionOverrides?: Promise<Record<string, boolean>>;
   canDisburseToThisUser?: boolean;
   isSuperAdmin?: boolean;
   isViewerHeadOfMarketing?: boolean;
@@ -297,21 +313,21 @@ export interface UserDetailLoaderData {
    */
   canEditLimited?: boolean;
   /**
-   * True when the Mirror user control should show (role matrix or supervision for the
-   * effective identity, including preview while already mirroring someone else).
+   * Mirror affordances — nested deferred promise so the loader returns without awaiting
+   * `canMirrorToUser` (avoids Remix single-fetch turbo-stream ~5s timeouts).
    */
-  viewerShowsMirror?: boolean;
-  /**
-   * True when Mirror is visible but POST must not run (nested mirror preview only).
-   * Submit is blocked server-side by `AuthService.startMirror` and tRPC mutations anyway.
-   */
-  mirrorSubmitDisabled?: boolean;
+  mirrorUi: Promise<{ viewerShowsMirror: boolean; mirrorSubmitDisabled: boolean }>;
   /**
    * True when the viewer is opening their OWN profile (drives /admin/profile).
    * Hides destructive admin actions (Reset Password, Deactivate, Mirror, Disburse) —
    * users manage their own credentials in /admin/settings, not from the profile page.
    */
   isSelfView?: boolean;
+  /** False for SuperAdmin / Admin profiles — they don't use the staff onboarding record. When true, Overview shows the onboarding card. */
+  showOnboardingTab?: boolean;
+  /** Viewer may open `/hr/users/:id/onboarding` (HR workflow). Self-view uses `/admin/onboarding` instead. */
+  viewerCanManageHrOnboarding?: boolean;
+  onboardingSummary?: Promise<UserOnboardingSummary | null>;
 }
 
 // ─── Avatar gradient mapping by role ────────────────────

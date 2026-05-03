@@ -2,6 +2,7 @@ import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
@@ -31,21 +32,22 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-app-fg">
-            {getGreeting()}, {firstName}
-          </h1>
-          <p className="text-sm text-app-fg-muted font-medium mt-1">
-            {getRoleDescription(role)}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          <DateFilterBar startDate={dateFilters.startDate} endDate={dateFilters.endDate} periodAllTime={dateFilters.periodAllTime ?? false} />
-        </div>
-      </div>
+      <PageHeader
+        title={`${getGreeting()}, ${firstName}`}
+        description={getRoleDescription(role)}
+        actions={
+          <>
+            <PageRefreshButton />
+            <div className="flex min-h-[2rem] shrink-0 items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+              <DateFilterBar
+                startDate={dateFilters.startDate}
+                endDate={dateFilters.endDate}
+                periodAllTime={dateFilters.periodAllTime ?? false}
+              />
+            </div>
+          </>
+        }
+      />
 
       {/* Missing role: minimal welcome (safer than defaulting to SuperAdmin) */}
       {!role && <GenericFallbackDashboard />}

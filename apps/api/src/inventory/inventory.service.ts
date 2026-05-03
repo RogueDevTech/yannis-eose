@@ -791,7 +791,10 @@ export class InventoryService {
    * Convenience wrapper around `levelDetail` that also resolves product/location names
    * so a full-page view only needs one round-trip.
    */
-  async getLevelById(id: string, limit = 200) {
+  async getLevelById(
+    id: string,
+    opts: { page?: number; limit?: number; startDate?: string; endDate?: string } = {},
+  ) {
     const rows = await this.db.execute<{
       id: string;
       productId: string;
@@ -825,13 +828,18 @@ export class InventoryService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Inventory level not found' });
     }
 
-    const detail = await this.levelDetail(level.productId, level.locationId, limit);
+    const detail = await this.levelDetail(level.productId, level.locationId, opts);
 
     return {
       level,
       batches: detail.batches,
       movements: detail.movements,
       total: detail.total,
+      page: detail.page,
+      limit: detail.limit,
+      totalPages: detail.totalPages,
+      inQty: detail.inQty,
+      outQty: detail.outQty,
     };
   }
 
@@ -846,8 +854,21 @@ export class InventoryService {
    *    an order whose `logisticsLocationId = X` (rescues historical DELIVERY / RETURN /
    *    WRITE_OFF rows that were written before location fields were stamped).
    */
-  async levelDetail(productId: string, locationId: string, limit = 100) {
+  async levelDetail(
+    productId: string,
+    locationId: string,
+    opts: { page?: number; limit?: number; startDate?: string; endDate?: string } | number = {},
+  ) {
+    // Back-compat: callers passing a bare `limit` number still work.
+    const normalized = typeof opts === 'number' ? { limit: opts } : opts;
+    const limit = Math.max(1, Math.min(normalized.limit ?? 20, 200));
+    const page = Math.max(1, normalized.page ?? 1);
+    const offset = (page - 1) * limit;
+    const startDate = normalized.startDate?.trim() || null;
+    const endDate = normalized.endDate?.trim() || null;
+
     // Batches: any stock_batch that was intaken at this location.
+    // Not paginated/date-filtered — these are the cost layers currently feeding FIFO.
     const batches = await this.db.execute<{
       id: string;
       factoryCost: string;
@@ -876,29 +897,34 @@ export class InventoryService {
 
     // Movements: fromLocation or toLocation match, OR the movement references an order
     // at this location (rescues legacy rows without location stamping).
-    const movements = await this.db.execute<{
-      id: string;
-      productId: string;
-      movementType: string;
-      quantity: number;
-      fromLocationId: string | null;
-      toLocationId: string | null;
-      referenceId: string | null;
-      reason: string | null;
-      actorId: string | null;
-      createdAt: Date;
+    // Joined with users (actor) + orders + locations so the audit panel can show
+    // "who moved what, where, and why" without extra round-trips.
+    // Date filter is applied to sm.created_at; endDate is treated as inclusive end-of-day.
+    // Single roll-up query: total event count + signed in/out unit totals scoped to
+    // (product, location, date range). Used both for pagination and for the overview
+    // stat strip on the detail page so its numbers stay correct as the user pages
+    // through the audit trail.
+    const aggregateRows = await this.db.execute<{
+      total: number;
+      inQty: number;
+      outQty: number;
     }>(sql`
       SELECT
-        sm.id,
-        sm.product_id        AS "productId",
-        sm.movement_type     AS "movementType",
-        sm.quantity,
-        sm.from_location_id  AS "fromLocationId",
-        sm.to_location_id    AS "toLocationId",
-        sm.reference_id      AS "referenceId",
-        sm.reason,
-        sm.actor_id          AS "actorId",
-        sm.created_at        AS "createdAt"
+        COUNT(*)::int AS total,
+        COALESCE(SUM(
+          CASE
+            WHEN sm.movement_type IN ('INTAKE','TRANSFER_IN','RESTOCK') THEN ABS(sm.quantity)
+            WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity > 0 THEN sm.quantity
+            ELSE 0
+          END
+        ), 0)::int AS "inQty",
+        COALESCE(SUM(
+          CASE
+            WHEN sm.movement_type IN ('DELIVERY','TRANSFER_OUT','WRITE_OFF','RETURN','DISPATCH') THEN ABS(sm.quantity)
+            WHEN sm.movement_type = 'ADJUSTMENT' AND sm.quantity < 0 THEN ABS(sm.quantity)
+            ELSE 0
+          END
+        ), 0)::int AS "outQty"
       FROM stock_movements sm
       LEFT JOIN orders o ON o.id = sm.reference_id
       WHERE sm.product_id = ${productId}
@@ -907,14 +933,73 @@ export class InventoryService {
           OR sm.to_location_id = ${locationId}
           OR o.logistics_location_id = ${locationId}
         )
+        AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
+        AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
+    `);
+    const aggregate = aggregateRows[0] ?? { total: 0, inQty: 0, outQty: 0 };
+    const total = aggregate.total;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    const movements = await this.db.execute<{
+      id: string;
+      productId: string;
+      movementType: string;
+      quantity: number;
+      fromLocationId: string | null;
+      fromLocationName: string | null;
+      toLocationId: string | null;
+      toLocationName: string | null;
+      referenceId: string | null;
+      orderShortId: string | null;
+      reason: string | null;
+      actorId: string | null;
+      actorName: string | null;
+      actorRole: string | null;
+      createdAt: Date;
+    }>(sql`
+      SELECT
+        sm.id,
+        sm.product_id        AS "productId",
+        sm.movement_type     AS "movementType",
+        sm.quantity,
+        sm.from_location_id  AS "fromLocationId",
+        from_loc.name        AS "fromLocationName",
+        sm.to_location_id    AS "toLocationId",
+        to_loc.name          AS "toLocationName",
+        sm.reference_id      AS "referenceId",
+        CASE WHEN o.id IS NOT NULL THEN o.id ELSE NULL END AS "orderShortId",
+        sm.reason,
+        sm.actor_id          AS "actorId",
+        u.name               AS "actorName",
+        u.role::text         AS "actorRole",
+        sm.created_at        AS "createdAt"
+      FROM stock_movements sm
+      LEFT JOIN orders o ON o.id = sm.reference_id
+      LEFT JOIN users u ON u.id = sm.actor_id
+      LEFT JOIN logistics_locations from_loc ON from_loc.id = sm.from_location_id
+      LEFT JOIN logistics_locations to_loc ON to_loc.id = sm.to_location_id
+      WHERE sm.product_id = ${productId}
+        AND (
+          sm.from_location_id = ${locationId}
+          OR sm.to_location_id = ${locationId}
+          OR o.logistics_location_id = ${locationId}
+        )
+        AND (${startDate}::date IS NULL OR sm.created_at >= ${startDate}::date)
+        AND (${endDate}::date IS NULL OR sm.created_at < (${endDate}::date + INTERVAL '1 day'))
       ORDER BY sm.created_at DESC
       LIMIT ${limit}
+      OFFSET ${offset}
     `);
 
     return {
       batches,
       movements,
-      total: movements.length,
+      total,
+      page,
+      limit,
+      totalPages,
+      inQty: aggregate.inQty,
+      outQty: aggregate.outQty,
     };
   }
 

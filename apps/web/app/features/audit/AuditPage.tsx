@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -11,10 +11,12 @@ import { formatNaira } from '~/lib/format-amount';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
+import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TextInput } from '~/components/ui/text-input';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { ActorMap, AuditEntry, AuditPageProps } from './types';
@@ -1103,8 +1105,12 @@ function DetailModal({
   onUnknownActorClick?: (changedBy: string | null, displayName: string) => void;
   onPreviewImage?: (url: string) => void;
 }) {
-  const fields = Object.entries(entry.data).filter(
-    ([key]) => !HIDDEN_FIELDS.has(key) && key !== 'id',
+  const fieldRows = useMemo(
+    () =>
+      Object.entries(entry.data)
+        .filter(([key]) => !HIDDEN_FIELDS.has(key) && key !== 'id')
+        .map(([key, value]) => ({ key, value })),
+    [entry.data],
   );
   const asOf = entry.validFrom;
 
@@ -1182,36 +1188,39 @@ function DetailModal({
 
         {/* Data fields */}
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="table-header">Field</th>
-                <th className="table-header">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fields.map(([key, value]) => (
-                <tr key={key} className="table-row">
-                  <td className="table-cell font-medium text-app-fg-muted">
-                    {formatFieldName(key)}
-                  </td>
-                  <td className="table-cell text-app-fg break-words whitespace-normal min-w-0">
-                    {key === 'offers' ? (
-                      <OffersDisplay value={value} />
-                    ) : IMAGE_URL_FIELD_KEYS.has(key) && isImageUrlValue(value) ? (
-                      <AttachedFileDisplay url={value} onPreview={onPreviewImage} />
-                    ) : (typeof value === 'object' && value !== null) || (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) ? (
+          <CompactTable<{ key: string; value: unknown }>
+            withCard={false}
+            columns={[
+              {
+                key: 'field',
+                header: 'Field',
+                render: (r) => <span className="font-medium text-app-fg-muted">{formatFieldName(r.key)}</span>,
+              },
+              {
+                key: 'value',
+                header: 'Value',
+                cellClassName: 'min-w-0',
+                render: (r) => (
+                  <div className="text-app-fg break-words whitespace-normal min-w-0">
+                    {r.key === 'offers' ? (
+                      <OffersDisplay value={r.value} />
+                    ) : IMAGE_URL_FIELD_KEYS.has(r.key) && isImageUrlValue(r.value) ? (
+                      <AttachedFileDisplay url={r.value} onPreview={onPreviewImage} />
+                    ) : (typeof r.value === 'object' && r.value !== null) ||
+                      (typeof r.value === 'string' && (r.value.startsWith('{') || r.value.startsWith('['))) ? (
                       <div className="py-1.5 min-w-0">
-                        <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} asOf={asOf} />
+                        <StructuredValueDisplay value={r.value} fieldKey={r.key} actorNames={actorNames} asOf={asOf} />
                       </div>
                     ) : (
-                      formatValue(key, value, actorNames, asOf)
+                      formatValue(r.key, r.value, actorNames, asOf)
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                ),
+              },
+            ]}
+            rows={fieldRows}
+            rowKey={(r) => r.key}
+          />
         </div>
     </Modal>
   );
@@ -1355,38 +1364,41 @@ function TimeTravelPanel({
 
       {ttResult && (
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="table-header">Field</th>
-                <th className="table-header">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(ttResult)
-                .filter(([key]) => !HIDDEN_FIELDS.has(key))
-                .map(([key, value]) => (
-                <tr key={key} className="table-row">
-                  <td className="table-cell font-medium text-app-fg-muted">
-                    {formatFieldName(key)}
-                  </td>
-                  <td className="table-cell text-app-fg break-words whitespace-normal min-w-0">
-                    {key === 'offers' ? (
-                      <OffersDisplay value={value} />
-                    ) : IMAGE_URL_FIELD_KEYS.has(key) && isImageUrlValue(value) ? (
-                      <AttachedFileDisplay url={value} onPreview={onPreviewImage} />
-                    ) : (typeof value === 'object' && value !== null) || (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) ? (
+          <CompactTable<{ key: string; value: unknown }>
+            withCard={false}
+            columns={[
+              {
+                key: 'field',
+                header: 'Field',
+                render: (r) => <span className="font-medium text-app-fg-muted">{formatFieldName(r.key)}</span>,
+              },
+              {
+                key: 'value',
+                header: 'Value',
+                cellClassName: 'min-w-0',
+                render: (r) => (
+                  <div className="text-app-fg break-words whitespace-normal min-w-0">
+                    {r.key === 'offers' ? (
+                      <OffersDisplay value={r.value} />
+                    ) : IMAGE_URL_FIELD_KEYS.has(r.key) && isImageUrlValue(r.value) ? (
+                      <AttachedFileDisplay url={r.value} onPreview={onPreviewImage} />
+                    ) : (typeof r.value === 'object' && r.value !== null) ||
+                      (typeof r.value === 'string' && (r.value.startsWith('{') || r.value.startsWith('['))) ? (
                       <div className="py-1.5 min-w-0">
-                        <StructuredValueDisplay value={value} fieldKey={key} actorNames={actorNames} asOf={ttAsOf} />
+                        <StructuredValueDisplay value={r.value} fieldKey={r.key} actorNames={actorNames} asOf={ttAsOf} />
                       </div>
                     ) : (
-                      formatValue(key, value, actorNames, ttAsOf)
+                      formatValue(r.key, r.value, actorNames, ttAsOf)
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                ),
+              },
+            ]}
+            rows={Object.entries(ttResult)
+              .filter(([key]) => !HIDDEN_FIELDS.has(key))
+              .map(([key, value]) => ({ key, value }))}
+            rowKey={(r) => r.key}
+          />
         </div>
       )}
     </div>
@@ -1477,10 +1489,57 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
         title="Audit Trail"
         description="Complete history of all data changes. Every mutation is permanently recorded."
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <PollingStatusIndicator state={pollState} countdown={countdown} />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Audit trail tools"
+            sheetSubtitle={<span>Date range, polling, and export</span>}
+            triggerAriaLabel="Audit toolbar and date range"
+            desktop={
+              <>
+                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime ?? false}
+                  />
+                </div>
+                <PageRefreshButton />
+                <PollingStatusIndicator state={pollState} countdown={countdown} />
+                {rows.length > 0 && (
+                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                    Generate report
+                  </Button>
+                )}
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime ?? false}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <div className="flex justify-center">
+                  <PollingStatusIndicator state={pollState} countdown={countdown} />
+                </div>
+                {rows.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowExportModal(true);
+                    }}
+                  >
+                    Generate report
+                  </Button>
+                )}
+              </>
+            )}
+          />
         }
       />
 
@@ -1493,65 +1552,54 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
         />
       )}
 
-      {/* Filters — Actor dropdown streams in via DeferredSection */}
+      {/* Filters — Actor dropdown streams in via DeferredSection. Same horizontal flex
+          layout as the Orders page filter bar so controls flow inline instead of stacking
+          into a 4-col grid. Date filter is intentionally not here — it lives in the
+          PageHeader top-right pill above. */}
       <div className="card">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <div>
-            <FormSelect
-              label="Table"
-              value={filters.tableName}
-              onChange={(e) => updateFilter('tableName', e.target.value)}
-              placeholder="All Tables"
-              options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatTableName(t) }))}
-            />
-          </div>
-          <div>
-            <DeferredSection resolve={actorNames} skeleton="inline">
-              {(resolvedActorNames) => {
-                // Filter dropdown shows actors by their CURRENT identity — when an admin renames
-                // themselves, the filter follows the new name. (Resolved-at-time only matters
-                // when rendering historical rows, not when picking who to filter on now.)
-                const uniqueActors = Object.entries(resolvedActorNames).map(([id, info]) => ({
-                  id,
-                  name: info.nameNow,
-                  role: info.roleNow,
-                }));
-                return uniqueActors.length > 0 ? (
-                  <SearchableSelect
-                    id="audit-actor-filter"
-                    label="Actor"
-                    value={filters.actorId}
-                    onChange={(v) => updateFilter('actorId', v)}
-                    placeholder="All Users"
-                    searchPlaceholder="Search users..."
-                    options={uniqueActors.map((a) => ({
-                      value: a.id,
-                      label: a.name,
-                      description: ROLE_LABELS[a.role] ?? a.role,
-                    }))}
-                  />
-                ) : (
-                  <TextInput
-                    label="Actor"
-                    type="text"
-                    placeholder="User UUID..."
-                    value={filters.actorId}
-                    onChange={(e) => updateFilter('actorId', e.target.value)}
-                  />
-                );
-              }}
-            </DeferredSection>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-app-fg-muted mb-1">
-              Date range
-            </label>
-            <DateFilterBar
-              startDate={filters.startDate}
-              endDate={filters.endDate}
-              periodAllTime={filters.periodAllTime ?? false}
-            />
-          </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <FormSelect
+            value={filters.tableName}
+            onChange={(e) => updateFilter('tableName', e.target.value)}
+            placeholder="All Tables"
+            options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatTableName(t) }))}
+            wrapperClassName="w-full sm:w-56"
+          />
+          <DeferredSection resolve={actorNames} skeleton="inline">
+            {(resolvedActorNames) => {
+              // Filter dropdown shows actors by their CURRENT identity — when an admin renames
+              // themselves, the filter follows the new name. (Resolved-at-time only matters
+              // when rendering historical rows, not when picking who to filter on now.)
+              const uniqueActors = Object.entries(resolvedActorNames).map(([id, info]) => ({
+                id,
+                name: info.nameNow,
+                role: info.roleNow,
+              }));
+              return uniqueActors.length > 0 ? (
+                <SearchableSelect
+                  id="audit-actor-filter"
+                  value={filters.actorId}
+                  onChange={(v) => updateFilter('actorId', v)}
+                  placeholder="All Users"
+                  searchPlaceholder="Search users..."
+                  options={uniqueActors.map((a) => ({
+                    value: a.id,
+                    label: a.name,
+                    description: ROLE_LABELS[a.role] ?? a.role,
+                  }))}
+                  wrapperClassName="w-full sm:w-72"
+                />
+              ) : (
+                <TextInput
+                  type="text"
+                  placeholder="User UUID..."
+                  value={filters.actorId}
+                  onChange={(e) => updateFilter('actorId', e.target.value)}
+                  wrapperClassName="w-full sm:w-72"
+                />
+              );
+            }}
+          </DeferredSection>
         </div>
       </div>
 
@@ -1586,103 +1634,116 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
         )}
       </DeferredSection>
 
-      {/* Results count + Export */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-app-fg-muted">
-          {total} {total === 1 ? 'entry' : 'entries'} found
-        </p>
-        {rows.length > 0 && (
-          <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-            Generate report
-          </Button>
-        )}
-      </div>
+      {/* Results count */}
+      <p className="text-sm text-app-fg-muted">
+        {total} {total === 1 ? 'entry' : 'entries'} found
+      </p>
 
       {/* Audit log table — rows render immediately, actor names stream in */}
       <TableLoadingOverlay show={isFilterLoading}>
       <div className="card p-0">
         {/* Desktop table */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Timestamp</th>
-                <th className="table-header">Description</th>
-                <th className="table-header">Actor</th>
-                <th className="table-header">Action</th>
-                <th className="table-header text-right">Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={6}><EmptyState title="No audit entries found" description="Try adjusting your filters." /></td>
-                </tr>
-              )}
-              {rows.map((entry, idx) => (
-                <tr key={`${entry.recordId}-${entry.validFrom}-${idx}`} className="table-row">
-                  <td className="table-cell text-xs text-app-fg-muted whitespace-nowrap">
-                    {formatDate(entry.validFrom)}
-                  </td>
-                  <td className="table-cell text-xs text-app-fg-muted max-w-[180px] sm:max-w-xs md:max-w-sm break-words whitespace-normal min-w-0">
-                    <DeferredSection resolve={actorNames} skeleton="inline">
-                      {(resolvedActorNames) => (
-                        <AuditDescription entry={entry} actorNames={resolvedActorNames} />
-                      )}
-                    </DeferredSection>
-                  </td>
-                  <td className="table-cell text-xs text-app-fg-muted whitespace-nowrap">
-                    <DeferredSection resolve={actorNames} skeleton="inline">
-                      {(resolvedActorNames) => {
-                        const display = getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom);
-                        const known = isActorKnown(entry.changedBy, resolvedActorNames);
-                        if (known && entry.changedBy) {
-                          return (
-                            <Link
-                              to={`/hr/users/${entry.changedBy}`}
-                              className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2"
-                            >
-                              {display}
-                            </Link>
-                          );
-                        }
+        <div className="hidden md:block">
+          <CompactTable<AuditEntry>
+            withCard={false}
+            rows={rows}
+            rowKey={(entry, idx) => `${entry.recordId}-${entry.validFrom}-${idx}`}
+            emptyTitle="No audit entries found"
+            emptyDescription="Try adjusting your filters."
+            columns={[
+              {
+                key: 'timestamp',
+                header: 'Timestamp',
+                nowrap: true,
+                cellClassName: 'text-xs text-app-fg-muted',
+                render: (entry) => formatDate(entry.validFrom),
+              },
+              {
+                key: 'description',
+                header: 'Description',
+                cellClassName:
+                  'text-xs text-app-fg-muted max-w-[180px] sm:max-w-xs md:max-w-sm break-words whitespace-normal min-w-0',
+                render: (entry) => (
+                  <DeferredSection resolve={actorNames} skeleton="inline">
+                    {(resolvedActorNames) => (
+                      <AuditDescription entry={entry} actorNames={resolvedActorNames} />
+                    )}
+                  </DeferredSection>
+                ),
+              },
+              {
+                key: 'actor',
+                header: 'Actor',
+                nowrap: true,
+                cellClassName: 'text-xs text-app-fg-muted',
+                render: (entry) => (
+                  <DeferredSection resolve={actorNames} skeleton="inline">
+                    {(resolvedActorNames) => {
+                      const display = getActorDisplay(
+                        entry.changedBy,
+                        resolvedActorNames,
+                        entry.validFrom,
+                      );
+                      const known = isActorKnown(entry.changedBy, resolvedActorNames);
+                      if (known && entry.changedBy) {
                         return (
-                          <button
-                            type="button"
-                            onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
-                            className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer"
+                          <Link
+                            to={`/hr/users/${entry.changedBy}`}
+                            className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2"
                           >
                             {display}
-                          </button>
+                          </Link>
                         );
-                      }}
-                    </DeferredSection>
-                  </td>
-                  <td className="table-cell">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
+                      }
+                      return (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })
+                          }
+                          className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer"
+                        >
+                          {display}
+                        </button>
+                      );
+                    }}
+                  </DeferredSection>
+                ),
+              },
+              {
+                key: 'action',
+                header: 'Action',
+                render: (entry) => (
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
                       entry.action === 'INSERT'
                         ? 'bg-success-50 dark:bg-success-700/20 text-success-700 dark:text-success-500'
                         : entry.action === 'DELETE'
-                        ? 'bg-danger-50 dark:bg-danger-700/20 text-danger-700 dark:text-danger-500'
-                        : 'bg-warning-50 dark:bg-warning-700/20 text-warning-700 dark:text-warning-500'
-                    }`}>
-                      {entry.action === 'INSERT' ? 'Created' : entry.action === 'DELETE' ? 'Deleted' : 'Updated'}
-                    </span>
-                  </td>
-                  <td className="table-cell text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelectedEntry(entry)}
-                      className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium h-auto py-0"
-                    >
-                      View
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                          ? 'bg-danger-50 dark:bg-danger-700/20 text-danger-700 dark:text-danger-500'
+                          : 'bg-warning-50 dark:bg-warning-700/20 text-warning-700 dark:text-warning-500'
+                    }`}
+                  >
+                    {entry.action === 'INSERT'
+                      ? 'Created'
+                      : entry.action === 'DELETE'
+                        ? 'Deleted'
+                        : 'Updated'}
+                  </span>
+                ),
+              },
+              {
+                key: 'view',
+                header: 'Details',
+                align: 'right',
+                tight: true,
+                render: (entry) => (
+                  <CompactTableActionButton onClick={() => setSelectedEntry(entry)}>
+                    View
+                  </CompactTableActionButton>
+                ),
+              },
+            ] satisfies CompactTableColumn<AuditEntry>[]}
+          />
         </div>
 
         {/* Mobile cards */}

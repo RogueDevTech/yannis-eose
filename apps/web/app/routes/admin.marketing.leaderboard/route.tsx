@@ -41,15 +41,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate) input.startDate = startDate;
   if (endDate) input.endDate = endDate;
 
-  const mediaBuyerLeaderboard = await apiRequest<unknown>(
-    `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(input))}`,
-    { method: 'GET', cookie },
-  ).then(parseMediaLeaderboard).catch((): LeaderboardEntry[] => []);
+  const [leaderboardRes, profitabilityRes] = await Promise.all([
+    apiRequest<unknown>(
+      `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(input))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>('/trpc/marketing.profitabilityConfig', { method: 'GET', cookie }),
+  ]);
+  const mediaBuyerLeaderboard = parseMediaLeaderboard(leaderboardRes);
+  const profitabilityConfig = profitabilityRes.ok
+    ? (profitabilityRes.data as { result?: { data?: { targetRoas: number; greenThreshold: number } } })
+        ?.result?.data ?? { targetRoas: 3, greenThreshold: 2.5 }
+    : { targetRoas: 3, greenThreshold: 2.5 };
 
   return {
     mediaBuyerLeaderboard,
     leaderboardPeriod,
     filters,
+    profitabilityConfig,
   };
 }
 
@@ -60,6 +69,7 @@ export default function MarketingLeaderboardRoute() {
       mediaBuyerLeaderboard={data.mediaBuyerLeaderboard}
       leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
       filters={data.filters}
+      profitabilityConfig={data.profitabilityConfig}
     />
   );
 }

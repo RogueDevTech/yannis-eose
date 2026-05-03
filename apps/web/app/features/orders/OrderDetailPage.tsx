@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
@@ -865,80 +866,59 @@ export function OrderDetailPage({
     revalidatedForRecordCallRef.current = false;
   }, [order.id]);
 
-  // Close modals when fetcher returns success
-  const fetcherSuccess = (fetcher.data as { success?: boolean })?.success;
-  const prevFetcherState = useRef(fetcher.state);
-  useEffect(() => {
-    // Detect transition from submitting/loading → idle with success
-    if (prevFetcherState.current !== 'idle' && fetcher.state === 'idle' && fetcherSuccess) {
-      if (confirmModalOpen) {
-        setConfirmModalOpen(false);
-        setDeliveryDate('');
-      }
-      if (cancelModalOpen) {
-        setCancelModalOpen(false);
-        setCancelReason('');
-      }
-      if (allocateModalOpen) {
-        setAllocateModalOpen(false);
-        setAllocateLocationId('');
-      }
-      if (deliverModalOpen) {
-        setDeliverModalOpen(false);
-        setDeliverNote('');
-        setDeliverProofUrl('');
-      }
+  // Close modals when their fetcher returns success — edge-triggered via the
+  // shared `useCloseOnFetcherSuccess` hook so the modal closes the same React
+  // tick as the toast (no waiting for loader revalidation).
+  const handleStateTransitionSuccess = useCallback(() => {
+    if (confirmModalOpen) {
+      setConfirmModalOpen(false);
+      setDeliveryDate('');
     }
-    prevFetcherState.current = fetcher.state;
-  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen, allocateModalOpen, deliverModalOpen]);
+    if (cancelModalOpen) {
+      setCancelModalOpen(false);
+      setCancelReason('');
+    }
+    if (allocateModalOpen) {
+      setAllocateModalOpen(false);
+      setAllocateLocationId('');
+    }
+    if (deliverModalOpen) {
+      setDeliverModalOpen(false);
+      setDeliverNote('');
+      setDeliverProofUrl('');
+    }
+  }, [confirmModalOpen, cancelModalOpen, allocateModalOpen, deliverModalOpen]);
+  useCloseOnFetcherSuccess(fetcher, handleStateTransitionSuccess);
 
-  // Close schedule callback modal and revalidate when schedule succeeds
-  const scheduleData = scheduleFetcher.data as { success?: boolean; scheduled?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (scheduleData?.success && scheduleData?.scheduled && revalidator.state === 'idle') {
+  const handleScheduleSuccess = useCallback(
+    (data: { success: true } & Record<string, unknown>) => {
+      if (!(data as { scheduled?: boolean }).scheduled) return;
       setScheduleCallbackModalOpen(false);
       setScheduleDelayMinutes(120);
       setScheduleNotes('');
-      revalidator.revalidate();
-    }
-  }, [scheduleData?.success, scheduleData?.scheduled, revalidator]);
+    },
+    [],
+  );
+  useCloseOnFetcherSuccess(scheduleFetcher, handleScheduleSuccess);
 
-  // Close adjust items modal and revalidate when update succeeds
+  const handleAdjustItemsSuccess = useCallback(() => {
+    setAdjustItemsModalOpen(false);
+    setPriceApprovalReason('');
+  }, []);
+  useCloseOnFetcherSuccess(adjustItemsFetcher, handleAdjustItemsSuccess);
+  useCloseOnFetcherSuccess(priceRequestFetcher, handleAdjustItemsSuccess);
+  // Inline error accessors — the modal renders these as PageNotification rows.
   const adjustItemsData = adjustItemsFetcher.data as { success?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (adjustItemsData?.success && revalidator.state === 'idle') {
-      setAdjustItemsModalOpen(false);
-      setPriceApprovalReason('');
-      revalidator.revalidate();
-    }
-  }, [adjustItemsData?.success, revalidator]);
-
   const priceRequestData = priceRequestFetcher.data as { success?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (priceRequestData?.success && revalidator.state === 'idle') {
-      setAdjustItemsModalOpen(false);
-      setPriceApprovalReason('');
-      revalidator.revalidate();
-    }
-  }, [priceRequestData?.success, revalidator]);
 
+  const handleArchiveSuccess = useCallback(() => {
+    setArchiveModalOpen(false);
+    setArchiveReason('');
+  }, []);
+  useCloseOnFetcherSuccess(archiveRequestFetcher, handleArchiveSuccess);
+  useCloseOnFetcherSuccess(archiveNowFetcher, handleArchiveSuccess);
   const archiveRequestData = archiveRequestFetcher.data as { success?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (archiveRequestData?.success && revalidator.state === 'idle') {
-      setArchiveModalOpen(false);
-      setArchiveReason('');
-      revalidator.revalidate();
-    }
-  }, [archiveRequestData?.success, revalidator]);
-
   const archiveNowData = archiveNowFetcher.data as { success?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (archiveNowData?.success && revalidator.state === 'idle') {
-      setArchiveModalOpen(false);
-      setArchiveReason('');
-      revalidator.revalidate();
-    }
-  }, [archiveNowData?.success, revalidator]);
 
   // Escape to close adjust items modal
   useEffect(() => {
@@ -1971,7 +1951,7 @@ export function OrderDetailPage({
               searchPlaceholder="Search locations..."
               options={allocatableLocations.map((loc) => ({
                 value: loc.id,
-                label: loc.name,
+                label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                 description: describeAllocatableLocation(loc),
                 disabled: !loc.eligible,
               }))}
@@ -2094,7 +2074,10 @@ export function OrderDetailPage({
                   value={shareLocationId}
                   onChange={(e) => setShareLocationId(e.target.value)}
                   placeholder="Select a location..."
-                  options={locationsWithGroup.map((loc) => ({ value: loc.id, label: loc.name }))}
+                  options={locationsWithGroup.map((loc) => ({
+                    value: loc.id,
+                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                  }))}
                 />
                 {locationsWithGroup.length === 0 && (
                   <p className="text-xs text-warning-600 mt-1">

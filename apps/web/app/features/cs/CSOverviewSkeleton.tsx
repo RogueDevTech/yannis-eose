@@ -21,48 +21,22 @@ export function CSOverviewSkeleton() {
         <div className="h-3 w-full max-w-md rounded bg-app-hover mb-3" />
         <div className="min-h-[15rem] flex flex-col">
           <div className="overflow-x-auto -mx-4 px-4 flex-1 min-h-0">
-            <table className="w-full text-sm table-fixed">
-              <thead>
-                <tr className="h-10">
-                  <th className="table-header text-left">
-                    <div className="h-3 w-16 rounded bg-app-hover" />
-                  </th>
-                  <th className="table-header text-left">
-                    <div className="h-3 w-12 rounded bg-app-hover" />
-                  </th>
-                  <th className="table-header text-left">
-                    <div className="h-3 w-14 rounded bg-app-hover" />
-                  </th>
-                  <th className="table-header text-left">
-                    <div className="h-3 w-16 rounded bg-app-hover" />
-                  </th>
-                  <th className="table-header text-left">
-                    <div className="h-3 w-20 rounded bg-app-hover" />
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+            <div className="w-full text-sm table-fixed min-w-[520px]" role="presentation">
+              <div className="grid grid-cols-5 gap-2 border-b border-app-border pb-2 mb-2">
                 {[1, 2, 3, 4, 5].map((i) => (
-                  <tr key={i} className="h-10">
-                    <td className="table-cell">
-                      <div className="h-3 w-24 rounded bg-app-hover" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-20 rounded bg-app-hover" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-28 rounded bg-app-hover" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-16 rounded bg-app-hover" />
-                    </td>
-                    <td className="table-cell">
-                      <div className="h-3 w-24 rounded bg-app-hover" />
-                    </td>
-                  </tr>
+                  <div key={`h-${i}`} className="h-3 rounded bg-app-hover" />
                 ))}
-              </tbody>
-            </table>
+              </div>
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="grid grid-cols-5 gap-2 py-2.5 border-b border-app-border/60">
+                  <div className="h-3 w-24 rounded bg-app-hover" />
+                  <div className="h-3 w-20 rounded bg-app-hover" />
+                  <div className="h-3 w-28 rounded bg-app-hover" />
+                  <div className="h-3 w-16 rounded bg-app-hover" />
+                  <div className="h-3 w-24 rounded bg-app-hover" />
+                </div>
+              ))}
+            </div>
           </div>
           <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-app-border shrink-0">
             <div className="h-3 w-32 rounded bg-app-hover" />
@@ -116,61 +90,25 @@ export function CSOverviewSkeleton() {
 
       {/* Tab content: table card */}
       <div className="card p-0">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">
-                  <div className="h-3 w-16 rounded bg-app-hover" />
-                </th>
-                <th className="table-header">
-                  <div className="h-3 w-20 rounded bg-app-hover" />
-                </th>
-                <th className="table-header">
-                  <div className="h-3 w-14 rounded bg-app-hover" />
-                </th>
-                <th className="table-header">
-                  <div className="h-3 w-16 rounded bg-app-hover" />
-                </th>
-                <th className="table-header">
-                  <div className="h-3 w-20 rounded bg-app-hover" />
-                </th>
-                <th className="table-header">
-                  <div className="h-3 w-20 rounded bg-app-hover" />
-                </th>
-                <th className="table-header">
-                  <div className="h-3 w-20 rounded bg-app-hover" />
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {[1, 2, 3, 4, 5].map((i) => (
-                <tr key={i} className="table-row">
-                  <td className="table-cell">
-                    <div className="h-3 w-20 rounded bg-app-hover" />
-                  </td>
-                  <td className="table-cell">
-                    <div className="h-3 w-24 rounded bg-app-hover" />
-                  </td>
-                  <td className="table-cell">
-                    <div className="h-3 w-16 rounded bg-app-hover" />
-                  </td>
-                  <td className="table-cell">
-                    <div className="h-3 w-20 rounded bg-app-hover" />
-                  </td>
-                  <td className="table-cell">
-                    <div className="h-3 w-24 rounded bg-app-hover" />
-                  </td>
-                  <td className="table-cell">
-                    <div className="h-3 w-24 rounded bg-app-hover" />
-                  </td>
-                  <td className="table-cell">
-                    <div className="h-6 w-16 rounded bg-app-hover" />
-                  </td>
-                </tr>
+        <div className="hidden md:block overflow-x-auto px-1">
+          <div className="w-full min-w-[720px]" role="presentation">
+            <div className="grid grid-cols-7 gap-2 border-b border-app-border px-3 py-2">
+              {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+                <div key={`th-${i}`} className="h-3 rounded bg-app-hover" />
               ))}
-            </tbody>
-          </table>
+            </div>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="grid grid-cols-7 gap-2 items-center px-3 py-3 border-b border-app-border/60">
+                <div className="h-3 w-20 rounded bg-app-hover" />
+                <div className="h-3 w-24 rounded bg-app-hover" />
+                <div className="h-3 w-16 rounded bg-app-hover" />
+                <div className="h-3 w-20 rounded bg-app-hover" />
+                <div className="h-3 w-24 rounded bg-app-hover" />
+                <div className="h-3 w-24 rounded bg-app-hover" />
+                <div className="h-6 w-16 rounded bg-app-hover justify-self-start" />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

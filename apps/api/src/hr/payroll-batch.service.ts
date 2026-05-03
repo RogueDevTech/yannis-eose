@@ -18,7 +18,7 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActorAndBranch } from '../common/db/with-actor';
-import { isAdminLevel, isOrgWideDepartmentHead } from '../common/authz';
+import { isOrgWideDepartmentHead } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schema';
@@ -71,15 +71,19 @@ export function getManageableRolesForViewer(viewer: { role: string }): string[] 
 
 /** True when this user is allowed to prepare a DRAFT batch by role-only policy. */
 function canPrepareDeptByRole(user: SessionUser, branchId: string, dept: PayrollDepartment): boolean {
-  if (isAdminLevel(user)) return true;
+  // SuperAdmin always; otherwise anyone holding hr.write (admin via ALL_PERMISSION_CODES, HR_MANAGER) prepares any.
+  if (user.role === 'SUPER_ADMIN') return true;
+  const perms = user.permissions ?? [];
+  if (perms.includes('hr.write')) return true;
   if (user.role !== DEPARTMENT_OWNER_ROLE[dept]) return false;
   if (isOrgWideDepartmentHead(user) && user.currentBranchId == null) return true;
   return !!user.currentBranchId && user.currentBranchId === branchId;
 }
 
-/** HR review stage gate — HR Manager + admin-class. */
+/** HR review stage gate — anyone with hr.write (HR_MANAGER, admin) or SuperAdmin. */
 function canReviewBatch(user: SessionUser): boolean {
-  return isAdminLevel(user) || user.role === 'HR_MANAGER';
+  if (user.role === 'SUPER_ADMIN') return true;
+  return (user.permissions ?? []).includes('hr.write');
 }
 
 /** Finance disbursement stage gate — Finance Officer + Finance hat + admin-class. */
@@ -753,7 +757,10 @@ export class PayrollBatchService {
     const departments = new Set<PayrollDepartment>();
     const branchIds = new Set<string>();
 
-    if (isAdminLevel(viewer)) {
+    const viewerHasFullHr =
+      viewer.role === 'SUPER_ADMIN' ||
+      (viewer.permissions ?? []).includes('hr.write');
+    if (viewerHasFullHr) {
       (Object.keys(DEPARTMENT_OWNER_ROLE) as PayrollDepartment[]).forEach((d) => departments.add(d));
       const allBranches = await this.db
         .select({ id: schema.branches.id, name: schema.branches.name })
@@ -819,8 +826,11 @@ export class PayrollBatchService {
   async listMonthlyPayrolls(input: ListMonthlyPayrollsInput, viewer: SessionUser) {
     const conditions = [] as ReturnType<typeof and>[] | unknown[];
 
-    // Viewer scoping
-    const cross = isAdminLevel(viewer);
+    // Viewer scoping. Cross-branch view is granted to SuperAdmin and anyone holding hr.write
+    // (admin via ALL_PERMISSION_CODES, HR_MANAGER via SYSTEM template).
+    const cross =
+      viewer.role === 'SUPER_ADMIN' ||
+      (viewer.permissions ?? []).includes('hr.write');
     const orgWideHeadNullSession =
       isOrgWideDepartmentHead(viewer) && viewer.currentBranchId == null;
 
@@ -904,7 +914,7 @@ export class PayrollBatchService {
     // Permission check: same scoping as list
     const allowedAsHead = await this.canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment);
     const allowed =
-      isAdminLevel(viewer) ||
+      viewer.role === 'SUPER_ADMIN' ||
       canReviewBatch(viewer) ||
       canProcessBatch(viewer) ||
       allowedAsHead;
@@ -1094,17 +1104,15 @@ export class PayrollBatchService {
     branchId: string,
     payload: { type: string; title: string; body: string; batchId: string },
   ) {
-    // Finance Officers (any branch) + Finance hat holder
+    // Finance Officers (any branch). The Finance "hat" pattern was retired in favour of
+    // permission overrides — admins now grant the relevant `finance.*` codes directly.
     const recipients = await this.db
       .select({ id: schema.users.id })
       .from(schema.users)
       .where(
         and(
           eq(schema.users.status, 'ACTIVE'),
-          or(
-            eq(schema.users.role, 'FINANCE_OFFICER'),
-            eq(schema.users.isFinanceOfficer, true),
-          ),
+          eq(schema.users.role, 'FINANCE_OFFICER'),
         ),
       );
     for (const r of recipients) {

@@ -13,6 +13,7 @@ import { APP_THEMES, previewRgb, THEME_PREVIEW_BRAND_HEX, THEME_PREVIEW_RGB } fr
 import { FONT_SCALES } from '~/lib/font-scale';
 import { SettingsPushPanel } from './SettingsPushPanel';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 
@@ -254,6 +255,35 @@ const NOTIFICATION_CATEGORY_LABELS: Record<string, string> = {
   account: 'Account',
 };
 
+function NotificationPreferenceToggle({
+  checked,
+  onToggle,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onToggle: () => void;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
+        checked ? 'bg-brand-600' : 'bg-app-border'
+      }`}
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+    >
+      <span
+        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+          checked ? 'translate-x-5' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  );
+}
+
 export function SettingsPage({
   user,
   systemSettings = [],
@@ -319,6 +349,19 @@ export function SettingsPage({
   const claimCapSetting = systemSettings.find((s) => s.key === 'CS_CLAIM_CAP');
   const claimCapFromSettings = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
   const [localClaimCap, setLocalClaimCap] = useState<number>(claimCapFromSettings);
+
+  // Marketing profitability config — target ROAS where score caps at 1.0, plus the green/red
+  // threshold used by the Team page Profitability column and the Leaderboard ROAS pill.
+  // Defaults: target=3x, green=2.5x (CEO directive 2026-05-03).
+  const profitabilitySetting = systemSettings.find((s) => s.key === 'MARKETING_PROFITABILITY');
+  const profitabilityTargetSaved =
+    typeof profitabilitySetting?.value?.targetRoas === 'number' ? profitabilitySetting.value.targetRoas : 3;
+  const profitabilityThresholdSaved =
+    typeof profitabilitySetting?.value?.greenThreshold === 'number'
+      ? profitabilitySetting.value.greenThreshold
+      : 2.5;
+  const [localProfitabilityTarget, setLocalProfitabilityTarget] = useState<number>(profitabilityTargetSaved);
+  const [localProfitabilityThreshold, setLocalProfitabilityThreshold] = useState<number>(profitabilityThresholdSaved);
 
   // Local state for notification email toggles (configurable types only)
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>({});
@@ -401,6 +444,12 @@ export function SettingsPage({
   useEffect(() => {
     setLocalClaimCap(claimCapFromSettings);
   }, [claimCapFromSettings]);
+  useEffect(() => {
+    setLocalProfitabilityTarget(profitabilityTargetSaved);
+  }, [profitabilityTargetSaved]);
+  useEffect(() => {
+    setLocalProfitabilityThreshold(profitabilityThresholdSaved);
+  }, [profitabilityThresholdSaved]);
 
   const orgDefaultSaved = useMemo(
     () =>
@@ -427,13 +476,16 @@ export function SettingsPage({
     localVoipEnabled !== isVoipEnabled ||
     selectedDispatchStrategy !== dispatchStrategyFromSettings ||
     localClaimCap !== claimCapFromSettings ||
-    orgDefaultAppTheme !== orgDefaultSaved;
+    orgDefaultAppTheme !== orgDefaultSaved ||
+    localProfitabilityTarget !== profitabilityTargetSaved ||
+    localProfitabilityThreshold !== profitabilityThresholdSaved;
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Settings"
         description="Manage your account and system preferences"
+        actions={<PageRefreshButton />}
       />
 
       <Tabs
@@ -653,45 +705,51 @@ export function SettingsPage({
             <input type="hidden" name="preferences" value={JSON.stringify(myNotifEnabled)} />
 
             <div className="card">
-              <div className="flex items-start justify-between gap-4 mb-4">
-                <div>
+              <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-app-fg">My notifications</h3>
-                  <p className="text-sm text-app-fg-muted mt-0.5">
+                  <p className="mt-0.5 text-sm text-app-fg-muted">
                     Choose which notifications you receive. Turning a type off stops all delivery
                     for that type — in-app, push, and email. You can turn it back on any time.
                   </p>
                 </div>
                 {myNotificationPrefs && myNotificationPrefs.items.length > 0 && (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-app-fg-muted">Toggle all:</span>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        const allOn: Record<string, boolean> = {};
-                        myNotificationPrefs.items.forEach((i) => {
-                          allOn[i.type] = true;
-                        });
-                        setMyNotifEnabled(allOn);
-                      }}
-                    >
-                      Enable all
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        const allOff: Record<string, boolean> = {};
-                        myNotificationPrefs.items.forEach((i) => {
-                          allOff[i.type] = false;
-                        });
-                        setMyNotifEnabled(allOff);
-                      }}
-                    >
-                      Disable all
-                    </Button>
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:shrink-0 sm:flex-row sm:items-center">
+                    <span className="text-xs font-medium text-app-fg-muted sm:whitespace-nowrap">
+                      Toggle all
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="min-h-[2.25rem] flex-1 sm:flex-initial"
+                        onClick={() => {
+                          const allOn: Record<string, boolean> = {};
+                          myNotificationPrefs.items.forEach((i) => {
+                            allOn[i.type] = true;
+                          });
+                          setMyNotifEnabled(allOn);
+                        }}
+                      >
+                        Enable all
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="min-h-[2.25rem] flex-1 sm:flex-initial"
+                        onClick={() => {
+                          const allOff: Record<string, boolean> = {};
+                          myNotificationPrefs.items.forEach((i) => {
+                            allOff[i.type] = false;
+                          });
+                          setMyNotifEnabled(allOff);
+                        }}
+                      >
+                        Disable all
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -704,60 +762,65 @@ export function SettingsPage({
                   reach you so you don&apos;t miss anything urgent.
                 </p>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-4 sm:space-y-6">
                   {Object.keys(myNotifGroupedItems)
                     .sort()
                     .map((category) => (
                       <div key={category}>
-                        <h4 className="text-sm font-medium text-app-fg-muted mb-3">
+                        <h4 className="mb-2 text-sm font-medium text-app-fg-muted sm:mb-3">
                           {NOTIFICATION_CATEGORY_LABELS[category] ?? category}
                         </h4>
-                        <div className="space-y-3">
-                          {myNotifGroupedItems[category]!.map((item) => (
-                            <div
-                              key={item.type}
-                              className="flex items-center justify-between py-3 px-4 rounded-lg border border-app-border"
-                            >
-                              <div className="flex-1 min-w-0 pr-4">
-                                <p className="text-sm font-medium text-app-fg">
-                                  {item.label}
-                                </p>
-                                <p className="text-xs text-app-fg-muted mt-0.5">
-                                  {item.description}
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setMyNotifEnabled((prev) => ({
-                                    ...prev,
-                                    [item.type]: !prev[item.type],
-                                  }))
-                                }
-                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
-                                  myNotifEnabled[item.type] ? 'bg-brand-600' : 'bg-app-border'
-                                }`}
-                                role="switch"
-                                aria-checked={myNotifEnabled[item.type] ?? false}
-                                aria-label={`Toggle notifications for ${item.label}`}
+                        <div className="space-y-2 sm:space-y-3">
+                          {myNotifGroupedItems[category]!.map((item) => {
+                            const enabled = myNotifEnabled[item.type] ?? false;
+                            const aria = `Toggle notifications for ${item.label}`;
+                            const flip = () =>
+                              setMyNotifEnabled((prev) => ({
+                                ...prev,
+                                [item.type]: !prev[item.type],
+                              }));
+                            return (
+                              <div
+                                key={item.type}
+                                className="rounded-lg border border-app-border px-2.5 py-2 sm:flex sm:items-center sm:justify-between sm:gap-4 sm:px-4 sm:py-3"
                               >
-                                <span
-                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                    myNotifEnabled[item.type] ? 'translate-x-5' : 'translate-x-0'
-                                  }`}
-                                />
-                              </button>
-                            </div>
-                          ))}
+                                <div className="min-w-0 flex-1 sm:pr-4">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className="min-w-0 flex-1 text-sm font-medium leading-snug text-app-fg">
+                                      {item.label}
+                                    </p>
+                                    <div className="shrink-0 pt-0.5 sm:hidden">
+                                      <NotificationPreferenceToggle
+                                        checked={enabled}
+                                        onToggle={flip}
+                                        ariaLabel={aria}
+                                      />
+                                    </div>
+                                  </div>
+                                  <p className="mt-1 text-xs leading-snug text-app-fg-muted sm:mt-0.5">
+                                    {item.description}
+                                  </p>
+                                </div>
+                                <div className="hidden shrink-0 sm:flex sm:items-center">
+                                  <NotificationPreferenceToggle
+                                    checked={enabled}
+                                    onToggle={flip}
+                                    ariaLabel={aria}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
 
-                  <div className="pt-4 border-t border-app-border">
+                  <div className="flex flex-col gap-2 border-t border-app-border pt-4 sm:flex-row sm:items-center">
                     <Button
                       type="submit"
                       variant="primary"
                       size="sm"
+                      className="w-full min-h-[2.5rem] sm:w-auto"
                       disabled={!myNotifHasChanges || fetcher.state === 'submitting'}
                       loading={fetcher.state === 'submitting'}
                       loadingText="Saving..."
@@ -765,7 +828,7 @@ export function SettingsPage({
                       Save notification preferences
                     </Button>
                     {myNotifHasChanges && (
-                      <span className="ml-3 text-xs text-app-fg-muted">
+                      <span className="text-xs text-app-fg-muted sm:ml-3">
                         You have unsaved changes
                       </span>
                     )}
@@ -789,6 +852,16 @@ export function SettingsPage({
               <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
               <input type="hidden" name="claimCap" value={String(localClaimCap)} />
               <input type="hidden" name="defaultAppTheme" value={orgDefaultAppTheme} />
+              <input
+                type="hidden"
+                name="profitabilityTargetRoas"
+                value={String(localProfitabilityTarget)}
+              />
+              <input
+                type="hidden"
+                name="profitabilityGreenThreshold"
+                value={String(localProfitabilityThreshold)}
+              />
 
               {/* VOIP Integration */}
               <div className="card lg:col-span-2">
@@ -972,6 +1045,81 @@ export function SettingsPage({
                             : 'Manual assignment'
                     }</strong>
                     {hasSystemChanges && ' — you have unsaved changes'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Marketing Profitability — target ROAS + green/red threshold */}
+              <div className="card lg:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Marketing profitability</h3>
+                    <p className="text-sm text-app-fg-muted">
+                      True ROAS = revenue from delivered orders ÷ approved ad spend. Drives the
+                      Profitability column on Team Analysis and the ROAS pill on the leaderboard.
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-app-border p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="profit-target-roas" className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
+                      Target ROAS (score caps at 1.0)
+                    </label>
+                    <p className="text-xs text-app-fg-muted mt-0.5 mb-2">
+                      The True ROAS multiple that maps to a perfect 1.0 profitability score.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <TextInput
+                        id="profit-target-roas"
+                        type="number"
+                        step="0.1"
+                        min={0.1}
+                        max={50}
+                        value={localProfitabilityTarget}
+                        onChange={(e) =>
+                          setLocalProfitabilityTarget(
+                            Math.max(0.1, Math.min(50, parseFloat(e.target.value) || 3)),
+                          )
+                        }
+                        wrapperClassName="w-28"
+                      />
+                      <span className="text-xs text-app-fg-muted">x</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="profit-green-threshold" className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
+                      Green/red threshold
+                    </label>
+                    <p className="text-xs text-app-fg-muted mt-0.5 mb-2">
+                      At/above this ROAS the buyer is shown in green; below it, red.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <TextInput
+                        id="profit-green-threshold"
+                        type="number"
+                        step="0.1"
+                        min={0.1}
+                        max={50}
+                        value={localProfitabilityThreshold}
+                        onChange={(e) =>
+                          setLocalProfitabilityThreshold(
+                            Math.max(0.1, Math.min(50, parseFloat(e.target.value) || 2.5)),
+                          )
+                        }
+                        wrapperClassName="w-28"
+                      />
+                      <span className="text-xs text-app-fg-muted">x</span>
+                    </div>
+                  </div>
+                  <p className="sm:col-span-2 text-xs text-app-fg-muted">
+                    Saved: <strong>target {profitabilityTargetSaved}x · green ≥ {profitabilityThresholdSaved}x</strong>
+                    {(localProfitabilityTarget !== profitabilityTargetSaved ||
+                      localProfitabilityThreshold !== profitabilityThresholdSaved) && ' — you have unsaved changes'}
                   </p>
                 </div>
               </div>

@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { eq, and, desc, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type Redis from 'ioredis';
-import { db as schema } from '@yannis/shared';
+import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { EventsService } from '../events/events.service';
@@ -199,7 +199,11 @@ export class VoipService {
         });
       }
 
-      const isElevated = actor.role === 'HEAD_OF_CS' || actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN';
+      const voipPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+      const isElevated =
+        actor.role === 'SUPER_ADMIN' ||
+        voipPerms.includes(canonicalPermissionCode('cs.scope.global')) ||
+        voipPerms.includes(canonicalPermissionCode('orders.update.any_branch'));
       if (!isElevated && foundOrder.assignedCsId !== actor.id) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'You are not assigned to this order' });
       }

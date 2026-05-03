@@ -1,6 +1,6 @@
 import { Modal } from './modal';
 import { Button } from './button';
-import { canonicalPermissionCode } from '~/lib/permission-codes';
+import { canonicalPermissionCode, formatPermissionCode } from '~/lib/permission-codes';
 
 /**
  * Phase 21 — Permission Required modal.
@@ -90,14 +90,21 @@ export function PermissionRequiredModal({
         <p className="text-[11px] font-semibold uppercase tracking-wide text-app-fg-muted">
           {canonical.length === 1 ? 'Permission needed' : 'Any one of these permissions'}
         </p>
-        <ul className="space-y-1.5">
+        <ul className="space-y-2">
           {canonical.map((code) => (
-            <li
-              key={code}
-              className="flex items-center gap-2 text-xs font-mono text-app-fg break-all"
-            >
-              <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" aria-hidden />
-              <code className="rounded bg-app-elevated px-1.5 py-0.5">{code}</code>
+            <li key={code} className="flex items-start gap-2 text-app-fg">
+              <span
+                className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500"
+                aria-hidden
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">
+                  {formatPermissionCode(code)}
+                </span>
+                <code className="mt-0.5 inline-block rounded bg-app-elevated px-1.5 py-0.5 font-mono text-[11px] text-app-fg-muted break-all">
+                  {code}
+                </code>
+              </span>
             </li>
           ))}
         </ul>

@@ -124,7 +124,12 @@ export class NotificationsService {
       this.logger.log(`Email sent: ${opts.subject} → ${opts.to}`);
       return true;
     } catch (error) {
-      this.logger.error(`Failed to send email to ${opts.to}: ${error}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      const hint =
+        msg.includes('ENOTFOUND') || msg.includes('getaddrinfo')
+          ? ' (DNS could not resolve api.sendgrid.com — check network/VPN/DNS; axios respects HTTPS_PROXY if set)'
+          : '';
+      this.logger.error(`Failed to send email to ${opts.to}: ${error}${hint}`);
       return false;
     }
   }
@@ -146,7 +151,7 @@ export class NotificationsService {
 
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 0;">
-        <div style="background: #6366f1; padding: 24px 32px; border-radius: 12px 12px 0 0;">
+        <div style="background: #1565C0; padding: 24px 32px; border-radius: 12px 12px 0 0;">
           <h1 style="color: #fff; margin: 0; font-size: 22px;">Welcome to Yannis EOSE</h1>
         </div>
         <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
@@ -168,7 +173,7 @@ export class NotificationsService {
               </tr>
             </table>
           </div>
-          <a href="${opts.loginUrl}" style="display: block; text-align: center; background: #6366f1; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+          <a href="${opts.loginUrl}" style="display: block; text-align: center; background: #1565C0; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
             Sign In Now
           </a>
           <p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 24px 0 0; text-align: center;">
@@ -283,7 +288,7 @@ export class NotificationsService {
 
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 0;">
-        <div style="background: #6366f1; padding: 24px 32px; border-radius: 12px 12px 0 0;">
+        <div style="background: #1565C0; padding: 24px 32px; border-radius: 12px 12px 0 0;">
           <h1 style="color: #fff; margin: 0; font-size: 22px;">Yannis EOSE</h1>
         </div>
         <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
@@ -294,7 +299,7 @@ export class NotificationsService {
             <strong>${title}</strong>
           </p>
           ${body ? `<p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">${body}</p>` : ''}
-          <a href="${link}" style="display: inline-block; background: #6366f1; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+          <a href="${link}" style="display: inline-block; background: #1565C0; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
             View in Dashboard
           </a>
         </div>

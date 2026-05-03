@@ -200,4 +200,21 @@ export const logisticsRouter = router({
     .mutation(async ({ input, ctx }) => {
       return getLogisticsService().rejectDeliveryConfirmation(input, ctx.user);
     }),
+
+  // Logistics Team Analysis (provider performance rollup) — gates the
+  // /admin/logistics/team page. Branch scoping flows through ctx.currentBranchId.
+  teamOverview: permissionProcedure('logistics.teamOverview')
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      return getLogisticsService().getLogisticsProviderPerformance(
+        input.startDate,
+        input.endDate,
+        ctx.currentBranchId,
+      );
+    }),
 });

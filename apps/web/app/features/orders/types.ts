@@ -180,12 +180,13 @@ export interface OrderDetailPageExtraProps {
   currentBranchId?: string | null;
   permissions: string[];
   csAgentsForAssign?: Array<{ id: string; name: string }>;
-  logisticsLocations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }>;
+  logisticsLocations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null; providerName?: string | null }>;
   allocatableLocations?: Array<{
     id: string;
     name: string;
     address: string | null;
     whatsappGroupLink?: string | null;
+    providerName: string | null;
     eligible: boolean;
     reason: string | null;
     /**

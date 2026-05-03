@@ -1,15 +1,15 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, isNull, ne, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import {
   db as schema,
   canonicalPermissionCode,
+  type ListStaffOnboardingDocumentsInput,
   type UpdateOnboardingProfileInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
-import { isAdminLevel } from '../common/authz';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -20,10 +20,9 @@ import { NotificationsService } from '../notifications/notifications.service';
  *  • The user's account stays ACTIVE regardless of onboarding status. This flow
  *    does not block login or anything in the app — it's an HR record.
  *  • Staff can edit their own onboarding while NOT_STARTED / IN_PROGRESS.
- *    Once SUBMITTED the form locks for staff (HR can still edit).
- *    Once APPROVED the form is permanently locked for staff.
- *  • HR (`hr.onboarding.write`) and admin-class can edit anyone's onboarding
- *    at any stage. Approval requires `hr.onboarding.approve` or admin-class.
+ *    Once SUBMITTED or APPROVED the form locks for staff (HR reviews read-only on `/hr/users/:id/onboarding`).
+ *  • Only the staff member may update or submit their onboarding (`update` / `submit` as self).
+ *    HR / admin approve via `approve` (`hr.onboarding.approve` or admin-class).
  *  • A `staff_onboarding` row is lazily created the first time a user opens
  *    their onboarding page, so we don't carry a 1-to-1 row from user creation.
  */
@@ -42,18 +41,15 @@ export class OnboardingService {
 
   private canManageAnyOnboarding(actor: SessionUser): boolean {
     return (
-      isAdminLevel(actor) ||
+      actor.role === 'SUPER_ADMIN' ||
       this.actorHasPermission(actor, 'hr.onboarding.write') ||
-      this.actorHasPermission(actor, 'hr.onboarding.read')
+      this.actorHasPermission(actor, 'hr.onboarding.read') ||
+      this.actorHasPermission(actor, 'hr.onboarding.approve')
     );
   }
 
-  private canEditAnyOnboarding(actor: SessionUser): boolean {
-    return isAdminLevel(actor) || this.actorHasPermission(actor, 'hr.onboarding.write');
-  }
-
   private canApproveOnboarding(actor: SessionUser): boolean {
-    return isAdminLevel(actor) || this.actorHasPermission(actor, 'hr.onboarding.approve');
+    return actor.role === 'SUPER_ADMIN' || this.actorHasPermission(actor, 'hr.onboarding.approve');
   }
 
   /**
@@ -114,11 +110,10 @@ export class OnboardingService {
     input: UpdateOnboardingProfileInput,
     actor: SessionUser,
   ) {
-    const isSelf = targetUserId === actor.id;
-    if (!isSelf && !this.canEditAnyOnboarding(actor)) {
+    if (targetUserId !== actor.id) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'You don\'t have permission to edit this onboarding record.',
+        message: 'Only the staff member can update onboarding details from their own session.',
       });
     }
 
@@ -129,17 +124,14 @@ export class OnboardingService {
         .where(eq(schema.staffOnboarding.userId, targetUserId))
         .limit(1);
 
-      // Self-edits are blocked once the record is locked. HR can always edit.
-      if (existing && isSelf && !this.canEditAnyOnboarding(actor)) {
-        if (existing.status === 'SUBMITTED' || existing.status === 'APPROVED') {
-          throw new TRPCError({
-            code: 'FORBIDDEN',
-            message:
-              existing.status === 'APPROVED'
-                ? 'Your onboarding has been approved and is locked. Contact HR for changes.'
-                : 'Your onboarding is awaiting HR review and is locked for edits.',
-          });
-        }
+      if (existing && (existing.status === 'SUBMITTED' || existing.status === 'APPROVED')) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            existing.status === 'APPROVED'
+              ? 'Your onboarding has been approved and is locked. Contact HR for changes.'
+              : 'Your onboarding is awaiting HR review and is locked for edits.',
+        });
       }
 
       const patch: Record<string, unknown> = { updatedAt: new Date() };
@@ -171,8 +163,7 @@ export class OnboardingService {
       setIfPresent('guarantor2LetterUrl', 'guarantor2LetterUrl');
 
       if (existing) {
-        // Bump NOT_STARTED → IN_PROGRESS on first edit. SUBMITTED / APPROVED
-        // stay at their current status when HR edits — approval is its own action.
+        // Bump NOT_STARTED → IN_PROGRESS on first edit.
         if (existing.status === 'NOT_STARTED') {
           patch['status'] = 'IN_PROGRESS';
         }
@@ -197,18 +188,16 @@ export class OnboardingService {
   }
 
   /**
-   * Move the record to SUBMITTED — locks it for the staff member. Self-submit
-   * always allowed when not yet SUBMITTED/APPROVED; HR can submit on behalf.
+   * Move the record to SUBMITTED — locks it for the staff member. Only self-submit.
    *
    * Required fields at submission: gender, DOB, residential address, proof of
    * address, both guarantors with at least name + phone + letter URL.
    */
   async submit(targetUserId: string, actor: SessionUser) {
-    const isSelf = targetUserId === actor.id;
-    if (!isSelf && !this.canEditAnyOnboarding(actor)) {
+    if (targetUserId !== actor.id) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'You don\'t have permission to submit this onboarding record.',
+        message: 'Only the staff member can submit their own onboarding.',
       });
     }
 
@@ -340,5 +329,132 @@ export class OnboardingService {
       .catch(() => {});
 
     return approved;
+  }
+
+  /**
+   * HR overview: paginated staff directory with effective onboarding status
+   * (`NOT_STARTED` when there is no `staff_onboarding` row yet). Branch scoping
+   * mirrors `UsersService.list`.
+   */
+  async listStaffDocuments(
+    input: ListStaffOnboardingDocumentsInput,
+    actor: SessionUser,
+    currentBranchId: string | null,
+  ) {
+    if (!this.canManageAnyOnboarding(actor)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You do not have permission to view staff onboarding records.',
+      });
+    }
+
+    const conditions = [];
+
+    if (!input.userStatus) {
+      conditions.push(ne(schema.users.status, 'DEACTIVATED'));
+    } else {
+      conditions.push(eq(schema.users.status, input.userStatus));
+    }
+
+    const canViewAllBranches =
+      actor.role === 'SUPER_ADMIN' ||
+      (actor.permissions ?? []).includes(canonicalPermissionCode('branches.manage'));
+    const skipBranchScope = input.allBranches === true && canViewAllBranches;
+    const branchFilter = skipBranchScope ? input.branchId : (input.branchId ?? currentBranchId ?? undefined);
+
+    if (branchFilter) {
+      conditions.push(
+        sql<boolean>`EXISTS (
+          SELECT 1
+          FROM user_branches ub
+          WHERE ub.user_id = ${schema.users.id}
+            AND ub.branch_id = ${branchFilter}
+        )`,
+      );
+    }
+
+    if (input.search) {
+      conditions.push(
+        or(
+          ilike(schema.users.name, `%${input.search}%`),
+          ilike(schema.users.email, `%${input.search}%`),
+        ),
+      );
+    }
+
+    if (input.onboardingStatus !== 'ALL') {
+      if (input.onboardingStatus === 'NOT_STARTED') {
+        conditions.push(
+          or(isNull(schema.staffOnboarding.id), eq(schema.staffOnboarding.status, 'NOT_STARTED')),
+        );
+      } else {
+        conditions.push(eq(schema.staffOnboarding.status, input.onboardingStatus));
+      }
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const effectiveStatusSql = sql<string>`COALESCE(${schema.staffOnboarding.status}::text, 'NOT_STARTED')`;
+    const sortKeySql = sql`COALESCE(${schema.staffOnboarding.updatedAt}, ${schema.users.updatedAt})`;
+
+    const orderByExpr =
+      input.sortBy === 'name'
+        ? input.sortOrder === 'asc'
+          ? asc(schema.users.name)
+          : desc(schema.users.name)
+        : input.sortOrder === 'asc'
+          ? asc(sortKeySql)
+          : desc(sortKeySql);
+
+    const offset = (input.page - 1) * input.limit;
+
+    const baseQuery = this.db
+      .select({
+        userId: schema.users.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        role: schema.users.role,
+        status: schema.users.status,
+        primaryBranchId: schema.users.primaryBranchId,
+        primaryBranchName: schema.branches.name,
+        onboardingStatus: effectiveStatusSql,
+        submittedAt: schema.staffOnboarding.submittedAt,
+        approvedAt: schema.staffOnboarding.approvedAt,
+        onboardingUpdatedAt: sortKeySql,
+      })
+      .from(schema.users)
+      .leftJoin(schema.staffOnboarding, eq(schema.users.id, schema.staffOnboarding.userId))
+      .leftJoin(schema.branches, eq(schema.users.primaryBranchId, schema.branches.id))
+      .where(whereClause)
+      .orderBy(orderByExpr)
+      .limit(input.limit)
+      .offset(offset);
+
+    const countQuery = this.db
+      .select({ count: count() })
+      .from(schema.users)
+      .leftJoin(schema.staffOnboarding, eq(schema.users.id, schema.staffOnboarding.userId))
+      .where(whereClause);
+
+    const [rows, totalRows] = await Promise.all([baseQuery, countQuery]);
+
+    const total = Number(totalRows[0]?.count ?? 0);
+
+    return {
+      rows: rows.map((r) => ({
+        ...r,
+        onboardingStatus: r.onboardingStatus as
+          | 'NOT_STARTED'
+          | 'IN_PROGRESS'
+          | 'SUBMITTED'
+          | 'APPROVED',
+      })),
+      pagination: {
+        page: input.page,
+        limit: input.limit,
+        total,
+        totalPages: Math.ceil(total / input.limit),
+      },
+    };
   }
 }

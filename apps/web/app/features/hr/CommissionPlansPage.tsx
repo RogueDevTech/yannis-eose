@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -10,6 +11,14 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useFetcherToast } from '~/components/ui/toast';
 import { RoleBadge } from '~/components/ui/role-badge';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import type { CommissionPlan } from './types';
 
 interface CommissionPlansPageProps {
@@ -51,60 +60,189 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
   const [editPlan, setEditPlan] = useState<CommissionPlan | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
-  const createInFlightRef = useRef(false);
-  const editInFlightRef = useRef(false);
 
   /** Filters — Role select narrows by exact role; Status narrows by computed Active/Upcoming/Expired. */
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | PlanStatus>('ALL');
 
+  // Optimistic-add: render a synthetic plan row the instant the form submits
+  // so the user sees their new plan in the list before the server responds.
+  // The synthetic row gets `id: __optimistic_…`; row chrome (action buttons,
+  // edit) is disabled until the canonical row replaces it on revalidation.
+  const buildOptimisticPlans = useCallback<
+    (fd: FormData, intent: string) => CommissionPlan[] | null
+  >((fd, intent) => {
+    if (intent !== 'createPlan') return null;
+    const planName = fd.get('planName')?.toString().trim();
+    const role = fd.get('role')?.toString().trim();
+    if (!planName || !role) return null;
+    const rules: Record<string, unknown> = {};
+    for (const key of [
+      'baseSalary',
+      'baseThreshold',
+      'perOrderRate',
+      'bonusPerExtraOrder',
+      'penaltyPerReturn',
+      'deliveryRateThreshold',
+    ]) {
+      const v = fd.get(key)?.toString().trim();
+      if (v) rules[key] = v;
+    }
+    const effectiveFrom = fd.get('effectiveFrom')?.toString() || new Date().toISOString().slice(0, 10);
+    const effectiveTo = fd.get('effectiveTo')?.toString() || null;
+    return [
+      {
+        id: optimisticId(),
+        planName,
+        role,
+        rules,
+        effectiveFrom: new Date(effectiveFrom).toISOString(),
+        effectiveTo: effectiveTo ? new Date(effectiveTo).toISOString() : null,
+      },
+    ];
+  }, []);
+  const optimisticPlans = useOptimisticListMerge<CommissionPlan>(fetcher, buildOptimisticPlans);
+
   const filteredPlans = useMemo(() => {
-    return plans.filter((p) => {
+    const all = [...optimisticPlans, ...plans];
+    return all.filter((p) => {
       if (roleFilter !== 'ALL' && p.role !== roleFilter) return false;
       if (statusFilter !== 'ALL' && deriveStatus(p) !== statusFilter) return false;
       return true;
     });
-  }, [plans, roleFilter, statusFilter]);
+  }, [plans, optimisticPlans, roleFilter, statusFilter]);
 
   // Distinct roles in the loaded set — used to populate the Role filter without showing roles
   // the viewer can't see anyway.
   const visibleRoles = useMemo(() => Array.from(new Set(plans.map((p) => p.role))), [plans]);
 
-  // Close-on-success effects (separate refs so create + edit don't interfere)
-  useEffect(() => {
-    if (!showCreate) return;
-    const submitting = fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'createPlan';
-    if (submitting) {
-      createInFlightRef.current = true;
-      setCreateError(null);
-      return;
-    }
-    if (fetcher.state === 'idle' && createInFlightRef.current) {
-      createInFlightRef.current = false;
-      const result = fetcher.data;
-      if (result?.success) setShowCreate(false);
-      else if (result?.error) setCreateError(result.error);
-    }
-  }, [fetcher.state, fetcher.formData, fetcher.data, showCreate]);
+  // Success — close the matching modal. Intent filter scopes the close so
+  // submitting createPlan never closes the edit modal and vice versa.
+  const handleCreateSuccess = useCallback(() => {
+    setShowCreate(false);
+    setCreateError(null);
+  }, []);
+  const handleEditSuccess = useCallback(() => {
+    setEditPlan(null);
+    setEditError(null);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleCreateSuccess, { intent: 'createPlan' });
+  useCloseOnFetcherSuccess(fetcher, handleEditSuccess, { intent: 'updatePlan' });
 
+  // Inline error routing — only one of {create, edit} modal is open at a time,
+  // so we route the error to whichever is. Watching fetcher.data reference
+  // (not state === 'idle') so the same response never fires twice.
+  const lastErrorRef = useRef<unknown>(fetcher.data);
   useEffect(() => {
-    if (!editPlan) return;
-    const submitting = fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'updatePlan';
-    if (submitting) {
-      editInFlightRef.current = true;
-      setEditError(null);
-      return;
-    }
-    if (fetcher.state === 'idle' && editInFlightRef.current) {
-      editInFlightRef.current = false;
-      const result = fetcher.data;
-      if (result?.success) setEditPlan(null);
-      else if (result?.error) setEditError(result.error);
-    }
-  }, [fetcher.state, fetcher.formData, fetcher.data, editPlan]);
+    if (fetcher.data === lastErrorRef.current) return;
+    lastErrorRef.current = fetcher.data;
+    if (!fetcher.data || typeof fetcher.data !== 'object') return;
+    const data = fetcher.data as { success?: boolean; error?: string };
+    if (data.success) return;
+    const message = data.error ?? 'Action failed. Please try again.';
+    if (showCreate) setCreateError(message);
+    else if (editPlan) setEditError(message);
+  }, [fetcher.data, showCreate, editPlan]);
 
   const canCreate = manageableRoles.length > 0;
   const canManage = (planRole: string) => manageableRoles.includes(planRole);
+
+  const planColumns: CompactTableColumn<CommissionPlan>[] = useMemo(
+    () => [
+      {
+        key: 'planName',
+        header: 'Plan Name',
+        render: (plan) => {
+          const isOptimistic = isOptimisticId(plan.id);
+          return (
+            <Fragment>
+              <span className="font-medium text-app-fg">{plan.planName}</span>
+              {isOptimistic ? (
+                <span className="ml-2 text-xs text-app-fg-muted italic">Saving…</span>
+              ) : null}
+            </Fragment>
+          );
+        },
+      },
+      {
+        key: 'role',
+        header: 'Role',
+        render: (plan) => <RoleBadge role={plan.role} />,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (plan) => {
+          const status = deriveStatus(plan);
+          return (
+            <span
+              className={
+                status === 'ACTIVE'
+                  ? 'badge-success'
+                  : status === 'UPCOMING'
+                    ? 'badge-warning'
+                    : 'badge-danger'
+              }
+            >
+              {status}
+            </span>
+          );
+        },
+      },
+      {
+        key: 'effective',
+        header: 'Effective',
+        nowrap: true,
+        render: (plan) => (
+          <span className="text-sm text-app-fg-muted">
+            {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {plan.effectiveTo
+              ? ` — ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`
+              : ' — Ongoing'}
+          </span>
+        ),
+      },
+      {
+        key: 'rules',
+        header: 'Rules',
+        minWidth: 'min-w-[200px]',
+        cellClassName: 'max-w-[280px]',
+        cellTitle: (plan) => formatRules(plan.rules),
+        render: (plan) => (
+          <span className="text-xs text-app-fg-muted truncate block">{formatRules(plan.rules)}</span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (plan) => {
+          const editable = canManage(plan.role);
+          const isOptimistic = isOptimisticId(plan.id);
+          return (
+            <div className="inline-flex gap-1.5 justify-end">
+              <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewPlan(plan)}>
+                View
+              </CompactTableActionButton>
+              {editable ? (
+                <CompactTableActionButton
+                  tone="brand"
+                  className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+                  disabled={isOptimistic}
+                  onClick={() => setEditPlan(plan)}
+                >
+                  Edit
+                </CompactTableActionButton>
+              ) : null}
+            </div>
+          );
+        },
+      },
+    ],
+    [manageableRoles],
+  );
 
   return (
     <div className="space-y-4">
@@ -116,11 +254,14 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
             : 'You do not have permission to create or edit commission plans.'
         }
         actions={
-          canCreate ? (
-            <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-              + New Commission Plan
-            </Button>
-          ) : null
+          <>
+            <PageRefreshButton />
+            {canCreate && (
+              <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+                + New Commission Plan
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -174,98 +315,14 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           description="Loosen the role or status filter to see more results."
         />
       ) : (
-        <div className="card p-0">
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Plan Name</th>
-                  <th className="table-header">Role</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header">Effective</th>
-                  <th className="table-header">Rules</th>
-                  <th className="table-header text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPlans.map((plan) => {
-                  const status = deriveStatus(plan);
-                  const editable = canManage(plan.role);
-                  return (
-                    <tr key={plan.id} className="table-row">
-                      <td className="table-cell font-medium text-app-fg">{plan.planName}</td>
-                      <td className="table-cell">
-                        <RoleBadge role={plan.role} />
-                      </td>
-                      <td className="table-cell">
-                        <span className={
-                          status === 'ACTIVE' ? 'badge-success' :
-                          status === 'UPCOMING' ? 'badge-warning' : 'badge-danger'
-                        }>{status}</span>
-                      </td>
-                      <td className="table-cell text-sm text-app-fg-muted whitespace-nowrap">
-                        {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        {plan.effectiveTo
-                          ? ` — ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                          : ' — Ongoing'}
-                      </td>
-                      <td className="table-cell text-xs text-app-fg-muted max-w-[280px] truncate">{formatRules(plan.rules)}</td>
-                      <td className="table-cell text-right whitespace-nowrap">
-                        <div className="inline-flex gap-1.5">
-                          <Button variant="primary" size="sm" className="text-xs" onClick={() => setViewPlan(plan)}>
-                            View
-                          </Button>
-                          {editable && (
-                            <Button variant="secondary" size="sm" className="text-xs" onClick={() => setEditPlan(plan)}>
-                              Edit
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile cards */}
-          <div className="md:hidden space-y-3 px-1 py-2">
-            {filteredPlans.map((plan) => {
-              const status = deriveStatus(plan);
-              const editable = canManage(plan.role);
-              return (
-                <div key={plan.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-app-fg text-sm">{plan.planName}</span>
-                    <RoleBadge role={plan.role} size="sm" />
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={
-                      status === 'ACTIVE' ? 'badge-success text-xs' :
-                      status === 'UPCOMING' ? 'badge-warning text-xs' : 'badge-danger text-xs'
-                    }>{status}</span>
-                    <p className="text-xs text-app-fg-muted">
-                      From {new Date(plan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                      {plan.effectiveTo ? ` to ${new Date(plan.effectiveTo).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}` : ''}
-                    </p>
-                  </div>
-                  <p className="text-xs text-app-fg-muted">{formatRules(plan.rules)}</p>
-                  <div className="flex gap-2">
-                    <Button variant="primary" size="sm" className="text-xs flex-1" onClick={() => setViewPlan(plan)}>
-                      View
-                    </Button>
-                    {editable && (
-                      <Button variant="secondary" size="sm" className="text-xs flex-1" onClick={() => setEditPlan(plan)}>
-                        Edit
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <CompactTable<CommissionPlan>
+          columns={planColumns}
+          rows={filteredPlans}
+          rowKey={(p) => p.id}
+          rowClassName={(p) => (isOptimisticId(p.id) ? 'opacity-60' : '')}
+          emptyTitle="No plans match these filters"
+          emptyDescription="Loosen the role or status filter to see more results."
+        />
       )}
 
       {/* Create modal — generous padding (p-6 sm:p-8) and tight inner spacing for breathing room */}
@@ -273,7 +330,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         <Modal
           open
           onClose={() => {
-            if (createInFlightRef.current || fetcher.state !== 'idle') return;
+            if (fetcher.state !== 'idle') return;
             setShowCreate(false);
             setCreateError(null);
           }}
@@ -289,7 +346,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
                 : 'Plans define base salary, per-order rate, extra-order bonuses, and return penalties for one role.'
             }
             onClose={() => {
-              if (createInFlightRef.current || fetcher.state !== 'idle') return;
+              if (fetcher.state !== 'idle') return;
               setShowCreate(false);
               setCreateError(null);
             }}
@@ -310,7 +367,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         <Modal
           open
           onClose={() => {
-            if (editInFlightRef.current || fetcher.state !== 'idle') return;
+            if (fetcher.state !== 'idle') return;
             setEditPlan(null);
             setEditError(null);
           }}
@@ -322,7 +379,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
             title={`Edit · ${editPlan.planName}`}
             subtitle={`Role: ${editPlan.role.replace(/_/g, ' ')} · Effective from ${new Date(editPlan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`}
             onClose={() => {
-              if (editInFlightRef.current || fetcher.state !== 'idle') return;
+              if (fetcher.state !== 'idle') return;
               setEditPlan(null);
               setEditError(null);
             }}

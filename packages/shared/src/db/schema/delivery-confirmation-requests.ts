@@ -13,12 +13,12 @@ export const deliveryConfirmationRequests = pgTable('delivery_confirmation_reque
   orderId: uuid('order_id')
     .notNull()
     .references(() => orders.id),
-  requestedBy: text('requested_by')
+  requestedBy: uuid('requested_by')
     .notNull()
     .references(() => users.id),
   requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
   status: deliveryConfirmationRequestStatusEnum('status').default('PENDING').notNull(),
-  approvedBy: text('approved_by').references(() => users.id),
+  approvedBy: uuid('approved_by').references(() => users.id),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   rejectionReason: text('rejection_reason'),
   /** Same shape as transition metadata: newStatus, otp, gpsLat, gpsLng, deliveredQuantity, returnedQuantity, deliveryFeeAddOn, etc. */

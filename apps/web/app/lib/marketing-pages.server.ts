@@ -176,6 +176,10 @@ export function toDistributingFundingEntries(
   transfers: FundingRecord[],
   requests: FundingRequestRecord[],
 ): DistributingFundingEntry[] {
+  // Build a quick lookup from request id → requester name so the resulting
+  // "from request" chip on a transfer can show who originally asked.
+  const requestById = new Map(requests.map((r) => [r.id, r] as const));
+
   const transferEntries: DistributingFundingEntry[] = transfers.map((record) => ({
     id: record.id,
     entryType: 'transfer',
@@ -187,21 +191,36 @@ export function toDistributingFundingEntries(
     receiverId: record.receiverId,
     receiverName: record.receiverName ?? null,
     receiptUrl: record.receiptUrl ?? null,
+    sourceFundingRequestId: record.sourceFundingRequestId ?? null,
+    sourceRequesterName: record.sourceFundingRequestId
+      ? requestById.get(record.sourceFundingRequestId)?.requesterName ?? null
+      : null,
   }));
 
-  const requestEntries: DistributingFundingEntry[] = requests.map((record) => ({
-    id: record.id,
-    entryType: 'request',
-    status: (record.status as 'PENDING' | 'APPROVED' | 'REJECTED') ?? 'PENDING',
-    amount: record.amount,
-    createdAt: record.createdAt,
-    requesterId: record.requesterId,
-    requesterName: record.requesterName ?? null,
-    reason: record.reason ?? null,
-    resolvedAt: record.resolvedAt ?? null,
-    resolvedBy: record.resolvedBy ?? null,
-    receiptUrl: record.receiptUrl ?? null,
-  }));
+  // Deduplicate: any request that already has a matching transfer (via
+  // `sourceFundingRequestId`) is now represented by that transfer in this feed,
+  // so skip the request row. Pending / rejected requests still pass through.
+  const linkedRequestIds = new Set(
+    transfers
+      .map((t) => t.sourceFundingRequestId)
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  const requestEntries: DistributingFundingEntry[] = requests
+    .filter((record) => !linkedRequestIds.has(record.id))
+    .map((record) => ({
+      id: record.id,
+      entryType: 'request',
+      status: (record.status as 'PENDING' | 'APPROVED' | 'REJECTED') ?? 'PENDING',
+      amount: record.amount,
+      createdAt: record.createdAt,
+      requesterId: record.requesterId,
+      requesterName: record.requesterName ?? null,
+      reason: record.reason ?? null,
+      resolvedAt: record.resolvedAt ?? null,
+      resolvedBy: record.resolvedBy ?? null,
+      receiptUrl: record.receiptUrl ?? null,
+    }));
 
   return [...transferEntries, ...requestEntries].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -360,12 +379,14 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
     if (!amount || Number.isNaN(Number(amount)) || Number(amount) < 0) {
       return json({ error: 'Valid amount is required' }, { status: 400 });
     }
+    const targetUserId = formData.get('targetUserId')?.toString().trim() || undefined;
     const res = await apiRequest<unknown>('/trpc/marketing.requestFunding', {
       method: 'POST',
       cookie,
       body: {
         amount: Number(amount),
         reason: formData.get('reason')?.toString() ?? '',
+        ...(targetUserId ? { targetUserId } : {}),
       },
     });
     if (!res.ok) {
@@ -377,13 +398,18 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
   if (intent === 'approveFundingRequest') {
     const requestId = formData.get('requestId')?.toString() ?? '';
     const receiptUrl = formData.get('receiptUrl')?.toString() ?? '';
+    const amountRaw = formData.get('amount')?.toString() ?? '';
+    const amount = Number(amountRaw);
     if (!requestId || !receiptUrl) {
       return json({ error: 'Request ID and receipt image are required' }, { status: 400 });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return json({ error: 'Valid approved amount is required' }, { status: 400 });
     }
     const res = await apiRequest<unknown>('/trpc/marketing.approveFundingRequest', {
       method: 'POST',
       cookie,
-      body: { requestId, receiptUrl },
+      body: { requestId, receiptUrl, amount },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to approve funding request') }, { status: safeStatus(res.status) });

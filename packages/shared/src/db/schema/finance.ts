@@ -53,7 +53,7 @@ export const settlementConfigs = pgTable('settlement_configs', {
   id: uuidv7Pk(),
   windowType: settlementWindowEnum('window_type').notNull(),
   startDay: integer('start_day').default(1).notNull(), // day of week (1=Mon) or month
-  createdBy: text('created_by').notNull().references(() => users.id),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
   ...temporalColumns,
   ...timestampColumns,
 });

@@ -60,9 +60,10 @@ describe('createFundingSchema', () => {
 });
 
 describe('approveFundingRequestSchema', () => {
-  it('accepts request id and receipt URL', () => {
+  it('accepts request id, amount, and receipt URL', () => {
     const r = approveFundingRequestSchema.safeParse({
       requestId: '550e8400-e29b-41d4-a716-446655440004',
+      amount: 50000,
       receiptUrl: 'https://cdn.example/r.png',
     });
     expect(r.success).toBe(true);

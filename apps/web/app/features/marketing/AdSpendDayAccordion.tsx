@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
+import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
 import type { AdSpendGroup, AdSpendGroupLine, RolledStatus } from './types';
 
 const PLATFORM_LABEL: Record<AdSpendGroupLine['platform'], string> = {
@@ -18,6 +19,130 @@ function rolledStatusLabel(s: RolledStatus): string {
   if (s === 'APPROVED') return 'Approved';
   if (s === 'REJECTED') return 'Rejected';
   return 'Mixed';
+}
+
+function buildAdSpendLineColumns(
+  canModerate: boolean,
+  actionUrl: string,
+  onPreviewReceipt: (line: AdSpendGroupLine) => void,
+): CompactTableColumn<AdSpendGroupLine>[] {
+  const cols: CompactTableColumn<AdSpendGroupLine>[] = [
+    {
+      key: 'campaign',
+      header: 'Campaign',
+      render: (line) => line.campaignName ?? '—',
+    },
+    {
+      key: 'product',
+      header: 'Product',
+      render: (line) =>
+        line.productId ? (
+          <Link to={`/admin/products/${line.productId}`} className="text-brand-500 hover:text-brand-600">
+            {line.productName ?? '—'}
+          </Link>
+        ) : (
+          '—'
+        ),
+    },
+    {
+      key: 'platform',
+      header: 'Platform',
+      render: (line) => PLATFORM_LABEL[line.platform],
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      nowrap: true,
+      render: (line) => <NairaPrice amount={Number(line.spendAmount)} />,
+    },
+    {
+      key: 'ad',
+      header: 'Ad',
+      render: (line) =>
+        line.adUrl ? (
+          <a
+            href={line.adUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-brand-500 hover:text-brand-600 underline"
+          >
+            View ad
+          </a>
+        ) : (
+          <span className="text-app-fg-muted">—</span>
+        ),
+    },
+    {
+      key: 'screenshot',
+      header: 'Screenshot',
+      render: (line) => (
+        <CompactTableActionButton tone="brand" onClick={() => onPreviewReceipt(line)}>
+          View
+        </CompactTableActionButton>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (line) => <StatusBadge status={line.status} />,
+    },
+  ];
+  if (canModerate) {
+    cols.push({
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      tight: true,
+      nowrap: true,
+      minWidth: 'min-w-[9rem]',
+      mobileShowLabel: false,
+      render: (line) => <AdSpendLineModerationCell line={line} actionUrl={actionUrl} />,
+    });
+  }
+  return cols;
+}
+
+function AdSpendLineModerationCell({
+  line,
+  actionUrl,
+}: {
+  line: AdSpendGroupLine;
+  actionUrl: string;
+}) {
+  const fetcher = useFetcher();
+  const submitting = fetcher.state !== 'idle';
+
+  const submit = (intent: 'approveAdSpend' | 'rejectAdSpend', reason?: string) => {
+    const fd = new FormData();
+    fd.set('intent', intent);
+    fd.set('adSpendId', line.id);
+    if (reason) fd.set('reason', reason);
+    fetcher.submit(fd, { method: 'POST', action: actionUrl });
+  };
+
+  const handleReject = () => {
+    const reason = window.prompt('Reason for rejection (optional)') ?? undefined;
+    submit('rejectAdSpend', reason || undefined);
+  };
+
+  if (line.status === 'PENDING') {
+    return (
+      <div className="inline-flex flex-nowrap items-center justify-end gap-2 shrink-0">
+        <Button type="button" variant="primary" size="sm" onClick={() => submit('approveAdSpend')} disabled={submitting}>
+          Approve
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={handleReject} disabled={submitting}>
+          Reject
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <span className="text-xs text-app-fg-muted">
+      {line.status === 'REJECTED' && line.rejectionReason ? line.rejectionReason : '—'}
+    </span>
+  );
 }
 
 function formatDate(ymd: string): string {
@@ -57,6 +182,11 @@ export function AdSpendDayAccordion({
 }: AdSpendDayAccordionProps) {
   // Default to fully collapsed so long lists stay scannable.
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
+
+  const lineColumns = useMemo(
+    () => buildAdSpendLineColumns(canModerate, actionUrl, onPreviewReceipt),
+    [canModerate, actionUrl, onPreviewReceipt],
+  );
 
   const toggle = (key: string) => {
     setOpenKeys((prev) => {
@@ -127,31 +257,12 @@ export function AdSpendDayAccordion({
               {isOpen && (
                 <div className="border-t border-app-border bg-app-base">
                   <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr>
-                          <th className="table-header !py-2">Campaign</th>
-                          <th className="table-header !py-2">Product</th>
-                          <th className="table-header !py-2">Platform</th>
-                          <th className="table-header !py-2 text-right">Amount</th>
-                          <th className="table-header !py-2">Ad</th>
-                          <th className="table-header !py-2">Screenshot</th>
-                          <th className="table-header !py-2">Status</th>
-                          {canModerate && <th className="table-header !py-2">Actions</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {g.lines.map((line) => (
-                          <LineRow
-                            key={line.id}
-                            line={line}
-                            canModerate={canModerate}
-                            actionUrl={actionUrl}
-                            onPreviewReceipt={onPreviewReceipt}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
+                    <CompactTable
+                      withCard={false}
+                      columns={lineColumns}
+                      rows={g.lines}
+                      rowKey={(line) => line.id}
+                    />
                   </div>
 
                   <div className="md:hidden divide-y divide-app-border">
@@ -179,114 +290,14 @@ export function AdSpendDayAccordion({
   );
 }
 
-interface LineRowProps {
+interface LineCardMobileProps {
   line: AdSpendGroupLine;
   canModerate: boolean;
   actionUrl: string;
   onPreviewReceipt: (line: AdSpendGroupLine) => void;
 }
 
-function LineRow({ line, canModerate, actionUrl, onPreviewReceipt }: LineRowProps) {
-  const fetcher = useFetcher();
-  const submitting = fetcher.state !== 'idle';
-
-  const submit = (intent: 'approveAdSpend' | 'rejectAdSpend', reason?: string) => {
-    const fd = new FormData();
-    fd.set('intent', intent);
-    fd.set('adSpendId', line.id);
-    if (reason) fd.set('reason', reason);
-    fetcher.submit(fd, { method: 'POST', action: actionUrl });
-  };
-
-  const handleReject = () => {
-    const reason = window.prompt('Reason for rejection (optional)') ?? undefined;
-    submit('rejectAdSpend', reason || undefined);
-  };
-
-  return (
-    <tr className="border-t border-app-border">
-      <td className="px-4 py-2">
-        {line.campaignName ?? '—'}
-      </td>
-      <td className="px-4 py-2">
-        {line.productId ? (
-          <Link
-            to={`/admin/products/${line.productId}`}
-            className="text-brand-500 hover:text-brand-600"
-          >
-            {line.productName ?? '—'}
-          </Link>
-        ) : (
-          '—'
-        )}
-      </td>
-      <td className="px-4 py-2">{PLATFORM_LABEL[line.platform]}</td>
-      <td className="px-4 py-2 text-right font-medium">
-        <NairaPrice amount={Number(line.spendAmount)} />
-      </td>
-      <td className="px-4 py-2">
-        {line.adUrl ? (
-          <a
-            href={line.adUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-brand-500 hover:text-brand-600 underline"
-          >
-            View ad
-          </a>
-        ) : (
-          <span className="text-app-fg-muted">—</span>
-        )}
-      </td>
-      <td className="px-4 py-2">
-        <button
-          type="button"
-          onClick={() => onPreviewReceipt(line)}
-          className="text-brand-500 hover:text-brand-600 underline"
-        >
-          View
-        </button>
-      </td>
-      <td className="px-4 py-2">
-        <StatusBadge status={line.status} />
-      </td>
-      {canModerate && (
-        <td className="px-4 py-2">
-          {line.status === 'PENDING' ? (
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                onClick={() => submit('approveAdSpend')}
-                disabled={submitting}
-              >
-                Approve
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleReject}
-                disabled={submitting}
-              >
-                Reject
-              </Button>
-            </div>
-          ) : (
-            <span className="text-xs text-app-fg-muted">
-              {line.status === 'REJECTED' && line.rejectionReason
-                ? line.rejectionReason
-                : '—'}
-            </span>
-          )}
-        </td>
-      )}
-    </tr>
-  );
-}
-
-function LineCardMobile({ line, canModerate, actionUrl, onPreviewReceipt }: LineRowProps) {
+function LineCardMobile({ line, canModerate, actionUrl, onPreviewReceipt }: LineCardMobileProps) {
   const fetcher = useFetcher();
   const submitting = fetcher.state !== 'idle';
 
@@ -310,7 +321,7 @@ function LineCardMobile({ line, canModerate, actionUrl, onPreviewReceipt }: Line
         {line.campaignName ?? '—'} · {line.productName ?? '—'} ·{' '}
         {PLATFORM_LABEL[line.platform]}
       </p>
-      <div className="flex flex-wrap gap-3 text-xs">
+      <div className="flex flex-nowrap gap-3 text-xs overflow-x-auto">
         {line.adUrl && (
           <a
             href={line.adUrl}
@@ -330,7 +341,7 @@ function LineCardMobile({ line, canModerate, actionUrl, onPreviewReceipt }: Line
         </button>
       </div>
       {canModerate && line.status === 'PENDING' && (
-        <div className="flex gap-2">
+        <div className="inline-flex flex-nowrap items-center gap-2">
           <Button
             type="button"
             variant="primary"

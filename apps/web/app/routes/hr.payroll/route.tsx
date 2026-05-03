@@ -89,7 +89,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     id: user.id,
     role: user.role,
     currentBranchId: user.currentBranchId ?? null,
-    isFinanceOfficer: user.isFinanceOfficer ?? false,
     prepareDepartments: (prepareAccessData?.departments ?? []) as ViewerInfo['prepareDepartments'],
     prepareBranchIds: (prepareAccessData?.branches ?? []).map((b) => b.id),
   };

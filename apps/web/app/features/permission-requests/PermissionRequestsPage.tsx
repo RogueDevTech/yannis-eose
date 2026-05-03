@@ -1,10 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Textarea } from '~/components/ui/textarea';
@@ -110,11 +116,84 @@ export function PermissionRequestsPage({
     setSearchParams(params, { replace: true });
   };
 
+  const requestColumns: CompactTableColumn<PermissionRequest>[] = useMemo(
+    () => [
+      {
+        key: 'status',
+        header: 'Status',
+        tight: true,
+        render: (req) => <StatusBadge status={req.status} />,
+      },
+      {
+        key: 'requester',
+        header: 'Requester',
+        minWidth: 'min-w-[10rem]',
+        render: (req) => (
+          <div className="text-sm max-w-[10rem]">
+            <span className="font-medium text-app-fg line-clamp-1" title={req.requesterName}>
+              {req.requesterName}
+            </span>
+            <span className="block text-xs text-app-fg-muted line-clamp-1" title={req.requesterEmail}>
+              {req.requesterEmail}
+            </span>
+          </div>
+        ),
+      },
+      {
+        key: 'target',
+        header: 'Target',
+        minWidth: 'min-w-[9rem]',
+        cellTitle: (req) => targetSummary(req),
+        render: (req) => (
+          <span className="text-sm line-clamp-2 text-app-fg">{targetSummary(req)}</span>
+        ),
+      },
+      {
+        key: 'requested',
+        header: 'Requested',
+        minWidth: 'min-w-[8rem]',
+        cellTitle: (req) => requestedSummary(req),
+        render: (req) => (
+          <span className="text-sm line-clamp-2" title={requestedSummary(req)}>
+            {requestedSummary(req)}
+          </span>
+        ),
+      },
+      {
+        key: 'submitted',
+        header: 'Submitted',
+        nowrap: true,
+        render: (req) => (
+          <span className="text-app-fg-muted text-sm">{formatDateTime(req.createdAt)}</span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (req) => (
+          <CompactTableActionButton onClick={() => setViewing(req)}>View</CompactTableActionButton>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const emptyTitle =
+    activeStatus === 'PENDING' ? 'No pending permission requests' : `No ${activeStatus.toLowerCase()} permission requests`;
+  const emptyDescription =
+    activeStatus === 'PENDING'
+      ? 'New requests from HR will appear here for your review.'
+      : 'Try switching the tab to see requests in other states.';
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Permission Requests"
         description="Sensitive changes (including admin-level staff and product archive) may require Super Admin approval. Approved and rejected requests are preserved for audit."
+        actions={<PageRefreshButton />}
       />
 
       {fetcherError && !dismissedError && (
@@ -132,124 +211,16 @@ export function PermissionRequestsPage({
         tabs={STATUS_TABS.map((t) => ({ value: t.value, label: t.label }))}
       />
 
-      <div className="card p-0 flex flex-col">
-        <div className="hidden md:block overflow-auto max-h-[min(60vh,22rem)] overscroll-contain">
-          <table className="w-full min-w-[640px]">
-            <thead>
-              <tr>
-                <th className="table-header">Status</th>
-                <th className="table-header">Requester</th>
-                <th className="table-header">Target</th>
-                <th className="table-header">Requested</th>
-                <th className="table-header">Submitted</th>
-                <th className="table-header w-[100px] text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((req) => (
-                <tr key={req.id} className="table-row">
-                  <td className="table-cell w-0 whitespace-nowrap">
-                    <StatusBadge status={req.status} />
-                  </td>
-                  <td className="table-cell text-sm max-w-[10rem]">
-                    <span className="font-medium text-app-fg line-clamp-1" title={req.requesterName}>
-                      {req.requesterName}
-                    </span>
-                    <span className="block text-xs text-app-fg-muted line-clamp-1" title={req.requesterEmail}>
-                      {req.requesterEmail}
-                    </span>
-                  </td>
-                  <td className="table-cell text-sm max-w-[9rem]">
-                    <span className="line-clamp-2 text-app-fg" title={targetSummary(req)}>
-                      {targetSummary(req)}
-                    </span>
-                  </td>
-                  <td className="table-cell text-sm max-w-[8rem]">
-                    <span className="line-clamp-2" title={requestedSummary(req)}>
-                      {requestedSummary(req)}
-                    </span>
-                  </td>
-                  <td className="table-cell text-app-fg-muted text-sm whitespace-nowrap">
-                    {formatDateTime(req.createdAt)}
-                  </td>
-                  <td className="table-cell text-right">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => setViewing(req)}
-                    >
-                      View
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {requests.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8">
-                    <EmptyState
-                      title={
-                        activeStatus === 'PENDING'
-                          ? 'No pending permission requests'
-                          : `No ${activeStatus.toLowerCase()} permission requests`
-                      }
-                      description={
-                        activeStatus === 'PENDING'
-                          ? 'New requests from HR will appear here for your review.'
-                          : 'Try switching the tab to see requests in other states.'
-                      }
-                      variant="inline"
-                    />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="md:hidden space-y-3 p-3 max-h-[min(70vh,24rem)] overflow-y-auto overscroll-contain">
-          {requests.map((req) => (
-            <div
-              key={req.id}
-              className="rounded-lg border border-app-border bg-app-elevated p-3 space-y-2"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <StatusBadge status={req.status} />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="text-xs shrink-0"
-                  onClick={() => setViewing(req)}
-                >
-                  View
-                </Button>
-              </div>
-              <p className="text-sm font-medium text-app-fg line-clamp-1">
-                {req.requesterName} · {requestedSummary(req)}
-              </p>
-              <p className="text-xs text-app-fg-muted">Submitted {formatDateTime(req.createdAt)}</p>
-            </div>
-          ))}
-          {requests.length === 0 && (
-            <div className="py-6">
-              <EmptyState
-                title={
-                  activeStatus === 'PENDING'
-                    ? 'No pending permission requests'
-                    : `No ${activeStatus.toLowerCase()} permission requests`
-                }
-                description={
-                  activeStatus === 'PENDING'
-                    ? 'New requests from HR will appear here for your review.'
-                    : 'Try switching the tab to see requests in other states.'
-                }
-                variant="inline"
-              />
-            </div>
-          )}
-        </div>
+      <div className="card p-0 flex flex-col max-h-[min(70vh,24rem)] md:max-h-[min(60vh,22rem)] overflow-y-auto overscroll-contain min-h-0">
+        <CompactTable<PermissionRequest>
+          withCard={false}
+          className="min-h-0 min-w-0"
+          columns={requestColumns}
+          rows={requests}
+          rowKey={(r) => r.id}
+          emptyTitle={emptyTitle}
+          emptyDescription={emptyDescription}
+        />
       </div>
 
       {viewing && (

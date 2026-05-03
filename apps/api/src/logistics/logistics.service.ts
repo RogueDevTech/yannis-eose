@@ -1,6 +1,6 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, ilike, count, lt, gte, lte, inArray, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, desc, ilike, count, lt, gte, lte, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
@@ -28,7 +28,6 @@ import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { OrdersService } from '../orders/orders.service';
-import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
@@ -214,12 +213,28 @@ export class LogisticsService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
-    const [locations, totalRows] = await Promise.all([
-      this.db.select().from(schema.logisticsLocations).where(whereClause)
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select({
+          location: schema.logisticsLocations,
+          providerName: schema.logisticsProviders.name,
+        })
+        .from(schema.logisticsLocations)
+        .leftJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .where(whereClause)
         .orderBy(desc(schema.logisticsLocations.createdAt))
-        .limit(input.limit).offset(offset),
+        .limit(input.limit)
+        .offset(offset),
       this.db.select({ count: count() }).from(schema.logisticsLocations).where(whereClause),
     ]);
+
+    const locations = rows.map((row) => ({
+      ...row.location,
+      providerName: row.providerName ?? null,
+    }));
 
     return {
       locations,
@@ -408,10 +423,14 @@ export class LogisticsService {
    * fromLocationId = user's logisticsLocationId. Notifies Head of Logistics.
    */
   async createRemittance(input: CreateRemittanceInput, actor: SessionUser) {
-    if (actor.role !== 'TPL_MANAGER' || !actor.logisticsLocationId) {
+    const remitPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const canRemit =
+      actor.role === 'SUPER_ADMIN' ||
+      remitPerms.includes(canonicalPermissionCode('logistics.remit'));
+    if (!canRemit || !actor.logisticsLocationId) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only 3PL Managers with an assigned location can submit remittances',
+        message: 'Only operators with logistics.remit and an assigned location can submit remittances',
       });
     }
 
@@ -476,14 +495,23 @@ export class LogisticsService {
   async listRemittances(input: ListRemittancesInput, actor: SessionUser) {
     const conditions = [];
 
-    if (actor.role === 'TPL_MANAGER' && actor.logisticsLocationId) {
-      conditions.push(eq(schema.transferRemittances.fromLocationId, actor.logisticsLocationId));
-    } else if (actor.role === 'HEAD_OF_LOGISTICS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN')) {
+    const listPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const has = (code: string) =>
+      actor.role === 'SUPER_ADMIN' || listPerms.includes(canonicalPermissionCode(code));
+    const isOrgWideLogistics = has('logistics.scope.global');
+    const isLocationOperator = has('logistics.remit') && !!actor.logisticsLocationId;
+
+    if (isOrgWideLogistics) {
       if (input.locationId) {
         conditions.push(eq(schema.transferRemittances.toLocationId, input.locationId));
       }
+    } else if (isLocationOperator) {
+      conditions.push(eq(schema.transferRemittances.fromLocationId, actor.logisticsLocationId!));
     } else {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only 3PL Manager or Head of Logistics can list remittances' });
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only logistics-scope or location operators can list remittances',
+      });
     }
 
     if (input.status) {
@@ -495,6 +523,8 @@ export class LogisticsService {
 
     const fromLoc = alias(schema.logisticsLocations, 'from_loc');
     const toLoc = alias(schema.logisticsLocations, 'to_loc');
+    const fromProv = alias(schema.logisticsProviders, 'from_prov');
+    const toProv = alias(schema.logisticsProviders, 'to_prov');
 
     const [records, totalRows] = await Promise.all([
       this.db
@@ -515,11 +545,15 @@ export class LogisticsService {
           shrinkageReason: schema.transferRemittances.shrinkageReason,
           fromLocationName: fromLoc.name,
           toLocationName: toLoc.name,
+          fromProviderName: fromProv.name,
+          toProviderName: toProv.name,
         })
         .from(schema.transferRemittances)
         .innerJoin(schema.products, eq(schema.transferRemittances.productId, schema.products.id))
         .innerJoin(fromLoc, eq(schema.transferRemittances.fromLocationId, fromLoc.id))
         .innerJoin(toLoc, eq(schema.transferRemittances.toLocationId, toLoc.id))
+        .leftJoin(fromProv, eq(fromLoc.providerId, fromProv.id))
+        .leftJoin(toProv, eq(toLoc.providerId, toProv.id))
         .where(whereClause)
         .orderBy(desc(schema.transferRemittances.sentAt))
         .limit(input.limit)
@@ -540,9 +574,11 @@ export class LogisticsService {
    * a custom role template can grant this without inheriting all of HEAD_OF_LOGISTICS.
    */
   async markRemittanceReceived(input: MarkRemittanceReceivedInput, actor: SessionUser) {
-    const isLegacyRole = actor.role === 'HEAD_OF_LOGISTICS' || isAdminLevel(actor);
+    const isOrgWideLogistics =
+      actor.role === 'SUPER_ADMIN' ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global');
     const hasPerm = this.actorHasAnyPermission(actor, 'logistics.transferRemittance.markReceived');
-    if (!isLegacyRole && !hasPerm) {
+    if (!isOrgWideLogistics && !hasPerm) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Head of Logistics can mark remittances as received' });
     }
 
@@ -647,10 +683,11 @@ export class LogisticsService {
     // primary FINANCE_OFFICER, anyone with the Finance hat, and admin-class.
     // Phase 20: also accept the explicit `finance.cashRemittance.create` permission
     // so a custom role template can grant just this capability.
-    const isTplCaller = actor.role === 'TPL_MANAGER' && !!actor.logisticsLocationId;
+    const isTplCaller =
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
     const isFinanceCaller =
+      actor.role === 'SUPER_ADMIN' ||
       hasFinanceAccess(actor) ||
-      isAdminLevel(actor) ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
     if (!isTplCaller && !isFinanceCaller) {
       throw new TRPCError({
@@ -822,18 +859,20 @@ export class LogisticsService {
    * List delivery remittances. TPL_MANAGER sees own location's; Finance and HoL see all.
    */
   async listDeliveryRemittances(input: ListDeliveryRemittancesInput, actor: SessionUser) {
-    const canList =
-      actor.role === 'TPL_MANAGER' ||
-      actor.role === 'HEAD_OF_LOGISTICS' ||
-      actor.role === 'FINANCE_OFFICER' ||
-      (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
-    if (!canList) {
+    const isTplCaller =
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
+    const canListGlobal =
+      actor.role === 'SUPER_ADMIN' ||
+      hasFinanceAccess(actor) ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
+    if (!isTplCaller && !canListGlobal) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot list delivery remittances' });
     }
 
     const conditions = [];
-    if (actor.role === 'TPL_MANAGER' && actor.logisticsLocationId) {
-      conditions.push(eq(schema.deliveryRemittances.logisticsLocationId, actor.logisticsLocationId));
+    if (isTplCaller && !canListGlobal) {
+      conditions.push(eq(schema.deliveryRemittances.logisticsLocationId, actor.logisticsLocationId!));
     } else if (input.logisticsLocationId) {
       conditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
     }
@@ -874,11 +913,20 @@ export class LogisticsService {
     const locations =
       locationIds.length > 0
         ? await this.db
-            .select({ id: schema.logisticsLocations.id, name: schema.logisticsLocations.name })
+            .select({
+              id: schema.logisticsLocations.id,
+              name: schema.logisticsLocations.name,
+              providerName: schema.logisticsProviders.name,
+            })
             .from(schema.logisticsLocations)
+            .leftJoin(
+              schema.logisticsProviders,
+              eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+            )
             .where(inArray(schema.logisticsLocations.id, locationIds))
         : [];
     const locationMap = new Map(locations.map((l) => [l.id, l.name]));
+    const locationProviderMap = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
 
     const orderSummaries = await Promise.all(
       records.map((r) =>
@@ -925,8 +973,8 @@ export class LogisticsService {
     // Summary aggregation: total remitted amounts by status (across all matching remittances, not just current page).
     // Keep location/date/role scoping but intentionally ignore status filter so all buckets are visible.
     const summaryConditions = [];
-    if (actor.role === 'TPL_MANAGER' && actor.logisticsLocationId) {
-      summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, actor.logisticsLocationId));
+    if (isTplCaller && !canListGlobal) {
+      summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, actor.logisticsLocationId!));
     } else if (input.logisticsLocationId) {
       summaryConditions.push(eq(schema.deliveryRemittances.logisticsLocationId, input.logisticsLocationId));
     }
@@ -994,6 +1042,7 @@ export class LogisticsService {
           const base = {
             ...r,
             locationName: locationMap.get(r.logisticsLocationId) ?? null,
+            locationProviderName: locationProviderMap.get(r.logisticsLocationId) ?? null,
             orderCount,
             outcomeAmount: orderAmount,
             outcomeOrderCount: orderCount,
@@ -1040,8 +1089,8 @@ export class LogisticsService {
     // Phase 20: also accept the explicit `finance.cashRemittance.markReceived`
     // permission so custom role templates can grant just this capability.
     if (
+      actor.role !== 'SUPER_ADMIN' &&
       !hasFinanceAccess(actor) &&
-      !isAdminLevel(actor) &&
       !this.actorHasAnyPermission(actor, 'finance.cashRemittance.markReceived')
     ) {
       throw new TRPCError({
@@ -1223,10 +1272,11 @@ export class LogisticsService {
     // per-location remittances).
     // Phase 20: also accept `finance.cashRemittance.create` so any custom role
     // that can create remittances can preview the eligible orders.
-    const isTplCaller = actor.role === 'TPL_MANAGER' && !!actor.logisticsLocationId;
+    const isTplCaller =
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
     const isFinanceCaller =
+      actor.role === 'SUPER_ADMIN' ||
       hasFinanceAccess(actor) ||
-      isAdminLevel(actor) ||
       this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
     if (!isTplCaller && !isFinanceCaller) {
       throw new TRPCError({
@@ -1273,6 +1323,7 @@ export class LogisticsService {
     const offset = (input.page - 1) * input.limit;
 
     const locAlias = alias(schema.logisticsLocations, 'eligible_loc');
+    const provAlias = alias(schema.logisticsProviders, 'eligible_loc_provider');
 
     const [orders, totalRows] = await Promise.all([
       this.db
@@ -1283,9 +1334,11 @@ export class LogisticsService {
           deliveredAt: schema.orders.deliveredAt,
           logisticsLocationId: schema.orders.logisticsLocationId,
           logisticsLocationName: locAlias.name,
+          logisticsLocationProviderName: provAlias.name,
         })
         .from(schema.orders)
         .leftJoin(locAlias, eq(schema.orders.logisticsLocationId, locAlias.id))
+        .leftJoin(provAlias, eq(locAlias.providerId, provAlias.id))
         .where(whereClause)
         .orderBy(desc(schema.orders.deliveredAt))
         .limit(input.limit)
@@ -1301,6 +1354,7 @@ export class LogisticsService {
         deliveredAt: o.deliveredAt?.toISOString() ?? null,
         logisticsLocationId: o.logisticsLocationId ?? null,
         logisticsLocationName: o.logisticsLocationName ?? null,
+        logisticsLocationProviderName: o.logisticsLocationProviderName ?? null,
       })),
       total: totalRows[0]?.count ?? 0,
     };
@@ -1310,12 +1364,14 @@ export class LogisticsService {
    * Get a single delivery remittance by ID with its orders (for detail view).
    */
   async getDeliveryRemittance(deliveryRemittanceId: string, actor: SessionUser) {
-    const canView =
-      actor.role === 'TPL_MANAGER' ||
-      actor.role === 'HEAD_OF_LOGISTICS' ||
-      actor.role === 'FINANCE_OFFICER' ||
-      (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
-    if (!canView) {
+    const isTplCaller =
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId;
+    const canViewGlobal =
+      actor.role === 'SUPER_ADMIN' ||
+      hasFinanceAccess(actor) ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global') ||
+      this.actorHasAnyPermission(actor, 'finance.cashRemittance.create');
+    if (!isTplCaller && !canViewGlobal) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot view delivery remittances' });
     }
 
@@ -1328,7 +1384,8 @@ export class LogisticsService {
     if (!remittance) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Delivery remittance not found' });
     }
-    if (actor.role === 'TPL_MANAGER' && actor.logisticsLocationId !== remittance.logisticsLocationId) {
+    // Location operators (3PL) without org-wide visibility see only their own location's remittances.
+    if (isTplCaller && !canViewGlobal && actor.logisticsLocationId !== remittance.logisticsLocationId) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your location\'s remittances' });
     }
 
@@ -1338,16 +1395,25 @@ export class LogisticsService {
       .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, deliveryRemittanceId));
 
     const orderIds = junctionRows.map((r) => r.orderId);
-    const locationName =
+    const locationLookupRow =
       orderIds.length > 0
         ? (
             await this.db
-              .select({ name: schema.logisticsLocations.name })
+              .select({
+                name: schema.logisticsLocations.name,
+                providerName: schema.logisticsProviders.name,
+              })
               .from(schema.logisticsLocations)
+              .leftJoin(
+                schema.logisticsProviders,
+                eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+              )
               .where(eq(schema.logisticsLocations.id, remittance.logisticsLocationId))
               .limit(1)
-          )[0]?.name ?? null
+          )[0]
         : null;
+    const locationName = locationLookupRow?.name ?? null;
+    const locationProviderName = locationLookupRow?.providerName ?? null;
 
     let orders: Array<{ id: string; customerName: string; totalAmount: string | null; deliveredAt: string | null }> = [];
     if (orderIds.length > 0) {
@@ -1371,6 +1437,7 @@ export class LogisticsService {
     return {
       ...remittance,
       locationName,
+      locationProviderName,
       orders,
     };
   }
@@ -1380,13 +1447,11 @@ export class LogisticsService {
   // ============================================
 
   async submitDeliveryConfirmation(input: SubmitDeliveryConfirmationInput, actor: SessionUser) {
-    const isLegacyRole =
-      actor.role === 'TPL_RIDER' ||
-      actor.role === 'TPL_MANAGER' ||
-      actor.role === 'HEAD_OF_LOGISTICS' ||
-      isAdminLevel(actor);
-    const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.submit');
-    if (!isLegacyRole && !hasPerm) {
+    const hasPerm =
+      actor.role === 'SUPER_ADMIN' ||
+      this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.submit') ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global');
+    if (!hasPerm) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only riders or 3PL managers can submit delivery confirmations',
@@ -1459,9 +1524,11 @@ export class LogisticsService {
   }
 
   async listDeliveryConfirmationRequests(input: ListDeliveryConfirmationRequestsInput, actor: SessionUser) {
-    const isLegacyRole = actor.role === 'HEAD_OF_LOGISTICS' || isAdminLevel(actor);
+    const isOrgWide =
+      actor.role === 'SUPER_ADMIN' ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global');
     const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
-    if (!isLegacyRole && !hasPerm) {
+    if (!isOrgWide && !hasPerm) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can list delivery confirmation requests',
@@ -1525,9 +1592,11 @@ export class LogisticsService {
   }
 
   async approveDeliveryConfirmation(input: ApproveDeliveryConfirmationInput, actor: SessionUser) {
-    const isLegacyRole = actor.role === 'HEAD_OF_LOGISTICS' || isAdminLevel(actor);
+    const isOrgWide =
+      actor.role === 'SUPER_ADMIN' ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global');
     const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
-    if (!isLegacyRole && !hasPerm) {
+    if (!isOrgWide && !hasPerm) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can approve delivery confirmations',
@@ -1597,9 +1666,11 @@ export class LogisticsService {
   }
 
   async rejectDeliveryConfirmation(input: RejectDeliveryConfirmationInput, actor: SessionUser) {
-    const isLegacyRole = actor.role === 'HEAD_OF_LOGISTICS' || isAdminLevel(actor);
+    const isOrgWide =
+      actor.role === 'SUPER_ADMIN' ||
+      this.actorHasAnyPermission(actor, 'logistics.scope.global');
     const hasPerm = this.actorHasAnyPermission(actor, 'logistics.deliveryConfirmation.review');
-    if (!isLegacyRole && !hasPerm) {
+    if (!isOrgWide && !hasPerm) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only Head of Logistics can reject delivery confirmations',
@@ -1644,5 +1715,209 @@ export class LogisticsService {
       .catch(() => {});
 
     return { ...request, status: 'REJECTED' as const, approvedBy: actor.id, approvedAt: new Date(), rejectionReason: input.reason ?? null };
+  }
+
+  // ============================================
+  // Logistics Team Analysis (provider performance rollup)
+  // ============================================
+
+  /**
+   * Roll up order-level outcomes by logistics provider company so the
+   * `/admin/logistics/team` page can rank "GoKada" / "Kwik Delivery" etc. by
+   * delivery + delinquency rate.
+   *
+   * - Includes providers with zero allocated orders (left join) so newly added
+   *   companies are visible with all-zero metrics.
+   * - Filters orders by `allocatedAt` (the canonical "in-flight at provider"
+   *   timestamp). Orders that never reached ALLOCATED are not the provider's
+   *   responsibility yet.
+   * - When `branchId` is given, restricts to that branch. SuperAdmin / org-wide
+   *   HoLogistics passes null → no filter (sees all branches).
+   * - Defaults to month-to-date when no date range is provided.
+   */
+  async getLogisticsProviderPerformance(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+  ): Promise<
+    Array<{
+      providerId: string;
+      providerName: string;
+      status: string;
+      locationCount: number;
+      totalAssigned: number;
+      delivered: number;
+      partiallyDelivered: number;
+      returned: number;
+      writtenOff: number;
+      cancelled: number;
+      inTransit: number;
+      dispatched: number;
+      allocated: number;
+      deliveryRate: number;
+      delinquencyRate: number;
+      statusBreakdown: { status: string; count: number; pct: number }[];
+    }>
+  > {
+    // Default to month-to-date when no range supplied — matches marketing page UX.
+    let effectiveStart: Date | null = null;
+    let effectiveEnd: Date | null = null;
+    if (startDate || endDate) {
+      if (startDate) effectiveStart = new Date(`${startDate}T00:00:00.000Z`);
+      if (endDate) effectiveEnd = new Date(`${endDate}T23:59:59.999Z`);
+    } else {
+      const now = new Date();
+      effectiveStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+      effectiveEnd = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
+      );
+    }
+
+    // ── Pass 1: location count per provider ────────────────────────────────
+    const locationCountRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
+        count: count(),
+      })
+      .from(schema.logisticsLocations)
+      .groupBy(schema.logisticsLocations.providerId);
+    const locationCountByProvider = new Map<string, number>();
+    for (const row of locationCountRows) {
+      if (row.providerId) locationCountByProvider.set(row.providerId, Number(row.count) || 0);
+    }
+
+    // ── Pass 2: per-(provider, status) order counts ────────────────────────
+    // Join orders → logistics_locations to resolve provider_id; the order itself
+    // also carries `logistics_provider_id` but the location-derived link is the
+    // canonical one (set during ALLOCATED transition).
+    const orderConditions: SQL[] = [isNotNull(schema.orders.logisticsLocationId)];
+    if (effectiveStart) orderConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
+    if (effectiveEnd) orderConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
+    if (branchId) orderConditions.push(eq(schema.orders.branchId, branchId));
+
+    const statusRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
+        status: schema.orders.status,
+        count: count(),
+      })
+      .from(schema.orders)
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.orders.logisticsLocationId),
+      )
+      .where(and(...orderConditions))
+      .groupBy(schema.logisticsLocations.providerId, schema.orders.status);
+
+    const statusCountsByProvider = new Map<string, Map<string, number>>();
+    for (const row of statusRows) {
+      if (!row.providerId) continue;
+      let bucket = statusCountsByProvider.get(row.providerId);
+      if (!bucket) {
+        bucket = new Map<string, number>();
+        statusCountsByProvider.set(row.providerId, bucket);
+      }
+      bucket.set(row.status, Number(row.count) || 0);
+    }
+
+    // ── Pass 3: list providers (always, including zero-order ones) ─────────
+    const providers = await this.db
+      .select({
+        id: schema.logisticsProviders.id,
+        name: schema.logisticsProviders.name,
+        status: schema.logisticsProviders.status,
+      })
+      .from(schema.logisticsProviders);
+
+    // ── Build rollup ───────────────────────────────────────────────────────
+    const result = providers.map((p) => {
+      const counts = statusCountsByProvider.get(p.id) ?? new Map<string, number>();
+      const get = (s: string): number => counts.get(s) ?? 0;
+
+      const delivered = get('DELIVERED');
+      const partiallyDelivered = get('PARTIALLY_DELIVERED');
+      const returned = get('RETURNED');
+      const writtenOff = get('WRITTEN_OFF');
+      const cancelled = get('CANCELLED');
+      const inTransit = get('IN_TRANSIT');
+      const dispatched = get('DISPATCHED');
+      const allocated = get('ALLOCATED');
+      const restocked = get('RESTOCKED');
+      const completed = get('COMPLETED');
+
+      const totalAssigned =
+        delivered +
+        partiallyDelivered +
+        returned +
+        writtenOff +
+        cancelled +
+        inTransit +
+        dispatched +
+        allocated +
+        restocked +
+        completed;
+
+      // DELIVERED + COMPLETED both count as delivered for the rate (COMPLETED is
+      // the post-remittance terminal state). Numerator stays the headline
+      // "delivered" column to keep the table scannable.
+      const deliveredForRate = delivered + completed;
+      const deliveryRate = totalAssigned > 0 ? (deliveredForRate / totalAssigned) * 100 : 0;
+      const delinquencyRate =
+        totalAssigned > 0
+          ? ((returned + partiallyDelivered + writtenOff) / totalAssigned) * 100
+          : 0;
+
+      // Stacked-bar percentages — sum to ~100 (rounding aside).
+      const statusBreakdown: { status: string; count: number; pct: number }[] = [];
+      const statusOrder: string[] = [
+        'DELIVERED',
+        'COMPLETED',
+        'PARTIALLY_DELIVERED',
+        'IN_TRANSIT',
+        'DISPATCHED',
+        'ALLOCATED',
+        'RETURNED',
+        'WRITTEN_OFF',
+        'RESTOCKED',
+        'CANCELLED',
+      ];
+      for (const s of statusOrder) {
+        const c = get(s);
+        if (c <= 0) continue;
+        statusBreakdown.push({
+          status: s,
+          count: c,
+          pct: totalAssigned > 0 ? (c / totalAssigned) * 100 : 0,
+        });
+      }
+
+      return {
+        providerId: p.id,
+        providerName: p.name,
+        status: p.status,
+        locationCount: locationCountByProvider.get(p.id) ?? 0,
+        totalAssigned,
+        delivered: delivered + completed,
+        partiallyDelivered,
+        returned,
+        writtenOff,
+        cancelled,
+        inTransit,
+        dispatched,
+        allocated,
+        deliveryRate,
+        delinquencyRate,
+        statusBreakdown,
+      };
+    });
+
+    // Sort: highest delivery rate first, then largest volume — providers with no
+    // orders sink to the bottom (deliveryRate 0, totalAssigned 0).
+    result.sort((a, b) => {
+      if (b.deliveryRate !== a.deliveryRate) return b.deliveryRate - a.deliveryRate;
+      return b.totalAssigned - a.totalAssigned;
+    });
+
+    return result;
   }
 }

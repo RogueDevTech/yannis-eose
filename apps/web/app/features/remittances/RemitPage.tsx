@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useFetcher, Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
@@ -11,6 +11,11 @@ import { createRemittanceSchema, createDeliveryRemittanceSchema } from '@yannis/
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { TextInput } from '~/components/ui/text-input';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 
 export interface RemittanceRecord {
@@ -26,6 +31,8 @@ export interface RemittanceRecord {
   sentAt: string;
   fromLocationName: string;
   toLocationName: string;
+  fromProviderName: string | null;
+  toProviderName: string | null;
   shrinkageReason: string | null;
 }
 
@@ -50,7 +57,7 @@ export interface DeliveryRemittanceEligibleOrder {
 export interface RemitPageProps {
   remittances: RemittanceRecord[];
   products: Array<{ id: string; name: string }>;
-  locations: Array<{ id: string; name: string }>;
+  locations: Array<{ id: string; name: string; providerName?: string | null }>;
   userLocationId: string | null;
   deliveryRemittances: DeliveryRemittanceRecord[];
   eligibleOrders: DeliveryRemittanceEligibleOrder[];
@@ -61,6 +68,16 @@ const STATUS_LABEL: Record<string, string> = {
   RECEIVED: 'Received',
   DISPUTED: 'Disputed',
 };
+
+function remittanceStatusPillClass(status: string): string {
+  if (status === 'RECEIVED') {
+    return 'inline-flex px-2 py-0.5 rounded text-xs font-medium bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300';
+  }
+  if (status === 'DISPUTED') {
+    return 'inline-flex px-2 py-0.5 rounded text-xs font-medium bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300';
+  }
+  return 'inline-flex px-2 py-0.5 rounded text-xs font-medium bg-warning-100 text-warning-800 dark:bg-warning-900/30 dark:text-warning-300';
+}
 
 const DELIVERY_REMIT_STATUS: Record<string, string> = {
   SENT: 'Pending (Finance to confirm)',
@@ -137,6 +154,57 @@ export function RemitPage({
   const isSubmitting = fetcher.state === 'submitting';
 
   const isSubmittingDelivery = fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'createDeliveryRemittance';
+
+  const remittanceColumns: CompactTableColumn<RemittanceRecord>[] = useMemo(
+    () => [
+      {
+        key: 'product',
+        header: 'Product',
+        render: (r) => <span className="text-app-fg">{r.productName}</span>,
+      },
+      {
+        key: 'to',
+        header: 'To',
+        render: (r) => (
+          <span className="text-app-fg-muted">
+            {r.toProviderName ? `${r.toLocationName} — ${r.toProviderName}` : r.toLocationName}
+          </span>
+        ),
+      },
+      {
+        key: 'qty',
+        header: 'Qty',
+        align: 'right',
+        render: (r) => (
+          <span className="tabular-nums">
+            {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : r.quantitySent}
+          </span>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (r) => (
+          <span className={remittanceStatusPillClass(r.status)}>{STATUS_LABEL[r.status] ?? r.status}</span>
+        ),
+      },
+      {
+        key: 'sentAt',
+        header: 'Sent',
+        render: (r) => <span className="text-app-fg-muted">{new Date(r.sentAt).toLocaleDateString()}</span>,
+      },
+      {
+        key: 'receipt',
+        header: 'Receipt',
+        align: 'right',
+        tight: true,
+        render: (r) => (
+          <CompactTableActionButton onClick={() => setRemittanceReceiptModal(r)}>View</CompactTableActionButton>
+        ),
+      },
+    ],
+    [],
+  );
 
   const handleCreateDeliveryRemittanceSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -389,7 +457,10 @@ export function RemitPage({
             disabled={isSubmitting}
             placeholder="Select warehouse / location"
             searchPlaceholder="Search locations..."
-            options={toLocationOptions.map((l) => ({ value: l.id, label: l.name }))}
+            options={toLocationOptions.map((l) => ({
+              value: l.id,
+              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+            }))}
           />
           <TextInput
             type="number"
@@ -426,86 +497,12 @@ export function RemitPage({
 
       <div>
         <h2 className="text-lg font-semibold text-app-fg mb-3">Your remittances</h2>
-        {remittances.length === 0 ? (
-          <p className="text-sm text-app-fg-muted">No remittances yet.</p>
-        ) : (
-          <>
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-app-border">
-                    <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Product</th>
-                    <th className="text-left py-2 px-3 font-medium text-app-fg-muted">To</th>
-                    <th className="text-right py-2 px-3 font-medium text-app-fg-muted">Qty</th>
-                    <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Status</th>
-                    <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Sent</th>
-                    <th className="text-left py-2 px-3 font-medium text-app-fg-muted">Receipt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {remittances.map((r) => (
-                    <tr key={r.id} className="border-b border-app-border">
-                      <td className="py-2 px-3 text-app-fg">{r.productName}</td>
-                      <td className="py-2 px-3 text-app-fg-muted">{r.toLocationName}</td>
-                      <td className="py-2 px-3 text-right">
-                        {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : r.quantitySent}
-                      </td>
-                      <td className="py-2 px-3">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                            r.status === 'RECEIVED'
-                              ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
-                              : r.status === 'DISPUTED'
-                                ? 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
-                                : 'bg-warning-100 text-warning-800 dark:bg-warning-900/30 dark:text-warning-300'
-                          }`}
-                        >
-                          {STATUS_LABEL[r.status] ?? r.status}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-app-fg-muted">
-                        {new Date(r.sentAt).toLocaleDateString()}
-                      </td>
-                      <td className="py-2 px-3">
-                        <Button type="button" variant="ghost" size="sm" className="text-brand-600 dark:text-brand-400 hover:underline h-auto p-0" onClick={() => setRemittanceReceiptModal(r)}>
-                          View
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="md:hidden space-y-3 px-1">
-              {remittances.map((r) => (
-                <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <p className="font-medium text-app-fg">{r.productName}</p>
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded text-xs font-medium shrink-0 ${
-                        r.status === 'RECEIVED'
-                          ? 'bg-success-100 text-success-800 dark:bg-success-900/30 dark:text-success-300'
-                          : r.status === 'DISPUTED'
-                            ? 'bg-danger-100 text-danger-800 dark:bg-danger-900/30 dark:text-danger-300'
-                            : 'bg-warning-100 text-warning-800 dark:bg-warning-900/30 dark:text-warning-300'
-                      }`}
-                    >
-                      {STATUS_LABEL[r.status] ?? r.status}
-                    </span>
-                  </div>
-                  <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
-                    <div>To: {r.toLocationName}</div>
-                    <div>Qty: {r.quantityReceived != null ? `${r.quantityReceived} / ${r.quantitySent}` : r.quantitySent}</div>
-                    <div>Sent: {new Date(r.sentAt).toLocaleDateString()}</div>
-                  </div>
-                  <Button type="button" variant="ghost" size="sm" className="btn-ghost btn-sm" onClick={() => setRemittanceReceiptModal(r)}>
-                    View receipt
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+        <CompactTable<RemittanceRecord>
+          columns={remittanceColumns}
+          rows={remittances}
+          rowKey={(r) => r.id}
+          emptyTitle="No remittances yet"
+        />
       </div>
 
       {/* Remittance receipt modal */}
@@ -523,7 +520,7 @@ export function RemitPage({
             <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4">
               <p className="font-medium text-app-fg">{remittanceReceiptModal.productName}</p>
               <p className="text-sm text-app-fg-muted mt-1">
-                To: {remittanceReceiptModal.toLocationName}
+                To: {remittanceReceiptModal.toProviderName ? `${remittanceReceiptModal.toLocationName} — ${remittanceReceiptModal.toProviderName}` : remittanceReceiptModal.toLocationName}
               </p>
               <p className="text-sm text-app-fg-muted mt-0.5">
                 Qty: {remittanceReceiptModal.quantityReceived != null ? `${remittanceReceiptModal.quantityReceived} / ${remittanceReceiptModal.quantitySent}` : remittanceReceiptModal.quantitySent} · Sent {new Date(remittanceReceiptModal.sentAt).toLocaleDateString()} · {STATUS_LABEL[remittanceReceiptModal.status] ?? remittanceReceiptModal.status}

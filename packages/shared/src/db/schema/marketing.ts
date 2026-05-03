@@ -14,7 +14,7 @@ export const offerTemplates = pgTable('offer_templates', {
   name: text('name').notNull(),
   price: numeric('price', { precision: 12, scale: 2 }).notNull(),
   variants: jsonb('variants'),
-  createdBy: text('created_by')
+  createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
@@ -46,13 +46,20 @@ export const marketingFundingRequests = pgTable('marketing_funding_requests', {
   requesterId: uuid('requester_id')
     .notNull()
     .references(() => users.id),
+  /**
+   * The user the request is directed at — Head of Marketing or Finance Officer
+   * (CEO directive 2026-05-03). NULL = legacy broadcast row created before
+   * migration 0106; legacy visibility falls back to the role-based audience
+   * (HoM for MB requests, Finance/SuperAdmin for HoM requests).
+   */
+  targetUserId: uuid('target_user_id').references(() => users.id),
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
   reason: text('reason'),
   status: fundingRequestStatusEnum('status').default('PENDING').notNull(),
   receiptUrl: text('receipt_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
-  resolvedBy: text('resolved_by').references(() => users.id),
+  resolvedBy: uuid('resolved_by').references(() => users.id),
   ...temporalColumns,
 });
 
@@ -97,7 +104,7 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
   spendDate: timestamp('spend_date', { withTimezone: true }).notNull(),
   status: adSpendStatusEnum('status').default('PENDING').notNull(),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
-  approvedBy: text('approved_by').references(() => users.id),
+  approvedBy: uuid('approved_by').references(() => users.id),
   rejectionReason: text('rejection_reason'),
   rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   rejectedBy: uuid('rejected_by').references(() => users.id),

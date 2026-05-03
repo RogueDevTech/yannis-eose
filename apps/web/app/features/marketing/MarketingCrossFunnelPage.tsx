@@ -2,11 +2,11 @@ import { Link } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
-import { EmptyState } from '~/components/ui/empty-state';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { Pagination } from '~/components/ui/pagination';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
-import { DataTable, type TableColumn } from '~/components/ui/data-table';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 
 export interface CrossFunnelAttemptRow {
   id: string;
@@ -66,7 +66,7 @@ export function MarketingCrossFunnelPage({ list, stats }: PageProps) {
     },
   ];
 
-  const columns: TableColumn<CrossFunnelAttemptRow>[] = [
+  const columns: CompactTableColumn<CrossFunnelAttemptRow>[] = [
     {
       key: 'attemptedAt',
       header: 'When',
@@ -103,11 +103,29 @@ export function MarketingCrossFunnelPage({ list, stats }: PageProps) {
       <PageHeader
         title="Cross-funnel attempts"
         description="Customers who tried to order through your funnel but already submitted via another Media Buyer's funnel within the dedup window. These are NOT orders — they don't count in your CPA, ROAS, or any pipeline. Use this as a signal that your funnel is generating real interest."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Cross-funnel tools"
+            sheetSubtitle={<span>Date range and refresh</span>}
+            triggerAriaLabel="Cross-funnel toolbar and date range"
+            desktop={
+              <>
+                <div className="flex w-fit shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar />
+                </div>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar triggerLayout="blockCenter" />
+                </div>
+              </>
+            }
+          />
+        }
       />
-
-      <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0 w-fit">
-        <DateFilterBar />
-      </div>
 
       <OverviewStatStrip items={statItems} />
 
@@ -130,27 +148,23 @@ export function MarketingCrossFunnelPage({ list, stats }: PageProps) {
       <Card>
         <CardHeader title="Attempts" />
         <CardBody className="p-0">
-          {list.rows.length === 0 ? (
-            <EmptyState
-              variant="card"
-              title="No cross-funnel attempts in this period"
-              description="When a customer fills your form for a product they've already ordered through someone else's funnel within 6 hours, the attempt shows up here."
-            />
-          ) : (
-            <DataTable<CrossFunnelAttemptRow>
-              columns={columns}
-              data={list.rows}
-              keyField="id"
-              loading={isLoaderRefetchBusy}
-              loadingVariant="overlay"
-            />
-          )}
+          <CompactTable<CrossFunnelAttemptRow>
+            columns={columns}
+            rows={list.rows}
+            rowKey={(r) => r.id}
+            loading={isLoaderRefetchBusy}
+            loadingVariant="overlay"
+            withCard={false}
+            emptyTitle="No cross-funnel attempts in this period"
+            emptyDescription="When a customer fills your form for a product they've already ordered through someone else's funnel within 6 hours, the attempt shows up here."
+            pagination={
+              list.totalPages >= 1
+                ? { page: list.page, totalPages: list.totalPages }
+                : undefined
+            }
+          />
         </CardBody>
       </Card>
-
-      {list.totalPages > 1 && (
-        <Pagination page={list.page} totalPages={list.totalPages} />
-      )}
 
       <p className="text-xs text-app-fg-muted">
         These rows are visible only to you and your Head of Marketing. CS does not see them.{' '}

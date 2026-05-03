@@ -14,11 +14,16 @@ export interface StockMovement {
   movementType: string;
   quantity: number;
   fromLocationId: string | null;
+  fromLocationName?: string | null;
   toLocationId: string | null;
+  toLocationName?: string | null;
   referenceId?: string | null;
   referenceCustomerName?: string | null;
+  orderShortId?: string | null;
   reason: string | null;
-  actorId: string;
+  actorId: string | null;
+  actorName?: string | null;
+  actorRole?: string | null;
   createdAt: string;
 }
 
@@ -50,6 +55,7 @@ export interface ProductOption {
 export interface LocationOption {
   id: string;
   name: string;
+  providerName: string | null;
 }
 
 /** Streaming loader shape — movements arrive as a deferred promise */

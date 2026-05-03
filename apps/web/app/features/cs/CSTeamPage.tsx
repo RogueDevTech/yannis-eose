@@ -1,9 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from '@remix-run/react';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { Pagination } from '~/components/ui/pagination';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Button } from '~/components/ui/button';
 import { ExportModal } from '~/components/ui/export-modal';
@@ -51,7 +57,7 @@ function memberInitials(name: string): string {
     .toUpperCase();
 }
 
-function CSTeamMemberCard({ member }: { member: CSTeamMemberOverview }) {
+function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; embedded?: boolean }) {
   const initials = memberInitials(member.name);
   const isAgent = member.role === 'CS_AGENT';
   const workload = member.workload;
@@ -59,7 +65,7 @@ function CSTeamMemberCard({ member }: { member: CSTeamMemberOverview }) {
   const roleLabel = csRoleLabel(member.role);
 
   return (
-    <div className="card">
+    <div className={embedded ? 'space-y-3' : 'card'}>
       <div className="flex items-center gap-3 mb-3">
         <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
           <span className="text-sm font-bold text-brand-600 dark:text-brand-400">{initials}</span>
@@ -139,21 +145,11 @@ function CSTeamMemberCard({ member }: { member: CSTeamMemberOverview }) {
         </>
       )}
 
-      <div className="flex flex-nowrap items-center gap-2">
-        <Link
-          to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}
-          prefetch="intent"
-          className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
-        >
+      <div className="inline-flex flex-nowrap items-center gap-1.5">
+        <CompactTableActionButton to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}>
           View orders
-        </Link>
-        <Link
-          to={`/hr/users/${member.id}`}
-          prefetch="intent"
-          className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
-        >
-          View profile
-        </Link>
+        </CompactTableActionButton>
+        <CompactTableActionButton to={`/hr/users/${member.id}`}>View profile</CompactTableActionButton>
       </div>
     </div>
   );
@@ -169,31 +165,210 @@ function activityCell(member: CSTeamMemberOverview): string {
 
 export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dateFilters }: CSTeamPageProps) {
   const [showExportModal, setShowExportModal] = useState(false);
+
+  const teamColumns = useMemo<CompactTableColumn<CSTeamMemberOverview>[]>(
+    () => [
+      {
+        key: 'member',
+        header: 'Member',
+        render: (member) => (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+              <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
+                {memberInitials(member.name)}
+              </span>
+            </div>
+            <span className="font-medium text-app-fg truncate">{member.name}</span>
+          </div>
+        ),
+      },
+      {
+        key: 'workload',
+        header: 'Workload',
+        nowrap: true,
+        render: (member) => {
+          const isAgent = member.role === 'CS_AGENT';
+          const workload = member.workload;
+          const workloadPct = workload && workload.capacity > 0 ? (workload.pendingCount / workload.capacity) * 100 : 0;
+          return isAgent && workload ? (
+            <span
+              className={`text-sm font-medium ${
+                workloadPct >= 80
+                  ? 'text-danger-600 dark:text-danger-400'
+                  : 'text-success-600 dark:text-success-400'
+              }`}
+            >
+              {workload.pendingCount} / {workload.capacity}
+            </span>
+          ) : (
+            <span className="text-sm text-app-fg-muted">{'\u2014'}</span>
+          );
+        },
+      },
+      {
+        key: 'activity',
+        header: 'Activity',
+        nowrap: true,
+        render: (member) => {
+          const act = activityCell(member);
+          const isIdleText = act === 'Idle';
+          return isIdleText ? (
+            <span className="text-sm font-medium text-warning-600 dark:text-warning-400">Idle</span>
+          ) : (
+            <span className="text-sm text-app-fg-muted">{act}</span>
+          );
+        },
+      },
+      {
+        key: 'assigned',
+        header: 'Assigned',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          return lb ? (
+            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersEngaged}</span>
+          ) : (
+            '\u2014'
+          );
+        },
+      },
+      {
+        key: 'delivered',
+        header: 'Delivered',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          return lb ? (
+            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersDelivered}</span>
+          ) : (
+            '\u2014'
+          );
+        },
+      },
+      {
+        key: 'confirmed',
+        header: 'Confirmed',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          return lb ? (
+            <span className="text-sm font-medium text-app-fg tabular-nums">{lb.ordersConfirmed}</span>
+          ) : (
+            '\u2014'
+          );
+        },
+      },
+      {
+        key: 'confRate',
+        header: 'Conf. rate',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          return lb ? (
+            <span className={`text-sm font-medium tabular-nums ${confirmationRateColorClass(lb.confirmationRate)}`}>
+              {formatRate(lb.confirmationRate)}
+            </span>
+          ) : (
+            '\u2014'
+          );
+        },
+      },
+      {
+        key: 'deliveryRate',
+        header: 'Delivery rate',
+        align: 'right',
+        nowrap: true,
+        render: (member) => {
+          const lb = member.leaderboardEntry;
+          return lb ? (
+            <span className={`text-sm font-medium tabular-nums ${deliveryRateColorClass(lb.deliveryRate)}`}>
+              {formatRate(lb.deliveryRate)}
+            </span>
+          ) : (
+            '\u2014'
+          );
+        },
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        tight: true,
+        render: (member) => (
+          <div className="inline-flex items-center gap-1.5">
+            <CompactTableActionButton to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}>
+              View orders
+            </CompactTableActionButton>
+            <CompactTableActionButton to={`/hr/users/${member.id}`}>View profile</CompactTableActionButton>
+          </div>
+        ),
+      },
+    ],
+    [],
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Team Analysis"
         description="Closer workload, activity, and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
         actions={
-          <div className="flex items-center gap-2 flex-wrap">
-            {dateFilters ? (
-              <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                <DateFilterBar
-                  startDate={dateFilters.startDate}
-                  endDate={dateFilters.endDate}
-                  periodAllTime={dateFilters.periodAllTime}
-                />
-              </div>
-            ) : null}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowExportModal(true)}
-            >
-              Generate report
-            </Button>
-          </div>
+          dateFilters ? (
+            <PageHeaderMobileTools
+              sheetTitle="CS team tools"
+              sheetSubtitle={<span>Date range and export</span>}
+              triggerAriaLabel="CS team toolbar and date range"
+              desktop={
+                <>
+                  <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                    <DateFilterBar
+                      startDate={dateFilters.startDate}
+                      endDate={dateFilters.endDate}
+                      periodAllTime={dateFilters.periodAllTime}
+                    />
+                  </div>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                    Generate report
+                  </Button>
+                  <PageRefreshButton />
+                </>
+              }
+              sheet={({ closeSheet }) => (
+                <>
+                  <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                    <DateFilterBar
+                      startDate={dateFilters.startDate}
+                      endDate={dateFilters.endDate}
+                      periodAllTime={dateFilters.periodAllTime}
+                      triggerLayout="blockCenter"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowExportModal(true);
+                    }}
+                  >
+                    Generate report
+                  </Button>
+                </>
+              )}
+            />
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                Generate report
+              </Button>
+              <PageRefreshButton />
+            </div>
+          )
         }
       />
 
@@ -255,145 +430,18 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
             </div>
           </div>
 
-          {/* Mobile: always render card grid (the table view is unusable on a narrow viewport) */}
-          <div className="md:hidden grid grid-cols-1 gap-3">
-            {teamMembers.map((m) => (
-              <CSTeamMemberCard key={m.id} member={m} />
-            ))}
+          <div className="card p-0">
+            <CompactTable
+              withCard={false}
+              columns={teamColumns}
+              rows={teamMembers}
+              rowKey={(m) => m.id}
+              renderMobileCard={(m) => <CSTeamMemberCard member={m} embedded />}
+              pagination={
+                totalPages > 1 ? { page, totalPages, pageParam: 'page' } : undefined
+              }
+            />
           </div>
-
-          {/* Desktop: table view */}
-          <div className="hidden md:block">
-            <div className="card p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1080px]">
-                  <thead>
-                    <tr>
-                      <th className="table-header">Member</th>
-                      <th className="table-header">Workload</th>
-                      <th className="table-header">Activity</th>
-                      <th className="table-header text-right">Assigned</th>
-                      <th className="table-header text-right">Delivered</th>
-                      <th className="table-header text-right">Confirmed</th>
-                      <th className="table-header text-right">Conf. rate</th>
-                      <th className="table-header text-right">Delivery rate</th>
-                      <th className="table-header">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {teamMembers.map((member) => {
-                      const isAgent = member.role === 'CS_AGENT';
-                      const workload = member.workload;
-                      const lb = member.leaderboardEntry;
-                      const act = activityCell(member);
-                      const isIdleText = act === 'Idle';
-                      const workloadPct = workload && workload.capacity > 0
-                        ? (workload.pendingCount / workload.capacity) * 100
-                        : 0;
-
-                      return (
-                        <tr key={member.id} className="table-row">
-                          <td className="table-cell">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-                                <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
-                                  {memberInitials(member.name)}
-                                </span>
-                              </div>
-                              <span className="font-medium text-app-fg truncate">{member.name}</span>
-                            </div>
-                          </td>
-                          <td className="table-cell text-sm whitespace-nowrap">
-                            {isAgent && workload ? (
-                              <span
-                                className={`font-medium ${
-                                  workloadPct >= 80
-                                    ? 'text-danger-600 dark:text-danger-400'
-                                    : 'text-success-600 dark:text-success-400'
-                                }`}
-                              >
-                                {workload.pendingCount} / {workload.capacity}
-                              </span>
-                            ) : (
-                              <span className="text-app-fg-muted">{'\u2014'}</span>
-                            )}
-                          </td>
-                          <td className="table-cell text-sm whitespace-nowrap">
-                            {isIdleText ? (
-                              <span className="font-medium text-warning-600 dark:text-warning-400">Idle</span>
-                            ) : (
-                              <span className="text-app-fg-muted">{act}</span>
-                            )}
-                          </td>
-                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
-                            {lb ? (
-                              <span className="font-medium text-app-fg">{lb.ordersEngaged}</span>
-                            ) : (
-                              '\u2014'
-                            )}
-                          </td>
-                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
-                            {lb ? (
-                              <span className="font-medium text-app-fg">{lb.ordersDelivered}</span>
-                            ) : (
-                              '\u2014'
-                            )}
-                          </td>
-                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
-                            {lb ? (
-                              <span className="font-medium text-app-fg">{lb.ordersConfirmed}</span>
-                            ) : (
-                              '\u2014'
-                            )}
-                          </td>
-                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
-                            {lb ? (
-                              <span className={`font-medium ${confirmationRateColorClass(lb.confirmationRate)}`}>
-                                {formatRate(lb.confirmationRate)}
-                              </span>
-                            ) : (
-                              '\u2014'
-                            )}
-                          </td>
-                          <td className="table-cell text-sm text-right tabular-nums whitespace-nowrap">
-                            {lb ? (
-                              <span className={`font-medium ${deliveryRateColorClass(lb.deliveryRate)}`}>
-                                {formatRate(lb.deliveryRate)}
-                              </span>
-                            ) : (
-                              '\u2014'
-                            )}
-                          </td>
-                          <td className="table-cell">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Link
-                                to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}
-                                prefetch="intent"
-                                className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
-                              >
-                                View orders
-                              </Link>
-                              <Link
-                                to={`/hr/users/${member.id}`}
-                                prefetch="intent"
-                                className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
-                              >
-                                View profile
-                              </Link>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          {totalPages > 1 && (
-            <Pagination page={page} totalPages={totalPages} pageParam="page" />
-          )}
         </div>
       )}
 

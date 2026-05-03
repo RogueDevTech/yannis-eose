@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 
 /**
  * Converts a base64url-encoded VAPID public key to a Uint8Array
@@ -32,12 +33,6 @@ export function detectInstallMode(): InstallMode {
     window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true;
   return standalone ? 'STANDALONE' : 'BROWSER';
-}
-
-function getApiBase(): string {
-  const w = window as Window & { __ENV?: Record<string, unknown> };
-  const raw = typeof w.__ENV?.API_URL === 'string' ? w.__ENV.API_URL : 'http://localhost:4444';
-  return raw.replace(/\/+$/, '');
 }
 
 /**
@@ -101,7 +96,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
           setIsSubscribed(true);
           const mode = detectInstallMode();
           if (mode !== 'UNKNOWN' && !isMirroring()) {
-            fetch(`${getApiBase()}/trpc/notifications.updatePushInstallMode`, {
+            fetch(`${getBrowserApiBaseUrl()}/trpc/notifications.updatePushInstallMode`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
@@ -129,7 +124,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
         const registration = await navigator.serviceWorker.ready;
         const sub = await registration.pushManager.getSubscription();
         if (!sub) return;
-        await fetch(`${getApiBase()}/trpc/notifications.updatePushInstallMode`, {
+        await fetch(`${getBrowserApiBaseUrl()}/trpc/notifications.updatePushInstallMode`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -169,7 +164,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
   const saveSubscriptionToDb = useCallback(async (subscription: PushSubscription): Promise<void> => {
     const raw = subscription.toJSON();
     if (!raw?.endpoint || !raw.keys?.auth || !raw.keys?.p256dh) return;
-    const apiBase = getApiBase();
+    const apiBase = getBrowserApiBaseUrl();
     const res = await fetch(`${apiBase}/trpc/notifications.savePushSubscription`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -239,7 +234,7 @@ export function usePushSubscription(): UsePushSubscriptionResult {
     const endpoint = subscription.endpoint;
     await subscription.unsubscribe();
 
-    const res = await fetch(`${getApiBase()}/trpc/notifications.removePushSubscription`, {
+    const res = await fetch(`${getBrowserApiBaseUrl()}/trpc/notifications.removePushSubscription`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

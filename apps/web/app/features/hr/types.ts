@@ -101,7 +101,6 @@ export interface ViewerInfo {
   id: string;
   role: string;
   currentBranchId: string | null;
-  isFinanceOfficer: boolean;
   prepareDepartments?: PayrollDepartment[];
   prepareBranchIds?: string[];
 }

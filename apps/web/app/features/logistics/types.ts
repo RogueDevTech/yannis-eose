@@ -17,6 +17,7 @@ export interface Location {
   status: string;
   dispatchLocked?: boolean;
   createdAt: string;
+  providerName: string | null;
 }
 
 export interface ShrinkageAlert {

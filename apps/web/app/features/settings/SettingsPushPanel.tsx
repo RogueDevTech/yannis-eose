@@ -64,10 +64,10 @@ export function SettingsPushPanel() {
   const iosNotInstalled = isIOS && !isStandalone;
 
   return (
-    <div className="space-y-4">
-      <div className="card overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-app-border">
-          <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/40 flex items-center justify-center flex-shrink-0">
+    <div className="space-y-3">
+      <div className="card overflow-hidden p-0">
+        <div className="flex items-center gap-2.5 border-b border-app-border px-4 py-3 sm:gap-3 sm:px-5 sm:py-3.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 dark:bg-brand-900/40 sm:h-9 sm:w-9">
             <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
               <path
                 strokeLinecap="round"
@@ -78,7 +78,7 @@ export function SettingsPushPanel() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-app-fg">Push on this device</p>
-            <p className="text-xs text-app-fg-muted mt-0.5">
+            <p className="mt-0.5 text-xs leading-snug text-app-fg-muted">
               Alerts for orders, messages, and updates when the app is in the background
             </p>
           </div>
@@ -98,35 +98,35 @@ export function SettingsPushPanel() {
           ) : null}
         </div>
 
-        <div className="px-5 py-4 space-y-4">
+        <div className="space-y-3 px-4 py-3 sm:px-5 sm:py-3.5">
           {!isSupported && !iosNotInstalled && (
-            <p className="text-sm text-app-fg-muted">
+            <p className="text-sm leading-snug text-app-fg-muted">
               Push is not supported in this browser. Try Chrome, Edge, or Firefox.
             </p>
           )}
 
           {iosNotInstalled && (
-            <div className="rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3">
+            <div className="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2.5 dark:border-warning-700/50 dark:bg-warning-900/20">
               <p className="text-sm font-medium text-warning-800 dark:text-warning-300">Add to Home Screen first</p>
-              <p className="text-xs text-warning-700 dark:text-warning-400 mt-1">
+              <p className="mt-1 text-xs leading-snug text-warning-700 dark:text-warning-400">
                 On iPhone or iPad, use Share → Add to Home Screen, then open the app from your home screen and return here to enable push.
               </p>
             </div>
           )}
 
           {pushActive && (
-            <p className="text-sm text-app-fg-muted">
+            <p className="text-sm leading-snug text-app-fg-muted">
               Push is enabled on this device. You will receive alerts even when the app is in the background.
             </p>
           )}
 
           {isDenied && (
-            <div className="rounded-lg border border-danger-200 dark:border-danger-500/50 bg-danger-50 dark:bg-transparent px-4 py-3 space-y-3">
+            <div className="space-y-2 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2.5 dark:border-danger-500/50 dark:bg-transparent">
               <p className="text-sm font-medium text-danger-800 dark:text-danger-300">Notifications are blocked</p>
-              <ol className="space-y-2">
+              <ol className="space-y-1.5">
                 {deniedSteps.map((step, i) => (
-                  <li key={i} className="flex items-start gap-2.5 text-sm text-danger-800 dark:text-app-fg">
-                    <span className="mt-px shrink-0 flex h-5 w-5 items-center justify-center rounded-full border border-danger-300 dark:border-danger-600 bg-danger-100 dark:bg-transparent text-xs font-semibold text-danger-700 dark:text-danger-400">
+                  <li key={i} className="flex items-start gap-2 text-sm leading-snug text-danger-800 dark:text-app-fg">
+                    <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-danger-300 bg-danger-100 text-xs font-semibold text-danger-700 dark:border-danger-600 dark:bg-transparent dark:text-danger-400">
                       {i + 1}
                     </span>
                     <span>
@@ -140,13 +140,13 @@ export function SettingsPushPanel() {
           )}
 
           {!pushActive && !isDenied && isSupported && !iosNotInstalled && (
-            <p className="text-sm text-app-fg-muted">
+            <p className="text-sm leading-snug text-app-fg-muted">
               Allow push to get real-time alerts for new orders, status changes, and team messages when you are not on this page.
             </p>
           )}
 
           {pushError && (
-            <div className="rounded-lg bg-danger-50 dark:bg-transparent border border-danger-200 dark:border-danger-500/50 px-3 py-2">
+            <div className="rounded-lg border border-danger-200 bg-danger-50 px-2.5 py-1.5 dark:border-danger-500/50 dark:bg-transparent">
               <p className="text-xs text-danger-700 dark:text-app-fg">{pushError}</p>
             </div>
           )}
@@ -172,9 +172,9 @@ export function SettingsPushPanel() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="flex items-start gap-3">
-          <div className="w-9 h-9 rounded-full bg-app-hover flex items-center justify-center flex-shrink-0 mt-0.5">
+      <div className="card p-4 sm:p-5">
+        <div className="flex items-start gap-2.5">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover sm:h-9 sm:w-9">
             <svg className="w-5 h-5 text-app-fg-muted" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
               <path
                 strokeLinecap="round"
@@ -185,7 +185,7 @@ export function SettingsPushPanel() {
           </div>
           <div>
             <p className="text-sm font-semibold text-app-fg">In-app notifications</p>
-            <p className="text-xs text-app-fg-muted mt-1">
+            <p className="mt-0.5 text-xs leading-snug text-app-fg-muted">
               While you are logged in, alerts also appear under the bell icon at the top of the page.
             </p>
           </div>

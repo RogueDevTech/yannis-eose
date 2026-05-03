@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useFetcher, useSearchParams, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -9,6 +9,8 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -306,6 +308,14 @@ export function OrdersListPage({
     ...(csAgentsForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName })),
   ];
 
+  const ordersListToolbarFilterBadge = useMemo(() => {
+    let n = 0;
+    if (selectedStatus !== 'ALL') n += 1;
+    const agent = searchParams.get('csAgentId') || 'ALL';
+    if (showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && agent !== 'ALL') n += 1;
+    return n;
+  }, [selectedStatus, showCSAgentColumn, csAgentsForFilter?.length, searchParams]);
+
   return (
     <div className="space-y-4">
       {canCreateOffline && (
@@ -322,41 +332,78 @@ export function OrdersListPage({
         title={isCSAgent ? 'My Orders' : 'CS Orders'}
         description={isCSAgent ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {liveEvents != null && liveEvents.length > 0 && (
-              <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+          <PageHeaderMobileTools
+            sheetTitle="CS orders tools"
+            sheetSubtitle={<span>Chart, offline order, and export</span>}
+            triggerAriaLabel="CS orders toolbar"
+            mobileLeading={
+              liveEvents != null && liveEvents.length > 0 ? (
+                <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+              ) : null
+            }
+            desktop={
+              <>
+                {liveEvents != null && liveEvents.length > 0 && (
+                  <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+                )}
+                <PageRefreshButton />
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
+                {canCreateOffline && (
+                  <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
+                    <span className="hidden sm:inline">Create offline order</span>
+                    <span className="sm:hidden">+ Order</span>
+                  </Button>
+                )}
+                <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                  Generate report
+                </Button>
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowChartView((v) => !v);
+                  }}
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
+                {canCreateOffline && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setCreateOfflineOpen(true);
+                    }}
+                  >
+                    Create offline order
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowExportModal(true);
+                  }}
+                >
+                  Generate report
+                </Button>
+              </>
             )}
-            <PageRefreshButton />
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowChartView((v) => !v)}
-            >
-              {showChartView ? 'View as data' : 'View data in chart'}
-            </Button>
-            {canCreateOffline && (
-              <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
-                <span className="hidden sm:inline">Create offline order</span>
-                <span className="sm:hidden">+ Order</span>
-              </Button>
-            )}
-          </div>
+          />
         }
       />
-
-      {/* Secondary action row — Export only (Live moved up next to refresh; date filter lives in filters card below) */}
-      <div className="flex flex-wrap items-center gap-2 -mt-2">
-        <div className="ml-auto">
-          <Button
-            variant="secondary"
-            size="sm"
-              onClick={() => setShowExportModal(true)}
-          >
-            Generate report
-          </Button>
-        </div>
-      </div>
 
       {/* Status totals — moved above My Workload so the funnel snapshot reads first. */}
       <OverviewStatStrip
@@ -521,81 +568,137 @@ export function OrdersListPage({
         defaultColumns={showCSAgentColumn ? ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'] : ['id', 'customer', 'status', 'amount', 'created']}
       />
 
-      {/* Filters bar */}
-      <div className="card">
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Date pill — same chrome we use on MarketingTeamPage so the filter is visually
-              prominent and easy to spot. The bare DateFilterBar is just a text button which
-              disappears into the toolbar; the pill wrapper makes it a clear control. */}
-          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-            <DateFilterBar
-              startDate={filters?.startDate ?? ''}
-              endDate={filters?.endDate ?? ''}
-              periodAllTime={filters?.periodAllTime ?? false}
-            />
-          </div>
-          <form
-            method="get"
-            className="flex-1"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setSearchParams((p) => {
-                const next = new URLSearchParams(p);
-                next.set('page', '1');
-                if (searchQuery.trim()) next.set('search', searchQuery.trim());
-                else next.delete('search');
-                return next;
-              });
-            }}
-          >
-            <SearchInput
-              name="search"
-              placeholder="Search by customer name..."
-              value={searchQuery}
-              onChange={(val) => setSearchQuery(val)}
-              wrapperClassName="w-full"
-            />
-          </form>
-          <FormSelect
-            value={selectedStatus}
-            onChange={(e) => {
-              const v = e.target.value;
-              setSelectedStatus(v);
-              setSelectedIds(new Set());
-              setBulkResult(null);
-              setSearchParams((p) => {
-                const next = new URLSearchParams(p);
-                next.set('page', '1');
-                if (v === 'ALL') next.delete('status');
-                else next.set('status', v);
-                return next;
-              });
-            }}
-            options={statusOptions}
-            wrapperClassName="w-full sm:w-48"
-          />
-          {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && (
-            <SearchableSelect
-              id="orders-filter-closer"
-              value={searchParams.get('csAgentId') || 'ALL'}
-              onChange={(v) => {
-                setSelectedIds(new Set());
-                setBulkResult(null);
-                setSearchParams((p) => {
-                  const next = new URLSearchParams(p);
-                  next.set('page', '1');
-                  if (v && v !== 'ALL') next.set('csAgentId', v);
-                  else next.delete('csAgentId');
-                  return next;
-                });
-              }}
-              options={csAgentOptions}
-              wrapperClassName="w-full sm:w-48"
-              placeholder="All closers"
-              searchPlaceholder="Search closers..."
-            />
-          )}
-        </div>
+      <div className="card p-0 overflow-hidden">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          badgeCount={ordersListToolbarFilterBadge}
+          sheetSubtitle={<span>Status and closer apply immediately</span>}
+          searchRow={
+            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-3">
+              <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                <DateFilterBar
+                  startDate={filters?.startDate ?? ''}
+                  endDate={filters?.endDate ?? ''}
+                  periodAllTime={filters?.periodAllTime ?? false}
+                />
+              </div>
+              <form
+                method="get"
+                className="min-w-0 flex-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setSearchParams((p) => {
+                    const next = new URLSearchParams(p);
+                    next.set('page', '1');
+                    if (searchQuery.trim()) next.set('search', searchQuery.trim());
+                    else next.delete('search');
+                    return next;
+                  });
+                }}
+              >
+                <SearchInput
+                  name="search"
+                  placeholder="Search by customer name..."
+                  value={searchQuery}
+                  onChange={(val) => setSearchQuery(val)}
+                  wrapperClassName="w-full"
+                />
+              </form>
+            </div>
+          }
+          desktopInlineFilters={
+            <>
+              <FormSelect
+                value={selectedStatus}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSelectedStatus(v);
+                  setSelectedIds(new Set());
+                  setBulkResult(null);
+                  setSearchParams((p) => {
+                    const next = new URLSearchParams(p);
+                    next.set('page', '1');
+                    if (v === 'ALL') next.delete('status');
+                    else next.set('status', v);
+                    return next;
+                  });
+                }}
+                options={statusOptions}
+                wrapperClassName="w-full min-w-0 sm:w-48"
+              />
+              {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 ? (
+                <SearchableSelect
+                  id="orders-filter-closer"
+                  value={searchParams.get('csAgentId') || 'ALL'}
+                  onChange={(v) => {
+                    setSelectedIds(new Set());
+                    setBulkResult(null);
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (v && v !== 'ALL') next.set('csAgentId', v);
+                      else next.delete('csAgentId');
+                      return next;
+                    });
+                  }}
+                  options={csAgentOptions}
+                  wrapperClassName="w-full min-w-0 sm:w-48"
+                  placeholder="All closers"
+                  searchPlaceholder="Search closers..."
+                />
+              ) : null}
+            </>
+          }
+          sheetFilterBody={
+            <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                <FormSelect
+                  value={selectedStatus}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedStatus(v);
+                    setSelectedIds(new Set());
+                    setBulkResult(null);
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (v === 'ALL') next.delete('status');
+                      else next.set('status', v);
+                      return next;
+                    });
+                  }}
+                  options={statusOptions}
+                  wrapperClassName="w-full"
+                />
+              </div>
+              {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 ? (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Closer</span>
+                  <SearchableSelect
+                    id="orders-filter-closer-sheet"
+                    value={searchParams.get('csAgentId') || 'ALL'}
+                    onChange={(v) => {
+                      setSelectedIds(new Set());
+                      setBulkResult(null);
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('csAgentId', v);
+                        else next.delete('csAgentId');
+                        return next;
+                      });
+                    }}
+                    options={csAgentOptions}
+                    wrapperClassName="w-full"
+                    placeholder="All closers"
+                    searchPlaceholder="Search closers..."
+                  />
+                </div>
+              ) : null}
+            </>
+          }
+        />
       </div>
 
       {/* Orders table — replaced with chart view when the user toggles "View data in chart" */}

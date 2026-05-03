@@ -1,9 +1,13 @@
 import { useLoaderData } from '@remix-run/react';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { DeferredSection } from '~/components/ui/deferred-section';
-import { UserDetailPage } from '~/features/users/UserDetailPage';
 import type { UserDetailLoaderData } from '~/features/users/types';
-import { loader as userDetailLoader, action as userDetailAction, meta as userDetailMeta } from '../hr.users.$id/route';
+import {
+  loader as userDetailLoader,
+  action as userDetailAction,
+  meta as userDetailMeta,
+  UserDetailPageWithMirror,
+} from '../hr.users.$id._index/route';
 
 export const meta: MetaFunction = userDetailMeta;
 
@@ -32,8 +36,8 @@ export default function FinanceStaffAccountsDetailRoute() {
             </a>
           </div>
         ) : (
-          <UserDetailPage
-            {...(data as UserDetailLoaderData)}
+          <UserDetailPageWithMirror
+            data={data as UserDetailLoaderData}
             usersBasePath="/admin/finance/staff-accounts"
           />
         )

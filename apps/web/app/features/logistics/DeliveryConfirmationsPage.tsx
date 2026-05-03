@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
-import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
@@ -9,7 +13,6 @@ import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Tabs } from '~/components/ui/tabs';
@@ -100,6 +103,154 @@ export function DeliveryConfirmationsPage({
     setSearchParams(next);
   };
 
+  const allocatedColumns = useMemo<CompactTableColumn<AllocatedDeliveryOrder>[]>(
+    () => [
+      {
+        key: 'orderId',
+        header: 'Order ID',
+        render: (order) => <OrderIdBadge id={order.id} ellipsis="…" />,
+      },
+      {
+        key: 'customer',
+        header: 'Customer',
+        render: (order) => (
+          <div className="flex flex-col">
+            <span className="font-medium text-app-fg">{order.customerName}</span>
+            {order.deliveryAddress && (
+              <span className="text-xs text-app-fg-muted">
+                {order.deliveryAddress.slice(0, 56)}
+                {order.deliveryAddress.length > 56 ? '…' : ''}
+              </span>
+            )}
+          </div>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Order status',
+        render: (order) => <StatusBadge status={order.status} showDot />,
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'center',
+        tight: true,
+        render: (order) => (
+          <div className="flex flex-wrap items-center justify-center gap-1.5">
+            <CompactTableActionButton to={`/admin/logistics/orders/${order.id}`}>View</CompactTableActionButton>
+            <fetcher.Form method="post" className="inline">
+              <input type="hidden" name="intent" value="markDelivered" />
+              <input type="hidden" name="orderId" value={order.id} />
+              <Button type="submit" variant="success" size="sm" disabled={fetcher.state !== 'idle'}>
+                Mark delivered
+              </Button>
+            </fetcher.Form>
+            {canAdjustOrder && (
+              <Link to={`/admin/logistics/orders/${order.id}`} className="btn-warning btn-sm">
+                Adjust order
+              </Link>
+            )}
+          </div>
+        ),
+      },
+    ],
+    [fetcher.state, canAdjustOrder],
+  );
+
+  const requestColumns = useMemo<CompactTableColumn<DeliveryConfirmationRequest>[]>(
+    () => [
+      {
+        key: 'orderId',
+        header: 'Order ID',
+        render: (req) => <OrderIdBadge id={req.orderId} ellipsis="…" />,
+      },
+      {
+        key: 'customer',
+        header: 'Customer',
+        render: (req) => {
+          const order = req.order;
+          return (
+            <div className="flex flex-col">
+              <span className="font-medium text-app-fg">{order?.customerName ?? '—'}</span>
+              {order?.deliveryAddress && (
+                <span className="text-xs text-app-fg-muted">
+                  {order.deliveryAddress.slice(0, 56)}
+                  {order.deliveryAddress.length > 56 ? '…' : ''}
+                </span>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        key: 'requester',
+        header: 'Requested by',
+        render: (req) => <span className="text-app-fg-muted">{req.requesterName ?? 'Unknown user'}</span>,
+      },
+      {
+        key: 'reqStatus',
+        header: 'Request status',
+        render: (req) => <StatusBadge status={req.status} showDot />,
+      },
+      {
+        key: 'transition',
+        header: 'Transition',
+        render: (req) => (
+          <span className="text-app-fg-muted">
+            {(req.payload?.newStatus as string) ?? 'DELIVERED'}
+          </span>
+        ),
+      },
+      {
+        key: 'requestedAt',
+        header: 'Requested at',
+        render: (req) => (
+          <span className="text-app-fg-muted text-sm">
+            {new Date(req.requestedAt).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'center',
+        tight: true,
+        render: (req) => {
+          const canReview = requestStatusFilter === 'PENDING' && req.status === 'PENDING';
+          return (
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              <CompactTableActionButton to={`/admin/logistics/orders/${req.orderId}`}>View</CompactTableActionButton>
+              {canReview && (
+                <>
+                  <Button
+                    type="button"
+                    variant="success"
+                    size="sm"
+                    disabled={fetcher.state !== 'idle'}
+                    onClick={() => setApproveModal({ requestId: req.id, orderId: req.orderId })}
+                  >
+                    Approve
+                  </Button>
+                  {canAdjustOrder && (
+                    <Link to={`/admin/logistics/orders/${req.orderId}`} className="btn-warning btn-sm">
+                      Adjust order
+                    </Link>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        },
+      },
+    ],
+    [requestStatusFilter, fetcher.state, canAdjustOrder],
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -138,75 +289,17 @@ export function DeliveryConfirmationsPage({
             CS and logistics can confirm delivery directly from here.
           </p>
         </div>
-        <TableLoadingOverlay show={isAllocatedTab && isLoaderRefetchBusy} minHeightClassName="min-h-[12rem]">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Order ID</th>
-                <th className="table-header">Customer</th>
-                <th className="table-header">Order status</th>
-                <th className="table-header text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allocatedOrders.map((order) => (
-                <tr key={order.id} className="table-row">
-                  <td className="table-cell">
-                    <OrderIdBadge id={order.id} ellipsis="…" />
-                  </td>
-                  <td className="table-cell whitespace-normal">
-                    <div className="flex flex-col">
-                      <span className="font-medium text-app-fg">{order.customerName}</span>
-                      {order.deliveryAddress && (
-                        <span className="text-xs text-app-fg-muted">
-                          {order.deliveryAddress.slice(0, 56)}
-                          {order.deliveryAddress.length > 56 ? '…' : ''}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="table-cell">
-                    <StatusBadge status={order.status} showDot />
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex flex-wrap items-center justify-center gap-1.5">
-                      <Link to={`/admin/logistics/orders/${order.id}`} className="btn-secondary btn-sm">
-                        View
-                      </Link>
-                      <fetcher.Form method="post">
-                        <input type="hidden" name="intent" value="markDelivered" />
-                        <input type="hidden" name="orderId" value={order.id} />
-                        <Button type="submit" variant="success" size="sm" disabled={fetcher.state !== 'idle'}>
-                          Mark delivered
-                        </Button>
-                      </fetcher.Form>
-                      {canAdjustOrder && (
-                        <Link to={`/admin/logistics/orders/${order.id}`} className="btn-warning btn-sm">
-                          Adjust order
-                        </Link>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {allocatedOrders.length === 0 && (
-                <tr>
-                  <td colSpan={4}>
-                    <EmptyState
-                      title="No allocated orders"
-                      description="Orders in ALLOCATED status will appear here for direct delivery confirmation."
-                      variant="card"
-                    />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="md:hidden space-y-3 px-1 py-1">
-          {allocatedOrders.map((order) => (
-            <div key={order.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+        <CompactTable
+          withCard={false}
+          columns={allocatedColumns}
+          rows={allocatedOrders}
+          rowKey={(order) => order.id}
+          loading={isAllocatedTab && isLoaderRefetchBusy}
+          loadingVariant="overlay"
+          emptyTitle="No allocated orders"
+          emptyDescription="Orders in ALLOCATED status will appear here for direct delivery confirmation."
+          renderMobileCard={(order) => (
+            <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <OrderIdBadge id={order.id} ellipsis="…" />
                 <StatusBadge status={order.status} showDot />
@@ -238,16 +331,8 @@ export function DeliveryConfirmationsPage({
                 )}
               </div>
             </div>
-          ))}
-          {allocatedOrders.length === 0 && (
-            <EmptyState
-              title="No allocated orders"
-              description="Orders in ALLOCATED status will appear here for direct delivery confirmation."
-              variant="card"
-            />
           )}
-        </div>
-        </TableLoadingOverlay>
+        />
       </div>
       )}
 
@@ -269,106 +354,27 @@ export function DeliveryConfirmationsPage({
             options={REQUEST_STATUS_OPTIONS}
           />
         </div>
-        <TableLoadingOverlay show={isRequestsTab && isLoaderRefetchBusy} minHeightClassName="min-h-[12rem]">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Order ID</th>
-                <th className="table-header">Customer</th>
-                <th className="table-header">Requested by</th>
-                <th className="table-header">Request status</th>
-                <th className="table-header">Transition</th>
-                <th className="table-header">Requested at</th>
-                <th className="table-header text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((req) => {
-                const order = req.order;
-                const newStatus = (req.payload?.newStatus as string) ?? 'DELIVERED';
-                const canReview = requestStatusFilter === 'PENDING' && req.status === 'PENDING';
-                return (
-                  <tr key={req.id} className="table-row">
-                    <td className="table-cell">
-                      <OrderIdBadge id={req.orderId} ellipsis="…" />
-                    </td>
-                    <td className="table-cell whitespace-normal">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-app-fg">{order?.customerName ?? '—'}</span>
-                        {order?.deliveryAddress && (
-                          <span className="text-xs text-app-fg-muted">
-                            {order.deliveryAddress.slice(0, 56)}
-                            {order.deliveryAddress.length > 56 ? '…' : ''}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="table-cell text-app-fg-muted">
-                      {req.requesterName ?? 'Unknown user'}
-                    </td>
-                    <td className="table-cell">
-                      <StatusBadge status={req.status} showDot />
-                    </td>
-                    <td className="table-cell text-app-fg-muted">{newStatus}</td>
-                    <td className="table-cell text-app-fg-muted">
-                      {new Date(req.requestedAt).toLocaleDateString('en-NG', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </td>
-                    <td className="table-cell">
-                      <div className="flex flex-wrap items-center justify-center gap-1.5">
-                        <Link to={`/admin/logistics/orders/${req.orderId}`} className="btn-secondary btn-sm">
-                          View
-                        </Link>
-                        {canReview && (
-                          <>
-                            <Button
-                              type="button"
-                              variant="success"
-                              size="sm"
-                              disabled={fetcher.state !== 'idle'}
-                              onClick={() => setApproveModal({ requestId: req.id, orderId: req.orderId })}
-                            >
-                                Approve
-                            </Button>
-                            {canAdjustOrder && (
-                              <Link to={`/admin/logistics/orders/${req.orderId}`} className="btn-warning btn-sm">
-                                Adjust order
-                              </Link>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {requests.length === 0 && (
-                <tr>
-                  <td colSpan={7}>
-                    <EmptyState
-                      title={requestStatusFilter === 'PENDING' ? 'No pending confirmations' : 'No confirmation requests'}
-                      description={requestStatusFilter === 'PENDING' ? 'No pending delivery confirmations.' : 'No delivery confirmation requests.'}
-                      variant="card"
-                    />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="md:hidden space-y-3 px-1 py-1">
-          {requests.map((req) => {
+        <CompactTable
+          withCard={false}
+          columns={requestColumns}
+          rows={requests}
+          rowKey={(req) => req.id}
+          loading={isRequestsTab && isLoaderRefetchBusy}
+          loadingVariant="overlay"
+          emptyTitle={
+            requestStatusFilter === 'PENDING' ? 'No pending confirmations' : 'No confirmation requests'
+          }
+          emptyDescription={
+            requestStatusFilter === 'PENDING'
+              ? 'No pending delivery confirmations.'
+              : 'No delivery confirmation requests.'
+          }
+          renderMobileCard={(req) => {
             const order = req.order;
             const newStatus = (req.payload?.newStatus as string) ?? 'DELIVERED';
             const canReview = requestStatusFilter === 'PENDING' && req.status === 'PENDING';
             return (
-              <div key={req.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+              <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <OrderIdBadge id={req.orderId} ellipsis="…" />
                   <StatusBadge status={req.status} showDot />
@@ -416,7 +422,7 @@ export function DeliveryConfirmationsPage({
                         disabled={fetcher.state !== 'idle'}
                         onClick={() => setApproveModal({ requestId: req.id, orderId: req.orderId })}
                       >
-                          Approve
+                        Approve
                       </Button>
                       {canAdjustOrder && (
                         <Link to={`/admin/logistics/orders/${req.orderId}`} className="btn-warning btn-sm">
@@ -428,16 +434,8 @@ export function DeliveryConfirmationsPage({
                 </div>
               </div>
             );
-          })}
-          {requests.length === 0 && (
-            <EmptyState
-              title={requestStatusFilter === 'PENDING' ? 'No pending confirmations' : 'No confirmation requests'}
-              description={requestStatusFilter === 'PENDING' ? 'No pending delivery confirmations.' : 'No delivery confirmation requests.'}
-              variant="card"
-            />
-          )}
-        </div>
-        </TableLoadingOverlay>
+          }}
+        />
       </div>
       )}
 

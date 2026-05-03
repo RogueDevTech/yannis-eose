@@ -17,13 +17,16 @@ function getService(): PermissionRequestsService {
 
 /**
  * Permission requests router.
- * listPending / list: all authenticated users can view (sensitive; route UI may narrow).
+ * listPending / list: viewer-scoped server-side — admin-class sees everything; approvers
+ *   see types they can approve; everyone else only sees rows they personally submitted.
+ *   Stops a CS Agent / Media Buyer with the URL from reading every HR user-creation
+ *   draft, order-deletion reason, etc.
  * approve/reject: authedProcedure — service enforces per-type gates (audit.read / SuperAdmin / order price approvers).
  */
 export const permissionRequestsRouter = router({
   listPending: authedProcedure
-    .query(async () => {
-      return getService().listPending();
+    .query(async ({ ctx }) => {
+      return getService().listPending(ctx.user);
     }),
 
   list: authedProcedure
@@ -34,8 +37,8 @@ export const permissionRequestsRouter = router({
         })
         .optional(),
     )
-    .query(async ({ input }) => {
-      return getService().list({ status: input?.status });
+    .query(async ({ input, ctx }) => {
+      return getService().list({ status: input?.status }, ctx.user);
     }),
 
   approve: authedProcedure

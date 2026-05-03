@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -7,14 +7,23 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
-import { DataTable, type TableColumn } from '~/components/ui/data-table';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { DescriptionList } from '~/components/ui/description-list';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { Tabs } from '~/components/ui/tabs';
@@ -59,17 +68,16 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
   // Local validation errors (e.g. "reason too short") win over stale fetcher
   // errors so the user always sees the most recent feedback.
   const cancelError = cancelInlineError ?? cancelFetcherError;
-  const cancelSuccess = (cancelFetcher.data as { success?: boolean } | undefined)?.success;
   useFetcherToast(cancelFetcher.data, { successMessage: 'Transfer cancelled' });
 
-  // Close cancel modal + clear reason on a successful cancel.
-  useEffect(() => {
-    if (cancelSuccess && cancelTarget) {
-      setCancelTarget(null);
-      setCancelReason('');
-      setViewTransfer(null);
-    }
-  }, [cancelSuccess, cancelTarget]);
+  // Close cancel modal + clear reason on a successful cancel — edge-triggered
+  // via the shared hook (see CLAUDE.md → "Modal + Optimistic UI Pattern").
+  const handleCancelSuccess = useCallback(() => {
+    setCancelTarget(null);
+    setCancelReason('');
+    setViewTransfer(null);
+  }, []);
+  useCloseOnFetcherSuccess(cancelFetcher, handleCancelSuccess);
 
   const submitCancel = () => {
     if (!cancelTarget) return;
@@ -86,7 +94,6 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
   };
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
-  const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
   const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'Transfer recorded' });
 
@@ -94,17 +101,53 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
     if (actionError) setDismissedError(false);
   }, [actionError]);
 
-  useEffect(() => {
-    if (actionSuccess && showForm) setShowForm(false);
-  }, [actionSuccess, showForm]);
+  // Close-on-success — edge-triggered via the shared hook. Resets the
+  // selection state at the same instant the toast appears so a user
+  // submitting two transfers in a row doesn't see stale field values.
+  const handleCreateTransferSuccess = useCallback(() => {
+    setShowForm(false);
+    setSelectedProductId('');
+    setSelectedFromLocation('');
+    setSelectedToLocationId('');
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleCreateTransferSuccess);
 
-  useEffect(() => {
-    if (actionSuccess) {
-      setSelectedProductId('');
-      setSelectedFromLocation('');
-      setSelectedToLocationId('');
-    }
-  }, [actionSuccess]);
+  // Optimistic-add: synthesise a Transfer row from the in-flight payload so
+  // the table shows the new entry the instant the user clicks Submit.
+  const buildOptimisticTransfers = useCallback(
+    (fd: FormData, intent: string): Transfer[] | null => {
+      if (intent !== 'initiateTransfer') return null;
+      const productId = fd.get('productId')?.toString().trim();
+      const fromLocationId = fd.get('fromLocationId')?.toString().trim();
+      const toLocationId = fd.get('toLocationId')?.toString().trim();
+      const quantitySent = Number(fd.get('quantitySent')?.toString() ?? '0');
+      if (!productId || !fromLocationId || !toLocationId || !Number.isFinite(quantitySent) || quantitySent <= 0) {
+        return null;
+      }
+      return [
+        {
+          id: optimisticId(),
+          productId,
+          quantitySent,
+          quantityReceived: null,
+          fromLocationId,
+          toLocationId,
+          transferStatus: 'PENDING',
+          shrinkageReason: null,
+          receiverNotes: null,
+          transferCost: fd.get('transferCost')?.toString().trim() || null,
+          createdAt: new Date().toISOString(),
+          verifiedAt: null,
+        },
+      ];
+    },
+    [],
+  );
+  const optimisticTransfers = useOptimisticListMerge<Transfer>(fetcher, buildOptimisticTransfers);
+  const displayTransfers = useMemo(
+    () => [...optimisticTransfers, ...transfers],
+    [optimisticTransfers, transfers],
+  );
 
   useEffect(() => {
     setSelectedToLocationId((prev) => (prev === selectedFromLocation ? '' : prev));
@@ -112,7 +155,8 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
   const getLocationName = (id: string) => {
     const loc = locations.find((l: Location) => l.id === id);
-    return loc?.name ?? id.slice(0, 8) + '...';
+    if (!loc) return id.slice(0, 8) + '...';
+    return loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name;
   };
 
   const activeLocations = locations.filter((l: Location) => l.status === 'ACTIVE');
@@ -166,9 +210,11 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
   // Stable base set for summary cards + tab counts.
   // Applies date/location/product filters, but intentionally excludes status tab filter.
+  // Uses `displayTransfers` so the in-flight optimistic row is included in the
+  // counts and tabs the same instant the form submits.
   const summaryTransfers = useMemo(
     () =>
-      transfers.filter((t: Transfer) => {
+      displayTransfers.filter((t: Transfer) => {
         if (!periodAllTime) {
           const recordedIso = (t.verifiedAt ?? t.createdAt)?.slice(0, 10);
           if (!recordedIso) return false;
@@ -180,7 +226,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
         return true;
       }),
     [
-      transfers,
+      displayTransfers,
       periodAllTime,
       effectiveDateRange.startDate,
       effectiveDateRange.endDate,
@@ -249,29 +295,65 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
         title="Stock Transfers"
         description="Record stock movements between your warehouse and other locations. Receipt is confirmed in Logistics → Stock Transfer Confirmations."
         actions={
-          <>
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-              <DateFilterBar
-                startDate={periodAllTime ? '' : effectiveDateRange.startDate}
-                endDate={periodAllTime ? '' : effectiveDateRange.endDate}
-                periodAllTime={periodAllTime}
-              />
-            </div>
-            {canInitiate && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  setSelectedProductId('');
-                  setSelectedFromLocation('');
-                  setSelectedToLocationId('');
-                  setShowForm(true);
-                }}
-              >
-                + Record transfer
-              </Button>
+          <PageHeaderMobileTools
+            sheetTitle="Stock transfers tools"
+            sheetSubtitle={<span>Date range and new transfer</span>}
+            triggerAriaLabel="Stock transfers toolbar and date range"
+            desktop={
+              <>
+                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={periodAllTime ? '' : effectiveDateRange.startDate}
+                    endDate={periodAllTime ? '' : effectiveDateRange.endDate}
+                    periodAllTime={periodAllTime}
+                  />
+                </div>
+                {canInitiate && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedProductId('');
+                      setSelectedFromLocation('');
+                      setSelectedToLocationId('');
+                      setShowForm(true);
+                    }}
+                  >
+                    + Record transfer
+                  </Button>
+                )}
+                <PageRefreshButton />
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={periodAllTime ? '' : effectiveDateRange.startDate}
+                    endDate={periodAllTime ? '' : effectiveDateRange.endDate}
+                    periodAllTime={periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                {canInitiate && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setSelectedProductId('');
+                      setSelectedFromLocation('');
+                      setSelectedToLocationId('');
+                      setShowForm(true);
+                    }}
+                  >
+                    + Record transfer
+                  </Button>
+                )}
+              </>
             )}
-          </>
+          />
         }
       />
 
@@ -339,7 +421,10 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
             onChange={(e) => updateFilter('fromLocationId', e.target.value)}
             options={[
               { value: '', label: 'All locations' },
-              ...locations.map((l: Location) => ({ value: l.id, label: l.name })),
+              ...locations.map((l: Location) => ({
+                value: l.id,
+                label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+              })),
             ]}
             controlSize="sm"
           />
@@ -350,7 +435,10 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
             onChange={(e) => updateFilter('toLocationId', e.target.value)}
             options={[
               { value: '', label: 'All locations' },
-              ...locations.map((l: Location) => ({ value: l.id, label: l.name })),
+              ...locations.map((l: Location) => ({
+                value: l.id,
+                label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+              })),
             ]}
             controlSize="sm"
           />
@@ -459,7 +547,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                             searchPlaceholder="Search locations..."
                             options={activeLocations.map((l: Location) => ({
                               value: l.id,
-                              label: l.name,
+                              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
                               description: selectedProductId
                                 ? `${getAvailableStock(selectedProductId, l.id)} available`
                                 : undefined,
@@ -483,7 +571,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                               .filter((l: Location) => l.id !== selectedFromLocation)
                               .map((l: Location) => ({
                                 value: l.id,
-                                label: l.name,
+                                label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
                                 description: selectedProductId
                                   ? `${getAvailableStock(selectedProductId, l.id)} available`
                                   : undefined,
@@ -555,34 +643,29 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
           {(resolvedProducts) => {
             const productName = (id: string) => resolvedProducts.find((p: Product) => p.id === id)?.name ?? id.slice(0, 8) + '...';
 
-            const columns: TableColumn<Transfer>[] = [
+            const columns: CompactTableColumn<Transfer>[] = [
               {
                 key: 'product',
                 header: 'Product',
-                render: (t) => <span className="font-medium text-app-fg">{productName(t.productId)}</span>,
+                render: (t) => (
+                  <span className="font-medium text-app-fg">
+                    {productName(t.productId)}
+                    {isOptimisticId(t.id) ? (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted">Saving…</span>
+                    ) : null}
+                  </span>
+                ),
                 minWidth: 'min-w-[140px]',
               },
               {
-                key: 'from',
-                header: 'From',
-                render: (t) => <span className="text-app-fg-muted">{getLocationName(t.fromLocationId)}</span>,
-                hideOnMobile: true,
-              },
-              {
-                key: 'to',
-                header: 'To',
-                render: (t) => <span className="text-app-fg-muted">{getLocationName(t.toLocationId)}</span>,
-                hideOnMobile: true,
-              },
-              {
                 key: 'route',
-                header: 'Route',
-                className: 'sm:hidden',
+                header: 'From → To',
                 render: (t) => (
-                  <span className="text-xs text-app-fg-muted">
+                  <span className="text-xs text-app-fg-muted sm:text-sm">
                     {getLocationName(t.fromLocationId)} → {getLocationName(t.toLocationId)}
                   </span>
                 ),
+                minWidth: 'min-w-[160px]',
               },
               {
                 key: 'qty',
@@ -608,25 +691,29 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
               {
                 key: 'actions',
                 header: '',
+                mobileLabel: 'Actions',
                 align: 'right',
+                tight: true,
                 className: 'w-[1%] whitespace-nowrap',
                 render: (t) => (
-                  <div className="flex items-center justify-end gap-2">
-                    <Button type="button" variant="secondary" size="sm" onClick={() => setViewTransfer(t)}>
+                  <div className="inline-flex items-center justify-end gap-1.5">
+                    <CompactTableActionButton
+                      disabled={isOptimisticId(t.id)}
+                      onClick={() => setViewTransfer(t)}
+                    >
                       View
-                    </Button>
+                    </CompactTableActionButton>
                     {t.transferStatus !== 'CANCELLED' && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
+                      <CompactTableActionButton
+                        tone="danger"
+                        disabled={isOptimisticId(t.id)}
                         onClick={() => {
                           setCancelTarget(t);
                           setCancelReason('');
                         }}
                       >
                         Cancel
-                      </Button>
+                      </CompactTableActionButton>
                     )}
                   </div>
                 ),
@@ -634,15 +721,18 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
             ];
 
             return (
-              <DataTable
+              <CompactTable<Transfer>
                 caption="Stock transfers"
                 columns={columns}
-                data={filteredTransfers}
-                keyField="id"
+                rows={filteredTransfers}
+                rowKey={(t) => t.id}
+                rowClassName={(t) => (isOptimisticId(t.id) ? 'opacity-60' : '')}
                 loading={isLoaderRefetchBusy}
                 loadingVariant="overlay"
                 emptyTitle="No transfers yet"
                 emptyDescription="No transfers found for the selected date range."
+                withCard={false}
+                className="overflow-hidden rounded-xl border border-app-border"
               />
             );
           }}

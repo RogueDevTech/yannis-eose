@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
@@ -15,6 +15,8 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -34,6 +36,7 @@ export interface LogisticsOrderRow extends Order {
   deliveryNotes?: string | null;
   preferredDeliveryDate?: string | null;
   locationName: string;
+  locationProviderName: string | null;
   riderName: string;
 }
 
@@ -204,6 +207,11 @@ export function LogisticsOrdersPage({
     });
   };
 
+  const logisticsOrdersToolbarFilterBadge = useMemo(
+    () => (selectedStatus !== 'ALL' ? 1 : 0),
+    [selectedStatus],
+  );
+
   const confirmedOrders = orders.filter((o) => o.status === 'CONFIRMED');
   const allocatedOrders = orders.filter((o) => o.status === 'ALLOCATED');
   const selectedOrders = orders.filter((o) => selectedIds.has(o.id));
@@ -250,23 +258,52 @@ export function LogisticsOrdersPage({
           title={pageTitle}
           description="Allocate confirmed orders to 3PL locations and dispatch to riders"
           actions={
-            <div className="flex flex-wrap items-center gap-2">
-              <PageRefreshButton />
-              <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                />
-              </div>
-              <button
-                type="button"
-                className="btn-secondary btn-sm"
-                onClick={() => setShowChartView((v) => !v)}
-              >
-                {showChartView ? 'View as data' : 'View data in chart'}
-              </button>
-            </div>
+            <PageHeaderMobileTools
+              sheetTitle="Logistics orders tools"
+              sheetSubtitle={<span>Date range and chart toggle</span>}
+              triggerAriaLabel="Logistics orders toolbar and date range"
+              desktop={
+                <>
+                  <PageRefreshButton />
+                  <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                    <DateFilterBar
+                      startDate={filters.startDate}
+                      endDate={filters.endDate}
+                      periodAllTime={filters.periodAllTime}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    onClick={() => setShowChartView((v) => !v)}
+                  >
+                    {showChartView ? 'View as data' : 'View data in chart'}
+                  </button>
+                </>
+              }
+              sheet={({ closeSheet }) => (
+                <>
+                  <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                    <DateFilterBar
+                      startDate={filters.startDate}
+                      endDate={filters.endDate}
+                      periodAllTime={filters.periodAllTime}
+                      triggerLayout="blockCenter"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowChartView((v) => !v);
+                    }}
+                  >
+                    {showChartView ? 'View as data' : 'View data in chart'}
+                  </button>
+                </>
+              )}
+            />
           }
         />
       </div>
@@ -305,7 +342,10 @@ export function LogisticsOrdersPage({
                     wrapperClassName="w-48"
                     placeholder="Select location"
                     searchPlaceholder="Search locations..."
-                    options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
+                    options={allocatableLocations.map((loc) => ({
+                      value: loc.id,
+                      label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    }))}
                   />
                   <Button
                     variant="primary"
@@ -423,28 +463,49 @@ export function LogisticsOrdersPage({
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1">
-          <SearchInput
-            value={searchQuery}
-            onChange={(val) => setSearchQuery(val)}
-            placeholder="Search by customer or order ID..."
-            className="flex-1"
+      <ToolbarFiltersCollapsible
+        className="!border-0 px-0 py-0"
+        badgeCount={logisticsOrdersToolbarFilterBadge}
+        sheetSubtitle={<span>Status applies immediately</span>}
+        searchRow={
+          <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+            <SearchInput
+              value={searchQuery}
+              onChange={(val) => setSearchQuery(val)}
+              placeholder="Search by customer or order ID..."
+              className="min-w-0 flex-1"
+            />
+            <Button type="submit" variant="secondary" size="sm">
+              Search
+            </Button>
+          </form>
+        }
+        desktopInlineFilters={
+          <FormSelect
+            value={selectedStatus}
+            onChange={(e) => handleStatusChange(e.target.value)}
+            options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+              value: status,
+              label: status === 'ALL' ? 'All statuses' : formatStatus(status),
+            }))}
+            wrapperClassName="w-auto min-w-[11rem]"
           />
-          <Button type="submit" variant="secondary" size="sm">
-            Search
-          </Button>
-        </form>
-        <FormSelect
-          value={selectedStatus}
-          onChange={(e) => handleStatusChange(e.target.value)}
-          options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
-            value: status,
-            label: status === 'ALL' ? 'All statuses' : formatStatus(status),
-          }))}
-          className="w-auto"
-        />
-      </div>
+        }
+        sheetFilterBody={
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium text-app-fg-muted">Status</span>
+            <FormSelect
+              value={selectedStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+                value: status,
+                label: status === 'ALL' ? 'All statuses' : formatStatus(status),
+              }))}
+              wrapperClassName="w-full"
+            />
+          </div>
+        }
+      />
 
       {showChartView ? (
         <OrdersChartView
@@ -505,7 +566,9 @@ export function LogisticsOrdersPage({
                     <td className="table-cell">
                       <DeliveryDateCell date={order.preferredDeliveryDate} />
                     </td>
-                    <td className="table-cell text-app-fg-muted">{order.locationName}</td>
+                    <td className="table-cell text-app-fg-muted">
+                      {order.locationProviderName ? `${order.locationName} — ${order.locationProviderName}` : order.locationName}
+                    </td>
                     <td className="table-cell text-app-fg-muted">{order.riderName}</td>
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1.5 flex-wrap">
@@ -550,7 +613,10 @@ export function LogisticsOrdersPage({
                               onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
                               placeholder="Location"
                               searchPlaceholder="Search locations..."
-                              options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
+                              options={allocatableLocations.map((loc) => ({
+                                value: loc.id,
+                                label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                              }))}
                               wrapperClassName="w-36"
                               controlSize="sm"
                             />
@@ -631,7 +697,9 @@ export function LogisticsOrdersPage({
                 </div>
                 <p className="text-sm text-app-fg">{order.customerName}</p>
                 <div className="flex items-center gap-2 text-sm text-app-fg-muted">
-                  <span>{order.locationName} · {order.riderName}</span>
+                  <span>
+                    {order.locationProviderName ? `${order.locationName} — ${order.locationProviderName}` : order.locationName} · {order.riderName}
+                  </span>
                   {order.preferredDeliveryDate && (
                     <span className="text-brand-600 dark:text-brand-400 font-medium">
                       Delivery: {formatDeliveryDate(order.preferredDeliveryDate)}
@@ -680,7 +748,10 @@ export function LogisticsOrdersPage({
                         onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
                         placeholder="Location"
                         searchPlaceholder="Search locations..."
-                        options={allocatableLocations.map((loc) => ({ value: loc.id, label: loc.name }))}
+                        options={allocatableLocations.map((loc) => ({
+                          value: loc.id,
+                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                        }))}
                         wrapperClassName="flex-1 min-w-0"
                         controlSize="sm"
                       />

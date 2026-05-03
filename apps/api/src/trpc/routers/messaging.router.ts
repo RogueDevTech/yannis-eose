@@ -14,10 +14,10 @@
 
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, or, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
-import { db as schema } from '@yannis/shared';
+import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 
 // Factory-injected DB
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
@@ -133,9 +133,15 @@ export const messagingRouter = router({
         conditions.push(eq(schema.messageTemplates.channel, input.channel));
       }
 
-      // Branch scoping: non-SuperAdmin sees own branch templates only
+      // Branch scoping: non-admin viewers see their own branch's templates plus
+      // org-wide defaults (`branch_id IS NULL`, seeded by MessageTemplateSeedService).
+      // Admin-class sees everything.
       if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.currentBranchId) {
-        conditions.push(eq(schema.messageTemplates.branchId, ctx.user.currentBranchId));
+        const branchOrGlobal = or(
+          eq(schema.messageTemplates.branchId, ctx.user.currentBranchId),
+          isNull(schema.messageTemplates.branchId),
+        );
+        if (branchOrGlobal) conditions.push(branchOrGlobal);
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -196,8 +202,12 @@ export const messagingRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
 
-      // CS agents may only edit their own templates. Heads can edit anything.
-      if (ctx.user.role === 'CS_AGENT') {
+      // Without org-wide CS scope, you may only edit templates you created.
+      const editorPerms = (ctx.user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+      const hasOrgWideTemplateEdit =
+        ctx.user.role === 'SUPER_ADMIN' ||
+        editorPerms.includes(canonicalPermissionCode('cs.scope.global'));
+      if (!hasOrgWideTemplateEdit) {
         const [existing] = await db
           .select({ createdBy: schema.messageTemplates.createdBy })
           .from(schema.messageTemplates)

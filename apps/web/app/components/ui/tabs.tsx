@@ -41,8 +41,11 @@ export function Tabs({ value, onChange, tabs, variant = 'underline', className =
   }
 
   return (
-    <div className={`border-b border-app-border ${className}`.trim()}>
-      <nav className="flex gap-6 overflow-x-auto -mb-px" aria-label="Tabs">
+    <div className={`-mx-1 border-b border-app-border px-1 sm:mx-0 sm:px-0 ${className}`.trim()}>
+      <nav
+        className="-mb-px flex gap-4 overflow-x-auto pb-px [-webkit-overflow-scrolling:touch] scroll-pl-1 scroll-pr-1 sm:gap-6 sm:scroll-pl-0 sm:scroll-pr-0"
+        aria-label="Tabs"
+      >
         {tabs.map((tab) => {
           const isActive = value === tab.value;
           return (
@@ -50,7 +53,7 @@ export function Tabs({ value, onChange, tabs, variant = 'underline', className =
               key={tab.value}
               type="button"
               onClick={() => onChange(tab.value)}
-              className={`whitespace-nowrap pb-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 pb-2.5 text-sm font-medium transition-colors ${
                 isActive
                   ? 'border-brand-500 text-brand-600 dark:text-brand-400'
                   : 'border-transparent text-app-fg-muted hover:text-app-fg'

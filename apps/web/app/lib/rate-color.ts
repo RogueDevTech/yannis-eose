@@ -31,3 +31,19 @@ export function formatRate(rate: number | null | undefined): string {
   if (rate == null || !Number.isFinite(rate) || rate <= 0) return '0%';
   return `${rate.toFixed(1)}%`;
 }
+
+/**
+ * Color signal for delinquency rate (returned + partially delivered + written off
+ * over total assigned to a logistics provider). Higher = worse, opposite of
+ * confirmation/delivery rate.
+ *
+ * - > 10% → red (action needed)
+ * - > 5%  → amber (watch)
+ * - else  → default foreground (healthy)
+ */
+export function delinquencyRateColorClass(rate: number | null | undefined): string {
+  if (rate == null) return 'text-app-fg';
+  if (rate > 10) return 'text-danger-600 dark:text-danger-400 font-semibold';
+  if (rate > 5) return 'text-warning-600 dark:text-warning-400';
+  return 'text-app-fg';
+}

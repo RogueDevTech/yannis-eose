@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useFetcher, useRevalidator, useSearchParams, Link } from '@remix-run/react';
+import { useFetcher, useSearchParams, useNavigation, useLocation, Link } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { createFundingSchema, approveFundingRequestSchema } from '@yannis/shared/validators';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { AmountInput } from '~/components/ui/amount-input';
 import { formatNaira } from '~/lib/format-amount';
 import { Button } from '~/components/ui/button';
+import { TableActionButton } from '~/components/ui/table-action-button';
 import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -25,6 +27,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
+import { Tabs } from '~/components/ui/tabs';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 
 const STATUS_OPTIONS = ['ALL', 'SENT', 'COMPLETED', 'DISPUTED'] as const;
@@ -118,6 +121,12 @@ export interface DisbursementsPageData {
   };
   fundingRequests?: FundingRequestRecord[];
   fundingRequestsTotal?: number;
+  /** Status counts across ALL funding requests (org-wide; period scope is the
+   * loader's date range when applied to the count endpoint). Used by the
+   * overview strip to surface "Pending Requests: N" so Finance / SuperAdmin
+   * can see at-a-glance there are HoM-originated asks awaiting their action
+   * without first switching the View dropdown to "Funding requests". */
+  fundingRequestStatusCounts?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number };
   requestsPage?: number;
   requestsTotalPages?: number;
   requestersList?: Array<{ id: string; name: string; email: string; role: string }>;
@@ -236,9 +245,7 @@ function CreateDisbursementModal({
 
   useFetcherToast(fetcher.data, { successMessage: 'Disbursement sent successfully' });
 
-  useEffect(() => {
-    if (fetcher.data?.success) onClose();
-  }, [fetcher.data, onClose]);
+  useCloseOnFetcherSuccess(fetcher, onClose);
 
   useEffect(() => {
     if (!open) {
@@ -383,6 +390,7 @@ export function DisbursementsPage({
   summary = { totalSent: '0', totalCompleted: '0', totalDisputed: '0' },
   fundingRequests = [],
   fundingRequestsTotal = 0,
+  fundingRequestStatusCounts = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 },
   requestsPage = 1,
   requestsTotalPages = 1,
   requestersList = [],
@@ -391,7 +399,21 @@ export function DisbursementsPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy();
   const [showForm, setShowForm] = useState(!!preselectedReceiverId);
-  const mainTab = mainTabFromSearchParams(searchParams);
+  // Read the pending URL while the loader revalidates — same pattern as the
+  // marketing funding page. Without this, `mainTab` only flips when the loader
+  // resolves (100–500ms) and the click feels laggy. Reading from
+  // `navigation.location.search` lets the active tab flip on the same tick the
+  // user clicks; the table loading overlay covers the data fetch.
+  const navigation = useNavigation();
+  const location = useLocation();
+  const pendingTabParams = useMemo(() => {
+    const isPendingHere =
+      navigation.state === 'loading' &&
+      navigation.location?.pathname.includes('/admin/finance/disbursements');
+    const search = isPendingHere && navigation.location ? navigation.location.search : location.search;
+    return new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  }, [navigation.state, navigation.location, location.search]);
+  const mainTab = mainTabFromSearchParams(pendingTabParams);
   const [receiptModal, setReceiptModal] = useState<DisbursementRecord | null>(null);
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<string | null>(null);
@@ -401,17 +423,15 @@ export function DisbursementsPage({
 
   const requestActionFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const RequestActionForm = requestActionFetcher.Form;
-  const revalidator = useRevalidator();
   useFetcherToast(requestActionFetcher.data, { successMessage: 'Request updated' });
 
-  useEffect(() => {
-    const data = requestActionFetcher.data;
-    if (data?.success && revalidator.state === 'idle') {
-      revalidator.revalidate();
-      setApprovingRequestId(null);
-      setRejectingRequestId(null);
-    }
-  }, [requestActionFetcher.data, revalidator.state, revalidator]);
+  // Close approve / reject modal the same tick the toast fires; revalidation
+  // is handled inside the close hook.
+  const handleRequestActionSuccess = useCallback(() => {
+    setApprovingRequestId(null);
+    setRejectingRequestId(null);
+  }, []);
+  useCloseOnFetcherSuccess(requestActionFetcher, handleRequestActionSuccess);
 
   useEffect(() => {
     if (!approvingRequestId) {
@@ -420,19 +440,38 @@ export function DisbursementsPage({
     }
   }, [approvingRequestId]);
 
+  const approvingRequestRow = useMemo(
+    () => (approvingRequestId ? fundingRequests.find((r) => r.id === approvingRequestId) : undefined),
+    [approvingRequestId, fundingRequests],
+  );
+
   const handleApproveFundingRequestSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!approvingRequestId) return;
+    if (!approvingRequestId || !approvingRequestRow) return;
+    const formEl = e.currentTarget;
+    const fdRead = new FormData(formEl);
+    const approvedAmt = Number(fdRead.get('amount')?.toString() ?? '');
+    const requestedAmt = Number(approvingRequestRow.amount);
+    if (!Number.isFinite(approvedAmt) || approvedAmt <= 0) {
+      toast.error('Cannot approve request', 'Enter a valid approved amount.');
+      return;
+    }
+    if (Math.round(approvedAmt * 100) > Math.round(requestedAmt * 100)) {
+      toast.error('Cannot approve request', 'Approved amount cannot exceed the requested amount.');
+      return;
+    }
     const parsed = approveFundingRequestSchema.safeParse({
       requestId: approvingRequestId,
+      amount: approvedAmt,
       receiptUrl: approveRequestReceiptUrl.trim(),
     });
     if (!parsed.success) {
       toast.error('Cannot approve request', parsed.error.issues[0]?.message ?? 'Attach a valid receipt image.');
       return;
     }
-    const fd = new FormData(e.currentTarget);
+    const fd = new FormData(formEl);
     fd.set('receiptUrl', parsed.data.receiptUrl);
+    fd.set('amount', String(parsed.data.amount));
     requestActionFetcher.submit(fd, { method: 'post' });
   };
 
@@ -643,25 +682,50 @@ export function DisbursementsPage({
         items={[
           { label: 'Total disbursed', value: formatNaira(totalAllAmt), valueClassName: 'text-app-fg tabular-nums' },
           { label: 'Pending', value: formatNaira(totalSentAmt), valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums' },
+          {
+            label: 'Pending Requests',
+            value: fundingRequestStatusCounts.PENDING.toString(),
+            valueClassName:
+              fundingRequestStatusCounts.PENDING > 0
+                ? 'text-warning-600 dark:text-warning-400 tabular-nums'
+                : 'text-app-fg tabular-nums',
+            title: 'Funding requests awaiting your approval — switch the View dropdown to "Funding requests" to action them',
+          },
           { label: 'Received', value: formatNaira(totalReceivedAmt), valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },
           { label: 'Disputed', value: formatNaira(totalDisputedAmt), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
         ]}
       />
 
-      <div className="card">
-        <FormSelect
-          id="disbursement-view-filter"
-          label="View"
-          value={mainTab}
-          onChange={(e) => setMainTab(e.target.value as MainTab)}
-          options={[
-            { value: 'disbursements', label: `Disbursements (${totalFunding})` },
-            { value: 'requests', label: `Funding requests (${fundingRequestsTotal})` },
-            { value: 'balances', label: `Recipient balances (${recipientBalancesTotal})` },
-          ]}
-          controlSize="sm"
-          wrapperClassName="w-full sm:w-72"
-        />
+      <div className="card p-0">
+        <div className="px-4 pt-2">
+          <Tabs
+            variant="underline"
+            value={mainTab}
+            onChange={(v) => setMainTab(v as MainTab)}
+            tabs={[
+              {
+                value: 'disbursements',
+                label: 'Disbursements',
+                badge: totalFunding > 0 ? <CountPill active={mainTab === 'disbursements'}>{totalFunding}</CountPill> : undefined,
+              },
+              {
+                value: 'requests',
+                label: 'Funding requests',
+                badge:
+                  fundingRequestStatusCounts.PENDING > 0 ? (
+                    <CountPill active={mainTab === 'requests'} tone="warning">{fundingRequestStatusCounts.PENDING}</CountPill>
+                  ) : fundingRequestsTotal > 0 ? (
+                    <CountPill active={mainTab === 'requests'}>{fundingRequestsTotal}</CountPill>
+                  ) : undefined,
+              },
+              {
+                value: 'balances',
+                label: 'Recipient balances',
+                badge: recipientBalancesTotal > 0 ? <CountPill active={mainTab === 'balances'}>{recipientBalancesTotal}</CountPill> : undefined,
+              },
+            ]}
+          />
+        </div>
       </div>
 
       {/* Disbursements ledger */}
@@ -906,25 +970,19 @@ export function DisbursementsPage({
                               </td>
                               <td className="table-cell">
                                 {r.status === 'PENDING' && (
-                                  <div className="flex gap-1.5">
-                                    <Button
-                                      type="button"
+                                  <div className="inline-flex gap-1.5">
+                                    <TableActionButton
                                       variant="primary"
-                                      size="sm"
-                                      className="text-xs"
                                       onClick={() => setApprovingRequestId(r.id)}
                                     >
                                       Approve
-                                    </Button>
-                                    <Button
-                                      type="button"
+                                    </TableActionButton>
+                                    <TableActionButton
                                       variant="danger"
-                                      size="sm"
-                                      className="text-xs"
                                       onClick={() => setRejectingRequestId(r.id)}
                                     >
                                       Reject
-                                    </Button>
+                                    </TableActionButton>
                                   </div>
                                 )}
                               </td>
@@ -955,13 +1013,13 @@ export function DisbursementsPage({
                             </Button>
                           )}
                           {r.status === 'PENDING' && (
-                            <div className="flex gap-2 pt-1">
-                              <Button type="button" variant="primary" size="sm" className="text-xs" onClick={() => setApprovingRequestId(r.id)}>
+                            <div className="inline-flex gap-1.5 pt-1">
+                              <TableActionButton variant="primary" onClick={() => setApprovingRequestId(r.id)}>
                                 Approve
-                              </Button>
-                              <Button type="button" variant="danger" size="sm" className="text-xs" onClick={() => setRejectingRequestId(r.id)}>
+                              </TableActionButton>
+                              <TableActionButton variant="danger" onClick={() => setRejectingRequestId(r.id)}>
                                 Reject
-                              </Button>
+                              </TableActionButton>
                             </div>
                           )}
                         </div>
@@ -1218,7 +1276,7 @@ export function DisbursementsPage({
       )}
 
       {/* Approve funding request modal */}
-      {approvingRequestId && (
+      {approvingRequestId && approvingRequestRow && (
         <Modal open onClose={() => setApprovingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
           <h3 className="text-lg font-semibold text-app-fg">Approve funding request</h3>
           <p className="text-sm text-app-fg-muted">
@@ -1232,6 +1290,21 @@ export function DisbursementsPage({
           >
             <input type="hidden" name="intent" value="approveFundingRequest" />
             <input type="hidden" name="requestId" value={approvingRequestId} />
+            <div>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">
+                Amount (₦)
+                <span className="text-app-fg-muted/70">
+                  {' '}
+                  — requested ₦{Number(approvingRequestRow.amount).toLocaleString('en-NG')}
+                </span>
+              </label>
+              <AmountInput
+                name="amount"
+                required
+                defaultValue={String(approvingRequestRow.amount)}
+                className="input w-full"
+              />
+            </div>
             <FileUpload
               folder={S3_FOLDERS.RECEIPTS}
               name="receiptUrl"
@@ -1288,5 +1361,32 @@ export function DisbursementsPage({
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Compact count badge for tab labels — neutral by default, warning-amber when
+ *  used for pending action items (e.g. PENDING funding requests). Matches the
+ *  pill used on `MarketingFundingPage.tsx`. */
+function CountPill({
+  active,
+  tone = 'neutral',
+  children,
+}: {
+  active: boolean;
+  tone?: 'neutral' | 'warning';
+  children: React.ReactNode;
+}) {
+  const toneClasses =
+    tone === 'warning'
+      ? active
+        ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300'
+        : 'bg-warning-50 text-warning-600 dark:bg-warning-900/20 dark:text-warning-400'
+      : active
+        ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
+        : 'bg-app-hover text-app-fg-muted';
+  return (
+    <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-semibold tabular-nums ${toneClasses}`}>
+      {children}
+    </span>
   );
 }

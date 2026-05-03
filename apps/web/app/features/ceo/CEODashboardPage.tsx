@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
 import { useToast } from '~/components/ui/toast';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
@@ -6,6 +6,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Spinner } from '~/components/ui/spinner';
 import { PageHeader } from '~/components/ui/page-header';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { FormSelect } from '~/components/ui/form-select';
@@ -85,6 +86,70 @@ export function CEODashboardPage({
   const { toast } = useToast();
   const topic = filters?.topic ?? 'orders';
   const isRefreshing = refreshFetcher.state !== 'idle';
+
+  const branchBreakdownColumns: CompactTableColumn<BranchBreakdownRow>[] = useMemo(
+    () => [
+      {
+        key: 'branch',
+        header: 'Branch',
+        render: (branch) => (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-primary-100 text-[10px] font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+              {branch.branchCode.slice(0, 2)}
+            </span>
+            <div>
+              <p className="font-medium text-app-fg">{branch.branchName}</p>
+              <p className="text-[10px] text-app-fg-muted">{branch.branchCode}</p>
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: 'totalOrders',
+        header: 'Total Orders',
+        align: 'right',
+        render: (branch) => (
+          <span className="font-medium text-app-fg">{branch.totalOrders.toLocaleString()}</span>
+        ),
+      },
+      {
+        key: 'activeOrders',
+        header: 'Active',
+        align: 'right',
+        render: (branch) => (
+          <span className="text-app-fg-muted">{branch.activeOrders.toLocaleString()}</span>
+        ),
+      },
+      {
+        key: 'deliveredOrders',
+        header: 'Delivered',
+        align: 'right',
+        render: (branch) => (
+          <span className="font-medium text-success-700 dark:text-success-300">
+            {branch.deliveredOrders.toLocaleString()}
+          </span>
+        ),
+      },
+      {
+        key: 'deliveryRate',
+        header: 'Delivery Rate',
+        align: 'right',
+        render: (branch) => {
+          const deliveryRate =
+            branch.totalOrders > 0 ? Math.round((branch.deliveredOrders / branch.totalOrders) * 100) : 0;
+          return (
+            <StatusBadge
+              status="delivery_rate"
+              variant={deliveryRate >= 70 ? 'success' : deliveryRate >= 40 ? 'warning' : 'neutral'}
+              label={`${deliveryRate}%`}
+              size="sm"
+            />
+          );
+        },
+      },
+    ],
+    [],
+  );
 
   // Auto-trigger a refresh on first mount so visiting the page is the trigger to regenerate
   // the report. Show the progress banner while the server is recomputing the materialized
@@ -977,50 +1042,14 @@ export function CEODashboardPage({
             <h2 className="text-sm font-semibold text-app-fg">Branch Breakdown</h2>
             <span className="text-xs text-app-fg-muted">All branches</span>
           </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="table-header-muted">Branch</th>
-                <th className="table-header-muted text-right">Total Orders</th>
-                <th className="table-header-muted text-right">Active</th>
-                <th className="table-header-muted text-right">Delivered</th>
-                <th className="table-header-muted text-right">Delivery Rate</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-app-border">
-              {branchBreakdown.map((branch) => {
-                const deliveryRate = branch.totalOrders > 0
-                  ? Math.round((branch.deliveredOrders / branch.totalOrders) * 100)
-                  : 0;
-                return (
-                  <tr key={branch.branchId} className="hover:bg-app-hover/30 transition-colors duration-100">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 text-[10px] font-bold flex-shrink-0">
-                          {branch.branchCode.slice(0, 2)}
-                        </span>
-                        <div>
-                          <p className="font-medium text-app-fg">{branch.branchName}</p>
-                          <p className="text-[10px] text-app-fg-muted">{branch.branchCode}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium text-app-fg">{branch.totalOrders.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right text-app-fg-muted">{branch.activeOrders.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right text-success-700 dark:text-success-300 font-medium">{branch.deliveredOrders.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right">
-                      <StatusBadge
-                        status="delivery_rate"
-                        variant={deliveryRate >= 70 ? 'success' : deliveryRate >= 40 ? 'warning' : 'neutral'}
-                        label={`${deliveryRate}%`}
-                        size="sm"
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <CompactTable<BranchBreakdownRow>
+            columns={branchBreakdownColumns}
+            rows={branchBreakdown}
+            rowKey={(b) => b.branchId}
+            caption="Branch breakdown"
+            withCard={false}
+            className="text-sm"
+          />
         </div>
         </TableLoadingOverlay>
       )}

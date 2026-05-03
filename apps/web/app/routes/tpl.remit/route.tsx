@@ -33,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data
     : null;
   const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string }> } } })?.result?.data
+    ? (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string; providerName?: string | null }> } } })?.result?.data
     : null;
   const deliveryRemittancesData = deliveryRemittancesRes.ok
     ? (deliveryRemittancesRes.data as { result?: { data?: { records: DeliveryRemittanceRecord[] } } })?.result?.data
@@ -45,7 +45,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     remittances: remittancesData?.records ?? [],
     products: productsData?.products ?? [],
-    locations: locationsData?.locations ?? [],
+    locations: (locationsData?.locations ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      providerName: l.providerName ?? null,
+    })),
     userLocationId: user.logisticsLocationId ?? null,
     deliveryRemittances: deliveryRemittancesData?.records ?? [],
     eligibleOrders: eligibleOrdersData ?? [],

@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Link } from '@remix-run/react';
+import { Link, useFetcher } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MediaBuyerBalanceCard } from '~/features/marketing/MediaBuyerBalanceCard';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
+import { LiveActivityCard, LiveActivityDetailModal } from '~/components/ui/live-activity-card';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
 import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
 import type { LeaderboardEntry, Metrics, FundingBalanceRow, MarketingOverviewRecentOrder } from './types';
+import type { LiveActivityItem } from '~/features/cs/types';
 
 function renderMediaBuyerLeaderboardCard(
   buyer: LeaderboardEntry,
@@ -95,6 +97,8 @@ export interface MarketingOverviewPageProps {
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
   liveEvents?: string[];
   recentOrders?: MarketingOverviewRecentOrder[];
+  /** Initial cart/order activity rendered on first paint before fetcher refresh. */
+  liveActivity?: LiveActivityItem[];
 }
 
 export function MarketingOverviewPage({
@@ -105,6 +109,7 @@ export function MarketingOverviewPage({
   filters,
   liveEvents,
   recentOrders = [],
+  liveActivity = [],
 }: MarketingOverviewPageProps) {
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [liveOrdersPage, setLiveOrdersPage] = useState(1);
@@ -162,6 +167,85 @@ export function MarketingOverviewPage({
   const mediaBuyerScrollRef = useRef<HTMLDivElement>(null);
   const [viewAllMediaBuyersOpen, setViewAllMediaBuyersOpen] = useState(false);
   const [viewAllMediaBuyerPage, setViewAllMediaBuyerPage] = useState(1);
+
+  // ─── Live Activity strip (mirror of CSDashboardPage strip) ───
+  const cartsFetcher = useFetcher<{ activityItems?: LiveActivityItem[] }>();
+  const [newCartIds, setNewCartIds] = useState<Set<string>>(new Set());
+  const [updatedCartIds, setUpdatedCartIds] = useState<Set<string>>(new Set());
+  const knownCartIdsRef = useRef<Set<string>>(new Set(liveActivity.map((c) => c.id)));
+  const prevCartsDataRef = useRef<Map<string, string>>(new Map(
+    liveActivity.map((c) => [
+      c.id,
+      `${c.cartStatus}|${c.orderStatus ?? ''}|${c.offerLabel ?? ''}|${String(c.updatedAt)}`,
+    ]),
+  ));
+  const [selectedLiveCart, setSelectedLiveCart] = useState<LiveActivityItem | null>(null);
+  const [viewAllActivityOpen, setViewAllActivityOpen] = useState(false);
+  const [viewAllActivityPage, setViewAllActivityPage] = useState(1);
+  const activityScrollRef = useRef<HTMLDivElement>(null);
+  const scrollActivityStrip = useCallback((delta: number) => {
+    activityScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  }, []);
+
+  // Initial fetch on mount + reload on order/cart events
+  useEffect(() => {
+    cartsFetcher.load('/admin/marketing/overview/activity');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useSocketEvent('cart:updated', () => {
+    cartsFetcher.load('/admin/marketing/overview/activity');
+  });
+  useSocketEvent('order:new', () => {
+    cartsFetcher.load('/admin/marketing/overview/activity');
+  });
+  useSocketEvent('order:status_changed', () => {
+    cartsFetcher.load('/admin/marketing/overview/activity');
+  });
+
+  // Detect newly arrived + updated activity items after each fetcher response
+  useEffect(() => {
+    const items = cartsFetcher.data?.activityItems;
+    if (!items || cartsFetcher.state !== 'idle') return;
+
+    const freshIds = new Set<string>();
+    const changedIds = new Set<string>();
+
+    for (const c of items) {
+      const fingerprint = `${c.cartStatus}|${c.orderStatus ?? ''}|${c.offerLabel ?? ''}|${String(c.updatedAt)}`;
+      if (!knownCartIdsRef.current.has(c.id)) {
+        freshIds.add(c.id);
+      } else if (prevCartsDataRef.current.get(c.id) !== fingerprint) {
+        changedIds.add(c.id);
+      }
+      prevCartsDataRef.current.set(c.id, fingerprint);
+    }
+    knownCartIdsRef.current = new Set(items.map((c) => c.id));
+
+    if (freshIds.size > 0) {
+      setNewCartIds((prev) => new Set([...prev, ...freshIds]));
+      setTimeout(() => {
+        setNewCartIds((prev) => {
+          const next = new Set(prev);
+          freshIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }, 3000);
+    }
+    if (changedIds.size > 0) {
+      setUpdatedCartIds((prev) => new Set([...prev, ...changedIds]));
+      setTimeout(() => {
+        setUpdatedCartIds((prev) => {
+          const next = new Set(prev);
+          changedIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }, 3000);
+    }
+  }, [cartsFetcher.data, cartsFetcher.state]);
+
+  useEffect(() => {
+    if (viewAllActivityOpen) setViewAllActivityPage(1);
+  }, [viewAllActivityOpen]);
   const scrollStatsStrip = useCallback((delta: number) => {
     statsScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
@@ -240,14 +324,6 @@ export function MarketingOverviewPage({
       <div className="card">
         <div className="flex items-center gap-2 min-w-0">
           <div ref={statsScrollRef} className="flex flex-1 min-w-0 flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Media Buyers
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">
-              {leaderboard.length > 0 ? leaderboard.length : balancesList.filter((b) => b.role === 'MEDIA_BUYER').length}
-            </p>
-          </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
             <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Total Spend
@@ -338,6 +414,183 @@ export function MarketingOverviewPage({
           </div>
         </div>
       </div>
+
+      {/* ── Live Activity strip (browsing / abandoned / order-placed cards) ── */}
+      <div>
+        {(() => {
+          const liveActivityItems = (cartsFetcher.data?.activityItems ?? liveActivity) as LiveActivityItem[];
+          const sorted = [...liveActivityItems].sort((a, b) => {
+            const aNew = newCartIds.has(a.id) ? 2 : updatedCartIds.has(a.id) ? 1 : 0;
+            const bNew = newCartIds.has(b.id) ? 2 : updatedCartIds.has(b.id) ? 1 : 0;
+            if (aNew !== bNew) return bNew - aNew;
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+          });
+          const stripVisible = sorted.slice(0, 12);
+          return (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-app-fg flex items-center gap-2">
+                    Live activity
+                    {newCartIds.size > 0 && (
+                      <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
+                        {newCartIds.size} new
+                      </span>
+                    )}
+                    {cartsFetcher.state === 'loading' && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-app-fg-muted font-normal">
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                        </svg>
+                        Updating…
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-xs text-app-fg-muted mt-0.5">
+                    {sorted.length} customer{sorted.length === 1 ? '' : 's'} — last 6 hours · click a card for details
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <div className="hidden md:flex items-center gap-1 sm:gap-2">
+                    <button
+                      type="button"
+                      onClick={() => scrollActivityStrip(-280)}
+                      className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+                      aria-label="Scroll left"
+                    >
+                      <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => scrollActivityStrip(280)}
+                      className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
+                      aria-label="Scroll right"
+                    >
+                      <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                  {sorted.length > 0 && (
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setViewAllActivityOpen(true)}>
+                      View all
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {sorted.length > 0 ? (
+                <div
+                  ref={activityScrollRef}
+                  className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
+                >
+                  {stripVisible.map((item) => (
+                    <div key={item.id} className="shrink-0 w-64">
+                      <LiveActivityCard
+                        item={item}
+                        isNew={newCartIds.has(item.id)}
+                        isUpdated={updatedCartIds.has(item.id)}
+                        onOpen={setSelectedLiveCart}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-app-border bg-app-elevated flex flex-col items-center justify-center py-10 gap-2">
+                  <span className="h-3 w-3 rounded-full bg-app-border animate-pulse" />
+                  <p className="text-sm font-medium text-app-fg-muted">Waiting for activity…</p>
+                  <p className="text-xs text-app-fg-muted">Cards appear here as carts and orders come in</p>
+                </div>
+              )}
+
+              {viewAllActivityOpen && (
+                <Modal open onClose={() => setViewAllActivityOpen(false)} maxWidth="max-w-4xl" role="dialog" aria-labelledby="mkt-view-all-activity-title" contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col">
+                  <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-app-border shrink-0">
+                    <h2 id="mkt-view-all-activity-title" className="text-lg font-semibold text-app-fg">
+                      All Live Activity
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setViewAllActivityOpen(false)}
+                      className="p-2 rounded-lg text-app-fg-muted hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                      aria-label="Close"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="px-4 py-2 border-b border-app-border shrink-0">
+                    <p className="text-sm text-app-fg-muted">
+                      {sorted.length} item{sorted.length !== 1 ? 's' : ''} — last 6 hours
+                    </p>
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    {(() => {
+                      const allPageSize = 10;
+                      const totalPages = Math.max(1, Math.ceil(sorted.length / allPageSize));
+                      const page = Math.min(viewAllActivityPage, totalPages);
+                      const start = (page - 1) * allPageSize;
+                      const rows = sorted.slice(start, start + allPageSize);
+                      return (
+                        <>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {rows.map((item) => (
+                              <LiveActivityCard
+                                key={item.id}
+                                item={item}
+                                isNew={newCartIds.has(item.id)}
+                                isUpdated={updatedCartIds.has(item.id)}
+                                onOpen={(i) => { setViewAllActivityOpen(false); setSelectedLiveCart(i); }}
+                              />
+                            ))}
+                          </div>
+                          <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-app-border">
+                            <span className="text-sm text-app-fg-muted">
+                              Page {page} of {totalPages}
+                              {sorted.length > 0 && (
+                                <span className="ml-1">
+                                  ({start + 1}–{Math.min(start + allPageSize, sorted.length)} of {sorted.length})
+                                </span>
+                              )}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                disabled={page <= 1}
+                                onClick={() => setViewAllActivityPage((p) => Math.max(1, p - 1))}
+                              >
+                                Prev
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                disabled={page >= totalPages}
+                                onClick={() => setViewAllActivityPage((p) => Math.min(totalPages, p + 1))}
+                              >
+                                Next
+                              </Button>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </Modal>
+              )}
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Live activity detail modal — shared with CS dashboard */}
+      <LiveActivityDetailModal item={selectedLiveCart} onClose={() => setSelectedLiveCart(null)} />
 
       {/* Live activity feed */}
       <div>

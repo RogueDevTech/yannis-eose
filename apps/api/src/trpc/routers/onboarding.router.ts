@@ -3,17 +3,16 @@
  *
  * Procedures:
  *  - get          — caller's own record (or HR/admin reads any user)
- *  - update       — caller updates own record (or HR/admin updates anyone)
+ *  - update       — caller updates own record only
+ *  - hrUpdate     — same as update when `userId` is the caller; cross-user updates rejected in service
  *  - submit       — caller submits own draft for HR review
  *  - approve      — HR (or admin) marks a submitted record APPROVED
  *
  * Authorization:
  *  - Self-read / self-edit / self-submit: any authenticated user (`authedProcedure`).
  *    Service-layer logic enforces lock-after-submit / lock-after-approve for staff.
- *  - HR-side reads / edits / approvals: gated by `hr.onboarding.read` /
- *    `hr.onboarding.write` / `hr.onboarding.approve` permissions, or admin-class.
- *  - Admin-class always passes via `permissionProcedure`'s built-in bypass + the
- *    service's `isAdminLevel` checks.
+ *  - HR-side reads: `hr.onboarding.read` / write / approve permissions or admin-class (`get`, `listStaffDocuments`).
+ *  - Cross-user field edits are not allowed — staff complete onboarding from `/admin/onboarding`.
  */
 
 import { TRPCError } from '@trpc/server';
@@ -23,6 +22,7 @@ import {
   submitOnboardingSchema,
   approveOnboardingSchema,
   getOnboardingSchema,
+  listStaffOnboardingDocumentsSchema,
 } from '@yannis/shared';
 import { router, authedProcedure } from '../trpc';
 import { OnboardingService } from '../../onboarding/onboarding.service';
@@ -55,16 +55,13 @@ export const onboardingRouter = router({
     return getService().updateProfile(ctx.user.id, input, ctx.user);
   }),
 
-  /**
-   * HR-side update — may target any user. Service enforces
-   * `hr.onboarding.write` / admin-class.
-   */
+  /** Legacy shape — only succeeds when `userId` is the authenticated user (same as `update`). */
   hrUpdate: authedProcedure.input(hrUpdateOnboardingSchema).mutation(async ({ input, ctx }) => {
     const { userId, ...patch } = input;
     return getService().updateProfile(userId, patch, ctx.user);
   }),
 
-  /** Submit — defaults to self; HR may submit on behalf if userId is provided. */
+  /** Submit — self only (`userId` must match caller when provided). */
   submit: authedProcedure.input(submitOnboardingSchema).mutation(async ({ input, ctx }) => {
     const targetId = input.userId ?? ctx.user.id;
     return getService().submit(targetId, ctx.user);
@@ -74,4 +71,11 @@ export const onboardingRouter = router({
   approve: authedProcedure.input(approveOnboardingSchema).mutation(async ({ input, ctx }) => {
     return getService().approve(input.userId, ctx.user);
   }),
+
+  /** HR overview — staff × onboarding status (service enforces HR onboarding visibility). */
+  listStaffDocuments: authedProcedure
+    .input(listStaffOnboardingDocumentsSchema)
+    .query(async ({ input, ctx }) => {
+      return getService().listStaffDocuments(input, ctx.user, ctx.user.currentBranchId ?? null);
+    }),
 });

@@ -15,6 +15,7 @@ import {
   useRouteError,
 } from '@remix-run/react';
 import { PwaInstallPrompt } from '~/components/ui/pwa-install-prompt';
+import { dismissInstallPromotion, isInstallPromotionDismissed } from '~/lib/install-promotion-dismiss';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { useServerAppThemeSync } from '~/hooks/useServerAppThemeSync';
 import { useServerFontScaleSync } from '~/hooks/useServerFontScaleSync';
@@ -43,8 +44,8 @@ export async function loader() {
   return json({
     ENV: {
       // PUBLIC_API_URL is the browser-reachable API URL (e.g. https://api-yannis.roguedevtech.com).
-      // Falls back to API_URL for local dev where both are the same.
-      API_URL: process.env.PUBLIC_API_URL ?? process.env.API_URL ?? 'http://localhost:4444',
+      // Empty string: client uses `getBrowserApiBaseUrl()` → same-origin (Vite /trpc + /socket.io proxy in dev).
+      API_URL: process.env.PUBLIC_API_URL ?? process.env.API_URL ?? '',
       EDGE_WORKER_URL: process.env.EDGE_WORKER_URL ?? '',
       S3_BUCKET: process.env.S3_BUCKET ?? '',
       S3_REGION: process.env.S3_REGION ?? 'us-east-1',
@@ -152,6 +153,10 @@ export default function App() {
       setInstallPromptOpen(false);
       return;
     }
+    if (isInstallPromotionDismissed()) {
+      setInstallPromptOpen(false);
+      return;
+    }
     setInstallPromptOpen(true);
   }, [canPromptInstall, isAuthPage, isLoggedInArea]);
 
@@ -197,9 +202,15 @@ export default function App() {
           isIosInstructions={isIosManualInstall}
           onInstall={async () => {
             const accepted = await install();
-            if (accepted) setInstallPromptOpen(false);
+            if (accepted) {
+              dismissInstallPromotion();
+              setInstallPromptOpen(false);
+            }
           }}
-          onClose={() => setInstallPromptOpen(false)}
+          onClose={() => {
+            dismissInstallPromotion();
+            setInstallPromptOpen(false);
+          }}
         />
         <ScrollToTopButton />
         <ScrollRestoration getKey={(loc) => loc.key} />

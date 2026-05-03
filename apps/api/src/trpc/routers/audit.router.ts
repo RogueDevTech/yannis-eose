@@ -67,7 +67,6 @@ export const auditRouter = router({
       return getAuditService().getGlobalAuditLog(input, {
         role: u.role,
         permissions: u.permissions,
-        isFinanceOfficer: u.isFinanceOfficer,
         currentBranchId: u.currentBranchId,
       });
     }),
@@ -103,7 +102,6 @@ export const auditRouter = router({
       return getAuditService().getAuditableTables({
         role: u.role,
         permissions: u.permissions,
-        isFinanceOfficer: u.isFinanceOfficer,
         currentBranchId: u.currentBranchId,
       });
     }),
@@ -138,7 +136,6 @@ export const auditRouter = router({
       return getAuditService().getMirrorSessions(input, {
         role: u.role,
         permissions: u.permissions,
-        isFinanceOfficer: u.isFinanceOfficer,
         currentBranchId: u.currentBranchId,
       });
     }),

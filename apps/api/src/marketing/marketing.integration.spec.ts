@@ -12,6 +12,7 @@ import { MarketingService } from './marketing.service';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import type { EventsService } from '../events/events.service';
 import type { NotificationsService } from '../notifications/notifications.service';
+import type { SettingsService } from '../settings/settings.service';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -29,8 +30,19 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
     createForRole: async () => undefined,
   } as unknown as NotificationsService;
 
+  // Returns null so MarketingService falls back to default profitability config (target=3, threshold=2.5).
+  const settingsStub = {
+    get: async () => null,
+  } as unknown as SettingsService;
+
   const mkMarketing = () =>
-    new MarketingService(db as any, eventsStub, notificationsStub, new BranchTeamsService(db as any));
+    new MarketingService(
+      db as any,
+      eventsStub,
+      notificationsStub,
+      new BranchTeamsService(db as any),
+      settingsStub,
+    );
 
   beforeEach(async () => {
     await pgClient`BEGIN`;
@@ -69,9 +81,22 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
 
     const requestId = req!.id;
 
+    const finance = await createTestUser(db as any, { role: 'FINANCE_OFFICER' });
+    await db.insert(schema.userBranches).values([
+      { userId: finance.id, branchId: branch.id, isPrimary: true },
+    ]);
+    await db.insert(schema.marketingFunding).values({
+      senderId: finance.id,
+      receiverId: hom.id,
+      amount: '200000.00',
+      receiptUrl: 'https://example.com/inbound.png',
+      status: 'COMPLETED',
+    });
+
     const svc = mkMarketing();
     await svc.approveFundingRequest(
       requestId,
+      50000,
       'https://example.com/receipt-test.png',
       { id: hom.id, role: 'HEAD_OF_MARKETING' },
       branch.id,
@@ -82,6 +107,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
         id: schema.marketingFunding.id,
         senderId: schema.marketingFunding.senderId,
         receiverId: schema.marketingFunding.receiverId,
+        amount: schema.marketingFunding.amount,
         status: schema.marketingFunding.status,
         sourceFundingRequestId: schema.marketingFunding.sourceFundingRequestId,
       })
@@ -93,12 +119,97 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
     expect(ledger!.receiverId).toBe(mb.id);
     expect(ledger!.status).toBe('SENT');
     expect(ledger!.sourceFundingRequestId).toBe(requestId);
+    expect(Number(ledger!.amount)).toBe(50000);
 
     const [reqAfter] = await db
-      .select({ status: schema.marketingFundingRequests.status })
+      .select({ status: schema.marketingFundingRequests.status, amount: schema.marketingFundingRequests.amount })
       .from(schema.marketingFundingRequests)
       .where(eq(schema.marketingFundingRequests.id, requestId));
     expect(reqAfter!.status).toBe('APPROVED');
+    expect(Number(reqAfter!.amount)).toBe(50000);
+  });
+
+  it('approveFundingRequest stamps partial amount on request and ledger', async () => {
+    const branch = await createTestBranch(db as any);
+    const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
+    const mb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    const finance = await createTestUser(db as any, { role: 'FINANCE_OFFICER' });
+    await db.insert(schema.userBranches).values([
+      { userId: hom.id, branchId: branch.id, isPrimary: true },
+      { userId: mb.id, branchId: branch.id, isPrimary: true },
+      { userId: finance.id, branchId: branch.id, isPrimary: true },
+    ]);
+    await db.insert(schema.marketingFunding).values({
+      senderId: finance.id,
+      receiverId: hom.id,
+      amount: '100000.00',
+      receiptUrl: 'https://x.test/in.png',
+      status: 'COMPLETED',
+    });
+    await setSessionActor(pgClient, hom.id);
+
+    const [req] = await db
+      .insert(schema.marketingFundingRequests)
+      .values({
+        requesterId: mb.id,
+        amount: '80000.00',
+        status: 'PENDING',
+        reason: 'Partial approve test',
+      })
+      .returning({ id: schema.marketingFundingRequests.id });
+
+    await mkMarketing().approveFundingRequest(
+      req!.id,
+      40000,
+      'https://x.test/rec-partial.png',
+      { id: hom.id, role: 'HEAD_OF_MARKETING' },
+      branch.id,
+    );
+
+    const [ledger] = await db
+      .select({ amount: schema.marketingFunding.amount })
+      .from(schema.marketingFunding)
+      .where(eq(schema.marketingFunding.sourceFundingRequestId, req!.id));
+    const [reqRow] = await db
+      .select({ amount: schema.marketingFundingRequests.amount })
+      .from(schema.marketingFundingRequests)
+      .where(eq(schema.marketingFundingRequests.id, req!.id));
+    expect(Number(ledger!.amount)).toBe(40000);
+    expect(Number(reqRow!.amount)).toBe(40000);
+  });
+
+  it('approveFundingRequest rejects HoM when disbursable balance is insufficient', async () => {
+    const branch = await createTestBranch(db as any);
+    const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
+    const mb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    await db.insert(schema.userBranches).values([
+      { userId: hom.id, branchId: branch.id, isPrimary: true },
+      { userId: mb.id, branchId: branch.id, isPrimary: true },
+    ]);
+    await setSessionActor(pgClient, hom.id);
+
+    const [req] = await db
+      .insert(schema.marketingFundingRequests)
+      .values({
+        requesterId: mb.id,
+        amount: '10000.00',
+        status: 'PENDING',
+        reason: 'No liquidity',
+      })
+      .returning({ id: schema.marketingFundingRequests.id });
+
+    await expect(
+      mkMarketing().approveFundingRequest(
+        req!.id,
+        10000,
+        'https://x.test/r.png',
+        { id: hom.id, role: 'HEAD_OF_MARKETING' },
+        branch.id,
+      ),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining('Insufficient marketing funding balance'),
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -136,11 +247,20 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
     const branch = await createTestBranch(db as any);
     const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
     const mb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    const finance = await createTestUser(db as any, { role: 'FINANCE_OFFICER' });
 
     await db.insert(schema.userBranches).values([
       { userId: hom.id, branchId: branch.id, isPrimary: true },
       { userId: mb.id, branchId: branch.id, isPrimary: true },
+      { userId: finance.id, branchId: branch.id, isPrimary: true },
     ]);
+    await db.insert(schema.marketingFunding).values({
+      senderId: finance.id,
+      receiverId: hom.id,
+      amount: '100000.00',
+      receiptUrl: 'https://x.test/in.png',
+      status: 'COMPLETED',
+    });
     await setSessionActor(pgClient, hom.id, branch.id);
 
     const svc = mkMarketing();
@@ -151,6 +271,28 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
         branch.id,
       ),
     ).resolves.toBeDefined();
+  });
+
+  it('createFunding rejects HoM when disbursable balance is insufficient', async () => {
+    const branch = await createTestBranch(db as any);
+    const hom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
+    const mb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    await db.insert(schema.userBranches).values([
+      { userId: hom.id, branchId: branch.id, isPrimary: true },
+      { userId: mb.id, branchId: branch.id, isPrimary: true },
+    ]);
+    await setSessionActor(pgClient, hom.id, branch.id);
+
+    await expect(
+      mkMarketing().createFunding(
+        { receiverId: mb.id, amount: 5000, receiptUrl: 'https://x.test/r.png' },
+        { id: hom.id, role: 'HEAD_OF_MARKETING' },
+        branch.id,
+      ),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining('Insufficient marketing funding balance'),
+    });
   });
 
   it('createFunding allows SuperAdmin scoped to a branch without user_branches row (receiver on branch)', async () => {
@@ -236,6 +378,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
     await expect(
       svc.approveFundingRequest(
         req!.id,
+        30000,
         'https://x.test/rec.png',
         { id: admin.id, role: 'SUPER_ADMIN' },
         branch.id,
@@ -269,6 +412,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
     await expect(
       svc.approveFundingRequest(
         req!.id,
+        50000,
         'https://x.test/r.png',
         { id: hom.id, role: 'HEAD_OF_MARKETING' },
         lagos.id,
@@ -283,10 +427,19 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
     const branch = await createTestBranch(db as any);
     const supMb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
     const recvMb = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    const finance = await createTestUser(db as any, { role: 'FINANCE_OFFICER' });
     await db.insert(schema.userBranches).values([
       { userId: supMb.id, branchId: branch.id, isPrimary: true },
       { userId: recvMb.id, branchId: branch.id, isPrimary: true },
+      { userId: finance.id, branchId: branch.id, isPrimary: true },
     ]);
+    await db.insert(schema.marketingFunding).values({
+      senderId: finance.id,
+      receiverId: supMb.id,
+      amount: '50000.00',
+      receiptUrl: 'https://x.test/in-sup.png',
+      status: 'COMPLETED',
+    });
     const [team] = await db
       .insert(schema.branchTeams)
       .values({ branchId: branch.id, department: 'MARKETING', name: 'MB squad' })

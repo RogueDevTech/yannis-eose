@@ -7,6 +7,7 @@ import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -27,6 +28,7 @@ function FormOptionsSummary({ config }: { config: CampaignFormConfig | null }) {
     { label: 'Delivery state', on: isOptionOn(config.showDeliveryState) },
     { label: 'Gender', on: isOptionOn(config.showGender) },
     { label: 'Preferred date', on: isOptionOn(config.showPreferredDeliveryDate) },
+    { label: 'Email', on: isOptionOn(config.showCustomerEmail) },
     { label: 'Payment method', on: isOptionOn(config.showPaymentMethod) },
   ].filter((f) => f.on);
 
@@ -192,9 +194,12 @@ export function FormsPage({
             : 'Create and manage order forms for your products'
         }
         actions={
-          <Link to="/admin/marketing/forms/new" className="btn-primary btn-sm inline-flex items-center justify-center">
-            + New Form
-          </Link>
+          <>
+            <PageRefreshButton />
+            <Link to="/admin/marketing/forms/new" className="btn-primary btn-sm inline-flex items-center justify-center">
+              + New Form
+            </Link>
+          </>
         }
       />
 
@@ -293,7 +298,7 @@ export function FormsPage({
               </time>
             </div>
 
-            {c.formConfig && (c.formConfig.heading || c.formConfig.subtitle || c.formConfig.buttonText || c.formConfig.accentColor || isOptionOn(c.formConfig.showDeliveryAddress) || isOptionOn(c.formConfig.showDeliveryNotes) || isOptionOn(c.formConfig.showDeliveryState) || isOptionOn(c.formConfig.showGender) || isOptionOn(c.formConfig.showPreferredDeliveryDate) || isOptionOn(c.formConfig.showPaymentMethod)) && (
+            {c.formConfig && (c.formConfig.heading || c.formConfig.subtitle || c.formConfig.buttonText || c.formConfig.accentColor || isOptionOn(c.formConfig.showDeliveryAddress) || isOptionOn(c.formConfig.showDeliveryNotes) || isOptionOn(c.formConfig.showDeliveryState) || isOptionOn(c.formConfig.showGender) || isOptionOn(c.formConfig.showPreferredDeliveryDate) || isOptionOn(c.formConfig.showCustomerEmail) || isOptionOn(c.formConfig.showPaymentMethod)) && (
               <div className="mb-4 pt-3 border-t border-app-border">
                 <p className="text-xs font-medium text-app-fg-muted dark:text-app-fg-muted uppercase tracking-wider mb-2">Form options</p>
                 <FormOptionsSummary config={c.formConfig} />

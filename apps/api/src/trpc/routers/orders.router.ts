@@ -13,7 +13,6 @@ import {
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure, publicProcedure } from '../trpc';
-import { isAdminLevel, isOrgWideDepartmentHead } from '../../common/authz';
 import { getBranchTeamsService } from './branches.router';
 import { OrdersService } from '../../orders/orders.service';
 import type { VoipService } from '../../voip/voip.service';
@@ -163,18 +162,26 @@ export const ordersRouter = router({
     .input(listOrdersSchema)
     .query(async ({ input, ctx }) => {
       const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
-      if (isAdminLevel(ctx.user) || isOrgWideDepartmentHead(ctx.user)) {
+      if (ctx.user.role === 'SUPER_ADMIN') {
         return getOrdersService().list(input, branchId);
       }
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
       const hasMarketingOrders = perms.includes('marketing.orders');
       const hasLogisticsRead = perms.includes('logistics.read');
-      if (!hasOrdersRead && !hasMarketingOrders && !hasLogisticsRead) {
+      // Org-wide scope holders see everything (admin via ALL_PERMISSION_CODES, org-wide heads via *.scope.global).
+      const hasOrgWideScope =
+        perms.includes('cs.scope.global') ||
+        perms.includes('marketing.scope.global') ||
+        perms.includes('logistics.scope.global');
+      if (!hasOrdersRead && !hasMarketingOrders && !hasLogisticsRead && !hasOrgWideScope) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'Missing orders.read, marketing.orders, or logistics.read permission',
         });
+      }
+      if (hasOrgWideScope) {
+        return getOrdersService().list(input, branchId);
       }
       let effectiveInput = input;
       if (!hasOrdersRead && hasMarketingOrders && ctx.user.role === 'MEDIA_BUYER') {

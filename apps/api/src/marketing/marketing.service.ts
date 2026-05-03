@@ -1,9 +1,9 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, ne, and, desc, gte, lte, gt, count, sum, inArray, or, ilike, getTableColumns, sql, exists, type SQL } from 'drizzle-orm';
+import { eq, ne, and, desc, gte, lte, gt, count, sum, inArray, or, ilike, getTableColumns, isNull, sql, exists, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
+import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import type {
   CreateFundingInput,
   VerifyFundingInput,
@@ -28,11 +28,23 @@ import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
-import { isAdminLevel } from '../common/authz';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { SettingsService } from '../settings/settings.service';
 
-/** True ROAS at or above this value maps profitability score to 1.0 (media buyer leaderboard / Team Analysis). */
-const PROFITABILITY_ROAS_TARGET = 4;
+/** Default profitability config when `MARKETING_PROFITABILITY` system setting is unset. */
+const DEFAULT_PROFITABILITY_TARGET_ROAS = 3;
+const DEFAULT_PROFITABILITY_GREEN_THRESHOLD = 2.5;
+export const MARKETING_PROFITABILITY_KEY = 'MARKETING_PROFITABILITY';
+
+/** Drizzle transaction client (same as `withActor` callback `tx`). */
+type MarketingFundingTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
+
+export type ProfitabilityConfig = {
+  /** True-ROAS multiple where the profitability score caps at 1.0 (default 3). */
+  targetRoas: number;
+  /** True-ROAS multiple at/above which the leaderboard pill is green (default 2.5). */
+  greenThreshold: number;
+};
 
 @Injectable()
 export class MarketingService {
@@ -41,7 +53,27 @@ export class MarketingService {
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
     private readonly branchTeams: BranchTeamsService,
+    private readonly settings: SettingsService,
   ) {}
+
+  /**
+   * Reads the org-wide profitability config from `system_settings`. SuperAdmin sets it on
+   * Settings → System; cached in Redis 5min by `SettingsService`. Returns sensible defaults
+   * (target=3x, green threshold=2.5x — CEO directive 2026-05-03) when unset or malformed.
+   */
+  async getProfitabilityConfig(): Promise<ProfitabilityConfig> {
+    const raw = await this.settings.get(MARKETING_PROFITABILITY_KEY).catch(() => null);
+    const target = Number((raw as Record<string, unknown> | null)?.targetRoas);
+    const threshold = Number((raw as Record<string, unknown> | null)?.greenThreshold);
+    return {
+      targetRoas:
+        Number.isFinite(target) && target > 0 ? target : DEFAULT_PROFITABILITY_TARGET_ROAS,
+      greenThreshold:
+        Number.isFinite(threshold) && threshold > 0
+          ? threshold
+          : DEFAULT_PROFITABILITY_GREEN_THRESHOLD,
+    };
+  }
 
   private async getBranchUserIds(branchId?: string | null): Promise<string[] | null> {
     if (!branchId) return null;
@@ -64,13 +96,20 @@ export class MarketingService {
    * Other actors with no active branch are rejected.
    */
   private async assertSameBranchOrAdmin(
-    actor: { id: string; role: string },
+    actor: { id: string; role: string; permissions?: string[] },
     otherUserId: string,
     currentBranchId: string | null,
   ): Promise<void> {
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const has = (code: string) =>
+      actor.role === 'SUPER_ADMIN' || perms.includes(canonicalPermissionCode(code));
+    const isOrgWide =
+      actor.role === 'SUPER_ADMIN' ||
+      has('branches.manage') ||
+      has('marketing.scope.global');
+
     if (currentBranchId === null) {
-      if (isAdminLevel(actor)) return;
-      if (actor.role === 'HEAD_OF_MARKETING') return;
+      if (isOrgWide) return;
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'No active branch — switch to a branch before initiating a funding transfer',
@@ -88,7 +127,7 @@ export class MarketingService {
       );
 
     const memberSet = new Set(memberships.map((m) => m.userId));
-    if (!isAdminLevel(actor) && !memberSet.has(actor.id)) {
+    if (!isOrgWide && !memberSet.has(actor.id)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'You are not a member of the active branch',
@@ -109,6 +148,74 @@ export class MarketingService {
       .from(schema.campaigns)
       .where(eq(schema.campaigns.branchId, branchId));
     return rows.map((row) => row.id);
+  }
+
+  /**
+   * HoM / marketing-supervisor disbursable pool: COMPLETED funding received minus all outbound
+   * ledger rows (SENT, COMPLETED, DISPUTED) minus APPROVED ad spend (branch-scoped when branchId is set).
+   * Run inside the same transaction as the outbound insert so checks align with concurrent sends.
+   */
+  private async computeMarketingDisbursableInTx(
+    tx: MarketingFundingTx,
+    userId: string,
+    branchId: string | null,
+  ): Promise<number> {
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+
+    const [inRow] = await tx
+      .select({ total: sum(schema.marketingFunding.amount) })
+      .from(schema.marketingFunding)
+      .where(
+        and(
+          eq(schema.marketingFunding.receiverId, userId),
+          eq(schema.marketingFunding.status, 'COMPLETED'),
+        ),
+      );
+
+    const [outRow] = await tx
+      .select({ total: sum(schema.marketingFunding.amount) })
+      .from(schema.marketingFunding)
+      .where(
+        and(
+          eq(schema.marketingFunding.senderId, userId),
+          inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
+        ),
+      );
+
+    let spendTotalStr = '0';
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      spendTotalStr = '0';
+    } else {
+      const [spendRow] = await tx
+        .select({ total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .where(
+          and(
+            eq(schema.adSpendLogs.mediaBuyerId, userId),
+            eq(schema.adSpendLogs.status, 'APPROVED'),
+            branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
+          ),
+        );
+      spendTotalStr = spendRow?.total ?? '0';
+    }
+
+    const received = Number(inRow?.total ?? '0');
+    const outgoing = Number(outRow?.total ?? '0');
+    const spend = Number(spendTotalStr);
+    return Math.max(0, received - outgoing - spend);
+  }
+
+  private assertSufficientMarketingDisbursable(disbursable: number, transferAmount: number): void {
+    const d = Math.round(disbursable * 100);
+    const t = Math.round(transferAmount * 100);
+    if (d < t) {
+      const fmt = (n: number) =>
+        n.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Insufficient marketing funding balance to send ₦${fmt(transferAmount)}. Disbursable: ₦${fmt(disbursable)}.`,
+      });
+    }
   }
 
   private spendDateToYmd(spendDate: Date | string): string {
@@ -301,6 +408,14 @@ export class MarketingService {
         viaFundingRequest: false,
         marketingSupervisorToMb,
       });
+
+      if (
+        receiverRole === 'MEDIA_BUYER' &&
+        (senderRole === 'HEAD_OF_MARKETING' || marketingSupervisorToMb)
+      ) {
+        const disbursable = await this.computeMarketingDisbursableInTx(tx, senderId, currentBranchId);
+        this.assertSufficientMarketingDisbursable(disbursable, input.amount);
+      }
 
       const rows = await tx
         .insert(schema.marketingFunding)
@@ -528,21 +643,37 @@ export class MarketingService {
 
   async fundingRequestStatusCounts(
     input: FundingRequestStatusCountsInput,
-    user: { id: string; role: string },
+    user: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
   ) {
     const conditions: SQL[] = [];
 
     // Direction filters — `requesterId` ("My Requests" view) and `excludeSelfAsRequester`
     // ("MB Requests" inbox view, HoM-side) are mutually exclusive in practice; if both
-    // are set the explicit `requesterId` wins.
+    // are set the explicit `requesterId` wins. Anyone without funding-approve capability
+    // sees only their own requests by default.
+    const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const canApproveFunding =
+      user.role === 'SUPER_ADMIN' ||
+      userPerms.includes(canonicalPermissionCode('marketing.funding.approve'));
     if (input.requesterId) {
       conditions.push(eq(schema.marketingFundingRequests.requesterId, input.requesterId));
     } else if (input.excludeSelfAsRequester) {
       conditions.push(ne(schema.marketingFundingRequests.requesterId, user.id));
-    } else if (user.role === 'MEDIA_BUYER') {
-      // Default MB visibility: own requests only.
+    } else if (!canApproveFunding) {
+      // Default visibility for non-approvers: own requests only.
       conditions.push(eq(schema.marketingFundingRequests.requesterId, user.id));
+    }
+    // Migration 0106 — caller-supplied targetUserId (their inbox); legacy NULL-target
+    // rows are included so pre-migration broadcasts remain visible to their historical
+    // audience.
+    if (input.targetUserId) {
+      conditions.push(
+        or(
+          eq(schema.marketingFundingRequests.targetUserId, input.targetUserId),
+          isNull(schema.marketingFundingRequests.targetUserId),
+        ) as SQL,
+      );
     }
     if (input.startDate) {
       conditions.push(gte(schema.marketingFundingRequests.createdAt, new Date(input.startDate)));
@@ -724,13 +855,28 @@ export class MarketingService {
    * - HEAD_OF_MARKETING: self + all Media Buyers
    * - SUPER_ADMIN / FINANCE_OFFICER: all Head of Marketing + all Media Buyers
    */
-  async listFundingBalances(caller: { id: string; role: string }, branchId?: string | null): Promise<
+  async listFundingBalances(
+    caller: { id: string; role: string; permissions?: string[] },
+    branchId?: string | null,
+  ): Promise<
     Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>
   > {
-    const isHoM = caller.role === 'HEAD_OF_MARKETING';
+    const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasGlobalView =
+      caller.role === 'SUPER_ADMIN' ||
+      callerPerms.includes(canonicalPermissionCode('finance.read')) ||
+      callerPerms.includes(canonicalPermissionCode('marketing.scope.global'));
     const recipientUserIds: string[] = [];
 
-    if (isHoM) {
+    if (hasGlobalView) {
+      const recipients = await this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']));
+      recipientUserIds.push(...recipients.map((r) => r.id));
+    } else {
+      // Non-global viewer (e.g. HoM without scope.global, or branch-scoped marketing reader)
+      // sees themselves plus all Media Buyers (they fund MBs).
       recipientUserIds.push(caller.id);
       const mediaBuyers = await this.db
         .select({ id: schema.users.id })
@@ -739,12 +885,6 @@ export class MarketingService {
       for (const u of mediaBuyers) {
         if (u.id !== caller.id) recipientUserIds.push(u.id);
       }
-    } else {
-      const recipients = await this.db
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']));
-      recipientUserIds.push(...recipients.map((r) => r.id));
     }
 
     const branchUserIds = await this.getBranchUserIds(branchId);
@@ -853,14 +993,16 @@ export class MarketingService {
     if (caller.id === userId) {
       return this.getFundingBalance(userId, branchId);
     }
-    if ((caller.role === 'SUPER_ADMIN' || caller.role === 'ADMIN') || caller.role === 'FINANCE_OFFICER') {
-      return this.getFundingBalance(userId, branchId);
-    }
-    if (caller.role === 'HEAD_OF_MARKETING' && targetRole === 'MEDIA_BUYER') {
-      return this.getFundingBalance(userId, branchId);
-    }
-    const perms = caller.permissions ?? [];
-    if (perms.includes('users.read')) {
+    const balancePerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasBalancePerm = (code: string) =>
+      caller.role === 'SUPER_ADMIN' || balancePerms.includes(canonicalPermissionCode(code));
+    // Anyone with finance read, marketing org-wide scope, or general user-read can view a
+    // recipient's funding balance. HoM-can-view-MB is captured by `marketing.scope.global`.
+    if (
+      hasBalancePerm('finance.read') ||
+      hasBalancePerm('marketing.scope.global') ||
+      hasBalancePerm('users.read')
+    ) {
       return this.getFundingBalance(userId, branchId);
     }
 
@@ -871,16 +1013,131 @@ export class MarketingService {
    * Media Buyer or Head of Marketing requests funds. Persists the request.
    * Media Buyer → notifies Head of Marketing. Head of Marketing → notifies SuperAdmin + Finance Officer.
    */
+  /**
+   * List recipient candidates for a funding request (Migration 0106). Returned
+   * in the order the UI should preselect them — for MBs, the HoM in their
+   * branch comes first; for HoMs, the first FINANCE_OFFICER.
+   *
+   * The Finance "hat" pattern was retired in migration 0101, so Finance is
+   * identified solely by `role === 'FINANCE_OFFICER'`.
+   */
+  async listFundingRequestRecipients(
+    requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
+    branchId: string | null | undefined,
+  ): Promise<
+    Array<{ id: string; name: string; role: string; isFinance: boolean; isPreferred: boolean; branchId: string | null }>
+  > {
+    const allowedRoles: Array<'FINANCE_OFFICER' | 'HEAD_OF_MARKETING'> =
+      requesterRole === 'MEDIA_BUYER'
+        ? ['FINANCE_OFFICER', 'HEAD_OF_MARKETING']
+        : ['FINANCE_OFFICER'];
+
+    const rows = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        role: schema.users.role,
+        primaryBranchId: schema.users.primaryBranchId,
+        status: schema.users.status,
+      })
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.status, 'ACTIVE' as const),
+          inArray(schema.users.role, allowedRoles),
+        ),
+      );
+
+    return rows
+      .filter((r) => {
+        // HoM target only valid for MB requesters; branch must match. Finance
+        // is org-wide and always available regardless of branch.
+        if (r.role === 'FINANCE_OFFICER') return true;
+        if (requesterRole !== 'MEDIA_BUYER') return false;
+        if (r.role !== 'HEAD_OF_MARKETING') return false;
+        if (!branchId) return true;
+        return r.primaryBranchId === branchId;
+      })
+      .map((r) => {
+        const isFinance = r.role === 'FINANCE_OFFICER';
+        const isHoM = r.role === 'HEAD_OF_MARKETING';
+        // MB → HoM in their branch is the preferred / preselected default.
+        // HoM → first Finance Officer is preferred.
+        const isPreferred =
+          requesterRole === 'MEDIA_BUYER'
+            ? isHoM
+            : isFinance;
+        return {
+          id: r.id,
+          name: r.name,
+          role: r.role,
+          isFinance,
+          isPreferred,
+          branchId: r.primaryBranchId ?? null,
+        };
+      })
+      .sort((a, b) => {
+        if (a.isPreferred && !b.isPreferred) return -1;
+        if (!a.isPreferred && b.isPreferred) return 1;
+        return a.name.localeCompare(b.name);
+      });
+  }
+
   async requestFunding(
     amount: number,
     reason: string,
     requesterId: string,
     requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
     branchId?: string | null,
+    targetUserId?: string,
   ) {
     const branchUserIds = await this.getBranchUserIds(branchId);
     if (branchUserIds && !branchUserIds.includes(requesterId)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Requester is not in the active branch' });
+    }
+
+    // ── Validate the target recipient (CEO directive 2026-05-03 / migration 0106) ──
+    // Allowed targets per requester role:
+    //   MB → HEAD_OF_MARKETING in the same branch, or any FINANCE_OFFICER / Finance hat (org-wide)
+    //   HoM → any FINANCE_OFFICER / Finance hat (org-wide)
+    // When `targetUserId` is omitted we fall back to the legacy broadcast flow
+    // (HoM-by-role for MB; Finance + SuperAdmin for HoM) — keeps older clients
+    // working until they ship the new dropdown.
+    let validatedTargetUserId: string | null = null;
+    if (targetUserId) {
+      const [target] = await this.db
+        .select({
+          id: schema.users.id,
+          role: schema.users.role,
+          primaryBranchId: schema.users.primaryBranchId,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, targetUserId))
+        .limit(1);
+      if (!target) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipient not found' });
+      }
+      const targetIsFinance = target.role === 'FINANCE_OFFICER';
+      const targetIsHoM = target.role === 'HEAD_OF_MARKETING';
+      const requesterIsMb = requesterRole === 'MEDIA_BUYER';
+      if (!targetIsFinance && !(requesterIsMb && targetIsHoM)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: requesterIsMb
+            ? 'Funding requests must be sent to a Head of Marketing or Finance Officer'
+            : 'Funding requests must be sent to a Finance Officer',
+        });
+      }
+      // Branch check for HoM targets only — Finance is org-wide.
+      if (targetIsHoM && branchId) {
+        if (target.primaryBranchId && target.primaryBranchId !== branchId) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Recipient is not in your branch',
+          });
+        }
+      }
+      validatedTargetUserId = target.id;
     }
 
     const { request, requester } = await withActor(this.db, { id: requesterId }, async (tx) => {
@@ -888,6 +1145,7 @@ export class MarketingService {
         .insert(schema.marketingFundingRequests)
         .values({
           requesterId,
+          targetUserId: validatedTargetUserId ?? undefined,
           amount: String(amount),
           reason: reason.trim() || null,
           status: 'PENDING',
@@ -912,7 +1170,18 @@ export class MarketingService {
     const bodySuffix = reason.trim() ? ` Reason: ${reason}` : '';
     const body = `${name} requested ₦${Number(amount).toLocaleString()}.${bodySuffix}`;
 
-    if (requesterRole === 'HEAD_OF_MARKETING') {
+    if (validatedTargetUserId) {
+      // Targeted notification — only the chosen recipient is notified.
+      await this.notifications
+        .create({
+          userId: validatedTargetUserId,
+          type: 'funding:request',
+          title: 'Funding request',
+          body,
+          data: { requesterId, amount, reason: reason || null, requestId: request.id },
+        })
+        .catch(() => {});
+    } else if (requesterRole === 'HEAD_OF_MARKETING') {
       const bodyWithAction = `${body} Disburse via Finance → Disbursements.`;
       await this.notifications
         .createForRole('SUPER_ADMIN', {
@@ -953,6 +1222,13 @@ export class MarketingService {
       /** Caller id used when `excludeSelfAsRequester` is set (HoM's "MB Requests" inbox). */
       callerId?: string;
       excludeSelfAsRequester?: boolean;
+      /** Migration 0106 — list only requests targeted at this user. When set together with
+       *  `requesterId`, both apply (caller's own outbound requests will not match unless they
+       *  targeted themselves, which the create flow disallows). */
+      targetUserId?: string;
+      /** When true, also include legacy NULL-target rows in the result set. Used by the
+       *  inbox view so pre-migration broadcasts remain visible to their historical audience. */
+      includeLegacyNullTarget?: boolean;
       startDate?: string;
       endDate?: string;
       status?: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -967,6 +1243,16 @@ export class MarketingService {
       conditions.push(eq(schema.marketingFundingRequests.requesterId, input.requesterId));
     } else if (input.excludeSelfAsRequester && input.callerId) {
       conditions.push(ne(schema.marketingFundingRequests.requesterId, input.callerId));
+    }
+    if (input.targetUserId) {
+      conditions.push(
+        input.includeLegacyNullTarget
+          ? (or(
+              eq(schema.marketingFundingRequests.targetUserId, input.targetUserId),
+              isNull(schema.marketingFundingRequests.targetUserId),
+            ) as SQL)
+          : eq(schema.marketingFundingRequests.targetUserId, input.targetUserId),
+      );
     }
     if (input.startDate) {
       conditions.push(gte(schema.marketingFundingRequests.createdAt, new Date(input.startDate)));
@@ -1026,9 +1312,13 @@ export class MarketingService {
    * Updates the request and inserts a matching `marketing_funding` ledger row (SENT) so totals / Transfers / balance
    * stay aligned with My Requests. Notifies the requester; emits `funding:received` for live lists (no duplicate
    * `funding:sent` push — `funding:approved` remains the primary in-app notification).
+   *
+   * `sentAmount` may be less than the requested amount (e.g. partial disbursement); it is stamped on the request
+   * row and ledger. HoM→MB approvals require sufficient disbursable marketing wallet (Finance/Admin→MB skips).
    */
   async approveFundingRequest(
     requestId: string,
+    sentAmount: number,
     receiptUrl: string,
     actor: { id: string; role: string },
     currentBranchId: string | null,
@@ -1045,6 +1335,30 @@ export class MarketingService {
     }
     if (existing.status !== 'PENDING') {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
+    }
+
+    const requestedAmount = Number(existing.amount);
+    const sentCents = Math.round(sentAmount * 100);
+    const requestedCents = Math.round(requestedAmount * 100);
+    if (!Number.isFinite(sentAmount) || sentCents <= 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Approved amount must be a positive number' });
+    }
+    if (sentCents > requestedCents) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Approved amount cannot exceed the requested amount',
+      });
+    }
+
+    // Migration 0106 — only the request's targeted recipient (or admin-class)
+    // can approve. Legacy NULL-target rows fall back to the historical role
+    // gate (already enforced via the `marketing.funding.approve` permission).
+    const isAdminClass = actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN';
+    if (existing.targetUserId && existing.targetUserId !== actor.id && !isAdminClass) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the recipient of this funding request can approve it',
+      });
     }
 
     // Branch isolation: requester must be on `currentBranchId`; approver must be too unless
@@ -1079,10 +1393,16 @@ export class MarketingService {
       }
       this.assertLedgerTransferAllowed(senderRole, receiverRole, { viaFundingRequest: true });
 
+      if (senderRole === 'HEAD_OF_MARKETING' && receiverRole === 'MEDIA_BUYER') {
+        const disbursable = await this.computeMarketingDisbursableInTx(tx, approverId, currentBranchId);
+        this.assertSufficientMarketingDisbursable(disbursable, sentAmount);
+      }
+
       const [row] = await tx
         .update(schema.marketingFundingRequests)
         .set({
           status: 'APPROVED',
+          amount: String(sentAmount),
           receiptUrl,
           resolvedAt: new Date(),
           resolvedBy: approverId,
@@ -1099,7 +1419,7 @@ export class MarketingService {
         .values({
           senderId: approverId,
           receiverId: existing.requesterId,
-          amount: String(existing.amount),
+          amount: String(sentAmount),
           receiptUrl,
           status: 'SENT',
           sourceFundingRequestId: requestId,
@@ -1115,11 +1435,14 @@ export class MarketingService {
 
     this.events.emitToUser(existing.requesterId, 'funding:received', {
       fundingId: ledger.id,
-      amount: Number(existing.amount),
+      amount: sentAmount,
     });
 
-    const amount = Number(existing.amount);
-    const body = `Your funding request of ₦${amount.toLocaleString()} was approved. You can view the receipt in Marketing → Funding.`;
+    const nf = (n: number) => n.toLocaleString('en-NG');
+    const body =
+      sentCents < requestedCents
+        ? `Your funding request (₦${nf(requestedAmount)}) was approved for ₦${nf(sentAmount)}. You can view the receipt in Marketing → Funding.`
+        : `Your funding request of ₦${nf(sentAmount)} was approved. You can view the receipt in Marketing → Funding.`;
     await this.notifications
       .create({
         userId: existing.requesterId,
@@ -1129,7 +1452,7 @@ export class MarketingService {
         data: {
           requestId: updated.id,
           receiptUrl: updated.receiptUrl,
-          amount: amount,
+          amount: sentAmount,
         },
       })
       .catch(() => {});
@@ -1143,8 +1466,10 @@ export class MarketingService {
   async rejectFundingRequest(
     requestId: string,
     _reason: string | undefined,
-    rejectorId: string,
+    rejector: { id: string; role: string } | string,
   ) {
+    const rejectorId = typeof rejector === 'string' ? rejector : rejector.id;
+    const rejectorRole = typeof rejector === 'string' ? null : rejector.role;
     const [existing] = await this.db
       .select()
       .from(schema.marketingFundingRequests)
@@ -1156,6 +1481,17 @@ export class MarketingService {
     }
     if (existing.status !== 'PENDING') {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
+    }
+
+    // Migration 0106 — only the request's targeted recipient (or admin-class)
+    // can reject. Legacy NULL-target rows skip this gate (relies on the
+    // `marketing.funding.approve` permission).
+    const isAdminClass = rejectorRole === 'SUPER_ADMIN' || rejectorRole === 'ADMIN';
+    if (existing.targetUserId && existing.targetUserId !== rejectorId && !isAdminClass) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the recipient of this funding request can reject it',
+      });
     }
 
     const updated = await withActor(this.db, { id: rejectorId }, async (tx) => {
@@ -1187,6 +1523,229 @@ export class MarketingService {
       .catch(() => {});
 
     return updated;
+  }
+
+  /**
+   * Build the chronological "back-and-forth" timeline for a funding request and its
+   * resulting transfer. Pass either a `requestId` or a `transferId`; the method walks
+   * the `source_funding_request_id` link to fetch the other side and stitches both into
+   * one event list:
+   *   - Requested  (request.created_at + requester)
+   *   - Approved   (request.resolved_at + resolver)        — when status === 'APPROVED'
+   *   - Rejected   (request.resolved_at + resolver)        — when status === 'REJECTED'
+   *   - Sent       (transfer.sent_at + sender)
+   *   - Received   (transfer.verified_at + receiver)       — when status === 'COMPLETED'
+   *   - Disputed   (transfer.verified_at OR sent_at + receiver)  — when status === 'DISPUTED'
+   *
+   * Permission gate: actor must be a party (requester / target / sender / receiver) OR
+   * admin-class / Finance hat (`hasFinanceAccess`).
+   */
+  async getFundingFlow(
+    input: { transferId?: string; requestId?: string },
+    actor: { id: string; role: string; permissions?: string[] },
+  ) {
+    if (!input.transferId && !input.requestId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Provide either transferId or requestId',
+      });
+    }
+
+    // Resolve transfer (with sender + receiver names) — by id or via request linkage.
+    const transferSender = alias(schema.users, 'flow_transfer_sender');
+    const transferReceiver = alias(schema.users, 'flow_transfer_receiver');
+    const transferQuery = this.db
+      .select({
+        id: schema.marketingFunding.id,
+        senderId: schema.marketingFunding.senderId,
+        senderName: transferSender.name,
+        senderRole: transferSender.role,
+        receiverId: schema.marketingFunding.receiverId,
+        receiverName: transferReceiver.name,
+        receiverRole: transferReceiver.role,
+        amount: schema.marketingFunding.amount,
+        status: schema.marketingFunding.status,
+        sentAt: schema.marketingFunding.sentAt,
+        verifiedAt: schema.marketingFunding.verifiedAt,
+        sourceFundingRequestId: schema.marketingFunding.sourceFundingRequestId,
+        receiptUrl: schema.marketingFunding.receiptUrl,
+      })
+      .from(schema.marketingFunding)
+      .leftJoin(transferSender, eq(schema.marketingFunding.senderId, transferSender.id))
+      .leftJoin(transferReceiver, eq(schema.marketingFunding.receiverId, transferReceiver.id));
+
+    const transferRow = input.transferId
+      ? (await transferQuery.where(eq(schema.marketingFunding.id, input.transferId)).limit(1))[0]
+      : input.requestId
+        ? (await transferQuery
+            .where(eq(schema.marketingFunding.sourceFundingRequestId, input.requestId))
+            .limit(1))[0]
+        : undefined;
+
+    // Resolve request (with requester + resolver names) — by id, or by transfer link.
+    const requester = alias(schema.users, 'flow_request_requester');
+    const resolver = alias(schema.users, 'flow_request_resolver');
+    const requestQuery = this.db
+      .select({
+        id: schema.marketingFundingRequests.id,
+        requesterId: schema.marketingFundingRequests.requesterId,
+        requesterName: requester.name,
+        requesterRole: requester.role,
+        targetUserId: schema.marketingFundingRequests.targetUserId,
+        amount: schema.marketingFundingRequests.amount,
+        reason: schema.marketingFundingRequests.reason,
+        status: schema.marketingFundingRequests.status,
+        createdAt: schema.marketingFundingRequests.createdAt,
+        resolvedAt: schema.marketingFundingRequests.resolvedAt,
+        resolvedBy: schema.marketingFundingRequests.resolvedBy,
+        resolvedByName: resolver.name,
+        resolvedByRole: resolver.role,
+      })
+      .from(schema.marketingFundingRequests)
+      .leftJoin(requester, eq(schema.marketingFundingRequests.requesterId, requester.id))
+      .leftJoin(resolver, eq(schema.marketingFundingRequests.resolvedBy, resolver.id));
+
+    const requestRow = input.requestId
+      ? (await requestQuery.where(eq(schema.marketingFundingRequests.id, input.requestId)).limit(1))[0]
+      : transferRow?.sourceFundingRequestId
+        ? (await requestQuery
+            .where(eq(schema.marketingFundingRequests.id, transferRow.sourceFundingRequestId))
+            .limit(1))[0]
+        : undefined;
+
+    if (!requestRow && !transferRow) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Funding flow not found' });
+    }
+
+    // Permission gate (permission-first per CLAUDE.md / RBAC matrix):
+    //   • SuperAdmin: only role allowed to bypass — short-circuit since their `permissions`
+    //     array is intentionally empty (they short-circuit at `permissionProcedure`).
+    //   • Parties to the flow (requester / target / sender / receiver) always see their own
+    //     row — no extra permission needed since the data identifies them as the audience.
+    //   • Anyone holding `marketing.funding.approve` (HoM / Finance / Admin templates) can
+    //     view every funding flow in their scope — they're the people who'd be approving
+    //     or reviewing it anyway.
+    //   • Finance-hat (`finance.costView`) sees every flow for audit.
+    // No other role checks — ADMIN goes through `marketing.funding.approve` like everyone else.
+    if (actor.role !== 'SUPER_ADMIN') {
+      const perms = actor.permissions ?? [];
+      const canViewAllFlows =
+        perms.includes('marketing.funding.approve') || perms.includes('finance.costView');
+      const isParty =
+        (transferRow &&
+          (transferRow.senderId === actor.id || transferRow.receiverId === actor.id)) ||
+        (requestRow &&
+          (requestRow.requesterId === actor.id || requestRow.targetUserId === actor.id));
+      if (!canViewAllFlows && !isParty) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You do not have access to this funding flow',
+        });
+      }
+    }
+
+    type FlowEvent = {
+      kind: 'requested' | 'approved' | 'rejected' | 'sent' | 'received' | 'disputed';
+      at: string;
+      actorId: string | null;
+      actorName: string | null;
+      actorRole: string | null;
+      note: string | null;
+    };
+    const events: FlowEvent[] = [];
+
+    if (requestRow) {
+      events.push({
+        kind: 'requested',
+        at: requestRow.createdAt.toISOString(),
+        actorId: requestRow.requesterId,
+        actorName: requestRow.requesterName ?? null,
+        actorRole: requestRow.requesterRole ?? null,
+        note: requestRow.reason ?? null,
+      });
+      if (requestRow.status === 'APPROVED' && requestRow.resolvedAt) {
+        events.push({
+          kind: 'approved',
+          at: requestRow.resolvedAt.toISOString(),
+          actorId: requestRow.resolvedBy ?? null,
+          actorName: requestRow.resolvedByName ?? null,
+          actorRole: requestRow.resolvedByRole ?? null,
+          note: null,
+        });
+      } else if (requestRow.status === 'REJECTED' && requestRow.resolvedAt) {
+        events.push({
+          kind: 'rejected',
+          at: requestRow.resolvedAt.toISOString(),
+          actorId: requestRow.resolvedBy ?? null,
+          actorName: requestRow.resolvedByName ?? null,
+          actorRole: requestRow.resolvedByRole ?? null,
+          note: null,
+        });
+      }
+    }
+
+    if (transferRow) {
+      events.push({
+        kind: 'sent',
+        at: transferRow.sentAt.toISOString(),
+        actorId: transferRow.senderId,
+        actorName: transferRow.senderName ?? null,
+        actorRole: transferRow.senderRole ?? null,
+        note: transferRow.receiptUrl ? 'Receipt uploaded' : null,
+      });
+      if (transferRow.status === 'COMPLETED') {
+        events.push({
+          kind: 'received',
+          at: (transferRow.verifiedAt ?? transferRow.sentAt).toISOString(),
+          actorId: transferRow.receiverId,
+          actorName: transferRow.receiverName ?? null,
+          actorRole: transferRow.receiverRole ?? null,
+          note: null,
+        });
+      } else if (transferRow.status === 'DISPUTED') {
+        events.push({
+          kind: 'disputed',
+          at: (transferRow.verifiedAt ?? transferRow.sentAt).toISOString(),
+          actorId: transferRow.receiverId,
+          actorName: transferRow.receiverName ?? null,
+          actorRole: transferRow.receiverRole ?? null,
+          note: null,
+        });
+      }
+    }
+
+    events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+
+    return {
+      request: requestRow
+        ? {
+            id: requestRow.id,
+            status: requestRow.status,
+            amount: requestRow.amount,
+            requesterId: requestRow.requesterId,
+            requesterName: requestRow.requesterName ?? null,
+            reason: requestRow.reason ?? null,
+            createdAt: requestRow.createdAt.toISOString(),
+            resolvedAt: requestRow.resolvedAt ? requestRow.resolvedAt.toISOString() : null,
+          }
+        : null,
+      transfer: transferRow
+        ? {
+            id: transferRow.id,
+            status: transferRow.status,
+            amount: transferRow.amount,
+            senderId: transferRow.senderId,
+            senderName: transferRow.senderName ?? null,
+            receiverId: transferRow.receiverId,
+            receiverName: transferRow.receiverName ?? null,
+            sentAt: transferRow.sentAt.toISOString(),
+            verifiedAt: transferRow.verifiedAt ? transferRow.verifiedAt.toISOString() : null,
+            receiptUrl: transferRow.receiptUrl ?? null,
+            sourceFundingRequestId: transferRow.sourceFundingRequestId ?? null,
+          }
+        : null,
+      events,
+    };
   }
 
   // ============================================
@@ -1384,7 +1943,7 @@ export class MarketingService {
    */
   async updateAdSpend(
     input: UpdateAdSpendInput,
-    actor: { id: string; role: string },
+    actor: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
   ) {
     const [existing] = await this.db
@@ -1400,12 +1959,17 @@ export class MarketingService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only PENDING or REJECTED ad spend can be edited' });
     }
 
-    const canUpdate =
-      actor.role === 'MEDIA_BUYER' || actor.role === 'HEAD_OF_MARKETING' || isAdminLevel(actor);
-    if (!canUpdate) {
+    const adSpendPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasSpendPerm = (code: string) =>
+      actor.role === 'SUPER_ADMIN' || adSpendPerms.includes(canonicalPermissionCode(code));
+    // Caller may update if they can submit ad spend (their own) or approve it (anyone's).
+    const canSubmit = hasSpendPerm('marketing.adSpend');
+    const canApprove = hasSpendPerm('marketing.adSpend.approve');
+    if (!canSubmit && !canApprove) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to update ad spend' });
     }
-    if (actor.role === 'MEDIA_BUYER' && existing.mediaBuyerId !== actor.id) {
+    // Submitter without approve capability can only edit their own rows.
+    if (!canApprove && existing.mediaBuyerId !== actor.id) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only edit your own ad spend' });
     }
 
@@ -1971,6 +2535,7 @@ export class MarketingService {
       ? allBuyers.filter((buyer) => branchUserIds.includes(buyer.id))
       : allBuyers;
 
+    const profitability = await this.getProfitabilityConfig();
     const leaderboard = await Promise.all(
       eligibleBuyers.map(async (buyer) => {
         const metrics = await this.getPerformanceMetrics(
@@ -1982,7 +2547,7 @@ export class MarketingService {
         );
         const profitabilityScore =
           metrics.totalSpend > 0
-            ? Math.min(1, metrics.trueRoas / PROFITABILITY_ROAS_TARGET)
+            ? Math.min(1, metrics.trueRoas / profitability.targetRoas)
             : null;
         return {
           mediaBuyerId: buyer.id,
@@ -2057,7 +2622,7 @@ export class MarketingService {
    * only mount this in the marketing module.
    */
   async listMyCrossFunnelAttempts(
-    caller: { id: string; role: string },
+    caller: { id: string; role: string; permissions?: string[] },
     input: {
       startDate?: string;
       endDate?: string;
@@ -2072,16 +2637,17 @@ export class MarketingService {
     const offset = (page - 1) * limit;
 
     const conditions: SQL[] = [];
+    const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasCallerPerm = (code: string) =>
+      caller.role === 'SUPER_ADMIN' || callerPerms.includes(canonicalPermissionCode(code));
 
-    if (caller.role === 'MEDIA_BUYER') {
-      conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
-    } else if (caller.role === 'HEAD_OF_MARKETING') {
-      if (!branchId) {
-        return { rows: [], total: 0, page, limit, totalPages: 0 };
-      }
-      conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
-    } else if (isAdminLevel({ role: caller.role })) {
+    if (hasCallerPerm('marketing.scope.global')) {
+      // Org-wide marketing scope (HoM, admin) → optionally narrow to a branch.
       if (branchId) conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
+    } else if (hasCallerPerm('marketing.read')) {
+      // Branch-scoped marketing reader: only their own rows (MB) — broader marketing.read
+      // without org-wide does NOT bleed into other MBs' funnels (Pillar 4).
+      conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
     } else {
       return { rows: [], total: 0, page, limit, totalPages: 0 };
     }
@@ -2146,19 +2712,19 @@ export class MarketingService {
    * breakdown). Same scoping rules as listMyCrossFunnelAttempts.
    */
   async crossFunnelStats(
-    caller: { id: string; role: string },
+    caller: { id: string; role: string; permissions?: string[] },
     input: { startDate?: string; endDate?: string },
     branchId?: string | null,
   ) {
     const conditions: SQL[] = [];
+    const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasCallerPerm = (code: string) =>
+      caller.role === 'SUPER_ADMIN' || callerPerms.includes(canonicalPermissionCode(code));
 
-    if (caller.role === 'MEDIA_BUYER') {
-      conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
-    } else if (caller.role === 'HEAD_OF_MARKETING') {
-      if (!branchId) return { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
-      conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
-    } else if (isAdminLevel({ role: caller.role })) {
+    if (hasCallerPerm('marketing.scope.global')) {
       if (branchId) conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
+    } else if (hasCallerPerm('marketing.read')) {
+      conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
     } else {
       return { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
     }
@@ -2312,6 +2878,26 @@ export class MarketingService {
 
   async createCampaign(input: CreateCampaignInput, mediaBuyerId: string, branchId?: string | null) {
     return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
+      // Form names are unique org-wide, case-insensitive. Pre-check so callers
+      // get a friendly CONFLICT instead of a Postgres unique-violation surfacing
+      // as an INTERNAL_SERVER_ERROR.
+      const conflict = await tx
+        .select({ id: schema.campaigns.id, name: schema.campaigns.name })
+        .from(schema.campaigns)
+        .where(
+          and(
+            isNull(schema.campaigns.validTo),
+            sql`lower(${schema.campaigns.name}) = lower(${input.name})`,
+          ),
+        )
+        .limit(1);
+      if (conflict[0]) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `A form named "${conflict[0].name}" already exists. Pick a different name.`,
+        });
+      }
+
       const rows = await tx
         .insert(schema.campaigns)
         .values({
@@ -2343,6 +2929,27 @@ export class MarketingService {
 
       if (existing.length === 0) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Campaign not found' });
+      }
+
+      // Pre-check name uniqueness when renaming, excluding the row being edited.
+      if (input.name !== undefined && input.name !== existing[0]!.name) {
+        const conflict = await tx
+          .select({ id: schema.campaigns.id, name: schema.campaigns.name })
+          .from(schema.campaigns)
+          .where(
+            and(
+              isNull(schema.campaigns.validTo),
+              ne(schema.campaigns.id, input.id),
+              sql`lower(${schema.campaigns.name}) = lower(${input.name})`,
+            ),
+          )
+          .limit(1);
+        if (conflict[0]) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `A form named "${conflict[0].name}" already exists. Pick a different name.`,
+          });
+        }
       }
 
       const updateData: Record<string, unknown> = {};

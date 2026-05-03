@@ -43,6 +43,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     name: string;
     address: string | null;
     whatsappGroupLink?: string | null;
+    providerName: string | null;
     eligible: boolean;
     reason: string | null;
     availabilityByProduct: Array<{
@@ -106,7 +107,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       : locations;
 
   const allocatableRich: RichAllocatableLocation[] = allocatableRes.ok
-    ? ((allocatableRes.data as { result?: { data?: RichAllocatableLocation[] } })?.result?.data ?? [])
+    ? ((allocatableRes.data as { result?: { data?: Array<RichAllocatableLocation & { providerName?: string | null }> } })?.result?.data ?? []).map(
+        (loc) => ({ ...loc, providerName: loc.providerName ?? null }),
+      )
     : [];
   const richAllocatableLocations =
     user.role === 'TPL_MANAGER' && user.logisticsLocationId

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
@@ -7,7 +7,6 @@ import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
-import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { Pagination } from '~/components/ui/pagination';
@@ -27,44 +26,21 @@ import type {
   UserStockMovement,
   UserApprovalRecord,
   UserPushStatus,
-  ActiveHeadUser,
-  FinanceHatHolder,
   RoleTemplateOption,
   PermissionCatalogItem,
+  PermissionCatalogBundle,
+  UserOnboardingSummary,
 } from './types';
 import { USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
-import { FormSelect } from '~/components/ui/form-select';
-import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
-import { RadioGroup } from '~/components/ui/radio-group';
-import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
-import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
-import { PermissionMatrix } from './PermissionMatrix';
-
-// HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
-const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
+import { PermissionsPreview } from './PermissionsPreview';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { TableActionButton } from '~/components/ui/table-action-button';
 
 // ─── Constants ──────────────────────────────────────────
-
-// SUPER_ADMIN is removed — the service rejects setting it on any user, so including it in the
-// dropdown is misleading. ADMIN + BRANCH_ADMIN routes through the SuperAdmin approval flow for
-// non-SuperAdmin callers; included so SuperAdmin can promote / demote directly.
-const ROLES = [
-  { value: 'ADMIN', label: 'Admin' },
-  { value: 'BRANCH_ADMIN', label: 'Branch Admin' },
-  { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
-  { value: 'MEDIA_BUYER', label: 'Media Buyer' },
-  { value: 'HEAD_OF_CS', label: 'Head of CS' },
-  { value: 'CS_AGENT', label: 'CS Agent' },
-  { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-  { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
-  { value: 'STOCK_MANAGER', label: 'Stock Manager' },
-  { value: 'TPL_MANAGER', label: '3PL Manager' },
-  { value: 'TPL_RIDER', label: '3PL Rider' },
-  { value: 'HR_MANAGER', label: 'HR Manager' },
-];
 
 const ROLE_DESCRIPTIONS: Record<string, string> = {
   SUPER_ADMIN: 'Full system access. Can manage all modules, users, and settings.',
@@ -82,19 +58,12 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
 
 // ─── Component ──────────────────────────────────────────
 
-const MOVEMENT_TYPE_LABELS: Record<string, string> = {
-  INTAKE: 'Intake',
-  RESERVATION: 'Reservation',
-  ALLOCATION: 'Allocation',
-  DISPATCH: 'Dispatch',
-  DELIVERY: 'Delivery',
-  RETURN: 'Return',
-  RESTOCK: 'Restock',
-  WRITE_OFF: 'Write-off',
-  TRANSFER_OUT: 'Transfer Out',
-  TRANSFER_IN: 'Transfer In',
-  ADJUSTMENT: 'Adjustment',
-};
+function formatOnboardingTimestamp(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
 
 export function UserDetailPage({
   user,
@@ -109,15 +78,14 @@ export function UserDetailPage({
   marketingMetrics,
   fundingBalance,
   pendingEmailChange,
-  stockMovements,
   financeActivity,
   pushStatus,
-  activeHeads,
-  currentFinanceOfficer,
-  branchesList,
+  // activeHeads + branchesList + userEditPermissionOverrides — only consumed by the
+  // edit form, which now lives at /hr/users/:id/edit. The loader still supplies them
+  // (other consumers may share the type), but this page no longer reads them.
   permissionCatalog,
   templatePermissionsById,
-  userPermissionOverrides,
+  userStampPreview,
   canDisburseToThisUser = false,
   isSuperAdmin = false,
   isViewerHeadOfMarketing = false,
@@ -126,8 +94,16 @@ export function UserDetailPage({
   viewerShowsMirror = false,
   mirrorSubmitDisabled = false,
   isSelfView = false,
+  showOnboardingTab = false,
+  viewerCanManageHrOnboarding = false,
+  onboardingSummary,
   usersBasePath = '/hr/users',
-}: UserDetailLoaderData & { usersBasePath?: string }) {
+}: Omit<UserDetailLoaderData, 'mirrorUi' | 'permissionCatalog'> & {
+  permissionCatalog?: Promise<PermissionCatalogBundle>;
+  usersBasePath?: string;
+  viewerShowsMirror?: boolean;
+  mirrorSubmitDisabled?: boolean;
+}) {
   const actionData = useActionData<{ error?: string; success?: boolean; message?: string; requiresApproval?: boolean }>();
   const navigation = useNavigation();
   // Reset Password runs through its own fetcher so the form submission inside the portaled
@@ -146,7 +122,7 @@ export function UserDetailPage({
   // admin-level users keep full Settings access unconditionally.
   const canOpenSettingsTab = isSuperAdmin || (!restrictHeadView) || canEditLimited;
 
-  type TabId = 'overview' | 'orders' | 'payroll' | 'stock' | 'finance' | 'audit' | 'edit';
+  type TabId = 'overview' | 'orders' | 'payroll' | 'finance' | 'audit';
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
@@ -154,18 +130,13 @@ export function UserDetailPage({
   const [emailChangeReason, setEmailChangeReason] = useState('');
   const [dismissedError, setDismissedError] = useState(false);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
-  const [conflictModalOpen, setConflictModalOpen] = useState(false);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
-  const editFormRef = useRef<HTMLFormElement>(null);
-  const allowSaveSubmitRef = useRef(false);
-  // Resolve the deferred `activeHeads` / `branchesList` into state so the submit handler can
-  // check synchronously whether the selected role+branch is already taken by another user.
-  const [resolvedActiveHeads, setResolvedActiveHeads] = useState<ActiveHeadUser[] | null>(null);
-  const [resolvedBranches, setResolvedBranches] = useState<Array<{ id: string; name: string }> | null>(null);
+  // Settings/edit moved to /hr/users/:id/edit — the edit form's local state
+  // (conflictModalOpen, showSaveConfirm, editFormRef, allowSaveSubmitRef, resolvedActiveHeads,
+  // resolvedBranches) was deleted with it. The Permissions preview card still needs the
+  // role-template + catalog promises so we keep those resolutions below.
   const [resolvedRoleTemplates, setResolvedRoleTemplates] = useState<RoleTemplateOption[] | null>(null);
   const [resolvedPermissionCatalog, setResolvedPermissionCatalog] = useState<PermissionCatalogItem[]>([]);
   const [resolvedTemplatePermissionsById, setResolvedTemplatePermissionsById] = useState<Record<string, string[]>>({});
-
   useEffect(() => {
     if (actionData?.error) setDismissedError(false);
     if (actionData?.success && actionData?.message) setDismissedSuccess(false);
@@ -173,31 +144,6 @@ export function UserDetailPage({
 
   // Derived flags (must be before useEffects that reference them)
   const isSuperAdminProfile = user.role === 'SUPER_ADMIN';
-
-  useEffect(() => {
-    let cancelled = false;
-    if (activeHeads) {
-      activeHeads
-        .then((heads) => {
-          if (!cancelled) setResolvedActiveHeads(heads);
-        })
-        .catch(() => {
-          if (!cancelled) setResolvedActiveHeads([]);
-        });
-    }
-    if (branchesList) {
-      branchesList
-        .then((branches) => {
-          if (!cancelled) setResolvedBranches(branches);
-        })
-        .catch(() => {
-          if (!cancelled) setResolvedBranches([]);
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [activeHeads, branchesList]);
 
   // Close reset modal on fetcher success.
   useEffect(() => {
@@ -214,23 +160,21 @@ export function UserDetailPage({
     }
   }, [actionData?.success, actionData?.message]);
 
-  // Role-based tab visibility
+  // Role-based tab visibility. Stock-domain activity (intakes, transfers,
+  // adjustments) is covered by the global Activity tab below — no separate
+  // Stock tab needed.
   const showOrdersTab = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_LOGISTICS', 'TPL_MANAGER', 'TPL_RIDER'].includes(user.role);
   const showPayrollTab = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'HEAD_OF_CS', 'CS_AGENT', 'TPL_RIDER', 'HR_MANAGER'].includes(user.role);
-  const showStockTab = ['STOCK_MANAGER', 'TPL_MANAGER', 'HEAD_OF_LOGISTICS'].includes(user.role);
-  // Finance activity tab is visible to either a primary Finance Officer OR anyone currently
-  // wearing the Finance hat on top of their primary role.
-  const showFinanceTab = user.role === 'FINANCE_OFFICER' || user.isFinanceOfficer === true;
+  // Finance activity tab is visible to the primary Finance Officer role.
+  const showFinanceTab = user.role === 'FINANCE_OFFICER';
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     ...(showOrdersTab ? [{ id: 'orders' as const, label: 'Orders' }] : []),
     ...(showPayrollTab ? [{ id: 'payroll' as const, label: 'Payroll' }] : []),
-    ...(showStockTab ? [{ id: 'stock' as const, label: 'Stock' }] : []),
     ...(showFinanceTab ? [{ id: 'finance' as const, label: 'Finance Activity' }] : []),
     { id: 'audit', label: 'Activity' },
-    // Self-view never gets the Settings tab — user manages their own account in /admin/settings.
-    ...((!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited)) ? [{ id: 'edit' as const, label: 'Settings' }] : []),
+    // Settings/edit is now a separate page at /hr/users/:id/edit — see "Edit user" header button.
   ];
 
   // When viewing a user, ensure activeTab is valid for their role
@@ -238,33 +182,34 @@ export function UserDetailPage({
     const validIds = new Set<TabId>(['overview', 'audit']);
     if (showOrdersTab) validIds.add('orders');
     if (showPayrollTab) validIds.add('payroll');
-    if (showStockTab) validIds.add('stock');
     if (showFinanceTab) validIds.add('finance');
-    if (!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited)) validIds.add('edit');
     if (!validIds.has(activeTab)) {
       setActiveTab('overview');
     }
-  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showStockTab, showFinanceTab, isSuperAdminProfile, canOpenSettingsTab, canEditLimited, isSelfView]);
+  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showFinanceTab]);
 
-  // Edit form state
-  const [selectedRole, setSelectedRole] = useState(user.role);
-  const [selectedPrimaryBranchId, setSelectedPrimaryBranchId] = useState(user.primaryBranchId ?? '');
-  const [selectedBranchIdsEdit, setSelectedBranchIdsEdit] = useState<string[]>(
-    (user.branchMemberships ?? []).map((membership) => membership.branchId),
-  );
-  const [selectedTemplateId, setSelectedTemplateId] = useState(user.roleTemplateId ?? '');
-  const [permissionOverridesEdit, setPermissionOverridesEdit] = useState<Record<string, boolean>>({});
-
-  const templateByRole = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const t of resolvedRoleTemplates ?? []) {
-      if (t.kind === 'SYSTEM' && t.mappedRole) map.set(t.mappedRole, t.id);
-    }
-    return map;
-  }, [resolvedRoleTemplates]);
+  // Permissions preview state — read-only chip rendering on the Overview tab.
+  // The editable form moved to /hr/users/:id/edit; only the preview state lives here now.
+  /** Overview preview: sparse stamped deltas off-template / revokes on-template. */
+  const [permissionOverridesLoaded, setPermissionOverridesLoaded] = useState<Record<string, boolean>>({});
+  /** Role-template baseline codes for Overview (`getUserMatrix` stamp_preview). */
+  const [stampPreviewTemplateCodes, setStampPreviewTemplateCodes] = useState<string[]>([]);
+  /** RBAC union (template ∪ role_permissions ∪ stamped grants − revokes) — drives granted chips. */
+  const [stampPreviewEffectiveCodes, setStampPreviewEffectiveCodes] = useState<string[]>([]);
+  /** False until stamp preview payload resolves. */
+  const [stampPreviewHydrated, setStampPreviewHydrated] = useState(false);
+  /** False until `permissions.listCatalog` settles (labels for chips — empty array still counts as resolved). */
+  const [permissionCatalogHydrated, setPermissionCatalogHydrated] = useState(false);
+  /** True when SSR catalog fetch failed (401/503/etc.) — distinct from an legitimately empty catalog. */
+  const [permissionCatalogRequestFailed, setPermissionCatalogRequestFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setStampPreviewHydrated(false);
+    setStampPreviewTemplateCodes([]);
+    setStampPreviewEffectiveCodes([]);
+    setPermissionCatalogHydrated(false);
+    setPermissionCatalogRequestFailed(false);
     if (roleTemplates) {
       roleTemplates.then((rows) => {
         if (!cancelled) setResolvedRoleTemplates(rows);
@@ -273,11 +218,23 @@ export function UserDetailPage({
       });
     }
     if (permissionCatalog) {
-      permissionCatalog.then((rows) => {
-        if (!cancelled) setResolvedPermissionCatalog(rows);
-      }).catch(() => {
-        if (!cancelled) setResolvedPermissionCatalog([]);
-      });
+      permissionCatalog
+        .then((bundle) => {
+          if (!cancelled) {
+            setResolvedPermissionCatalog(bundle.items);
+            setPermissionCatalogRequestFailed(bundle.requestFailed);
+            setPermissionCatalogHydrated(true);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setResolvedPermissionCatalog([]);
+            setPermissionCatalogRequestFailed(true);
+            setPermissionCatalogHydrated(true);
+          }
+        });
+    } else {
+      setPermissionCatalogHydrated(true);
     }
     if (templatePermissionsById) {
       templatePermissionsById.then((rows) => {
@@ -286,103 +243,245 @@ export function UserDetailPage({
         if (!cancelled) setResolvedTemplatePermissionsById({});
       });
     }
-    if (userPermissionOverrides) {
-      userPermissionOverrides.then((rows) => {
-        if (!cancelled) setPermissionOverridesEdit(rows);
-      }).catch(() => {
-        if (!cancelled) setPermissionOverridesEdit({});
-      });
+    if (userStampPreview) {
+      userStampPreview
+        .then((row) => {
+          if (!cancelled) {
+            setPermissionOverridesLoaded(row.userOverrides);
+            setStampPreviewTemplateCodes(row.templateCodes);
+            setStampPreviewEffectiveCodes(row.effectiveCodes ?? []);
+            setStampPreviewHydrated(true);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setPermissionOverridesLoaded({});
+            setStampPreviewTemplateCodes([]);
+            setStampPreviewEffectiveCodes([]);
+            setStampPreviewHydrated(true);
+          }
+        });
+    } else {
+      setStampPreviewHydrated(true);
     }
     return () => {
       cancelled = true;
     };
-  }, [roleTemplates, permissionCatalog, templatePermissionsById, userPermissionOverrides]);
+  }, [
+    roleTemplates,
+    permissionCatalog,
+    templatePermissionsById,
+    userStampPreview,
+  ]);
 
-  useEffect(() => {
-    if (!selectedRole) return;
-    const mapped = templateByRole.get(selectedRole);
-    if (mapped) setSelectedTemplateId(mapped);
-  }, [selectedRole, templateByRole]);
+  /** True until stamp preview and permission catalog requests settle (do not key off catalog length — failed loads stay []). */
+  const permissionsPreviewLoading = !stampPreviewHydrated || !permissionCatalogHydrated;
 
-  useEffect(() => {
-    setPermissionOverridesEdit({});
-  }, [selectedTemplateId, selectedRole]);
-
-  const pendingConflict =
-    HEAD_ROLES.includes(selectedRole) &&
-    selectedRole !== user.role &&
-    resolvedActiveHeads
-      ? resolvedActiveHeads.find((h) => {
-          if (h.role !== selectedRole || h.id === user.id) return false;
-          if (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)) return true;
-          return !!selectedPrimaryBranchId && h.primaryBranchId === selectedPrimaryBranchId;
-        })
-      : undefined;
-  const pendingConflictBranchName = pendingConflict
-    ? ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
-      ? 'The organization'
-      : resolvedBranches?.find((b) => b.id === selectedPrimaryBranchId)?.name ?? 'This branch'
-    : null;
-
-  const [assignFinanceHat, setAssignFinanceHat] = useState(user.isFinanceOfficer === true);
-  useEffect(() => {
-    setAssignFinanceHat(user.isFinanceOfficer === true);
-  }, [user.id, user.updatedAt, user.isFinanceOfficer]);
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>(user.assignedProductIds ?? []);
-  const [logisticsLocationEdit, setLogisticsLocationEdit] = useState(user.logisticsLocationId ?? '');
-  // Local 10-digit phone for the edit form. Empty means "keep unchanged" — only
-  // a complete 10-digit value (starting 7/8/9) ever submits as +234XXXXXXXXXX.
-  const [phoneLocalEdit, setPhoneLocalEdit] = useState('');
-  const phoneEditIsComplete = /^[789]\d{9}$/.test(phoneLocalEdit);
-  const phoneEditError = phoneLocalEdit.length > 0 && !phoneEditIsComplete
-    ? phoneLocalEdit.length < 10
-      ? 'Enter all 10 digits, or leave blank to keep current.'
-      : 'Number must start with 7, 8, or 9.'
-    : undefined;
-
-  const assignedProductIdsKey = [...(user.assignedProductIds ?? [])].sort().join(',');
-  useEffect(() => {
-    setSelectedRole(user.role);
-    setSelectedPrimaryBranchId(user.primaryBranchId ?? '');
-    setSelectedBranchIdsEdit((user.branchMemberships ?? []).map((membership) => membership.branchId));
-    setSelectedProductIds(user.assignedProductIds ? [...user.assignedProductIds] : []);
-    setLogisticsLocationEdit(user.logisticsLocationId ?? '');
-  }, [user.id, user.updatedAt, user.role, assignedProductIdsKey, user.logisticsLocationId, user.primaryBranchId, user.branchMemberships]);
-
-  // Capacity is only meaningful for roles that work an individual workload — CS agents
-  // (max concurrent orders) and Media Buyers (max concurrent campaigns). Managers / heads
-  // don't carry a personal load, so hiding the field removes noise from their forms.
-  const showCapacity = ['CS_AGENT', 'MEDIA_BUYER'].includes(selectedRole);
-  const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
-  const showProductAssignment = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(selectedRole);
+  // Detail-page-only role flags — used for tab visibility and the right-rail cards.
   const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
   const isCSRole = ['CS_AGENT', 'HEAD_OF_CS'].includes(user.role);
-  // Capacity is only a meaningful number for CS agents + Media Buyers (see `showCapacity`).
-  // This flag gates the read-only badge / InfoField in the overview, independent of CS-vs-MB role logic elsewhere.
+  // Capacity is only a meaningful number for CS agents + Media Buyers.
+  // Drives the read-only badge / InfoField in the Overview, independent of CS-vs-MB role logic elsewhere.
   const showCapacityReadonly = ['CS_AGENT', 'MEDIA_BUYER'].includes(user.role);
   const isLogisticsRole = ['TPL_MANAGER', 'TPL_RIDER', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'].includes(user.role);
 
-  const toggleProduct = (id: string) => {
-    setSelectedProductIds((prev) =>
-      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
-    );
-  };
+  const userOrderColumns = useMemo((): CompactTableColumn<UserOrderSummary>[] => [
+    {
+      key: 'reference',
+      header: 'Reference',
+      render: (order) => (
+        <Link to={`/admin/orders/${order.id}`} prefetch="intent" className="text-brand-500 hover:text-brand-600 font-medium text-sm">
+          {order.referenceNumber || order.id.slice(0, 8)}
+        </Link>
+      ),
+      minWidth: 'min-w-[100px]',
+    },
+    {
+      key: 'customer',
+      header: 'Customer',
+      render: (order) => <span className="text-sm text-app-fg-muted">{order.customerName || '—'}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (order) => <OrderStatusBadge status={order.status} />,
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (order) => (
+        <span className="text-sm font-medium text-app-fg">
+          {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      nowrap: true,
+      render: (order) => (
+        <span className="text-sm text-app-fg-muted">
+          {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'center',
+      tight: true,
+      nowrap: true,
+      minWidth: 'min-w-[4.5rem]',
+      mobileShowLabel: false,
+      render: (order) => (
+        <TableActionButton to={`/admin/orders/${order.id}`} prefetch="intent" variant="primary">
+          View
+        </TableActionButton>
+      ),
+    },
+  ], []);
 
-  const toggleBranchEdit = (id: string) => {
-    setSelectedBranchIdsEdit((prev) => {
-      if (prev.includes(id)) {
-        const next = prev.filter((branchId) => branchId !== id);
-        if (selectedPrimaryBranchId === id) {
-          setSelectedPrimaryBranchId(next[0] ?? '');
-        }
-        return next;
-      }
-      if (!selectedPrimaryBranchId) {
-        setSelectedPrimaryBranchId(id);
-      }
-      return [...prev, id];
-    });
-  };
+  const payoutColumns = useMemo((): CompactTableColumn<UserPayoutRecord>[] => [
+    {
+      key: 'period',
+      header: 'Period',
+      render: (p) => (
+        <span className="text-sm">
+          {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+          {' — '}
+          {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+        </span>
+      ),
+    },
+    {
+      key: 'gross',
+      header: 'Gross',
+      align: 'right',
+      render: (p) => <span className="text-right text-sm text-app-fg">{formatNaira(Number(p.grossAmount))}</span>,
+    },
+    {
+      key: 'deductions',
+      header: 'Deductions',
+      align: 'right',
+      render: (p) => (
+        <span className="text-right text-sm text-danger-600 dark:text-danger-400">
+          {Number(p.deductions) > 0 ? formatNaira(-Number(p.deductions)) : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'net',
+      header: 'Net',
+      align: 'right',
+      render: (p) => <span className="text-right text-sm font-semibold text-app-fg">{formatNaira(Number(p.netAmount))}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (p) => (
+        <span className={p.status === 'PAID' ? 'badge-success' : p.status === 'PENDING' ? 'badge-warning' : 'badge'}>{p.status}</span>
+      ),
+    },
+  ], []);
+
+  const adjustmentColumns = useMemo((): CompactTableColumn<UserAdjustment>[] => [
+    {
+      key: 'type',
+      header: 'Type',
+      render: (adj) => (
+        <span className={adj.type === 'BONUS' || adj.type === 'ADD_ON' ? 'badge-success' : 'badge-danger'}>
+          {adj.type.replace(/_/g, ' ')}
+        </span>
+      ),
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (adj) => (
+        <span
+          className={`text-right text-sm font-medium ${
+            adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK'
+              ? 'text-danger-600 dark:text-danger-400'
+              : 'text-success-600 dark:text-success-400'
+          }`}
+        >
+          {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK'
+            ? formatNaira(-Math.abs(Number(adj.amount)))
+            : `+${formatNaira(Number(adj.amount))}`}
+        </span>
+      ),
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      render: (adj) => (
+        <span className="text-sm text-app-fg-muted max-w-[200px] truncate" title={adj.reason ?? undefined}>
+          {adj.reason || '—'}
+        </span>
+      ),
+      cellTitle: (adj) => adj.reason ?? undefined,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (adj) => (
+        <span className={adj.status === 'APPROVED' ? 'badge-success' : adj.status === 'PENDING' ? 'badge-warning' : 'badge'}>{adj.status}</span>
+      ),
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      render: (adj) => (
+        <span className="text-sm text-app-fg-muted">
+          {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+        </span>
+      ),
+    },
+  ], []);
+
+  const financeApprovalColumns = useMemo((): CompactTableColumn<UserApprovalRecord>[] => [
+    {
+      key: 'type',
+      header: 'Type',
+      render: (a) => <span className="badge">{a.type.replace(/_/g, ' ')}</span>,
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: (a) => <span className="text-right text-sm font-medium">{formatNaira(Number(a.amount))}</span>,
+    },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (a) => (
+        <span className="text-sm text-app-fg-muted max-w-[200px] truncate" title={a.description}>
+          {a.description}
+        </span>
+      ),
+      cellTitle: (a) => a.description,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (a) => (
+        <span className={a.status === 'APPROVED' ? 'badge-success' : a.status === 'REJECTED' ? 'badge-danger' : 'badge'}>{a.status}</span>
+      ),
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      render: (a) => (
+        <span className="text-sm text-app-fg-muted">
+          {a.approvedAt
+            ? new Date(a.approvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : new Date(a.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+        </span>
+      ),
+    },
+  ], []);
 
   const gradient = ROLE_AVATAR_GRADIENTS[user.role] ?? 'from-brand-500 to-brand-700';
   const initials = user.name.split(' ').map((w) => w.charAt(0).toUpperCase()).slice(0, 2).join('');
@@ -459,20 +558,7 @@ export function UserDetailPage({
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <PageRefreshButton />
-                  {/* Phase 22 — onboarding record button. Self-view links to the
-                      self-service page; HR-class viewers link to the user-scoped
-                      onboarding view. Server-side auth ensures the destination
-                      route gates correctly. */}
-                  <Link
-                    to={isSelfView ? '/onboarding' : `/hr/users/${user.id}/onboarding`}
-                    className="btn-secondary btn-sm flex items-center gap-1.5"
-                    title="Onboarding profile"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z" />
-                    </svg>
-                    Onboarding
-                  </Link>
+                  {/* Staff onboarding lives on Overview; login nudge until HR approves. */}
                   {/* Mirror: `branches.canMirrorToUser` — not behind restrictHeadView. Disabled when preview-only (nested mirror). */}
                   {!isSelfView && viewerShowsMirror && (
                     mirrorSubmitDisabled ? (
@@ -506,6 +592,18 @@ export function UserDetailPage({
                         </Button>
                       </Form>
                     )
+                  )}
+                  {!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited) && (
+                    <Link
+                      to={`/hr/users/${user.id}/edit`}
+                      prefetch="intent"
+                      className="btn-primary btn-sm flex items-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                      </svg>
+                      Edit user
+                    </Link>
                   )}
                   {!isSelfView && (canDisburseToThisUser || (!isSuperAdminProfile && !restrictHeadView)) && (
                     <>
@@ -567,11 +665,6 @@ export function UserDetailPage({
           {/* Quick info pills */}
           <div className="flex flex-wrap items-center gap-2 mt-4">
             <RoleBadge role={user.role} label={formatRole(user.role)} />
-            {user.isFinanceOfficer && user.role !== 'FINANCE_OFFICER' && (
-              <span className="badge-success" title="Wears the Finance hat — carries Finance Officer powers on top of their primary role.">
-                + Finance hat
-              </span>
-            )}
             <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -628,14 +721,105 @@ export function UserDetailPage({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column — Details */}
           <div className="lg:col-span-2 space-y-6">
+            {showOnboardingTab && onboardingSummary ? (
+              <DeferredSection resolve={onboardingSummary} skeleton="card">
+                {(summary: UserOnboardingSummary | null) => (
+                  <div
+                    className={
+                      isSelfView
+                        ? 'card space-y-4 border-brand-200/80 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-950/20'
+                        : 'card space-y-4'
+                    }
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 space-y-1">
+                        <h2 className="text-base font-semibold text-app-fg">
+                          {isSelfView ? 'Your onboarding' : 'Staff onboarding'}
+                        </h2>
+                        <p className="text-sm text-app-fg-muted">
+                          {isSelfView
+                            ? 'HR documents, proof of address, and guarantors — does not affect your login. Open the full form to edit or submit for review.'
+                            : 'HR documents and guarantor details — this does not affect their login.'}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2 sm:items-end shrink-0">
+                        {isSelfView ? (
+                          <Link
+                            to="/admin/onboarding"
+                            prefetch="intent"
+                            className="btn-primary inline-flex items-center justify-center whitespace-nowrap"
+                          >
+                            Open onboarding
+                          </Link>
+                        ) : null}
+                        {!isSelfView && viewerCanManageHrOnboarding && summary?.ok === true ? (
+                          <Link
+                            to={`${usersBasePath}/${user.id}/onboarding`}
+                            prefetch="intent"
+                            className="btn-primary inline-flex items-center justify-center whitespace-nowrap"
+                          >
+                            View details
+                          </Link>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {!summary || summary.ok === false ? (
+                      <div className="rounded-lg border border-app-border bg-app-hover/40 px-4 py-3 text-sm text-app-fg-muted">
+                        {summary?.reason === 'forbidden'
+                          ? "You don't have permission to view this user's onboarding summary. HR can open the full record from the staff directory."
+                          : 'Could not load onboarding status. Try refreshing the page.'}
+                      </div>
+                    ) : (
+                      <>
+                        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wide">Status</dt>
+                            <dd className="mt-1">
+                              <StatusBadge status={summary.status} showDot size="md" />
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wide">Submitted</dt>
+                            <dd className="mt-1 text-app-fg">{formatOnboardingTimestamp(summary.submittedAt)}</dd>
+                          </div>
+                          <div className="sm:col-span-2">
+                            <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wide">Approved</dt>
+                            <dd className="mt-1 text-app-fg">{formatOnboardingTimestamp(summary.approvedAt)}</dd>
+                          </div>
+                        </dl>
+                        {(isSelfView || viewerCanManageHrOnboarding) && (
+                          <p className="text-xs text-app-fg-muted">
+                            {isSelfView ? (
+                              <>
+                                Use <strong>Open onboarding</strong> to upload documents, edit guarantors, or submit for HR review.
+                              </>
+                            ) : (
+                              <>
+                                Use <strong>View details</strong> for the full packet and HR approval workflow.
+                              </>
+                            )}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </DeferredSection>
+            ) : null}
+
             {/* Account Information */}
             <div className="card space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-app-fg">Account Information</h2>
-                {!isSuperAdminProfile && !restrictHeadView && (
-                  <button type="button" onClick={() => setActiveTab('edit')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
+                {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
+                  <Link
+                    to={`/hr/users/${user.id}/edit`}
+                    prefetch="intent"
+                    className="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                  >
                     Edit
-                  </button>
+                  </Link>
                 )}
               </div>
               <DeferredSection resolve={pendingEmailChange} skeleton="inline">
@@ -793,6 +977,50 @@ export function UserDetailPage({
                 )}
               </DeferredSection>
             )}
+
+            {/* Permissions preview — effective capability list (role template ∪ stamped deltas).
+                The "Edit permissions" button opens Settings (sparse matrix / `edit_matrix`). */}
+            {!isSuperAdminProfile && (
+              <div className="card space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-app-fg">Permissions</h2>
+                    <p className="text-xs text-app-fg-muted mt-0.5">
+                      {isSelfView
+                        ? 'Capabilities from your role template and any changes stamped on your account.'
+                        : 'Read-only preview of effective permissions (template baseline plus account overrides).'}
+                    </p>
+                  </div>
+                  {!restrictHeadView && !isSelfView && (
+                    <Link
+                      to={`/hr/users/${user.id}/edit`}
+                      prefetch="intent"
+                      className="text-xs text-brand-500 hover:text-brand-600 font-medium shrink-0"
+                    >
+                      Edit permissions
+                    </Link>
+                  )}
+                </div>
+                {permissionsPreviewLoading ? (
+                  <div className="space-y-2 py-2">
+                    <div className="h-3 w-32 rounded bg-app-hover animate-pulse" />
+                    <div className="flex flex-wrap gap-1.5">
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="h-6 w-24 rounded bg-app-hover animate-pulse" />
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <PermissionsPreview
+                    permissions={resolvedPermissionCatalog}
+                    templateCodes={stampPreviewTemplateCodes}
+                    overrides={permissionOverridesLoaded}
+                    effectiveCodes={stampPreviewEffectiveCodes}
+                    catalogRequestFailed={permissionCatalogRequestFailed}
+                  />
+                )}
+              </div>
+            )}
           </div>
 
           {/* Right Column — Quick Stats */}
@@ -871,8 +1099,8 @@ export function UserDetailPage({
                   </div>
                   {entries.length > 0 ? (
                     <div className="space-y-2">
-                      {entries.slice(0, 5).map((entry) => (
-                        <div key={entry.id} className="flex items-start gap-2 text-xs">
+                      {entries.slice(0, 5).map((entry, index) => (
+                        <div key={auditActivityRowKey(entry, index)} className="flex items-start gap-2 text-xs">
                           <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
                           <div className="min-w-0 flex-1">
                             <p className="text-app-fg truncate">
@@ -987,58 +1215,15 @@ export function UserDetailPage({
                   <span className="text-app-fg-muted font-normal ml-2">({data.total})</span>
                 </h2>
               </div>
-              {data.orders.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr>
-                        <th className="table-header">Reference</th>
-                        <th className="table-header">Customer</th>
-                        <th className="table-header">Status</th>
-                        <th className="table-header text-right">Amount</th>
-                        <th className="table-header">Date</th>
-                        <th className="table-header text-center">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.orders.map((order) => (
-                        <tr key={order.id} className="table-row">
-                          <td className="table-cell">
-                            <Link to={`/admin/orders/${order.id}`} prefetch="intent" className="text-brand-500 hover:text-brand-600 font-medium text-sm">
-                              {order.referenceNumber || order.id.slice(0, 8)}
-                            </Link>
-                          </td>
-                          <td className="table-cell text-sm text-app-fg-muted">{order.customerName || '—'}</td>
-                          <td className="table-cell">
-                            <OrderStatusBadge status={order.status} />
-                          </td>
-                          <td className="table-cell text-right text-sm font-medium text-app-fg">
-                            {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
-                          </td>
-                          <td className="table-cell text-sm text-app-fg-muted">
-                            {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                          </td>
-                          <td className="table-cell text-center">
-                            <Link
-                              to={`/admin/orders/${order.id}`}
-                              prefetch="intent"
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              </svg>
-                              View
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="px-4 py-12 text-center text-app-fg-muted">No orders found for this user</div>
-              )}
+              <CompactTable<UserOrderSummary>
+                caption="User orders"
+                columns={userOrderColumns}
+                rows={data.orders}
+                rowKey={(order) => order.id}
+                withCard={false}
+                className="min-w-[720px]"
+                emptyTitle="No orders found for this user"
+              />
             </div>
           )}
         </DeferredSection>
@@ -1054,42 +1239,15 @@ export function UserDetailPage({
                 <div className="px-4 py-3 border-b border-app-border">
                   <h2 className="text-sm font-semibold text-app-fg">Payout History</h2>
                 </div>
-                {payoutList.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr>
-                          <th className="table-header">Period</th>
-                          <th className="table-header text-right">Gross</th>
-                          <th className="table-header text-right">Deductions</th>
-                          <th className="table-header text-right">Net</th>
-                          <th className="table-header">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {payoutList.map((p) => (
-                          <tr key={p.id} className="table-row">
-                            <td className="table-cell text-sm">
-                              {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                              {' — '}
-                              {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </td>
-                            <td className="table-cell text-right text-sm text-app-fg">{formatNaira(Number(p.grossAmount))}</td>
-                            <td className="table-cell text-right text-sm text-danger-600 dark:text-danger-400">
-                              {Number(p.deductions) > 0 ? formatNaira(-Number(p.deductions)) : '—'}
-                            </td>
-                            <td className="table-cell text-right text-sm font-semibold text-app-fg">{formatNaira(Number(p.netAmount))}</td>
-                            <td className="table-cell">
-                              <span className={p.status === 'PAID' ? 'badge-success' : p.status === 'PENDING' ? 'badge-warning' : 'badge'}>{p.status}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="px-4 py-12 text-center text-app-fg-muted">No payout records found</div>
-                )}
+                <CompactTable<UserPayoutRecord>
+                  caption="Payout history"
+                  columns={payoutColumns}
+                  rows={payoutList}
+                  rowKey={(p) => p.id}
+                  withCard={false}
+                  className="min-w-[640px]"
+                  emptyTitle="No payout records found"
+                />
               </div>
             )}
           </DeferredSection>
@@ -1101,103 +1259,19 @@ export function UserDetailPage({
                 <div className="px-4 py-3 border-b border-app-border">
                   <h2 className="text-sm font-semibold text-app-fg">Adjustments & Bonuses</h2>
                 </div>
-                {adjList.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr>
-                          <th className="table-header">Type</th>
-                          <th className="table-header text-right">Amount</th>
-                          <th className="table-header">Reason</th>
-                          <th className="table-header">Status</th>
-                          <th className="table-header">Date</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {adjList.map((adj) => (
-                          <tr key={adj.id} className="table-row">
-                            <td className="table-cell">
-                              <span className={adj.type === 'BONUS' || adj.type === 'ADD_ON' ? 'badge-success' : 'badge-danger'}>
-                                {adj.type.replace(/_/g, ' ')}
-                              </span>
-                            </td>
-                            <td className={`table-cell text-right text-sm font-medium ${adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
-                              {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK' ? formatNaira(-Math.abs(Number(adj.amount))) : `+${formatNaira(Number(adj.amount))}`}
-                            </td>
-                            <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{adj.reason || '—'}</td>
-                            <td className="table-cell">
-                              <span className={adj.status === 'APPROVED' ? 'badge-success' : adj.status === 'PENDING' ? 'badge-warning' : 'badge'}>{adj.status}</span>
-                            </td>
-                            <td className="table-cell text-sm text-app-fg-muted">
-                              {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="px-4 py-12 text-center text-app-fg-muted">No adjustments found</div>
-                )}
+                <CompactTable<UserAdjustment>
+                  caption="Adjustments and bonuses"
+                  columns={adjustmentColumns}
+                  rows={adjList}
+                  rowKey={(adj) => adj.id}
+                  withCard={false}
+                  className="min-w-[720px]"
+                  emptyTitle="No adjustments found"
+                />
               </div>
             )}
           </DeferredSection>
         </div>
-      )}
-
-      {/* ─── Stock Tab ──────────────────────────────────── */}
-      {activeTab === 'stock' && stockMovements && (
-        <DeferredSection resolve={stockMovements} skeleton="table">
-          {(data) => (
-            <div className="card p-0">
-              <div className="px-4 py-3 border-b border-app-border">
-                <h2 className="text-sm font-semibold text-app-fg">
-                  Stock Activity
-                  <span className="text-app-fg-muted font-normal ml-2">({data.total})</span>
-                </h2>
-                <p className="text-xs text-app-fg-muted mt-0.5">
-                  Intakes, transfers, adjustments, and reconciliations performed by this user
-                </p>
-              </div>
-              {data.movements.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr>
-                        <th className="table-header">Type</th>
-                        <th className="table-header text-right">Qty</th>
-                        <th className="table-header">From → To</th>
-                        <th className="table-header">Reason</th>
-                        <th className="table-header">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.movements.map((m) => (
-                        <tr key={m.id} className="table-row">
-                          <td className="table-cell">
-                            <span className="badge">{MOVEMENT_TYPE_LABELS[m.movementType] ?? m.movementType}</span>
-                          </td>
-                          <td className="table-cell text-right text-sm font-medium">{m.quantity > 0 ? `+${m.quantity}` : m.quantity}</td>
-                          <td className="table-cell text-xs text-app-fg-muted">
-                            {m.fromLocationId ? m.fromLocationId.slice(0, 8) : '—'}
-                            {' → '}
-                            {m.toLocationId ? m.toLocationId.slice(0, 8) : '—'}
-                          </td>
-                          <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{m.reason ?? '—'}</td>
-                          <td className="table-cell text-sm text-app-fg-muted">
-                            {new Date(m.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="px-4 py-12 text-center text-app-fg-muted">No stock movements found</div>
-              )}
-            </div>
-          )}
-        </DeferredSection>
       )}
 
       {/* ─── Finance Activity Tab ─────────────────────────── */}
@@ -1214,42 +1288,15 @@ export function UserDetailPage({
                   Approval requests processed by this Finance Officer
                 </p>
               </div>
-              {data.approvals.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr>
-                        <th className="table-header">Type</th>
-                        <th className="table-header text-right">Amount</th>
-                        <th className="table-header">Description</th>
-                        <th className="table-header">Status</th>
-                        <th className="table-header">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.approvals.map((a) => (
-                        <tr key={a.id} className="table-row">
-                          <td className="table-cell">
-                            <span className="badge">{a.type.replace(/_/g, ' ')}</span>
-                          </td>
-                          <td className="table-cell text-right text-sm font-medium">{formatNaira(Number(a.amount))}</td>
-                          <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{a.description}</td>
-                          <td className="table-cell">
-                            <span className={a.status === 'APPROVED' ? 'badge-success' : a.status === 'REJECTED' ? 'badge-danger' : 'badge'}>{a.status}</span>
-                          </td>
-                          <td className="table-cell text-sm text-app-fg-muted">
-                            {a.approvedAt
-                              ? new Date(a.approvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                              : new Date(a.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="px-4 py-12 text-center text-app-fg-muted">No approvals processed yet</div>
-              )}
+              <CompactTable<UserApprovalRecord>
+                caption="Approvals processed"
+                columns={financeApprovalColumns}
+                rows={data.approvals}
+                rowKey={(a) => a.id}
+                withCard={false}
+                className="min-w-[720px]"
+                emptyTitle="No approvals processed yet"
+              />
             </div>
           )}
         </DeferredSection>
@@ -1262,368 +1309,6 @@ export function UserDetailPage({
         </DeferredSection>
       )}
 
-      {/* ─── Settings / Edit Tab ─────────────────────────── */}
-      {activeTab === 'edit' && (
-        <Form
-          ref={editFormRef}
-          method="post"
-          data-branch-scoped-action="true"
-          className="space-y-6"
-          onSubmit={(e) => {
-            if (pendingConflict) {
-              e.preventDefault();
-              setConflictModalOpen(true);
-              return;
-            }
-            if (!allowSaveSubmitRef.current) {
-              e.preventDefault();
-              setShowSaveConfirm(true);
-              return;
-            }
-            allowSaveSubmitRef.current = false;
-          }}
-        >
-          <input type="hidden" name="intent" value="update" />
-          <input type="hidden" name="branchIds" value={JSON.stringify(selectedBranchIdsEdit)} />
-          <input type="hidden" name="primaryBranchId" value={selectedPrimaryBranchId} />
-          {selectedTemplateId ? <input type="hidden" name="roleTemplateId" value={selectedTemplateId} /> : null}
-          <input type="hidden" name="permissionOverrides" value={JSON.stringify(permissionOverridesEdit)} />
-          {showProductAssignment && selectedProductIds.length > 0 && (
-            <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
-          )}
-          {showLogisticsLocation && !canEditLimited ? (
-            <input type="hidden" name="logisticsLocationId" value={logisticsLocationEdit} />
-          ) : null}
-
-          {canEditLimited && (
-            <InlineNotification
-              variant="info"
-              message={
-                user.role === 'CS_AGENT'
-                  ? 'As Head of CS you can change this agent’s order capacity and assigned products. For role changes, account status, or password resets, contact an administrator.'
-                  : 'As Head of Marketing you can change this buyer’s assigned products. For role changes, account status, or password resets, contact an administrator.'
-              }
-            />
-          )}
-
-          {/* Account Details — admin-only; hidden for team-lead scoped edits */}
-          {!canEditLimited && (
-          <div className="card space-y-4">
-            <h2 className="text-base font-semibold text-app-fg">Account Details</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2">
-                <FormSelect
-                  id="role"
-                  name="role"
-                  label="Role"
-                  value={selectedRole}
-                  onChange={(e) => setSelectedRole(e.target.value)}
-                  options={ROLES.map((role) => ({ value: role.value, label: role.label }))}
-                />
-                {HEAD_ROLES.includes(selectedRole) &&
-                  selectedRole !== user.role &&
-                  activeHeads &&
-                  (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole) || !!user.primaryBranchId) && (
-                  <DeferredSection resolve={activeHeads} skeleton="inline">
-                    {(heads: ActiveHeadUser[]) => {
-                      const conflict = heads.find((h) => {
-                        if (h.role !== selectedRole || h.id === user.id) return false;
-                        if (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)) return true;
-                        return h.primaryBranchId === user.primaryBranchId;
-                      });
-                      if (!conflict) return null;
-                      const scopeLabel = ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
-                        ? 'The organization'
-                        : null;
-                      return (
-                        <DeferredSection resolve={branchesList ?? Promise.resolve([])} skeleton="inline">
-                          {(branches: Array<{ id: string; name: string }>) => {
-                            const branchName =
-                              scopeLabel ??
-                              branches.find((b) => b.id === user.primaryBranchId)?.name ??
-                              'This branch';
-                            return (
-                              <div className="mt-2">
-                                <InlineNotification
-                                  variant="warning"
-                                  message={`${branchName} already has an active ${formatRole(selectedRole)} (${conflict.name}). Saving this change will be rejected — deactivate them first.`}
-                                />
-                              </div>
-                            );
-                          }}
-                        </DeferredSection>
-                      );
-                    }}
-                  </DeferredSection>
-                )}
-                {resolvedRoleTemplates && resolvedRoleTemplates.length > 0 && (
-                  <div className="mt-3">
-                    <SearchableSelect
-                      id="roleTemplateIdUi"
-                      label="Permission template"
-                      placeholder="Select a template"
-                      searchPlaceholder="Search templates..."
-                      value={selectedTemplateId}
-                      onChange={setSelectedTemplateId}
-                      options={resolvedRoleTemplates.map((t) => ({
-                        value: t.id,
-                        label: `${t.name} (${t.kind})`,
-                        description: t.key,
-                      }))}
-                    />
-                  </div>
-                )}
-              </div>
-              <div>
-                <TextInput id="name" name="name" type="text" label="Full Name" defaultValue={user.name} />
-              </div>
-              <div>
-                <TextInput id="email" name="email" type="email" label="Email Address" defaultValue={user.email} />
-                <p className="text-xs text-warning-600 dark:text-warning-400 mt-1">Email changes require SuperAdmin approval before taking effect.</p>
-              </div>
-              <div className="sm:col-span-2 space-y-3">
-                <label className="block text-sm font-medium text-app-fg-muted">Branch Memberships</label>
-                <DeferredSection resolve={branchesList ?? Promise.resolve([])} skeleton="inline">
-                  {(branches: Array<{ id: string; name: string; code: string; status: string }>) => (
-                    <>
-                      <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
-                        {branches
-                          .filter((branch) => branch.status === 'ACTIVE')
-                          .map((branch) => (
-                            <label
-                              key={branch.id}
-                              className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
-                            >
-                              <Checkbox
-                                checked={selectedBranchIdsEdit.includes(branch.id)}
-                                onChange={() => toggleBranchEdit(branch.id)}
-                              />
-                              <span className="text-sm text-app-fg">{branch.name}</span>
-                              <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
-                            </label>
-                          ))}
-                      </div>
-                      <SearchableSelect
-                        id="primaryBranchId"
-                        label="Primary Branch"
-                        required
-                        placeholder="Select primary branch"
-                        searchPlaceholder="Search selected branches..."
-                        value={selectedPrimaryBranchId}
-                        onChange={setSelectedPrimaryBranchId}
-                        options={branches
-                          .filter((branch) => selectedBranchIdsEdit.includes(branch.id))
-                          .map((branch) => ({
-                            value: branch.id,
-                            label: branch.name,
-                            description: branch.code,
-                          }))}
-                      />
-                    </>
-                  )}
-                </DeferredSection>
-              </div>
-              <div>
-                {user.status === 'DEACTIVATED' ? (
-                  <>
-                    <p className="text-sm font-medium text-app-fg-muted mb-1.5">Status</p>
-                    <p className="text-sm text-app-fg-muted">Deactivated accounts cannot be reactivated. Re-invite to create a new account.</p>
-                  </>
-                ) : (
-                  <RadioGroup
-                    name="status"
-                    label="Status"
-                    layout="horizontal"
-                    defaultValue={user.status}
-                    options={(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED'] as const).map((s) => ({
-                      value: s,
-                      label: s.charAt(0) + s.slice(1).toLowerCase(),
-                    }))}
-                  />
-                )}
-              </div>
-              <div>
-                <TextInput
-                  id="phone-local"
-                  type="tel"
-                  inputMode="numeric"
-                  autoComplete="tel-national"
-                  label="Phone"
-                  placeholder="8031234567"
-                  value={phoneLocalEdit}
-                  onChange={(e) => {
-                    let digits = e.target.value.replace(/\D/g, '');
-                    if (digits.startsWith('234')) digits = digits.slice(3);
-                    if (digits.startsWith('0')) digits = digits.slice(1);
-                    setPhoneLocalEdit(digits.slice(0, 10));
-                  }}
-                  leftAddon="+234"
-                  error={phoneEditError}
-                  maxLength={10}
-                />
-                <input
-                  type="hidden"
-                  name="phone"
-                  value={phoneEditIsComplete ? `+234${phoneLocalEdit}` : ''}
-                />
-                <p className="text-xs text-app-fg-muted mt-1">Current: {user.phone ?? 'Not set'}. Leave blank to keep unchanged.</p>
-              </div>
-            </div>
-          </div>
-          )}
-
-          {!canEditLimited && resolvedPermissionCatalog.length > 0 && (
-            <PermissionMatrix
-              permissions={resolvedPermissionCatalog}
-              templateCodes={selectedTemplateId ? (resolvedTemplatePermissionsById[selectedTemplateId] ?? []) : []}
-              overrides={permissionOverridesEdit}
-              onOverridesChange={setPermissionOverridesEdit}
-            />
-          )}
-
-          {/* Finance hat — org-wide singleton. Admin-only; hidden for team-lead edits. */}
-          {!canEditLimited && selectedRole !== 'FINANCE_OFFICER' && (
-            <div className="card space-y-3">
-              <h2 className="text-base font-semibold text-app-fg">Finance hat</h2>
-              <p className="text-sm text-app-fg-muted">
-                Deputize this user with Finance Officer powers (column-level cost visibility, approvals, remittance) <strong>in addition to</strong> their primary role. Only one user can hold the hat at any time.
-              </p>
-              <input type="hidden" name="isFinanceOfficer" value={assignFinanceHat ? 'true' : 'false'} />
-              <label className="flex items-start gap-2 cursor-pointer">
-                <Checkbox
-                  checked={assignFinanceHat}
-                  onChange={(e) => setAssignFinanceHat((e.target as HTMLInputElement).checked)}
-                />
-                <span className="text-sm text-app-fg">This user holds the Finance hat</span>
-              </label>
-              {assignFinanceHat && !user.isFinanceOfficer && currentFinanceOfficer && (
-                <DeferredSection resolve={currentFinanceOfficer} skeleton="inline">
-                  {(holder: FinanceHatHolder | null) => {
-                    if (!holder || holder.id === user.id) return null;
-                    return (
-                      <InlineNotification
-                        variant="warning"
-                        message={`The Finance hat is currently held by ${holder.name}. Saving will revoke it from them automatically.`}
-                      />
-                    );
-                  }}
-                </DeferredSection>
-              )}
-              {user.isFinanceOfficer && !assignFinanceHat && (
-                <InlineNotification
-                  variant="warning"
-                  message="Unchecking this revokes the Finance hat from this user. No one else will hold it until you assign it to someone else."
-                />
-              )}
-            </div>
-          )}
-
-          {/* Role Settings */}
-          {(showCapacity || showLogisticsLocation || showProductAssignment) && (
-            <div className="card space-y-4">
-              <h2 className="text-base font-semibold text-app-fg">Role Settings</h2>
-
-              {showCapacity && (
-                <div>
-                  <TextInput
-                    id="capacity"
-                    name="capacity"
-                    type="number"
-                    label="Order Capacity"
-                    min={1}
-                    max={100}
-                    defaultValue={String(user.capacity)}
-                    wrapperClassName="w-full sm:w-32"
-                  />
-                </div>
-              )}
-
-              {showLogisticsLocation && !canEditLimited && (
-                <DeferredSection resolve={locations} skeleton="inline">
-                  {(locs) => (
-                    <div>
-                      <SearchableSelect
-                        id="logisticsLocationId"
-                        label="Logistics Location"
-                        value={logisticsLocationEdit}
-                        onChange={setLogisticsLocationEdit}
-                        placeholder="Select location"
-                        searchPlaceholder="Search locations..."
-                        options={locs.map((loc: UserCreateLocation) => ({
-                          value: loc.id,
-                          label: loc.name,
-                          description: loc.address,
-                        }))}
-                      />
-                      {locs.length === 0 && (
-                        <InlineNotification
-                          variant="warning"
-                          message="No logistics locations found. Create one first."
-                          action={{ label: 'Go to Logistics', href: '/admin/logistics' }}
-                          className="mt-2"
-                        />
-                      )}
-                    </div>
-                  )}
-                </DeferredSection>
-              )}
-
-              {showProductAssignment && (
-                <DeferredSection resolve={products} skeleton="table">
-                  {(prods) => (
-                    <div>
-                      <label className="block text-sm font-medium text-app-fg-muted mb-1.5">Assign Products</label>
-                      <p className="text-xs text-app-fg-muted mb-2">Leave blank to assign all products.</p>
-                      {prods.length > 0 ? (
-                        <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
-                          {prods.map((product: UserCreateProduct) => (
-                            <label key={product.id} className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0">
-                              <Checkbox
-                                checked={selectedProductIds.includes(product.id)}
-                                onChange={() => toggleProduct(product.id)}
-                              />
-                              <span className="text-sm text-app-fg">{product.name}</span>
-                              <span className="text-xs text-app-fg-muted ml-auto">{product.category ?? ''}</span>
-                            </label>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-app-fg-muted">No products found.</p>
-                      )}
-                      {selectedProductIds.length > 0 && (
-                        <div className="mt-3">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <Checkbox
-                              name="restrictProductAccess"
-                              value="true"
-                              defaultChecked={user.restrictProductAccess}
-                            />
-                            <span className="text-sm text-app-fg-muted">Restrict access to only assigned products</span>
-                          </label>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </DeferredSection>
-              )}
-            </div>
-          )}
-
-          <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
-            <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={() => setActiveTab('overview')}>Cancel</Button>
-            <Button
-              type="submit"
-              variant="primary"
-              className="w-full sm:w-auto"
-              loading={isUpdating}
-              loadingText="Saving..."
-              disabled={selectedBranchIdsEdit.length === 0 || !selectedPrimaryBranchId}
-            >
-              Save Changes
-            </Button>
-          </div>
-        </Form>
-      )}
 
       {/* ─── Reset Password Modal ────────────────────────── */}
       {showResetPassword && (
@@ -1762,75 +1447,6 @@ export function UserDetailPage({
         </Modal>
       )}
 
-      <ConfirmActionModal
-        open={showSaveConfirm}
-        onClose={() => setShowSaveConfirm(false)}
-        title="Save changes to this user?"
-        description={
-          <>
-            Updates to <strong>{user.name}</strong> apply immediately for anyone with access to this profile.
-            Role, status, and account changes are recorded in the audit trail.
-          </>
-        }
-        confirmLabel="Save changes"
-        cancelLabel="Keep editing"
-        variant="warning"
-        loading={isUpdating}
-        onConfirm={() => {
-          setShowSaveConfirm(false);
-          allowSaveSubmitRef.current = true;
-          editFormRef.current?.requestSubmit();
-        }}
-      />
-
-      {conflictModalOpen && pendingConflict && (
-        <Modal
-          open
-          onClose={() => setConflictModalOpen(false)}
-          maxWidth="max-w-md"
-          contentClassName="p-6"
-        >
-          <h3 className="text-lg font-semibold text-app-fg mb-2">
-            {ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
-              ? 'Role already taken (organization-wide)'
-              : 'Role already taken in this branch'}
-          </h3>
-          <p className="text-sm text-app-fg-muted mb-3">
-            {ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole) ? (
-              <>
-                Only one active <strong>{formatRole(selectedRole)}</strong> is allowed for the whole organization.{' '}
-                <strong>{pendingConflict.name}</strong> already holds that role.
-              </>
-            ) : (
-              <>
-                Only one active <strong>{formatRole(selectedRole)}</strong> is allowed per branch.{' '}
-                <strong>{pendingConflictBranchName}</strong> already has{' '}
-                <strong>{pendingConflict.name}</strong> in that role.
-              </>
-            )}
-          </p>
-          <p className="text-sm text-app-fg-muted mb-4">
-            To change {user.name}&apos;s role to {formatRole(selectedRole)}, first change{' '}
-            {pendingConflict.name}&apos;s role (or deactivate them) from their profile.
-          </p>
-          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setConflictModalOpen(false)}
-            >
-              Back
-            </Button>
-            <Link
-              to={`${usersBasePath}/${pendingConflict.id}`}
-              className="btn-primary"
-              onClick={() => setConflictModalOpen(false)}
-            >
-              Go to {pendingConflict.name}
-            </Link>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
@@ -1946,6 +1562,14 @@ function ClockIcon() {
   return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 }
 
+/**
+ * React list key for global-audit rows mapped into {@link UserAuditEntry}.
+ * `id` is the business record id and repeats across temporal `_history` versions; pair with
+ * `createdAt` (valid_from) and a stable index in the rendered list.
+ */
+function auditActivityRowKey(entry: UserAuditEntry, position: number): string {
+  return `${entry.tableName}-${entry.id}-${entry.createdAt}-${position}`;
+}
 
 /**
  * Activity / audit log tab — paginated 10/page client-side. Loader returns up to 50 entries
@@ -1969,8 +1593,8 @@ function ActivityTabContent({ entries }: { entries: UserAuditEntry[] }) {
       {entries.length > 0 ? (
         <>
           <div className="space-y-2">
-            {paged.map((entry) => (
-              <div key={entry.id} className="flex items-start gap-2 text-xs">
+            {paged.map((entry, pageIndex) => (
+              <div key={auditActivityRowKey(entry, startIdx + pageIndex)} className="flex items-start gap-2 text-xs">
                 <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="text-app-fg truncate">{formatActivityDescription(entry)}</p>

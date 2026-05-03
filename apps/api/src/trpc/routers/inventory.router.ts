@@ -52,10 +52,18 @@ export const inventoryRouter = router({
     .input(z.object({
       productId: z.string().uuid(),
       locationId: z.string().uuid(),
-      limit: z.number().int().min(1).max(500).default(100),
+      page: z.number().int().min(1).default(1),
+      limit: z.number().int().min(1).max(200).default(20),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
     }))
     .query(async ({ input }) => {
-      return getInventoryService().levelDetail(input.productId, input.locationId, input.limit);
+      return getInventoryService().levelDetail(input.productId, input.locationId, {
+        page: input.page,
+        limit: input.limit,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      });
     }),
 
   /**
@@ -65,10 +73,18 @@ export const inventoryRouter = router({
   getLevelById: authedProcedure
     .input(z.object({
       id: z.string().uuid(),
-      limit: z.number().int().min(1).max(500).default(200),
+      page: z.number().int().min(1).default(1),
+      limit: z.number().int().min(1).max(200).default(20),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
     }))
     .query(async ({ input }) => {
-      return getInventoryService().getLevelById(input.id, input.limit);
+      return getInventoryService().getLevelById(input.id, {
+        page: input.page,
+        limit: input.limit,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      });
     }),
 
   /**

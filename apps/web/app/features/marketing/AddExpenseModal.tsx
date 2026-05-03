@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
@@ -11,6 +11,7 @@ import { FileUpload, type FileUploadUploadState } from '~/components/ui/file-upl
 import { NairaPrice } from '~/components/ui/naira-price';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import type { Campaign, Product, AdPlatform } from './types';
 
 interface ExpenseLine {
@@ -82,16 +83,15 @@ export function AddExpenseModal({
     }
   }, [open]);
 
-  // Close + toast on successful submit. Failed submits stay open and surface
-  // the error so the user can fix it without losing what they typed (this is
-  // the "submit-driven modal" pattern used elsewhere — see MonthlyPayrolls).
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data?.success) {
-      toast.success(`Logged ${lines.length} expense line${lines.length === 1 ? '' : 's'}`);
-      onSuccess?.();
-      onClose();
-    }
-  }, [fetcher.state, fetcher.data, lines.length, onClose, onSuccess, toast]);
+  // Close + toast on successful submit (edge-trigger via shared hook). Failed
+  // submits stay open with their error inline so the user can fix without
+  // losing what they typed.
+  const handleAddExpenseSuccess = useCallback(() => {
+    toast.success(`Logged ${lines.length} expense line${lines.length === 1 ? '' : 's'}`);
+    onSuccess?.();
+    onClose();
+  }, [lines.length, onClose, onSuccess, toast]);
+  useCloseOnFetcherSuccess(fetcher, handleAddExpenseSuccess);
 
   const productOptions = useMemo(
     () => products.map((p) => ({ value: p.id, label: p.name })),

@@ -4,6 +4,21 @@
 -- need to be created here before any later migration references them.
 -- ============================================
 
+-- 0000 created stock_movements + call_logs without temporal columns; stamp_actor + the
+-- temporal index below require valid_from/valid_to/modified_by (same as other audited tables).
+ALTER TABLE "stock_movements" ADD COLUMN IF NOT EXISTS "modified_by" text;
+ALTER TABLE "stock_movements" ADD COLUMN IF NOT EXISTS "valid_from" timestamptz DEFAULT now() NOT NULL;
+ALTER TABLE "stock_movements" ADD COLUMN IF NOT EXISTS "valid_to" timestamptz;
+
+ALTER TABLE "call_logs" ADD COLUMN IF NOT EXISTS "modified_by" text;
+ALTER TABLE "call_logs" ADD COLUMN IF NOT EXISTS "valid_from" timestamptz DEFAULT now() NOT NULL;
+ALTER TABLE "call_logs" ADD COLUMN IF NOT EXISTS "valid_to" timestamptz;
+
+-- ad_spend_logs: same gap as above (0000 has no temporal / modified_by columns).
+ALTER TABLE "ad_spend_logs" ADD COLUMN IF NOT EXISTS "modified_by" text;
+ALTER TABLE "ad_spend_logs" ADD COLUMN IF NOT EXISTS "valid_from" timestamptz DEFAULT now() NOT NULL;
+ALTER TABLE "ad_spend_logs" ADD COLUMN IF NOT EXISTS "valid_to" timestamptz;
+
 -- Core audit functions (idempotent — CREATE OR REPLACE)
 CREATE OR REPLACE FUNCTION yannis_stamp_actor()
 RETURNS TRIGGER AS $$
@@ -93,11 +108,21 @@ BEGIN
       );
     END LOOP;
 
-    -- Add temporal index
-    EXECUTE format(
-      'CREATE INDEX IF NOT EXISTS %I ON %I (id, valid_from, valid_to)',
-      _t || '_history_temporal_idx', _t || '_history'
-    );
+    -- Temporal index (only if LIKE copy included valid_from/valid_to — 0000 is not uniform)
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns c
+      WHERE c.table_schema = 'public' AND c.table_name = _t || '_history' AND c.column_name = 'valid_from'
+    ) AND EXISTS (
+      SELECT 1 FROM information_schema.columns c
+      WHERE c.table_schema = 'public' AND c.table_name = _t || '_history' AND c.column_name = 'valid_to'
+    ) THEN
+      EXECUTE format(
+        'CREATE INDEX IF NOT EXISTS %I ON %I (id, valid_from, valid_to)',
+        _t || '_history_temporal_idx', _t || '_history'
+      );
+    ELSE
+      RAISE NOTICE 'Skipping temporal index for % (history copy lacks valid_from/valid_to)', _t;
+    END IF;
 
     -- stamp_actor trigger on main table
     EXECUTE format(

@@ -5,7 +5,11 @@ import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/l
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { MarketingFormCreatePage } from '~/features/campaigns/MarketingFormCreatePage';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
-import { parseStandardFieldsPayload, toLegacyStandardFieldFlags } from '~/features/campaigns/standard-fields';
+import {
+  parseAdditionalFieldSelectOptionsPayload,
+  parseStandardFieldsPayload,
+  toLegacyStandardFieldFlags,
+} from '~/features/campaigns/standard-fields';
 import type { Product } from '~/features/campaigns/types';
 
 export const meta: MetaFunction = () => [{ title: 'New form — Yannis EOSE' }];
@@ -67,6 +71,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const legacyStandardFlags = toLegacyStandardFieldFlags(standardFields);
   const hasStandardFields = standardFields.length > 0;
 
+  const parsedSelectOpts = parseAdditionalFieldSelectOptionsPayload(
+    formData.get('additionalFieldSelectOptions')?.toString(),
+  );
+  if (!parsedSelectOpts.ok) {
+    return json({ error: parsedSelectOpts.error }, { status: 400 });
+  }
+
   const parsedFields = parseCustomFieldsPayload(formData.get('customFields')?.toString());
   if (!parsedFields.ok) {
     return json({ error: parsedFields.error }, { status: 400 });
@@ -92,6 +103,9 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(showProductImages === false ? { showProductImages: false } : {}),
           standardFields,
           ...legacyStandardFlags,
+          deliveryStateOptions: parsedSelectOpts.options.deliveryStateOptions,
+          preferredDeliveryDateOptions: parsedSelectOpts.options.preferredDeliveryDateOptions,
+          genderOptions: parsedSelectOpts.options.genderOptions,
           ...(hasCustomFields ? { customFields } : {}),
         }
       : undefined;

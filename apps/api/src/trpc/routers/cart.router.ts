@@ -57,11 +57,31 @@ export const cartRouter = router({
 
   /**
    * Live activity feed — PENDING/ABANDONED/CONVERTED carts in last 6h with linked order status.
+   *
+   * Accepts `cart.read` (CS-side) OR `marketing.read` (Marketing Overview live feed). The
+   * activity feed is the same data either way — what differs is the scope filter the caller
+   * applies. CS sees org-wide; Media Buyers / branch-scoped marketing viewers pass
+   * `mediaBuyerId` / `branchId` so the service narrows the rows. Without the OR-grant, a
+   * Media Buyer would need a brand-new `cart.read` grant just for this feed, which would
+   * over-expose other procedures gated on `cart.read`. Keep this OR — it's the least-
+   * privilege answer that preserves both sides.
    */
-  listActivity: permissionProcedure('cart.read')
-    .input(z.object({ limit: z.number().int().min(1).max(100).default(60) }).optional())
+  listActivity: permissionProcedure('cart.read', 'marketing.read')
+    .input(
+      z
+        .object({
+          limit: z.number().int().min(1).max(100).default(60),
+          mediaBuyerId: z.string().uuid().optional(),
+          branchId: z.string().uuid().optional(),
+        })
+        .optional(),
+    )
     .query(async ({ input }) => {
-      return getCartService().listActivity(input?.limit ?? 60);
+      return getCartService().listActivity({
+        limit: input?.limit ?? 60,
+        mediaBuyerId: input?.mediaBuyerId,
+        branchId: input?.branchId,
+      });
     }),
 
   /**

@@ -69,11 +69,23 @@ const SIZE_CLASSES = {
   lg: 'text-sm px-2.5 py-1 gap-1.5',
 } as const;
 
+/** Typography-only sizes when `variant="text"` (no pill padding). */
+const TEXT_VARIANT_SIZE_CLASSES = {
+  sm: 'text-2xs gap-1',
+  md: 'text-xs gap-1.5',
+  lg: 'text-sm gap-1.5',
+} as const;
+
 interface RoleBadgeProps {
   role: string;
   /** Override the rendered text — defaults to role with underscores → spaces. */
   label?: string;
   size?: keyof typeof SIZE_CLASSES;
+  /**
+   * `chip` — filled pill with border (default).
+   * `text` — role hue as foreground color only (no background or border).
+   */
+  variant?: 'chip' | 'text';
   /** Show a colored dot before the label. Useful in dense tables. */
   showDot?: boolean;
   className?: string;
@@ -88,18 +100,19 @@ export function RoleBadge({
   role,
   label,
   size = 'md',
+  variant = 'chip',
   showDot = false,
   className = '',
   style,
 }: RoleBadgeProps) {
   const color = getRoleColor(role);
   const c = COLOR_CLASSES[color];
+  const chipClasses =
+    variant === 'chip'
+      ? `rounded-full font-medium border ${c.bg} ${c.text} ${c.border} ${SIZE_CLASSES[size]}`
+      : `font-medium ${c.text} ${TEXT_VARIANT_SIZE_CLASSES[size]}`;
   return (
-    <span
-      className={`inline-flex items-center rounded-full font-medium border ${c.bg} ${c.text} ${c.border} ${SIZE_CLASSES[size]} ${className}`}
-      style={style}
-      title={role}
-    >
+    <span className={`inline-flex items-center ${chipClasses} ${className}`} style={style} title={role}>
       {showDot && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.dot}`} />}
       {label ?? formatRoleLabel(role)}
     </span>

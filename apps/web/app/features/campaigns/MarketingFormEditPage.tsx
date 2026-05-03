@@ -1,24 +1,26 @@
+import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from '@yannis/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useFetcherToast } from '~/components/ui/toast';
-import type { Campaign, CustomFormField, StandardFieldConfig } from './types';
+import type { Campaign, CustomFormField, Product, StandardFieldConfig } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
 import { sortAndReindexCustomFields } from './custom-fields-order';
 import { FormFullPreview } from './form-full-preview';
-import { normalizeStandardFields } from './standard-fields';
+import { additionalFieldSelectOptionsFromConfig, normalizeStandardFields } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
 
 export interface MarketingFormEditPageProps {
   campaign: Campaign;
+  /** Catalog rows for `campaign.productIds` (offers drive the live preview). */
+  formProducts: Product[];
 }
-
-const DEFAULT_ACCENT = '#6366f1';
 
 const FORMS_INDEX_ACTION = '/admin/marketing/forms';
 
@@ -48,7 +50,7 @@ const ArchiveIcon = (
  * Full-page edit: basic form settings + custom fields (same shape as new form), one save.
  * Activate / deactivate / archive use the forms index action (status-only) so they apply immediately.
  */
-export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) {
+export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormEditPageProps) {
   const fetcher = useFetcher<{ error?: string }>();
   const statusFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const { revalidate } = useRevalidator();
@@ -65,29 +67,51 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
   const [fields, setFields] = useState<CustomFormField[]>(() =>
     sortAndReindexCustomFields((cfg?.customFields ?? []) as CustomFormField[]),
   );
-  const [accentColor, setAccentColor] = useState(() => cfg?.accentColor ?? DEFAULT_ACCENT);
+  const [accentColor, setAccentColor] = useState(() => cfg?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX);
   const [formHeading, setFormHeading] = useState(() => cfg?.heading ?? '');
   const [formSubtitle, setFormSubtitle] = useState(() => cfg?.subtitle ?? '');
   const [formButtonText, setFormButtonText] = useState(() => cfg?.buttonText ?? '');
   const [successCallbackUrl, setSuccessCallbackUrl] = useState(() => cfg?.successCallbackUrl ?? '');
   const [showProductImages, setShowProductImages] = useState(() => cfg?.showProductImages !== false);
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>(() => normalizeStandardFields(campaign.formConfig));
+  const [additionalSelectOptions, setAdditionalSelectOptions] = useState(() =>
+    additionalFieldSelectOptionsFromConfig(campaign.formConfig),
+  );
 
   useEffect(() => {
     const c = campaign.formConfig;
     setFields(sortAndReindexCustomFields((c?.customFields ?? []) as CustomFormField[]));
-    setAccentColor(c?.accentColor ?? DEFAULT_ACCENT);
+    setAccentColor(c?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX);
     setFormHeading(c?.heading ?? '');
     setFormSubtitle(c?.subtitle ?? '');
     setFormButtonText(c?.buttonText ?? '');
     setSuccessCallbackUrl(c?.successCallbackUrl ?? '');
     setShowProductImages(c?.showProductImages !== false);
     setStandardFields(normalizeStandardFields(c));
+    setAdditionalSelectOptions(additionalFieldSelectOptionsFromConfig(c));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset when switching form
   }, [campaign.id]);
 
   const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
   const standardFieldsJson = useMemo(() => JSON.stringify(standardFields), [standardFields]);
+  const additionalFieldSelectOptionsJson = useMemo(
+    () => JSON.stringify(additionalSelectOptions),
+    [additionalSelectOptions],
+  );
+
+  const previewOffers = useMemo(() => {
+    if (multiProduct) return [];
+    return formProducts[0]?.offers ?? [];
+  }, [multiProduct, formProducts]);
+
+  const previewProducts = useMemo(() => {
+    if (!multiProduct) return undefined;
+    return formProducts.map((p) => ({
+      id: p.id,
+      name: p.name,
+      offers: p.offers ?? [],
+    }));
+  }, [multiProduct, formProducts]);
 
   useEffect(() => {
     if (fetcher.state === 'submitting') setDismissedActionError(false);
@@ -188,6 +212,7 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
             <input type="hidden" name="id" value={campaign.id} />
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
+            <input type="hidden" name="additionalFieldSelectOptions" value={additionalFieldSelectOptionsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
 
@@ -221,7 +246,8 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
                   <TextInput
                     name="formSubtitle"
                     label="Form subtitle"
-                    placeholder="Form subtitle"
+                    hint="Optional. Leave blank to hide subtitle text on the public form."
+                    placeholder="e.g. Fill in your details below"
                     value={formSubtitle}
                     onChange={(e) => setFormSubtitle(e.target.value)}
                   />
@@ -253,12 +279,7 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
                     className="sm:col-span-2"
                   />
                   <label className="sm:col-span-2 inline-flex items-center gap-2 text-sm text-app-fg-muted cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showProductImages}
-                      onChange={(e) => setShowProductImages(e.target.checked)}
-                      className="rounded border-app-border text-brand-600"
-                    />
+                    <Checkbox checked={showProductImages} onChange={(e) => setShowProductImages(e.target.checked)} />
                     Show product images on the form
                   </label>
                 </div>
@@ -266,8 +287,13 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
             </div>
 
             <div>
-              <h2 className="text-sm font-semibold text-app-fg mb-2">Standard fields</h2>
-              <StandardFieldsEditor fields={standardFields} onFieldsChange={setStandardFields} />
+              <h2 className="text-sm font-semibold text-app-fg mb-2">Additional fields</h2>
+              <StandardFieldsEditor
+                fields={standardFields}
+                onFieldsChange={setStandardFields}
+                selectOptions={additionalSelectOptions}
+                onSelectOptionsChange={setAdditionalSelectOptions}
+              />
             </div>
 
             <div>
@@ -277,8 +303,8 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
                 onFieldsChange={setFields}
                 footnote={
                   <span>
-                    Standard field toggles are in <strong className="text-app-fg">Basic settings</strong> above. Submit once
-                    to save the form with these custom fields.
+                    Additional field toggles are in <strong className="text-app-fg">Additional fields</strong> above. Submit
+                    once to save the form with these custom fields.
                   </span>
                 }
               />
@@ -306,6 +332,9 @@ export function MarketingFormEditPage({ campaign }: MarketingFormEditPageProps) 
             standardFields={standardFields}
             successCallbackUrl={successCallbackUrl}
             customFields={fields}
+            previewOffers={previewOffers}
+            previewProducts={previewProducts}
+            additionalSelectOptions={additionalSelectOptions}
           />
         </div>
       </div>

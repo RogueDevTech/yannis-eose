@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
+import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 
 interface SearchResult {
   id: string;
@@ -63,7 +64,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
     abortRef.current = controller;
 
     try {
-      const apiUrl = window.__ENV?.API_URL || 'http://localhost:4444';
+      const apiUrl = getBrowserApiBaseUrl();
       const searchParam = encodeURIComponent(JSON.stringify({ search: q, limit: 5 }));
 
       const [ordersRes, productsRes, usersRes] = await Promise.all([

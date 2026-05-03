@@ -145,11 +145,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locations = locationsData?.locations ?? [];
 
   const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
+  const locationProviderById = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
   const riderById = new Map(ridersData.map((r) => [r.id, r]));
 
-  const enrichedOrders: Array<LogisticsOrder & { locationName: string; riderName: string }> = orders.map((o) => ({
+  const enrichedOrders: Array<LogisticsOrder & { locationName: string; locationProviderName: string | null; riderName: string }> = orders.map((o) => ({
     ...o,
     locationName: o.logisticsLocationId ? locationNameById.get(o.logisticsLocationId) ?? '—' : '—',
+    locationProviderName: o.logisticsLocationId ? locationProviderById.get(o.logisticsLocationId) ?? null : null,
     riderName: o.riderId ? riderById.get(o.riderId)?.name ?? '—' : '—',
   }));
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -7,6 +7,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
 export interface ProductOption {
   id: string;
@@ -68,16 +69,17 @@ export function CreateOfflineOrderModal({
     }
   }, [open, initialCustomerName]);
 
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data) {
-      const data = fetcher.data as { success?: boolean; orderId?: string; error?: string };
-      if (data.success && data.orderId) {
-        onSuccess?.(data.orderId);
-        onClose();
-        resetForm();
-      }
-    }
-  }, [fetcher.state, fetcher.data, onSuccess, onClose]);
+  const handleCreateOrderSuccess = useCallback(
+    (data: { success: true } & Record<string, unknown>) => {
+      const orderId = (data as { orderId?: string }).orderId;
+      if (!orderId) return;
+      onSuccess?.(orderId);
+      onClose();
+      resetForm();
+    },
+    [onSuccess, onClose],
+  );
+  useCloseOnFetcherSuccess(fetcher, handleCreateOrderSuccess);
 
   function resetForm() {
     setCustomerName('');

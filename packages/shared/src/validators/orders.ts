@@ -64,7 +64,8 @@ export const createOrderSchema = z.object({
   deliveryAddress: z.string().optional(),
   deliveryNotes: z.string().optional(),
   deliveryState: z.string().max(100).optional(),
-  customerGender: z.enum(['male', 'female']).optional(),
+  /** Edge forms may send configurable dropdown labels (see campaign formConfig.genderOptions). */
+  customerGender: z.string().max(50).optional(),
   preferredDeliveryDate: z.string().max(100).optional(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
@@ -102,7 +103,7 @@ export const createOfflineOrderSchema = z.object({
   deliveryAddress: z.string().optional(),
   deliveryNotes: z.string().optional(),
   deliveryState: z.string().max(100).optional(),
-  customerGender: z.enum(['male', 'female']).optional(),
+  customerGender: z.string().max(50).optional(),
   preferredDeliveryDate: z.string().max(100).optional(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
@@ -154,7 +155,7 @@ export const updateOrderSchema = z.object({
   deliveryAddress: z.string().optional(),
   deliveryNotes: z.string().optional(),
   deliveryState: z.string().max(100).optional(),
-  customerGender: z.enum(['male', 'female']).optional(),
+  customerGender: z.string().max(50).optional(),
   preferredDeliveryDate: z.string().max(100).optional(),
   /**
    * Form-builder responses (same shape as create). CS / supervisors / heads may correct

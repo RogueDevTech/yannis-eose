@@ -44,6 +44,34 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
     setGroupCollapsed(loadGroupState());
   }, []);
 
+  /**
+   * Longest-prefix-match across every registered nav href, computed once.
+   *
+   * Why: NavLink's default + a `path.startsWith(item.href + '/')` rule would
+   * mark BOTH `/admin/settings` and `/admin/settings/role-templates` active
+   * when the user is on the latter (Settings is a prefix of the URL). That's
+   * a UX bug — only the most specific item should light up.
+   *
+   * We resolve the active href here at the parent so every SidebarNavLink can
+   * just compare its own href to one shared answer. Falls back to undefined
+   * when nothing matches; SidebarNavLink then defers to NavLink's built-in
+   * `isActive` (used for the resource routes / non-nav paths).
+   */
+  const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
+  const resolvedActiveHref = (() => {
+    if (!activePathname) return undefined;
+    let best: string | undefined;
+    for (const href of allHrefs) {
+      // Special-case `/admin` so it doesn't swallow every admin sub-route.
+      const matches =
+        href === '/admin'
+          ? activePathname === '/admin' || activePathname === '/admin/'
+          : activePathname === href || activePathname.startsWith(href + '/');
+      if (matches && (!best || href.length > best.length)) best = href;
+    }
+    return best;
+  })();
+
   // When a role has ≤2 named groups (e.g. HR Manager → "HR"; Media Buyer → "MARKETING";
   // CS Agent → "SALES & CS"), auto-open the groups so the handful of nav items are
   // immediately visible. Users with many groups (SuperAdmin/Admin) keep the collapsed
@@ -106,6 +134,7 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
                       isExpanded={isExpanded}
                       onMobileClose={onMobileClose}
                       activePathname={activePathname}
+                      resolvedActiveHref={resolvedActiveHref}
                       badge={item.href === '/admin/notifications' && (notificationCount ?? 0) > 0 ? notificationCount : undefined}
                     />
                   ))}
@@ -130,6 +159,7 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
                       isExpanded={isExpanded}
                       onMobileClose={onMobileClose}
                       activePathname={activePathname}
+                      resolvedActiveHref={resolvedActiveHref}
                       badge={item.href === '/admin/notifications' && (notificationCount ?? 0) > 0 ? notificationCount : undefined}
                     />
                   ))}
@@ -175,6 +205,7 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
                           isExpanded={isExpanded}
                           onMobileClose={onMobileClose}
                           activePathname={activePathname}
+                          resolvedActiveHref={resolvedActiveHref}
                           badge={item.href === '/admin/notifications' && (notificationCount ?? 0) > 0 ? notificationCount : undefined}
                         />
                       ))}
@@ -230,12 +261,20 @@ function SidebarNavLink({
   isExpanded,
   onMobileClose,
   activePathname,
+  resolvedActiveHref,
   badge,
 }: {
   item: { label: string; href: string; icon: React.ReactNode };
   isExpanded: boolean;
   onMobileClose: () => void;
   activePathname?: string;
+  /**
+   * Pre-computed by the parent Sidebar via longest-prefix-match across all nav
+   * hrefs. When defined, only the item whose href equals this value should be
+   * marked active — guarantees parent + child don't both light up on deep URLs
+   * like `/admin/settings/role-templates`.
+   */
+  resolvedActiveHref?: string;
   badge?: number;
 }) {
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -244,6 +283,9 @@ function SidebarNavLink({
 
   const isActiveFromPath = (path: string): boolean => {
     if (!path) return false;
+    // Parent supplied the longest-prefix-match? Trust it — it's the only
+    // way to disambiguate nested sibling nav entries.
+    if (resolvedActiveHref !== undefined) return resolvedActiveHref === item.href;
     if (item.href === '/admin') return path === '/admin' || path === '/admin/';
     return path === item.href || path.startsWith(item.href + '/');
   };

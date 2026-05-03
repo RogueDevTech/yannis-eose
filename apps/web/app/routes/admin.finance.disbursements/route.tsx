@@ -73,6 +73,16 @@ function parseUsersList(res: { ok: boolean; data: unknown }): Array<{ id: string
   return data?.users ?? [];
 }
 
+function parseFundingRequestStatusCounts(
+  res: { ok: boolean; data: unknown },
+): { PENDING: number; APPROVED: number; REJECTED: number; ALL: number } {
+  if (!res.ok) return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+  const data = (res.data as {
+    result?: { data?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number } };
+  })?.result?.data;
+  return data ?? { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'finance.disburse');
   const cookie = getSessionCookie(request);
@@ -142,7 +152,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (receiverFilter) listFundingInput.receiverId = receiverFilter;
   if (searchFilter) listFundingInput.search = searchFilter;
 
-  const [fundingRes, balancesRes, summaryRes, fundingRequestsRes, usersListRes] = await Promise.all([
+  const [fundingRes, balancesRes, summaryRes, fundingRequestsRes, fundingRequestsCountsRes, usersListRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/marketing.listFunding?input=${encodeURIComponent(JSON.stringify(listFundingInput))}`,
       { method: 'GET', cookie },
@@ -153,6 +163,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(
         JSON.stringify({ page: requestsPage, limit: TAB_PAGE_LIMIT }),
       )}`,
+      { method: 'GET', cookie },
+    ),
+    // Status counts across all requests (any requester) so the overview strip
+    // surfaces "Pending Requests: N" with the period scope. Mirror of what the
+    // Marketing → Funding page shows for HoMs.
+    apiRequest<unknown>(
+      `/trpc/marketing.fundingRequestStatusCounts?input=${encodeURIComponent(JSON.stringify({}))}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(`/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 200 }))}`, { method: 'GET', cookie }),
@@ -194,6 +211,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     fundingRequestsResult = parseFundingRequests(retryRes);
   }
   const fundingRequests = fundingRequestsResult.records;
+  const fundingRequestStatusCounts = parseFundingRequestStatusCounts(fundingRequestsCountsRes);
   const requestersList = parseUsersList(usersListRes);
 
   // Finance can only disburse to Head of Marketing. HoM distributes to Media Buyers via Marketing → Funding.
@@ -226,6 +244,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     summary,
     fundingRequests,
     fundingRequestsTotal: requestsTotal,
+    fundingRequestStatusCounts,
     requestsPage,
     requestsTotalPages,
     requestersList,
@@ -269,13 +288,18 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'approveFundingRequest') {
     const requestId = formData.get('requestId')?.toString() ?? '';
     const receiptUrl = formData.get('receiptUrl')?.toString() ?? '';
+    const amountRaw = formData.get('amount')?.toString() ?? '';
+    const amount = Number(amountRaw);
     if (!requestId || !receiptUrl) {
       return json({ error: 'Request ID and receipt image are required' }, { status: 400 });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return json({ error: 'Valid approved amount is required' }, { status: 400 });
     }
     const res = await apiRequest<unknown>('/trpc/marketing.approveFundingRequest', {
       method: 'POST',
       cookie,
-      body: { requestId, receiptUrl },
+      body: { requestId, receiptUrl, amount },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to approve funding request') }, { status: safeStatus(res.status) });

@@ -51,14 +51,6 @@ export const users = pgTable('users', {
   /** Payout beneficiary account number (finance-only visibility). */
   payoutAccountNumber: text('payout_account_number'),
   /**
-   * "Finance hat" flag — lets a user carry Finance Officer powers on top of their primary role.
-   * At most one user may have this set to true at a time (enforced by partial unique index
-   * `users_only_one_finance_officer` and by a service-level check that emits a friendly error).
-   * Set independently of `role`; someone with `role = 'FINANCE_OFFICER'` also satisfies finance checks
-   * so the hat is only meaningful for users with a non-finance primary role.
-   */
-  isFinanceOfficer: boolean('is_finance_officer').default(false).notNull(),
-  /**
    * Per-user notification opt-outs. Map of notification-type → enabled.
    * Empty / missing key = enabled (default). `false` = skip this type entirely
    * (no in-app row, no socket emit, no push, no email) for this user.

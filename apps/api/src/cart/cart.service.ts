@@ -345,8 +345,16 @@ export class CartService {
    *   1. Cart-originated activity — carts in last 6h + their linked order status
    *   2. Direct orders (no cart) created in last 6h
    * Deduplicates by phone hash across both sources (latest activity wins).
+   *
+   * Optional filters:
+   *   - mediaBuyerId: only include carts/orders owned by this MB (carts joined via
+   *     campaigns.media_buyer_id; orders via orders.media_buyer_id directly).
+   *   - branchId: only include carts/orders for this branch (carts joined via
+   *     campaigns.branch_id; orders via orders.branch_id).
+   * When no filter is passed (default), behavior is unchanged — caller has org-wide
+   * visibility (CS dashboard / admin Marketing Overview for HoM/admin/global).
    */
-  async listActivity(limit = 60): Promise<
+  async listActivity(opts: { limit?: number; mediaBuyerId?: string; branchId?: string } = {}): Promise<
     Array<{
       id: string;
       customerName: string;
@@ -360,6 +368,9 @@ export class CartService {
       updatedAt: Date;
     }>
   > {
+    const limit = opts.limit ?? 60;
+    const mediaBuyerId = opts.mediaBuyerId ?? null;
+    const branchId = opts.branchId ?? null;
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const sixHoursAgo = todayStart.toISOString();
@@ -406,6 +417,8 @@ export class CartService {
         LEFT JOIN offer_templates ot ON ot.id = c.offer_template_id
         WHERE ca.updated_at >= ${sixHoursAgo}
           AND ca.status IN ('PENDING', 'ABANDONED', 'CONVERTED')
+          AND (${mediaBuyerId}::uuid IS NULL OR c.media_buyer_id = ${mediaBuyerId}::uuid)
+          AND (${branchId}::uuid IS NULL OR c.branch_id = ${branchId}::uuid)
 
         UNION ALL
 
@@ -429,6 +442,8 @@ export class CartService {
             SELECT 1 FROM cart_abandonments ca
             WHERE ca.converted_order_id = o.id
           )
+          AND (${mediaBuyerId}::uuid IS NULL OR o.media_buyer_id = ${mediaBuyerId}::uuid)
+          AND (${branchId}::uuid IS NULL OR o.branch_id = ${branchId}::uuid)
       ) combined
       ORDER BY phone_hash, "updatedAt" DESC
       LIMIT ${limit}

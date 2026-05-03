@@ -63,17 +63,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : [];
   const locations =
     locationsRes.ok
-      ? ((locationsRes.data as { result?: { data?: { locations?: Array<{ id: string; name: string }> } } })?.result?.data?.locations ?? [])
+      ? ((locationsRes.data as { result?: { data?: { locations?: Array<{ id: string; name: string; providerName?: string | null }> } } })?.result?.data?.locations ?? [])
+        .map((l) => ({ id: l.id, name: l.name, providerName: l.providerName ?? null }))
       : [];
 
   const productMap = new Map(products.map((p) => [p.id, p.name]));
   const locationMap = new Map(locations.map((l) => [l.id, l.name]));
+  const providerMap = new Map(locations.map((l) => [l.id, l.providerName]));
 
   const records = transfers.map((t) => ({
     ...t,
     productName: productMap.get(t.productId) ?? 'Unknown product',
     fromLocationName: locationMap.get(t.fromLocationId) ?? 'Unknown location',
     toLocationName: locationMap.get(t.toLocationId) ?? 'Unknown location',
+    fromProviderName: providerMap.get(t.fromLocationId) ?? null,
+    toProviderName: providerMap.get(t.toLocationId) ?? null,
     senderName: (t as { senderName?: string | null }).senderName ?? null,
   }));
 

@@ -1,16 +1,20 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
-import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { Pagination } from '~/components/ui/pagination';
 import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
@@ -24,6 +28,7 @@ export interface DeliveryRemittanceListItem {
   status: string;
   sentAt: string;
   locationName: string | null;
+  locationProviderName: string | null;
   orderCount: number;
   disputeReason?: string | null;
   outcomeStatus?: 'APPROVED' | 'DISPUTED' | 'SENT' | string;
@@ -55,7 +60,7 @@ export interface DeliveryRemittanceSummary {
 export interface DeliveryRemittancesPageProps {
   remittances: DeliveryRemittanceListItem[];
   pagination: { total: number; totalPages: number; page: number };
-  locations: Array<{ id: string; name: string }>;
+  locations: Array<{ id: string; name: string; providerName?: string | null }>;
   filters: {
     status: string;
     location: string;
@@ -142,34 +147,161 @@ export function DeliveryRemittancesPage({
 
   const hasFilters = !!filters.status || !!filters.location || !!filters.sentBy;
 
+  const remittanceToolbarFilterBadge = useMemo(() => {
+    let n = 0;
+    if (filters.status) n += 1;
+    if (filters.location) n += 1;
+    if (filters.sentBy) n += 1;
+    return n;
+  }, [filters.status, filters.location, filters.sentBy]);
+
+  const remittanceColumns: CompactTableColumn<DeliveryRemittanceListItem>[] = useMemo(
+    () => [
+      {
+        key: 'id',
+        header: 'ID',
+        tight: true,
+        render: (r) => <span className="font-mono text-xs text-app-fg-muted">{r.id.slice(0, 8)}…</span>,
+      },
+      {
+        key: 'location',
+        header: 'Location',
+        render: (r) => (
+          <span className="text-sm text-app-fg">
+            {r.locationName
+              ? r.locationProviderName
+                ? `${r.locationName} — ${r.locationProviderName}`
+                : r.locationName
+              : '—'}
+          </span>
+        ),
+      },
+      {
+        key: 'sentBy',
+        header: 'Sent by',
+        render: (r) => <span className="text-sm text-app-fg-muted">{userMap[r.sentBy] ?? 'Unknown user'}</span>,
+      },
+      {
+        key: 'orderCount',
+        header: 'Orders',
+        align: 'right',
+        render: (r) => <span className="tabular-nums">{r.orderCount}</span>,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (r) => (
+          <StatusBadge
+            status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)}
+            label={STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)]}
+          />
+        ),
+      },
+      {
+        key: 'sentAt',
+        header: 'Sent at',
+        nowrap: true,
+        render: (r) => (
+          <span className="text-sm text-app-fg-muted">
+            {new Date(r.sentAt).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (r) => (
+          <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.id}`}>
+            {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
+          </CompactTableActionButton>
+        ),
+      },
+    ],
+    [userMap],
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="Cash Remittances"
         description="Record cash received against delivered orders. Marking a remittance Received closes out its orders (DELIVERED → COMPLETED)."
         actions={
-          <>
-            <DateFilterBar
-              startDate={filters.startDate}
-              endDate={filters.endDate}
-              periodAllTime={filters.periodAllTime}
-            />
-            <PageRefreshButton />
-            <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-              Generate report
-            </Button>
-            {canCreateRemittance && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowCreateModal(true)}
-                disabled={eligibleTotal === 0}
-                title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
-              >
-                + Create cash remittance
-              </Button>
+          <PageHeaderMobileTools
+            sheetTitle="Cash remittances tools"
+            sheetSubtitle={<span>Date range, export, and create</span>}
+            triggerAriaLabel="Cash remittances toolbar and date range"
+            desktop={
+              <>
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                  />
+                </div>
+                <PageRefreshButton />
+                <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                  Generate report
+                </Button>
+                {canCreateRemittance && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setShowCreateModal(true)}
+                    disabled={eligibleTotal === 0}
+                    title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
+                  >
+                    + Create cash remittance
+                  </Button>
+                )}
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowExportModal(true);
+                  }}
+                >
+                  Generate report
+                </Button>
+                {canCreateRemittance && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center"
+                    disabled={eligibleTotal === 0}
+                    title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
+                    onClick={() => {
+                      closeSheet();
+                      setShowCreateModal(true);
+                    }}
+                  >
+                    + Create cash remittance
+                  </Button>
+                )}
+              </>
             )}
-          </>
+          />
         }
       />
 
@@ -236,141 +368,110 @@ export function DeliveryRemittancesPage({
         ]}
       />
 
-      <div className="card space-y-3">
-        <Tabs
-          value={filters.status}
-          onChange={handleStatusChange}
-          tabs={STATUS_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
-          variant="pill"
-        />
-        <div className="flex flex-wrap gap-2">
-          <SearchableSelect
-            id="delivery-remittance-location-filter"
-            value={filters.location}
-            onChange={handleLocationChange}
-            wrapperClassName="w-full sm:w-52"
-            placeholder="All locations"
-            searchPlaceholder="Search locations..."
-            options={[
-              { value: '', label: 'All locations' },
-              ...locations.map((loc) => ({ value: loc.id, label: loc.name })),
-            ]}
-          />
-          {/* Phase 18 — Sent-by filter (accountant who recorded the remittance). */}
-          <SearchableSelect
-            id="delivery-remittance-sent-by-filter"
-            value={filters.sentBy}
-            onChange={handleSentByChange}
-            wrapperClassName="w-full sm:w-56"
-            placeholder="Sent by anyone"
-            searchPlaceholder="Search accountants..."
-            options={[
-              { value: '', label: 'Sent by anyone' },
-              ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-            ]}
-          />
-        </div>
-      </div>
-
-      <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[12rem]">
-      <div className="card p-0">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">ID</th>
-                <th className="table-header">Location</th>
-                <th className="table-header">Sent by</th>
-                <th className="table-header text-right">Orders</th>
-                <th className="table-header">Status</th>
-                <th className="table-header">Sent at</th>
-                <th className="table-header">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {remittances.map((r) => (
-                <tr key={r.id} className="table-row">
-                  <td className="table-cell">
-                    <span className="font-mono text-xs text-app-fg-muted">{r.id.slice(0, 8)}…</span>
-                  </td>
-                  <td className="table-cell text-sm text-app-fg">{r.locationName ?? '—'}</td>
-                  <td className="table-cell text-sm text-app-fg-muted">
-                    {userMap[r.sentBy] ?? 'Unknown user'}
-                  </td>
-                  <td className="table-cell text-right">{r.orderCount}</td>
-                  <td className="table-cell">
-                    <StatusBadge
-                      status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)}
-                      label={STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)]}
-                    />
-                  </td>
-                  <td className="table-cell text-sm text-app-fg-muted">
-                    {new Date(r.sentAt).toLocaleDateString('en-NG', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </td>
-                  <td className="table-cell">
-                    <Link
-                      to={`/admin/finance/delivery-remittances/${r.id}`}
-                      className="btn-secondary btn-sm inline-flex"
-                    >
-                      {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="md:hidden space-y-3 px-1">
-          {remittances.map((r) => (
-            <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-xs text-app-fg-muted">{r.id.slice(0, 8)}…</span>
-                <StatusBadge
-                  status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)}
-                  label={STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)]}
+      <div className="card p-0 overflow-hidden">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          badgeCount={remittanceToolbarFilterBadge}
+          sheetSubtitle={<span>Location and sent-by apply immediately</span>}
+          searchRow={
+            <div className="min-w-0 shrink-0 md:min-w-0 md:flex-1">
+              <Tabs
+                value={filters.status}
+                onChange={handleStatusChange}
+                tabs={STATUS_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
+                variant="pill"
+              />
+            </div>
+          }
+          desktopInlineFilters={
+            <>
+              <SearchableSelect
+                id="delivery-remittance-location-filter"
+                value={filters.location}
+                onChange={handleLocationChange}
+                wrapperClassName="w-full min-w-0 sm:w-52"
+                placeholder="All locations"
+                searchPlaceholder="Search locations..."
+                options={[
+                  { value: '', label: 'All locations' },
+                  ...locations.map((loc) => ({
+                    value: loc.id,
+                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                  })),
+                ]}
+              />
+              <SearchableSelect
+                id="delivery-remittance-sent-by-filter"
+                value={filters.sentBy}
+                onChange={handleSentByChange}
+                wrapperClassName="w-full min-w-0 sm:w-56"
+                placeholder="Sent by anyone"
+                searchPlaceholder="Search accountants..."
+                options={[
+                  { value: '', label: 'Sent by anyone' },
+                  ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                ]}
+              />
+            </>
+          }
+          sheetFilterBody={
+            <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Location</span>
+                <SearchableSelect
+                  id="delivery-remittance-location-filter-sheet"
+                  value={filters.location}
+                  onChange={handleLocationChange}
+                  wrapperClassName="w-full"
+                  placeholder="All locations"
+                  searchPlaceholder="Search locations..."
+                  options={[
+                    { value: '', label: 'All locations' },
+                    ...locations.map((loc) => ({
+                      value: loc.id,
+                      label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    })),
+                  ]}
                 />
               </div>
-              <div className="text-sm text-app-fg-muted">
-                {r.locationName ?? '—'} · {r.orderCount} order(s) · {userMap[r.sentBy] ?? 'Unknown'}
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
+                <SearchableSelect
+                  id="delivery-remittance-sent-by-filter-sheet"
+                  value={filters.sentBy}
+                  onChange={handleSentByChange}
+                  wrapperClassName="w-full"
+                  placeholder="Sent by anyone"
+                  searchPlaceholder="Search accountants..."
+                  options={[
+                    { value: '', label: 'Sent by anyone' },
+                    ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                  ]}
+                />
               </div>
-              <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-                <span>
-                  {new Date(r.sentAt).toLocaleDateString('en-NG', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
-                </span>
-                <Link
-                  to={`/admin/finance/delivery-remittances/${r.id}`}
-                  className="btn-secondary btn-sm inline-flex"
-                >
-                  {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {remittances.length === 0 && (
-          <EmptyState
-            title="No cash remittances found"
-            description={
-              hasFilters
-                ? 'Try adjusting your filters'
-                : 'Cash remittances will appear here once Finance records them'
-            }
-          />
-        )}
+            </>
+          }
+        />
       </div>
-      </TableLoadingOverlay>
 
-      {totalPages > 1 && <Pagination page={page} totalPages={totalPages} pageParam="page" />}
+      <CompactTable<DeliveryRemittanceListItem>
+        columns={remittanceColumns}
+        rows={remittances}
+        rowKey={(r) => r.id}
+        loading={isLoaderRefetchBusy}
+        loadingVariant="overlay"
+        emptyTitle="No cash remittances found"
+        emptyDescription={
+          hasFilters
+            ? 'Try adjusting your filters'
+            : 'Cash remittances will appear here once Finance records them'
+        }
+        pagination={{
+          page,
+          totalPages,
+          pageParam: 'page',
+        }}
+      />
     </div>
   );
 }

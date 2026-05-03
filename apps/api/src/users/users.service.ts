@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-import { eq, and, desc, asc, ilike, or, count, ne, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, ilike, or, count, ne, inArray, sql, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -12,12 +12,13 @@ import type {
   ListUsersInput,
   ResetPasswordInput,
 } from '@yannis/shared';
-import { canonicalPermissionCode } from '@yannis/shared';
+import { canonicalPermissionCode, mergePermissionSnapshot } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { AuthService } from '../auth/auth.service';
 import { withActor } from '../common/db/with-actor';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PermissionsService } from '../permissions/permissions.service';
+import { resolveRoleTemplateBaselineCodes } from '../permissions/role-template-baseline';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevelRole } from '../common/authz';
 
@@ -48,47 +49,86 @@ export class UsersService {
     const rows = await this.db
       .select({ id: schema.roleTemplates.id })
       .from(schema.roleTemplates)
-      .where(and(eq(schema.roleTemplates.kind, 'SYSTEM'), eq(schema.roleTemplates.mappedRole, role as never)))
+      .where(
+        and(
+          eq(schema.roleTemplates.kind, 'SYSTEM'),
+          eq(schema.roleTemplates.mappedRole, role as never),
+          isNull(schema.roleTemplates.validTo),
+        ),
+      )
       .limit(1);
     return rows[0]?.id ?? null;
   }
 
-  private async applyPermissionOverrides(
+  /**
+   * Stamp merged template ∪ overrides onto `user_permissions` (snapshot model).
+   * Replaces all current rows for the user; runtime gates read only these rows (+ SuperAdmin catalog).
+   */
+  private async replaceUserPermissionSnapshot(
     tx: DbTx,
-    params: { userId: string; overrides: Record<string, boolean>; actorId: string },
+    params: {
+      userId: string;
+      roleTemplateId: string;
+      role: string;
+      overrides: Record<string, boolean>;
+      actorId: string;
+    },
   ): Promise<void> {
-    const normalizedOverrides = Object.entries(params.overrides).reduce<Record<string, boolean>>(
-      (acc, [code, granted]) => {
-        acc[canonicalPermissionCode(code)] = granted;
-        return acc;
-      },
-      {},
-    );
-    const codes = Object.keys(normalizedOverrides);
-    if (codes.length === 0) return;
+    const templateCodes = await resolveRoleTemplateBaselineCodes(tx, params.roleTemplateId, params.role);
+    if (templateCodes.length === 0 && params.role !== 'SUPER_ADMIN') {
+      this.logger.warn(
+        `replaceUserPermissionSnapshot: empty baseline for user ${params.userId} (role=${params.role}, template=${params.roleTemplateId}). ` +
+          'Check permission seed / role_template_permissions / role_permissions.',
+      );
+    }
+    const { granted, revoked } = mergePermissionSnapshot(templateCodes, params.overrides);
+
+    await tx
+      .delete(schema.userPermissions)
+      .where(and(eq(schema.userPermissions.userId, params.userId), isNull(schema.userPermissions.validTo)));
+
+    const allCodes = [...new Set([...granted, ...revoked])];
+    if (allCodes.length === 0) return;
 
     const permRows = await tx
       .select({ id: schema.permissions.id, code: schema.permissions.code })
       .from(schema.permissions)
-      .where(inArray(schema.permissions.code, codes));
+      .where(inArray(schema.permissions.code, allCodes));
 
-    const byCode = new Map(permRows.map((p) => [p.code, p.id]));
-    for (const code of codes) {
+    const byCode = new Map(permRows.map((p) => [canonicalPermissionCode(p.code), p.id]));
+    const values: Array<{
+      userId: string;
+      permissionId: string;
+      granted: boolean;
+      grantedBy: string;
+    }> = [];
+
+    for (const code of granted) {
       const permId = byCode.get(code);
       if (!permId) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: `Unknown permission code: ${code}` });
       }
-      await tx
-        .delete(schema.userPermissions)
-        .where(and(eq(schema.userPermissions.userId, params.userId), eq(schema.userPermissions.permissionId, permId)));
-
-      await tx.insert(schema.userPermissions).values({
+      values.push({
         userId: params.userId,
         permissionId: permId,
-        granted: normalizedOverrides[code] === true,
+        granted: true,
         grantedBy: params.actorId,
       });
     }
+    for (const code of revoked) {
+      const permId = byCode.get(code);
+      if (!permId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Unknown permission code: ${code}` });
+      }
+      values.push({
+        userId: params.userId,
+        permissionId: permId,
+        granted: false,
+        grantedBy: params.actorId,
+      });
+    }
+
+    await tx.insert(schema.userPermissions).values(values);
   }
 
   /**
@@ -134,10 +174,11 @@ export class UsersService {
   ): boolean {
     if (!actor) return false;
     if (actor.id === target.id) return true;
-    if (actor.role === 'SUPER_ADMIN' || actor.role === 'HR_MANAGER') return true;
+    if (actor.role === 'SUPER_ADMIN') return true;
 
     const perms = actor.permissions ?? [];
-    if (perms.includes('users.read') || perms.includes('hr.read')) return true;
+    if (perms.includes('users.read') || perms.includes('hr.read') || perms.includes('hr.write'))
+      return true;
 
     if ((perms.includes('cs.teamOverview') || perms.includes('team.supervise_cs')) && target.role === 'CS_AGENT')
       return true;
@@ -205,50 +246,6 @@ export class UsersService {
       membershipsByUser.set(row.userId, existing);
     }
     return membershipsByUser;
-  }
-
-  /**
-   * Fire the "Finance hat changed hands" notifications. Both the new holder and the displaced
-   * previous holder (if any) get an in-app + push + email (account category). Errors are
-   * swallowed — the hat assignment has already committed; a failed notification must never roll it back.
-   */
-  private notifyFinanceHatChange(params: {
-    newHolder: { id: string; name: string };
-    displacedHolder: { id: string; name: string } | null;
-    actorName: string;
-  }): void {
-    const { newHolder, displacedHolder, actorName } = params;
-    const assignedBody = displacedHolder
-      ? `${actorName} assigned the Finance hat to you. It was previously held by ${displacedHolder.name}. You now have Finance Officer powers on top of your primary role.`
-      : `${actorName} assigned the Finance hat to you. You now have Finance Officer powers on top of your primary role.`;
-    this.notificationsService
-      .create({
-        userId: newHolder.id,
-        type: 'account:finance_hat_assigned',
-        title: 'You now hold the Finance hat',
-        body: assignedBody,
-        data: {
-          displacedHolderId: displacedHolder?.id ?? null,
-          displacedHolderName: displacedHolder?.name ?? null,
-          assignedBy: actorName,
-        },
-      })
-      .catch((err) => this.logger.warn(`finance_hat_assigned notification failed: ${err}`));
-    if (displacedHolder && displacedHolder.id !== newHolder.id) {
-      this.notificationsService
-        .create({
-          userId: displacedHolder.id,
-          type: 'account:finance_hat_revoked',
-          title: 'Finance hat reassigned',
-          body: `${actorName} reassigned the Finance hat to ${newHolder.name}. You no longer have Finance Officer powers.`,
-          data: {
-            newHolderId: newHolder.id,
-            newHolderName: newHolder.name,
-            assignedBy: actorName,
-          },
-        })
-        .catch((err) => this.logger.warn(`finance_hat_revoked notification failed: ${err}`));
-    }
   }
 
   /**
@@ -507,10 +504,6 @@ export class UsersService {
     const scopeOrgWideHead = input.scopeOrgWideHead ?? defaults.scopeOrgWideHead;
     const scopeTeamSupervisor = input.scopeTeamSupervisor ?? false;
 
-    // Captured during the atomic Finance-hat swap so we can notify the displaced holder
-    // after the transaction commits.
-    let displacedFinanceHolder: { id: string; name: string } | null = null;
-
     const user = await this.db.transaction(async (tx) => {
       // Audit actor for this transaction — must be INSIDE the transaction because
       // `SET LOCAL` is scoped to the current transaction's connection (see with-actor.ts).
@@ -552,23 +545,6 @@ export class UsersService {
         }
       }
 
-      // Finance hat: if requested, clear the flag from whoever currently holds it (atomic swap
-      // inside this transaction). The partial unique index is the safety net; the pre-clear is
-      // what actually lets a new user be inserted with the hat set to true.
-      // Capture the displaced holder so we can notify them once the transaction commits.
-      if (input.isFinanceOfficer === true) {
-        const [existing] = await tx
-          .select({ id: schema.users.id, name: schema.users.name })
-          .from(schema.users)
-          .where(eq(schema.users.isFinanceOfficer, true))
-          .limit(1);
-        if (existing) displacedFinanceHolder = existing;
-        await tx
-          .update(schema.users)
-          .set({ isFinanceOfficer: false, updatedAt: new Date() })
-          .where(eq(schema.users.isFinanceOfficer, true));
-      }
-
       // Insert user with all fields
       const rows = await tx
         .insert(schema.users)
@@ -589,7 +565,6 @@ export class UsersService {
           visibleOrderStatuses: input.visibleOrderStatuses ?? null,
           restrictProductAccess: input.restrictProductAccess ?? false,
           commissionPlanId,
-          isFinanceOfficer: input.isFinanceOfficer === true,
         })
         .returning({
           id: schema.users.id,
@@ -629,11 +604,12 @@ export class UsersService {
         );
       }
 
-      const createOverrides = input.permissionOverrides ?? {};
-      if (Object.keys(createOverrides).length > 0) {
-        await this.applyPermissionOverrides(tx, {
+      if (input.role !== 'SUPER_ADMIN') {
+        await this.replaceUserPermissionSnapshot(tx, {
           userId: createdUser.id,
-          overrides: createOverrides,
+          roleTemplateId,
+          role: input.role,
+          overrides: input.permissionOverrides ?? {},
           actorId: actor.id,
         });
       }
@@ -678,17 +654,6 @@ export class UsersService {
         .catch(() => {});
     }
 
-    // Finance-hat notifications: fired after the transaction commits so both parties see the
-    // change. The new holder gets "you now hold the Finance hat"; the displaced holder (if any)
-    // gets "you no longer hold the Finance hat".
-    if (input.isFinanceOfficer === true) {
-      this.notifyFinanceHatChange({
-        newHolder: { id: user.id, name: user.name },
-        displacedHolder: displacedFinanceHolder,
-        actorName: actor.name ?? 'an admin',
-      });
-    }
-
     return {
       ...user,
       // Caller is the creator (passed `users.create` gate) — they always see the raw phone
@@ -720,7 +685,6 @@ export class UsersService {
         restrictProductAccess: schema.users.restrictProductAccess,
         commissionPlanId: schema.users.commissionPlanId,
         primaryBranchId: schema.users.primaryBranchId,
-        isFinanceOfficer: schema.users.isFinanceOfficer,
         roleTemplateId: schema.users.roleTemplateId,
         scopeGlobal: schema.users.scopeGlobal,
         scopeOrgWideHead: schema.users.scopeOrgWideHead,
@@ -793,10 +757,21 @@ export class UsersService {
     //  - input.branchId     → filter to that branch (legacy explicit override)
     //  - ctx.currentBranchId → auto-scope to caller's active branch
     //  - admin in global mode (currentBranchId = NULL) → unscoped
-    const isAdmin = actor && (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
+    // `allBranches` opt-in is reserved for callers who can already see all branches —
+    // SuperAdmin (always) or anyone whose session resolved unscoped (e.g. admin holding
+    // every permission, or an org-wide head with `currentBranchId === null`).
+    const actorPerms = (actor?.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const canViewAllBranches =
+      !!actor && (
+        actor.role === 'SUPER_ADMIN' ||
+        actorPerms.includes(canonicalPermissionCode('branches.manage')) ||
+        actorPerms.includes(canonicalPermissionCode('cs.scope.global')) ||
+        actorPerms.includes(canonicalPermissionCode('marketing.scope.global')) ||
+        actorPerms.includes(canonicalPermissionCode('logistics.scope.global'))
+      );
     const skipBranchScope =
       (input.userIds && input.userIds.length > 0) ||
-      (input.allBranches === true && isAdmin);
+      (input.allBranches === true && canViewAllBranches);
     const branchFilter = skipBranchScope
       ? input.branchId
       : (input.branchId ?? currentBranchId ?? undefined);
@@ -1000,20 +975,6 @@ export class UsersService {
   }
 
   /**
-   * Current holder of the Finance hat, if any. Exactly zero or one rows. Used by the user
-   * create/edit forms to show a "Currently held by X — reassigning will revoke from them" hint
-   * before the admin submits the change.
-   */
-  async getCurrentFinanceOfficerHolder(): Promise<{ id: string; name: string } | null> {
-    const rows = await this.db
-      .select({ id: schema.users.id, name: schema.users.name })
-      .from(schema.users)
-      .where(eq(schema.users.isFinanceOfficer, true))
-      .limit(1);
-    return rows[0] ?? null;
-  }
-
-  /**
    * Update a staff member's details.
    * If actor is HR and requested role is sensitive, creates permission_request instead.
    */
@@ -1042,7 +1003,6 @@ export class UsersService {
         visibleOrderStatuses: schema.users.visibleOrderStatuses,
         restrictProductAccess: schema.users.restrictProductAccess,
         primaryBranchId: schema.users.primaryBranchId,
-        isFinanceOfficer: schema.users.isFinanceOfficer,
       })
       .from(schema.users)
       .where(eq(schema.users.id, input.userId))
@@ -1125,18 +1085,23 @@ export class UsersService {
       });
     }
 
-    // Scoped team-lead edits: HoCS can edit CS Agents on their branch; HoM can edit Media
-    // Buyers on their branch. Restricted to three fields that are operational (not pay,
-    // not identity): capacity, productIds, visibleOrderStatuses. Cannot change role, status,
-    // email, phone, name, logistics location, commission plan, or the Finance hat.
+    // Scoped team-lead edits: anyone holding `users.staff.update_supervised` can narrow-edit
+    // their direct reports (capacity, productIds, visibleOrderStatuses). The supervised role
+    // resolution still uses the team-supervision codes (cs.teamOverview, team.supervise_cs, etc.)
+    // so a CS-domain supervisor edits CS Agents and a marketing-domain supervisor edits MBs.
+    // Cannot change role, status, email, phone, name, logistics location, commission plan, etc.
     // Team-leads cannot edit each other or themselves — that stays admin territory.
-    const p = actor.permissions ?? [];
+    const p = (actor.permissions ?? []).map((c) => canonicalPermissionCode(c));
+    const has = (code: string) => p.includes(canonicalPermissionCode(code));
+    const supervisedScope = has('users.staff.update_supervised');
     const actorIsCsLead =
-      p.includes('cs.teamOverview') || p.includes('team.supervise_cs') || actor.scopeTeamSupervisor === true;
+      supervisedScope &&
+      (has('cs.teamOverview') || has('team.supervise_cs') || actor.scopeTeamSupervisor === true);
     const actorIsMarketingLead =
-      p.includes('marketing.teamOverview') ||
-      p.includes('team.supervise_marketing') ||
-      actor.scopeTeamSupervisor === true;
+      supervisedScope &&
+      (has('marketing.teamOverview') ||
+        has('team.supervise_marketing') ||
+        actor.scopeTeamSupervisor === true);
 
     const actorIsTeamLead = actorIsCsLead || actorIsMarketingLead;
     const targetFitsTeamLeadScope =
@@ -1146,7 +1111,9 @@ export class UsersService {
       !!actor.currentBranchId &&
       beforeRow.primaryBranchId === actor.currentBranchId;
 
-    if (actorIsTeamLead) {
+    // Admin-class viewers already get full edit via `canEditUser`; their permission snapshots
+    // may still include supervise/update_supervised codes — do not treat them as branch team leads.
+    if (actorIsTeamLead && !isAdminLevelRole(actor.role)) {
       if (!targetFitsTeamLeadScope) {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -1391,28 +1358,29 @@ export class UsersService {
     }
     if (input.visibleOrderStatuses !== undefined) updateFields['visibleOrderStatuses'] = input.visibleOrderStatuses;
     if (input.restrictProductAccess !== undefined) updateFields['restrictProductAccess'] = input.restrictProductAccess;
-    if (input.isFinanceOfficer !== undefined) updateFields['isFinanceOfficer'] = input.isFinanceOfficer;
     if (input.primaryBranchId !== undefined) updateFields['primaryBranchId'] = input.primaryBranchId;
 
-    // Finance-hat swap: if we're turning the hat ON for this user, clear it from the current
-    // holder first in the same transaction. Turning it OFF is a plain revoke (no swap needed).
-    // Capture the displaced holder (if any) so we can notify them after commit.
-    let displacedFinanceHolder: { id: string; name: string } | null = null;
+    let nextRoleTemplateIdForSnapshot: string | null = beforeRow.roleTemplateId ?? null;
+    if (input.roleTemplateId !== undefined) {
+      nextRoleTemplateIdForSnapshot = input.roleTemplateId;
+    } else if (input.role !== undefined) {
+      const resolvedTpl = await this.resolveRoleTemplateIdForEnumRole(input.role);
+      if (resolvedTpl) nextRoleTemplateIdForSnapshot = resolvedTpl;
+    }
+
+    const overridesPayloadPresent = input.permissionOverrides !== undefined;
+    const roleChanged = input.role !== undefined && input.role !== beforeRow.role;
+    const templateDirectChanged =
+      input.roleTemplateId !== undefined &&
+      input.roleTemplateId !== (beforeRow.roleTemplateId ?? null);
+    const shouldRematerializePermissions =
+      beforeRow.role !== 'SUPER_ADMIN' &&
+      (overridesPayloadPresent || roleChanged || templateDirectChanged);
+    const overridesForSnapshot = overridesPayloadPresent ? (input.permissionOverrides ?? {}) : {};
+
     const updatedRows = await this.db.transaction(async (tx) => {
       // Audit actor for this transaction (see with-actor.ts for why SET LOCAL must be inside).
       await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
-      if (input.isFinanceOfficer === true) {
-        const [existing] = await tx
-          .select({ id: schema.users.id, name: schema.users.name })
-          .from(schema.users)
-          .where(and(eq(schema.users.isFinanceOfficer, true), ne(schema.users.id, input.userId)))
-          .limit(1);
-        if (existing) displacedFinanceHolder = existing;
-        await tx
-          .update(schema.users)
-          .set({ isFinanceOfficer: false, updatedAt: new Date() })
-          .where(and(eq(schema.users.isFinanceOfficer, true), ne(schema.users.id, input.userId)));
-      }
       const updatedRowsTx = await tx
         .update(schema.users)
         .set(updateFields)
@@ -1428,7 +1396,6 @@ export class UsersService {
           phone: schema.users.phone,
           visibleOrderStatuses: schema.users.visibleOrderStatuses,
           restrictProductAccess: schema.users.restrictProductAccess,
-          isFinanceOfficer: schema.users.isFinanceOfficer,
           updatedAt: schema.users.updatedAt,
         });
       if (input.branchIds !== undefined || input.primaryBranchId !== undefined) {
@@ -1443,6 +1410,16 @@ export class UsersService {
             roleInBranch: null,
           })),
         );
+      }
+      if (shouldRematerializePermissions && nextRoleTemplateIdForSnapshot) {
+        const snapshotRole = input.role !== undefined ? input.role : beforeRow.role;
+        await this.replaceUserPermissionSnapshot(tx, {
+          userId: input.userId,
+          roleTemplateId: nextRoleTemplateIdForSnapshot,
+          role: snapshotRole,
+          overrides: overridesForSnapshot,
+          actorId: actor.id,
+        });
       }
       return updatedRowsTx;
     });
@@ -1475,41 +1452,8 @@ export class UsersService {
       });
     }
 
-    const updateOverrides = input.permissionOverrides ?? {};
-    if (Object.keys(updateOverrides).length > 0) {
-      await withActor(this.db, actor, async (tx) => {
-        await this.applyPermissionOverrides(tx, {
-          userId: input.userId,
-          overrides: updateOverrides,
-          actorId: actor.id,
-        });
-      });
-    }
-
     if (input.status === 'INACTIVE' || input.status === 'ARCHIVED' || input.status === 'DEACTIVATED') {
       await this.authService.killUserSessions(input.userId);
-    }
-
-    // Finance-hat notifications, fired post-commit. Three cases:
-    //   - Assign TO this user (hat turned on): notify this user + any displaced holder.
-    //   - Plain revoke FROM this user (hat turned off, not reassigned elsewhere): notify this user.
-    //   - Unchanged: nothing to fire.
-    if (input.isFinanceOfficer === true && beforeRow.isFinanceOfficer !== true) {
-      this.notifyFinanceHatChange({
-        newHolder: { id: updated.id, name: updated.name },
-        displacedHolder: displacedFinanceHolder,
-        actorName: actor.name ?? 'an admin',
-      });
-    } else if (input.isFinanceOfficer === false && beforeRow.isFinanceOfficer === true) {
-      this.notificationsService
-        .create({
-          userId: updated.id,
-          type: 'account:finance_hat_revoked',
-          title: 'Finance hat revoked',
-          body: `${actor.name ?? 'An admin'} revoked the Finance hat from you. You no longer have Finance Officer powers.`,
-          data: { revokedBy: actor.name ?? 'an admin' },
-        })
-        .catch((err) => this.logger.warn(`finance_hat_revoked notification failed: ${err}`));
     }
 
     const afterProductIds =
@@ -1552,6 +1496,128 @@ export class UsersService {
       phone: updated.phone,
       emailChangePending: emailChangePending || undefined,
     };
+  }
+
+  /**
+   * Re-stamp `user_permissions` from the current template baseline plus any
+   * existing per-user overrides. Idempotent — safe to call repeatedly.
+   *
+   * Use case: a user was created during a window when `role_template_permissions`
+   * was empty (or before the snapshot model was active), so they have zero
+   * `user_permissions` rows and every permission check fails. The stale-user
+   * fix.
+   *
+   * Reads the user's CURRENT `role_template_id` and CURRENT sparse overrides
+   * from `user_permissions`, then re-runs `replaceUserPermissionSnapshot` with
+   * the same merge logic that `createStaff` and `update` use — so the
+   * resulting set is consistent with the rest of the codebase.
+   *
+   * Returns counts of granted / revoked rows written so the caller can
+   * surface a meaningful confirmation toast.
+   */
+  async restampPermissions(
+    userId: string,
+    actor: SessionUser,
+  ): Promise<{ stampedGranted: number; stampedRevoked: number; templateBaselineCount: number }> {
+    return withActor(this.db, actor, async (tx) => {
+      const [target] = await tx
+        .select({
+          id: schema.users.id,
+          role: schema.users.role,
+          roleTemplateId: schema.users.roleTemplateId,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+
+      if (!target) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+      if ((target.role as string) === 'SUPER_ADMIN') {
+        // SuperAdmin gets the full catalog at runtime via short-circuit; stamping
+        // is meaningless and would be deleted on next call anyway.
+        return { stampedGranted: 0, stampedRevoked: 0, templateBaselineCount: 0 };
+      }
+
+      // Resolve the template (fall back to the SYSTEM template for the role
+      // when `role_template_id` is null — same logic createStaff uses).
+      const roleTemplateId =
+        target.roleTemplateId ?? (await this.resolveRoleTemplateIdForEnumRole(target.role as string));
+      if (!roleTemplateId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'No role template found for this user. Run `pnpm db:seed-permissions` (or restart the API) and try again.',
+        });
+      }
+
+      // Read existing sparse overrides from `user_permissions` so we preserve
+      // any explicit per-user grants/revokes the admin set on this user before
+      // re-stamping. This makes the re-stamp idempotent: if a user is already
+      // properly stamped, the writes will be a no-op delta.
+      const existingRows = await tx
+        .select({
+          code: schema.permissions.code,
+          granted: schema.userPermissions.granted,
+        })
+        .from(schema.userPermissions)
+        .innerJoin(schema.permissions, eq(schema.userPermissions.permissionId, schema.permissions.id))
+        .where(
+          and(eq(schema.userPermissions.userId, userId), isNull(schema.userPermissions.validTo)),
+        );
+
+      const templateCodes = await resolveRoleTemplateBaselineCodes(
+        tx,
+        roleTemplateId,
+        target.role as string,
+      );
+      const templateSet = new Set(templateCodes.map((c) => canonicalPermissionCode(c)));
+
+      const overrides: Record<string, boolean> = {};
+      for (const row of existingRows) {
+        const code = canonicalPermissionCode(row.code);
+        const inTpl = templateSet.has(code);
+        if (row.granted) {
+          // explicit grant only when the code is NOT in the template (otherwise it's just inherited)
+          if (!inTpl) overrides[code] = true;
+        } else if (inTpl) {
+          // explicit revoke of a template default
+          overrides[code] = false;
+        }
+      }
+
+      await this.replaceUserPermissionSnapshot(tx, {
+        userId,
+        roleTemplateId,
+        role: target.role as string,
+        overrides,
+        actorId: actor.id,
+      });
+
+      // Re-read to count what landed (granted=true and granted=false rows).
+      const stampedRows = await tx
+        .select({ granted: schema.userPermissions.granted })
+        .from(schema.userPermissions)
+        .where(
+          and(eq(schema.userPermissions.userId, userId), isNull(schema.userPermissions.validTo)),
+        );
+      let stampedGranted = 0;
+      let stampedRevoked = 0;
+      for (const row of stampedRows) {
+        if (row.granted) stampedGranted++;
+        else stampedRevoked++;
+      }
+
+      this.logger.log(
+        `restampPermissions(${userId}) by ${actor.id}: template=${roleTemplateId} baseline=${templateCodes.length} → ${stampedGranted} granted, ${stampedRevoked} revoked`,
+      );
+
+      return {
+        stampedGranted,
+        stampedRevoked,
+        templateBaselineCount: templateCodes.length,
+      };
+    });
   }
 
   /**

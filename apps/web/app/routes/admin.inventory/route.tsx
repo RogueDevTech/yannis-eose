@@ -121,8 +121,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   let locations: LocationOption[] = [];
   if (locationsRes.ok) {
-    const data = (locationsRes.data as { result?: { data?: { locations: { id: string; name: string }[] } } })?.result?.data;
-    locations = (data?.locations ?? []).map((l) => ({ id: l.id, name: l.name }));
+    const data = (locationsRes.data as {
+      result?: { data?: { locations: { id: string; name: string; providerName?: string | null }[] } };
+    })?.result?.data;
+    locations = (data?.locations ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      providerName: l.providerName ?? null,
+    }));
   }
 
   // Low-stock alert threshold (org-wide setting). Default 10 if unset.

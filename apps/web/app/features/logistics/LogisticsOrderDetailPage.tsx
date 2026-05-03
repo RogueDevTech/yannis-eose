@@ -11,6 +11,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -32,6 +33,7 @@ export interface RichAllocatableLocation {
   name: string;
   address: string | null;
   whatsappGroupLink?: string | null;
+  providerName: string | null;
   eligible: boolean;
   reason: string | null;
   /**
@@ -228,6 +230,55 @@ function CubeIcon() {
     </svg>
   );
 }
+
+type LogisticsOrderLineItem = OrderDetail['orderItems'][number];
+
+const LOGISTICS_ORDER_LINE_COLUMNS: CompactTableColumn<LogisticsOrderLineItem>[] = [
+  {
+    key: 'product',
+    header: 'Product',
+    render: (item) => (
+      <div className="flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-lg bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+          <CubeIcon />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-app-fg">{item.productName ?? 'Unknown product'}</p>
+        </div>
+      </div>
+    ),
+  },
+  {
+    key: 'quantity',
+    header: 'Qty',
+    align: 'center',
+    render: (item) => (
+      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-app-hover text-sm font-semibold text-app-fg">
+        {item.quantity}
+      </span>
+    ),
+  },
+  {
+    key: 'unitPrice',
+    header: 'Unit Price',
+    align: 'right',
+    render: (item) => (
+      <span className="text-sm tabular-nums text-app-fg-muted">
+        <NairaPrice amount={Number(item.unitPrice)} />
+      </span>
+    ),
+  },
+  {
+    key: 'subtotal',
+    header: 'Subtotal',
+    align: 'right',
+    render: (item) => (
+      <span className="text-sm font-semibold tabular-nums text-app-fg">
+        <NairaPrice amount={Number(item.unitPrice) * item.quantity} />
+      </span>
+    ),
+  },
+];
 
 function CheckCircleIcon({ className = 'w-4 h-4' }: { className?: string }) {
   return (
@@ -875,69 +926,36 @@ export function LogisticsOrderDetailPage({
       {activeTab === 'items' && (
         <div className="card overflow-hidden">
           {order.orderItems && order.orderItems.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-app-border">
-                    <th className="text-left text-[11px] uppercase tracking-wider text-app-fg-muted font-medium px-4 py-2.5">Product</th>
-                    <th className="text-center text-[11px] uppercase tracking-wider text-app-fg-muted font-medium px-4 py-2.5">Qty</th>
-                    <th className="text-right text-[11px] uppercase tracking-wider text-app-fg-muted font-medium px-4 py-2.5">Unit Price</th>
-                    <th className="text-right text-[11px] uppercase tracking-wider text-app-fg-muted font-medium px-4 py-2.5">Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {order.orderItems.map((item, idx) => {
-                    const subtotal = Number(item.unitPrice) * item.quantity;
-                    return (
-                      <tr key={item.id} className={idx % 2 === 0 ? 'bg-app-hover/50' : ''}>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-lg bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center flex-shrink-0">
-                              <CubeIcon />
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium text-app-fg">
-                                {item.productName ?? 'Unknown product'}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-app-hover text-sm font-semibold text-app-fg">
-                            {item.quantity}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right text-sm tabular-nums text-app-fg-muted">
-                          <NairaPrice amount={Number(item.unitPrice)} />
-                        </td>
-                        <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-app-fg">
-                          <NairaPrice amount={subtotal} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-app-border">
-                    <td className="px-4 py-3 text-sm font-bold text-app-fg" colSpan={2}>Total</td>
-                    <td className="px-4 py-3 text-right text-xs text-app-fg-muted tabular-nums">
-                      {totalQty} unit{totalQty !== 1 ? 's' : ''}
-                    </td>
-                    <td className="px-4 py-3 text-right text-base font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                      <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} zeroAsDash />
-                    </td>
-                  </tr>
-                  {order.deliveryFee && Number(order.deliveryFee) > 0 && (
-                    <tr className="border-t border-app-border">
-                      <td className="px-4 py-2 text-xs text-app-fg-muted" colSpan={3}>Delivery Fee</td>
-                      <td className="px-4 py-2 text-right text-sm text-app-fg-muted tabular-nums">
+            <CompactTable<LogisticsOrderLineItem>
+              withCard={false}
+              columns={LOGISTICS_ORDER_LINE_COLUMNS}
+              rows={order.orderItems}
+              rowKey={(item) => item.id}
+              rowClassName={(_item, idx) => (idx % 2 === 0 ? 'bg-app-hover/50' : '')}
+              footer={
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-app-fg">Total</span>
+                    <div className="flex flex-wrap items-center justify-end gap-4">
+                      <span className="text-xs text-app-fg-muted tabular-nums">
+                        {totalQty} unit{totalQty !== 1 ? 's' : ''}
+                      </span>
+                      <span className="text-base font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} zeroAsDash />
+                      </span>
+                    </div>
+                  </div>
+                  {order.deliveryFee && Number(order.deliveryFee) > 0 ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border pt-2 text-xs text-app-fg-muted">
+                      <span>Delivery Fee</span>
+                      <span className="text-sm tabular-nums">
                         <NairaPrice amount={Number(order.deliveryFee)} />
-                      </td>
-                    </tr>
-                  )}
-                </tfoot>
-              </table>
-            </div>
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              }
+            />
           ) : (
             <EmptyState title="No items" description="No items in this order." variant="inline" />
           )}
@@ -976,13 +994,13 @@ export function LogisticsOrderDetailPage({
                       richAllocatableLocations && richAllocatableLocations.length > 0
                         ? richAllocatableLocations.map((loc) => ({
                             value: loc.id,
-                            label: loc.name,
+                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                             disabled: !loc.eligible,
                             description: describeRichAllocatableLocation(loc),
                           }))
                         : allocatableLocations.map((loc) => ({
                             value: loc.id,
-                            label: loc.name,
+                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                             disabled: Boolean(loc.dispatchLocked),
                             description: loc.dispatchLocked ? 'Dispatch locked for reconciliation' : undefined,
                           }))

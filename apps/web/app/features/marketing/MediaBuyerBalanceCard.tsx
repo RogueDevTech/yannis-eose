@@ -14,6 +14,8 @@ export interface MediaBuyerBalanceCardProps {
    * loads with the same range the user picked on the parent page.
    */
   ordersDateFilters?: { startDate: string; endDate: string; periodAllTime: boolean };
+  /** Org-wide green/red threshold for the Profitability score color. Default 2.5x. */
+  profitabilityGreenThreshold?: number;
 }
 
 function buildOrdersHref(
@@ -37,7 +39,13 @@ function buildOrdersHref(
  * Card used on Live Activities (Marketing) and Team page to represent a media buyer
  * with funding balance. Matches the card style used in the media buyer strip.
  */
-export function MediaBuyerBalanceCard({ row, className = '', ordersDateFilters }: MediaBuyerBalanceCardProps) {
+export function MediaBuyerBalanceCard({ row, className = '', ordersDateFilters, profitabilityGreenThreshold = 2.5 }: MediaBuyerBalanceCardProps) {
+  const profitabilityColorClass =
+    row.profitabilityScore != null && row.trueRoas != null
+      ? row.trueRoas >= profitabilityGreenThreshold
+        ? 'text-success-600 dark:text-success-400 font-semibold'
+        : 'text-danger-600 dark:text-danger-400 font-semibold'
+      : 'text-app-fg';
   const initials = row.name
     .split(' ')
     .map((n) => n[0])
@@ -101,7 +109,7 @@ export function MediaBuyerBalanceCard({ row, className = '', ordersDateFilters }
         {row.profitabilityScore != null && (
           <div className="flex justify-between text-app-fg-muted">
             <span>Profitability</span>
-            <span className="font-medium text-app-fg tabular-nums">{row.profitabilityScore.toFixed(1)}</span>
+            <span className={`tabular-nums ${profitabilityColorClass}`}>{row.profitabilityScore.toFixed(1)}</span>
           </div>
         )}
       </div>

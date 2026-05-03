@@ -11,9 +11,7 @@ import { uuidv7 } from 'uuidv7';
  *   WHERE id >= '018cd000-0000-7000-8000-000000000000'
  * to find "all rows created after X" without touching created_at.
  *
- * Column type is currently `text` (36-char UUID string). A future migration
- * will swap to native `uuid` for 16-byte storage + faster B-tree compares;
- * v7 values we generate now will carry over unchanged and retain ordering.
+ * Column type is native PostgreSQL `uuid` (UUIDv7 values from `uuidv7` npm package).
  *
  * If you need to override at insert time (migrations, seeds), just pass an
  * explicit `id` — the `$defaultFn` only fires when the field is omitted.

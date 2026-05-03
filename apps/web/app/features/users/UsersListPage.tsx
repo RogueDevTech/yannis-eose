@@ -1,13 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams, useFetcher } from '@remix-run/react';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
-import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { Pagination } from '~/components/ui/pagination';
-import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast } from '~/components/ui/toast';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -15,6 +19,7 @@ import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 
 interface UsersListPageProps {
   users: User[];
@@ -74,6 +79,14 @@ export function UsersListPage({
     setSearchParams(next, { replace: true });
   };
 
+  const usersToolbarFilterBadge = useMemo(() => {
+    if (staffAccounts) return 0;
+    let n = 0;
+    if (statusParam !== 'ALL') n += 1;
+    if (roleParam !== 'ALL') n += 1;
+    return n;
+  }, [staffAccounts, statusParam, roleParam]);
+
   const q = searchQuery.trim().toLowerCase();
   const filteredUsers = users.filter((user) => {
     if (statusParam !== 'ALL' && user.status !== statusParam) return false;
@@ -86,6 +99,124 @@ export function UsersListPage({
     return false;
   });
 
+  const staffAccountsColumns: CompactTableColumn<User>[] = useMemo(
+    () => [
+      {
+        key: 'name',
+        header: 'Name',
+        render: (user) => (
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center shrink-0">
+              <span className="text-xs font-semibold text-white">{user.name.charAt(0).toUpperCase()}</span>
+            </div>
+            <span className="font-medium text-app-fg">{user.name}</span>
+          </div>
+        ),
+      },
+      {
+        key: 'payment',
+        header: 'Payment details',
+        minWidth: 'min-w-[200px]',
+        render: (user) => (
+          <div className="space-y-2 text-sm">
+            <div>
+              <p className="text-[0.65rem] font-medium uppercase tracking-wider text-app-fg-muted">Email</p>
+              <p className="font-mono text-app-fg break-all">{user.email}</p>
+            </div>
+            <div>
+              <p className="text-[0.65rem] font-medium uppercase tracking-wider text-app-fg-muted">Phone</p>
+              <p className="text-app-fg">{user.phone?.trim() ? user.phone : '—'}</p>
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (user) => (
+          <CompactTableActionButton to={`${usersBasePath}/${user.id}`}>View</CompactTableActionButton>
+        ),
+      },
+    ],
+    [usersBasePath],
+  );
+
+  const hrUserColumns: CompactTableColumn<User>[] = useMemo(
+    () => [
+      {
+        key: 'name',
+        header: 'Name',
+        render: (user) => (
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center shrink-0">
+              <span className="text-xs font-semibold text-white">{user.name.charAt(0).toUpperCase()}</span>
+            </div>
+            <span className="font-medium text-app-fg">{user.name}</span>
+          </div>
+        ),
+      },
+      {
+        key: 'email',
+        header: 'Email',
+        render: (user) => <span className="text-app-fg-muted">{user.email}</span>,
+      },
+      {
+        key: 'role',
+        header: 'Role',
+        render: (user) => <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />,
+      },
+      {
+        key: 'branches',
+        header: 'Branches',
+        render: (user) => <UserBranchBadges branches={user.branchMemberships} compact />,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (user) => <StatusBadge status={user.status} />,
+      },
+      {
+        key: 'joined',
+        header: 'Joined',
+        nowrap: true,
+        render: (user) => (
+          <span className="text-app-fg-muted">
+            {new Date(user.createdAt).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (user) => (
+          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+            {user.status === 'PENDING' ? (
+              <CompactTableActionButton
+                className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+                disabled={isResending}
+                onClick={() => setResendConfirm({ id: user.id, name: user.name, email: user.email })}
+              >
+                Resend Invite
+              </CompactTableActionButton>
+            ) : null}
+            <CompactTableActionButton to={`${usersBasePath}/${user.id}`}>View</CompactTableActionButton>
+          </div>
+        ),
+      },
+    ],
+    [usersBasePath, isResending],
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -96,13 +227,37 @@ export function UsersListPage({
             : 'Manage team members and their roles'
         }
         actions={
-          staffAccounts ? undefined : (
-            <Link to={`${usersBasePath}/new`} className="btn-primary">
-              <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              Add User
-            </Link>
+          staffAccounts ? (
+            <PageRefreshButton />
+          ) : (
+            <PageHeaderMobileTools
+              sheetTitle="Users tools"
+              sheetSubtitle={<span>Refresh and add user</span>}
+              triggerAriaLabel="Users toolbar"
+              desktop={
+                <>
+                  <PageRefreshButton />
+                  <Link to={`${usersBasePath}/new`} className="btn-primary">
+                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Add User
+                  </Link>
+                </>
+              }
+              sheet={({ closeSheet }) => (
+                <Link
+                  to={`${usersBasePath}/new`}
+                  className="btn-primary inline-flex w-full items-center justify-center gap-2"
+                  onClick={() => closeSheet()}
+                >
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  Add User
+                </Link>
+              )}
+            />
           )
         }
       />
@@ -132,306 +287,122 @@ export function UsersListPage({
       />
       )}
 
-      {/* Filters bar */}
-      <div className="card">
-        <div className="flex flex-col sm:flex-row gap-3">
+      {staffAccounts ? (
+        <div className="card">
           <SearchInput
             value={searchQuery}
             onChange={setSearchQuery}
-            placeholder={
-              staffAccounts ? 'Search by name, email, or phone…' : 'Search by name or email...'
-            }
-            className="flex-1"
+            placeholder="Search by name, email, or phone…"
+            wrapperClassName="w-full"
           />
-          {!staffAccounts && (
-            <>
-              <FormSelect
-                value={statusParam}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                options={[
-                  { value: 'ALL', label: 'All Status' },
-                  { value: 'PENDING', label: 'Pending' },
-                  { value: 'ACTIVE', label: 'Active' },
-                  { value: 'INACTIVE', label: 'Inactive' },
-                  { value: 'ARCHIVED', label: 'Archived' },
-                  { value: 'DEACTIVATED', label: 'Deactivated' },
-                ]}
-                className="w-full sm:w-40"
-              />
-              <FormSelect
-                value={roleParam}
-                onChange={(e) => handleRoleChange(e.target.value)}
-                options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
-                className="w-full sm:w-48"
-              />
-            </>
-          )}
         </div>
-      </div>
-
-      {/* Users table — full HR directory vs finance staff roster */}
-      <TableLoadingOverlay show={isFilterLoading}>
-      <div className="card p-0">
-        {staffAccounts ? (
-          <>
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-header">Name</th>
-                    <th className="table-header">Payment details</th>
-                    <th className="table-header text-right w-[7rem]"> </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.map((user) => (
-                    <tr key={user.id} className="table-row">
-                      <td className="table-cell align-top">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">
-                            <span className="text-xs font-semibold text-white">
-                              {user.name.charAt(0).toUpperCase()}
-                            </span>
-                          </div>
-                          <span className="font-medium text-app-fg">{user.name}</span>
-                        </div>
-                      </td>
-                      <td className="table-cell align-top">
-                        <div className="space-y-2 text-sm">
-                          <div>
-                            <p className="text-[0.65rem] font-medium uppercase tracking-wider text-app-fg-muted">
-                              Email
-                            </p>
-                            <p className="font-mono text-app-fg break-all">{user.email}</p>
-                          </div>
-                          <div>
-                            <p className="text-[0.65rem] font-medium uppercase tracking-wider text-app-fg-muted">
-                              Phone
-                            </p>
-                            <p className="text-app-fg">{user.phone?.trim() ? user.phone : '—'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="table-cell text-right align-top">
-                        <Link to={`${usersBasePath}/${user.id}`} className="btn-secondary btn-sm">
-                          View
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredUsers.length === 0 && (
-                    <tr>
-                      <td colSpan={3}>
-                        <EmptyState
-                          title={users.length === 0 ? 'No staff found' : 'No matching staff'}
-                          description={
-                            users.length === 0
-                              ? 'Staff records will appear here once added in HR.'
-                              : 'Try a different search.'
-                          }
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="md:hidden space-y-3 px-1 py-3">
-              {filteredUsers.map((user) => (
-                <div
-                  key={user.id}
-                  className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm font-semibold text-white">
-                        {user.name.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <p className="font-medium text-app-fg flex-1 min-w-0">{user.name}</p>
-                  </div>
-                  <dl className="space-y-2 text-sm">
-                    <div>
-                      <dt className="text-[0.65rem] font-medium uppercase tracking-wider text-app-fg-muted">
-                        Email
-                      </dt>
-                      <dd className="font-mono text-app-fg break-all">{user.email}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-[0.65rem] font-medium uppercase tracking-wider text-app-fg-muted">
-                        Phone
-                      </dt>
-                      <dd className="text-app-fg">{user.phone?.trim() ? user.phone : '—'}</dd>
-                    </div>
-                  </dl>
-                  <Link to={`${usersBasePath}/${user.id}`} className="btn-secondary btn-sm w-full block text-center">
-                    View profile
-                  </Link>
-                </div>
-              ))}
-              {filteredUsers.length === 0 && (
-                <EmptyState
-                  title={users.length === 0 ? 'No staff found' : 'No matching staff'}
-                  description={
-                    users.length === 0
-                      ? 'Staff records will appear here once added in HR.'
-                      : 'Try a different search.'
-                  }
+      ) : (
+        <div className="card p-0 overflow-hidden">
+          <ToolbarFiltersCollapsible
+            className="!border-0"
+            badgeCount={usersToolbarFilterBadge}
+            sheetSubtitle={<span>Status and role apply immediately</span>}
+            searchRow={
+              <SearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="Search by name or email..."
+                wrapperClassName="min-w-0 flex-1 md:min-w-0"
+              />
+            }
+            desktopInlineFilters={
+              <>
+                <FormSelect
+                  value={statusParam}
+                  onChange={(e) => handleStatusChange(e.target.value)}
+                  options={[
+                    { value: 'ALL', label: 'All Status' },
+                    { value: 'PENDING', label: 'Pending' },
+                    { value: 'ACTIVE', label: 'Active' },
+                    { value: 'INACTIVE', label: 'Inactive' },
+                    { value: 'ARCHIVED', label: 'Archived' },
+                    { value: 'DEACTIVATED', label: 'Deactivated' },
+                  ]}
+                  wrapperClassName="w-full min-w-0 sm:w-40"
                 />
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-header">Name</th>
-                    <th className="table-header">Email</th>
-                    <th className="table-header">Role</th>
-                    <th className="table-header">Branches</th>
-                    <th className="table-header">Status</th>
-                    <th className="table-header">Joined</th>
-                    <th className="table-header text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.map((user) => (
-                    <tr key={user.id} className="table-row">
-                      <td className="table-cell">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">
-                            <span className="text-xs font-semibold text-white">
-                              {user.name.charAt(0).toUpperCase()}
-                            </span>
-                          </div>
-                          <span className="font-medium text-app-fg">{user.name}</span>
-                        </div>
-                      </td>
-                      <td className="table-cell text-app-fg-muted">{user.email}</td>
-                      <td className="table-cell">
-                        <RoleBadge role={user.role} label={formatRole(user.role)} />
-                      </td>
-                      <td className="table-cell">
-                        <UserBranchBadges branches={user.branchMemberships} compact />
-                      </td>
-                      <td className="table-cell">
-                        <StatusBadge status={user.status} />
-                      </td>
-                      <td className="table-cell text-app-fg-muted">
-                        {new Date(user.createdAt).toLocaleDateString('en-NG', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
-                      </td>
-                      <td className="table-cell text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {user.status === 'PENDING' && (
-                            <button
-                              type="button"
-                              className="btn-secondary btn-sm text-brand-600 dark:text-brand-400"
-                              disabled={isResending}
-                              onClick={() => setResendConfirm({ id: user.id, name: user.name, email: user.email })}
-                            >
-                              Resend Invite
-                            </button>
-                          )}
-                          <Link
-                            to={`${usersBasePath}/${user.id}`}
-                            className="btn-primary btn-sm"
-                          >
-                            View
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredUsers.length === 0 && (
-                    <tr>
-                      <td colSpan={8}>
-                        <EmptyState
-                          title={users.length === 0 ? 'No users yet' : 'No matching users found'}
-                          description={users.length === 0 ? 'Add your first team member.' : 'Try adjusting your search or filters.'}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile card list */}
-            <div className="md:hidden space-y-3 px-1">
-              {filteredUsers.map((user) => (
-                <div
-                  key={user.id}
-                  className="rounded-lg border border-app-border bg-app-elevated p-4"
-                >
-                  <Link
-                    to={`${usersBasePath}/${user.id}`}
-                    className="block hover:bg-app-hover/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="w-9 h-9 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">
-                        <span className="text-sm font-semibold text-white">
-                          {user.name.charAt(0).toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium text-app-fg truncate">{user.name}</p>
-                        <p className="text-sm text-app-fg-muted truncate">{user.email}</p>
-                      </div>
-                      <StatusBadge status={user.status} />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <RoleBadge role={user.role} label={formatRole(user.role)} />
-                      <span className="text-xs text-app-fg-muted">
-                        {new Date(user.createdAt).toLocaleDateString('en-NG', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
-                      </span>
-                    </div>
-                    <div className="mt-2">
-                      <UserBranchBadges branches={user.branchMemberships} compact />
-                    </div>
-                  </Link>
-                  {user.status === 'PENDING' && (
-                    <div className="mt-3 pt-3 border-t border-app-border">
-                      <button
-                        type="button"
-                        className="btn-secondary btn-sm w-full text-brand-600 dark:text-brand-400"
-                        disabled={isResending}
-                        onClick={() => setResendConfirm({ id: user.id, name: user.name, email: user.email })}
-                      >
-                        Resend Invite
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {filteredUsers.length === 0 && (
-                <EmptyState
-                  title={users.length === 0 ? 'No users yet' : 'No matching users found'}
+                <FormSelect
+                  value={roleParam}
+                  onChange={(e) => handleRoleChange(e.target.value)}
+                  options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                  wrapperClassName="w-full min-w-0 sm:w-48"
                 />
-              )}
-            </div>
-          </>
-        )}
-      </div>
-      </TableLoadingOverlay>
+              </>
+            }
+            sheetFilterBody={
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                  <FormSelect
+                    value={statusParam}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={[
+                      { value: 'ALL', label: 'All Status' },
+                      { value: 'PENDING', label: 'Pending' },
+                      { value: 'ACTIVE', label: 'Active' },
+                      { value: 'INACTIVE', label: 'Inactive' },
+                      { value: 'ARCHIVED', label: 'Archived' },
+                      { value: 'DEACTIVATED', label: 'Deactivated' },
+                    ]}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Role</span>
+                  <FormSelect
+                    value={roleParam}
+                    onChange={(e) => handleRoleChange(e.target.value)}
+                    options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+              </>
+            }
+          />
+        </div>
+      )}
 
-      {/* Pagination */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-app-fg-muted">
-          Showing {filteredUsers.length} of {total} {staffAccounts ? 'staff' : 'users'}
-        </p>
-        <Pagination page={page} totalPages={safeTotalPages} onPageChange={goToPage} showLabel />
-      </div>
+      <CompactTable<User>
+        key={staffAccounts ? 'staff' : 'hr'}
+        columns={staffAccounts ? staffAccountsColumns : hrUserColumns}
+        rows={filteredUsers}
+        rowKey={(u) => u.id}
+        loading={isFilterLoading}
+        loadingVariant="overlay"
+        emptyTitle={
+          staffAccounts
+            ? users.length === 0
+              ? 'No staff found'
+              : 'No matching staff'
+            : users.length === 0
+              ? 'No users yet'
+              : 'No matching users found'
+        }
+        emptyDescription={
+          staffAccounts
+            ? users.length === 0
+              ? 'Staff records will appear here once added in HR.'
+              : 'Try a different search.'
+            : users.length === 0
+              ? 'Add your first team member.'
+              : 'Try adjusting your search or filters.'
+        }
+        pagination={{
+          page,
+          totalPages: safeTotalPages,
+          onPageChange: goToPage,
+          summary: (
+            <span>
+              Showing {filteredUsers.length} of {total} {staffAccounts ? 'staff' : 'users'}
+            </span>
+          ),
+          wrapperClassName: 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
+        }}
+      />
 
       {/* Resend invite confirmation — guards against fat-finger sends from a long table.
           Resending generates a fresh temporary password and invalidates any prior link. */}

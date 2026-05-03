@@ -7,6 +7,11 @@ export interface DateFilterBarProps {
   startDate?: string;
   endDate?: string;
   periodAllTime?: boolean;
+  /**
+   * `inline` — compact text control (default).
+   * `blockCenter` — full-width row with icon + label centered (e.g. mobile sheet next to full-width buttons).
+   */
+  triggerLayout?: 'inline' | 'blockCenter';
 }
 
 /** Stable fingerprint of date-related query params (ignores page, sort, etc.). */
@@ -113,7 +118,12 @@ function getPresetRange(preset: DatePreset): { startDate: string; endDate: strin
   }
 }
 
-export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = false }: DateFilterBarProps) {
+export function DateFilterBar({
+  startDate = '',
+  endDate = '',
+  periodAllTime = false,
+  triggerLayout = 'inline',
+}: DateFilterBarProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const location = useLocation();
@@ -201,13 +211,14 @@ export function DateFilterBar({ startDate = '', endDate = '', periodAllTime = fa
   const periodLabel = formatPeriodLabel(startDate, endDate, periodAllTime);
   const activeDraftId = getActiveDraftSelectionId(draftStart, draftEnd, draftPeriodAllTime);
 
+  const triggerClassName =
+    triggerLayout === 'blockCenter'
+      ? 'flex w-full min-w-0 items-center justify-center gap-1.5 text-xs text-app-fg-muted hover:text-app-fg transition-colors'
+      : 'inline-flex items-center gap-1.5 text-xs text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg transition-colors';
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setModalOpen(true)}
-        className="inline-flex items-center gap-1.5 text-xs text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg transition-colors"
-      >
+      <button type="button" onClick={() => setModalOpen(true)} className={triggerClassName}>
         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
         </svg>

@@ -17,7 +17,7 @@ export const messageTemplates = pgTable('message_templates', {
   channel: messageChannelEnum('channel').notNull(),
   /** Template body with {{placeholder}} syntax. */
   body: text('body').notNull(),
-  createdBy: text('created_by')
+  createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id),
   branchId: uuid('branch_id').references(() => branches.id),
