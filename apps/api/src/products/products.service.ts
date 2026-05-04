@@ -79,19 +79,22 @@ export class ProductsService {
       return { allowedProductIds: null };
     }
 
-    const [userRow] = await this.db
-      .select({ restrictProductAccess: schema.users.restrictProductAccess })
-      .from(schema.users)
-      .where(eq(schema.users.id, viewerId))
-      .limit(1);
-
-    const assignmentRows = await this.db
-      .selectDistinct({ productId: schema.userProductAssignments.productId })
-      .from(schema.userProductAssignments)
-      .where(eq(schema.userProductAssignments.userId, viewerId));
+    // Run user + assignment lookups concurrently — they're independent and
+    // both round-trips dominate the latency for this method on a remote DB.
+    const [userRows, assignmentRows] = await Promise.all([
+      this.db
+        .select({ restrictProductAccess: schema.users.restrictProductAccess })
+        .from(schema.users)
+        .where(eq(schema.users.id, viewerId))
+        .limit(1),
+      this.db
+        .selectDistinct({ productId: schema.userProductAssignments.productId })
+        .from(schema.userProductAssignments)
+        .where(eq(schema.userProductAssignments.userId, viewerId)),
+    ]);
 
     const assignmentIds = [...new Set(assignmentRows.map((r) => r.productId))];
-    const restrict = userRow?.restrictProductAccess ?? false;
+    const restrict = userRows[0]?.restrictProductAccess ?? false;
     const shouldScope = restrict || assignmentIds.length > 0;
 
     if (!shouldScope) {

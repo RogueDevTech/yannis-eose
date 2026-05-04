@@ -850,15 +850,32 @@ export class OrdersService {
       })
       .catch(() => {});
 
-    // Notify Media Buyer if order is from their campaign
+    // Notify Media Buyer if order is from their campaign. Body is
+    // personalized with the customer name + campaign name so the MB can
+    // distinguish multiple notifications stacking up in their bell. Customer
+    // name is non-PII (Pillar 2 only protects the phone). Falls back to the
+    // generic body if either lookup fails.
     if (order.mediaBuyerId) {
+      const campaignName = order.campaignId
+        ? (
+            await this.db
+              .select({ name: schema.campaigns.name })
+              .from(schema.campaigns)
+              .where(eq(schema.campaigns.id, order.campaignId))
+              .limit(1)
+          )[0]?.name ?? null
+        : null;
+      const customerLabel = (order.customerName ?? '').trim() || 'A customer';
+      const body = campaignName
+        ? `${customerLabel} just placed an order via ${campaignName}.`
+        : `${customerLabel} just placed an order from your campaign.`;
       this.notifications
         .create({
           userId: order.mediaBuyerId,
           type: 'order:new_campaign',
           title: 'New order from your campaign',
-          body: 'A new order has been created from your campaign.',
-          data: { orderId: order.id },
+          body,
+          data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName, customerName: customerLabel },
         })
         .catch(() => {});
     }
@@ -2366,7 +2383,28 @@ export class OrdersService {
       this.notifications.createForRole('HEAD_OF_CS', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
       this.notifications.createForRole('HEAD_OF_MARKETING', { type: 'order:new', title: 'New order received', body: 'A new order has been created.', data: { orderId: order.id } }).catch(() => {});
       if (order.mediaBuyerId) {
-        this.notifications.create({ userId: order.mediaBuyerId, type: 'order:new_campaign', title: 'New order from your campaign', body: 'A new order has been created from your campaign.', data: { orderId: order.id } }).catch(() => {});
+        const campaignNamePay = order.campaignId
+          ? (
+              await this.db
+                .select({ name: schema.campaigns.name })
+                .from(schema.campaigns)
+                .where(eq(schema.campaigns.id, order.campaignId))
+                .limit(1)
+            )[0]?.name ?? null
+          : null;
+        const customerLabelPay = (order.customerName ?? '').trim() || 'A customer';
+        const bodyPay = campaignNamePay
+          ? `${customerLabelPay} just placed an order via ${campaignNamePay}.`
+          : `${customerLabelPay} just placed an order from your campaign.`;
+        this.notifications
+          .create({
+            userId: order.mediaBuyerId,
+            type: 'order:new_campaign',
+            title: 'New order from your campaign',
+            body: bodyPay,
+            data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName: campaignNamePay, customerName: customerLabelPay },
+          })
+          .catch(() => {});
       }
       const mediaBuyerNamePay = order.mediaBuyerId
         ? await this.resolveUserNameById(order.mediaBuyerId)

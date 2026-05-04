@@ -951,6 +951,26 @@ function getFormScript(
         if (phoneInput.parentNode) {
           phoneInput.parentNode.insertBefore(phoneError, phoneInput.nextSibling);
         }
+        // Live sanitizer: strip everything except digits and a single leading +,
+        // then cap at the Nigerian-number max length (14 chars including +, 11
+        // without). The HTML maxlength attribute caps total chars, but it would
+        // count dashes / spaces / parens against the limit and let the user run
+        // out of room before reaching 11 digits — so we strip those characters
+        // here as they type. Also handles paste / autofill of formatted numbers.
+        phoneInput.addEventListener('input', function() {
+          var raw = phoneInput.value || '';
+          var hadPlus = raw.charAt(0) === '+';
+          var digits = raw.replace(/\\D/g, '');
+          var maxDigits = hadPlus ? 13 : 11; // +234XXXXXXXXXX (13) or 0XXXXXXXXXX (11)
+          if (digits.length > maxDigits) digits = digits.substring(0, maxDigits);
+          var next = hadPlus ? '+' + digits : digits;
+          if (next !== raw) {
+            // Preserve cursor position by writing through .value (browser will
+            // place the caret at end, which is the expected behavior when
+            // autocorrecting input).
+            phoneInput.value = next;
+          }
+        });
         phoneInput.addEventListener('blur', function() {
           var v = (phoneInput.value || '').trim();
           phoneError.style.display = v.length > 0 && !isValidNgPhone(v) ? '' : 'none';
@@ -1294,7 +1314,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
       <label for="customerName">Full Name</label>
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
       <label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
+      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
       ${showField('gender') ? `<label for="customerGender">Gender${requiredField('gender') ? ' <span class="required">*</span>' : ''}</label>
       <select id="customerGender" name="customerGender"${requiredField('gender') ? ' required' : ''}>
         <option value="">Select gender...</option>
@@ -1481,7 +1501,7 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
       <label for="customerName">Full Name</label>
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
       <label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
+      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
       <label for="deliveryAddress">Delivery Address</label>
       <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"></textarea>
       <label for="deliveryNotes">Delivery Notes (optional)</label>

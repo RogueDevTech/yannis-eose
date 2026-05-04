@@ -28,10 +28,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.read');
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
-  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(
-    url,
-    'last_48_hours',
-  );
+  // Default to "this month" — matches every other marketing page (Overview, Team,
+  // Orders, Leaderboard, Funding). The previous `last_48_hours` default hid every
+  // entry older than 2 days, so users landing on the page from the sidebar saw
+  // ₦0 even when their period had real spend.
+  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
   const { isMediaBuyer, isFundingAdmin, canApproveAdSpend } = getMarketingRoleFlags(user);
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
@@ -154,7 +155,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         spendAmount: string;
         screenshotUrl: string;
         adUrl: string | null;
-        platform: 'FACEBOOK' | 'TIKTOK' | 'GOOGLE';
+        platform: 'FACEBOOK' | 'TIKTOK' | 'GOOGLE' | 'OTHER';
+        platformCustomLabel?: string | null;
         spendDate: string;
         status: 'PENDING' | 'APPROVED' | 'REJECTED';
         rejectionReason: string | null;
@@ -232,6 +234,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const data: MarketingAdSpendLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',
     canApproveAdSpend,
+    currentUserId: user.id,
     adSpend: adSpendData?.records ?? [],
     totalAdSpend: totalRows,
     adSpendTotal: adSpendData?.totalSpend ?? '0',

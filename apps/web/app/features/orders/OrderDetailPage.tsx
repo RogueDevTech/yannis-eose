@@ -1241,7 +1241,22 @@ export function OrderDetailPage({
             {canEditOrder && userRole !== 'MEDIA_BUYER' && isCSOrHoS && orderAllowsLineItemEdits && (
               <div className="card">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
-                {!canPerformCSActionsOnOrder && (
+                {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
+                    other than the Assign closer dropdown are suppressed. This forces the
+                    correct lifecycle entry point: someone (HoCS / admin) picks a closer first,
+                    then the order moves to CS_ASSIGNED and the rest of the workflow opens up.
+                    Without this, an admin could engage / confirm an order directly and the
+                    "Closer" column on `/admin/cs/orders` ends up blank because no CS_AGENT
+                    is on the row. */}
+                {order.status === 'UNPROCESSED' && !order.assignedCsId && (
+                  <div className="rounded-lg bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-700/50 px-4 py-3 mb-3">
+                    <p className="text-sm text-info-800 dark:text-info-200">
+                      Assign a closer to begin. Other actions (call, confirm, cancel, archive)
+                      will appear once a closer is assigned.
+                    </p>
+                  </div>
+                )}
+                {!canPerformCSActionsOnOrder && !(order.status === 'UNPROCESSED' && !order.assignedCsId) && (
                   <div className="rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3 mb-3">
                     <p className="text-sm text-warning-800 dark:text-warning-200">
                       This order is not assigned to you. You cannot perform actions until it is assigned to you by Head of CS or the system.
@@ -1249,6 +1264,11 @@ export function OrderDetailPage({
                   </div>
                 )}
                 <div className={`space-y-2 ${!canPerformCSActionsOnOrder ? 'pointer-events-none opacity-60' : ''}`}>
+                  {/* All actions other than the Assign closer dropdown are suppressed while
+                      the order is UNPROCESSED with no closer assigned — see the info banner
+                      above for rationale. */}
+                  {!(order.status === 'UNPROCESSED' && !order.assignedCsId) && (
+                  <>
                   {/* Adjust order items — always first */}
                   <Button
                     type="button"
@@ -1379,38 +1399,48 @@ export function OrderDetailPage({
                       )}
                     </>
                   )}
+                  </>
+                  )}
 
-                  {/* Assign to agent — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED */}
+                  {/* Assign to closer — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED.
+                      The CS agent (closer) drives the order from queue → call → confirm; assignment
+                      happens BEFORE confirmation per the locked Order Lifecycle (CLAUDE.md). */}
                   {(order.status === 'UNPROCESSED' ||
                     order.status === 'CS_ASSIGNED' ||
                     order.status === 'CS_ENGAGED') &&
                     canAssignToCS &&
                     csAgentsForAssign &&
                     csAgentsForAssign.length > 0 && (
-                    <div className="flex gap-2">
-                      <SearchableSelect
-                        id="order-assign-cs"
-                        value={assignToId}
-                        onChange={setAssignToId}
-                        placeholder="Select agent..."
-                        options={csAgentsForAssign.map((a) => ({ value: a.id, label: a.name }))}
-                        wrapperClassName="flex-1 min-w-0"
-                        searchPlaceholder="Search agents..."
-                      />
-                      <fetcher.Form method="post" className="flex-shrink-0">
-                        <input type="hidden" name="intent" value="assignToCS" />
-                        {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
-                        <input type="hidden" name="toCsAgentId" value={assignToId} />
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          disabled={!assignToId || fetcher.state === 'submitting'}
-                          loading={fetcher.state === 'submitting'}
-                          loadingText="Assigning..."
-                        >
-                          Assign
-                        </Button>
-                      </fetcher.Form>
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-app-fg-muted">
+                        {order.assignedCsId ? 'Reassign closer' : 'Assign closer (CS agent)'}
+                      </p>
+                      <div className="flex items-stretch gap-2">
+                        <SearchableSelect
+                          id="order-assign-cs"
+                          value={assignToId}
+                          onChange={setAssignToId}
+                          placeholder="Pick a closer to assign…"
+                          options={csAgentsForAssign.map((a) => ({ value: a.id, label: a.name }))}
+                          wrapperClassName="flex-1 min-w-0"
+                          searchPlaceholder="Search closers..."
+                          controlSize="lg"
+                        />
+                        <fetcher.Form method="post" className="flex-shrink-0">
+                          <input type="hidden" name="intent" value="assignToCS" />
+                          {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+                          <input type="hidden" name="toCsAgentId" value={assignToId} />
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            disabled={!assignToId || fetcher.state === 'submitting'}
+                            loading={fetcher.state === 'submitting'}
+                            loadingText="Assigning..."
+                          >
+                            Assign
+                          </Button>
+                        </fetcher.Form>
+                      </div>
                     </div>
                   )}
                 </div>

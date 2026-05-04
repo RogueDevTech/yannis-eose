@@ -33,27 +33,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortOrder: 'asc' as const,
   };
   const productsInputStr = encodeURIComponent(JSON.stringify(productsListInput));
-  const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie });
+  // `products.list` runs several sequential queries (per-viewer scope + list +
+  // count + inventory aggregate) and the page is unusable without the result —
+  // give it a longer timeout than the 4.5s default so a slow remote Postgres
+  // hop doesn't kill the whole page. 15s is generous but still well under
+  // any reasonable patience threshold; if it consistently hits this ceiling,
+  // the underlying query needs an EXPLAIN ANALYZE pass.
+  const productsPromise = apiRequest<unknown>(
+    `/trpc/products.list?input=${productsInputStr}`,
+    { method: 'GET', cookie, timeoutMs: 15_000 },
+  );
 
-  const formsRes = await formsPromise;
+  // Run forms + products concurrently so the page gets the full timeout
+  // budget for whichever is slowest, instead of paying them sequentially.
+  const [formsRes, productsRes] = await Promise.all([formsPromise, productsPromise]);
 
   const resultData = formsRes.ok ? (formsRes.data as { result?: { data?: { campaigns: Campaign[]; pagination: { total: number } } } })?.result?.data : null;
   const formsData = resultData ?? null;
 
   let products: Product[] = [];
   let productsLoadError: string | null = null;
-  try {
-    const productsRes = await productsPromise;
-    if (productsRes.ok) {
-      const productsData = (productsRes.data as { result?: { data?: { products: Product[] } } })?.result?.data;
-      products = productsData?.products ?? [];
-    } else {
-      console.error('[admin.marketing.forms._index] products.list failed', productsRes.status, productsRes.data);
-      productsLoadError = 'Could not load products. Try refreshing the page.';
-    }
-  } catch (err) {
-    console.error('[admin.marketing.forms._index] products.list error', err);
-    productsLoadError = 'Could not load products. Try refreshing the page.';
+  if (productsRes.ok) {
+    const productsData = (productsRes.data as { result?: { data?: { products: Product[] } } })?.result?.data;
+    products = productsData?.products ?? [];
+  } else {
+    const errPayload = (productsRes.data as { error?: string })?.error;
+    console.error('[admin.marketing.forms._index] products.list failed', productsRes.status, errPayload ?? productsRes.data);
+    productsLoadError =
+      errPayload === 'API request timed out'
+        ? 'Loading products is slow right now. Refresh to retry.'
+        : 'Could not load products. Try refreshing the page.';
   }
 
   return {

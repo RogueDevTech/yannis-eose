@@ -558,11 +558,25 @@ export function CSDashboardPage({
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   /** Tab follows `?tab=` so deep links and client <Link> navigations (e.g. Hot Swap from a closer card) switch the panel — local useState did not update when the URL changed. */
-  const activeTab = useMemo((): CSQueueTab => {
+  const settledTab = useMemo((): CSQueueTab => {
     return parseCSQueueTabFromSearchParam(searchParams.get('tab'), isClaimMode) ?? 'queue';
   }, [searchParams, isClaimMode]);
+  /** Optimistic tab override — set the moment the user clicks a tab so the visual indicator
+   *  AND the content area swap immediately, without waiting for Remix to commit the new URL
+   *  + revalidate the loader. Cleared once the URL catches up with the chosen tab. */
+  const [optimisticTab, setOptimisticTab] = useState<CSQueueTab | null>(null);
+  useEffect(() => {
+    if (optimisticTab !== null && optimisticTab === settledTab) {
+      setOptimisticTab(null);
+    }
+  }, [optimisticTab, settledTab]);
+  const activeTab = optimisticTab ?? settledTab;
+  /** True while we've optimistically switched but the loader hasn't caught up yet — used to
+   *  drive the in-tab loading state below so the user gets immediate feedback. */
+  const isTabSwitching = optimisticTab !== null && optimisticTab !== settledTab;
   const setActiveTab = useCallback(
     (v: CSQueueTab) => {
+      setOptimisticTab(v);
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -663,7 +677,6 @@ export function CSDashboardPage({
         );
       },
     },
-    // csMutationBranchPayload is stable enough per render; omit from deps to avoid column churn.
   ], [claimingOrderId, claimFetcher.state, claimFetcher, setClaimingOrderId]);
 
   const leaderboardColumns = useMemo((): CompactTableColumn<CSLeaderboardEntry>[] => [
@@ -1735,6 +1748,17 @@ export function CSDashboardPage({
         )}
       </div>
 
+      {/* Thin loading rail — visible only while we're optimistically switching tabs OR
+          the loader is revalidating the current URL. Tab content stays visible underneath
+          (data for all tabs is loaded upfront, so the new tab renders immediately) but the
+          user gets a clear signal that work is in flight. */}
+      {(isTabSwitching || isRouteLoaderBusy) && (
+        <div className="flex items-center gap-2 px-1 py-1 text-xs text-app-fg-muted" role="status" aria-live="polite">
+          <Spinner size="sm" />
+          <span>Loading…</span>
+        </div>
+      )}
+
       {/* Tab Content — fixed height so layout does not shift */}
       {activeTab === 'queue' && (
         <div className="space-y-3">
@@ -2495,142 +2519,63 @@ export function CSDashboardPage({
                   </span>
                 </div>
 
-                {orders.length === 0 ? (
-                  <div className="text-center py-12 text-app-fg-muted">
-                    No orders in the claim queue right now.
-                  </div>
-                ) : (
-                  <>
-                    {/* Desktop table */}
-                    <div className="hidden md:block overflow-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr>
-                            <th className="table-header">Order</th>
-                            <th className="table-header">Customer</th>
-                            <th className="table-header">Phone</th>
-                            <th className="table-header text-right">Amount</th>
-                            <th className="table-header">Received</th>
-                            <th className="table-header" />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {orders.map((order: CSOrder) => {
-                            const isClaiming = claimingOrderId === order.id && claimFetcher.state === 'submitting';
-                            // Count how many unconfirmed orders the current user has
-                            // We cap check is enforced server-side; disable button while submitting
-                            return (
-                              <tr key={order.id} className="table-row">
-                                <td className="table-cell">
-                                  <OrderIdBadge
-                                    id={order.id}
-                                    uppercase
-                                    ellipsis=""
-                                    linkTo={`/admin/orders/${order.id}`}
-                                    textClassName="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
-                                  />
-                                </td>
-                                <td className="table-cell">
-                                  <p className="text-sm font-medium text-app-fg">{order.customerName}</p>
-                                </td>
-                                <td className="table-cell">
-                                  <span className="text-xs font-mono text-app-fg-muted">{order.customerPhoneDisplay}</span>
-                                </td>
-                                <td className="table-cell text-right text-sm">
-                                  {order.totalAmount ? `₦${Number(order.totalAmount).toLocaleString()}` : '—'}
-                                </td>
-                                <td className="table-cell text-xs text-app-fg-muted">
-                                  {new Date(order.createdAt).toLocaleString('en-NG', {
-                                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                                  })}
-                                </td>
-                                <td className="table-cell text-right">
-                                  <Button
-                                    type="button"
-                                    variant="primary"
-                                    size="sm"
-                                    loading={isClaiming}
-                                    loadingText="Claiming..."
-                                    disabled={claimFetcher.state === 'submitting'}
-                                    onClick={() => {
-                                      setClaimingOrderId(order.id);
-                                      claimFetcher.submit(
-                                        {
-                                          intent: 'claimOrder',
-                                          orderId: order.id,
-                                          ...csMutationBranchPayload([order]),
-                                        },
-                                        { method: 'post' },
-                                      );
-                                    }}
-                                  >
-                                    Claim
-                                  </Button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Mobile cards */}
-                    <div className="md:hidden space-y-3">
-                      {orders.map((order: CSOrder) => {
-                        const isClaiming = claimingOrderId === order.id && claimFetcher.state === 'submitting';
-                        return (
-                          <div
-                            key={order.id}
-                            className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <OrderIdBadge
-                                  id={order.id}
-                                  uppercase
-                                  ellipsis=""
-                                  linkTo={`/admin/orders/${order.id}`}
-                                  textClassName="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
-                                />
-                                <p className="text-sm font-medium text-app-fg mt-0.5">{order.customerName}</p>
-                                <p className="text-xs font-mono text-app-fg-muted">{order.customerPhoneDisplay}</p>
-                                {order.totalAmount && (
-                                  <p className="text-xs text-app-fg-muted mt-1">₦{Number(order.totalAmount).toLocaleString()}</p>
-                                )}
-                                <p className="text-xs text-app-fg-muted mt-1">
-                                  {new Date(order.createdAt).toLocaleString('en-NG', {
-                                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                                  })}
-                                </p>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="primary"
-                                size="sm"
-                                loading={isClaiming}
-                                loadingText="Claiming..."
-                                disabled={claimFetcher.state === 'submitting'}
-                                onClick={() => {
-                                  setClaimingOrderId(order.id);
-                                  claimFetcher.submit(
-                                    {
-                                      intent: 'claimOrder',
-                                      orderId: order.id,
-                                      ...csMutationBranchPayload([order]),
-                                    },
-                                    { method: 'post' },
-                                  );
-                                }}
-                              >
-                                Claim
-                              </Button>
-                            </div>
+                <CompactTable<CSOrder>
+                  caption="Claim queue"
+                  columns={claimQueueColumns}
+                  rows={orders}
+                  rowKey={(order) => order.id}
+                  withCard={false}
+                  emptyTitle="No orders in the claim queue right now."
+                  renderMobileCard={(order) => {
+                    const isClaiming = claimingOrderId === order.id && claimFetcher.state === 'submitting';
+                    return (
+                      <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <OrderIdBadge
+                              id={order.id}
+                              uppercase
+                              ellipsis=""
+                              linkTo={`/admin/orders/${order.id}`}
+                              textClassName="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
+                            />
+                            <p className="mt-0.5 text-sm font-medium text-app-fg">{order.customerName}</p>
+                            <p className="text-xs font-mono text-app-fg-muted">{order.customerPhoneDisplay}</p>
+                            {order.totalAmount && (
+                              <p className="mt-1 text-xs text-app-fg-muted">₦{Number(order.totalAmount).toLocaleString()}</p>
+                            )}
+                            <p className="mt-1 text-xs text-app-fg-muted">
+                              {new Date(order.createdAt).toLocaleString('en-NG', {
+                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                              })}
+                            </p>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            loading={isClaiming}
+                            loadingText="Claiming..."
+                            disabled={claimFetcher.state === 'submitting'}
+                            onClick={() => {
+                              setClaimingOrderId(order.id);
+                              claimFetcher.submit(
+                                {
+                                  intent: 'claimOrder',
+                                  orderId: order.id,
+                                  ...csMutationBranchPayload([order]),
+                                },
+                                { method: 'post' },
+                              );
+                            }}
+                          >
+                            Claim
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
               </div>
             </div>
           )}
@@ -2676,93 +2621,48 @@ export function CSDashboardPage({
                     </div>
                   </div>
                 </div>
-                <div className="isolate hidden md:block overflow-auto flex-1 min-h-0 overscroll-y-contain">
-                  <table className="w-full border-separate border-spacing-0">
-                    <thead>
-                      <tr>
-                        <th className="table-header">#</th>
-                        <th className="table-header">Closer</th>
-                        <th className="table-header text-right">Engaged</th>
-                        <th className="table-header text-right">Confirmed</th>
-                        <th className="table-header text-right">Delivered</th>
-                        <th className="table-header text-right">Calls</th>
-                        <th className="table-header text-right">Conf. Rate</th>
-                        <th className="table-header text-right">Del. Rate</th>
-                        <th className="table-header text-right">Avg Call</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lb.map((e: CSLeaderboardEntry, idx: number) => (
-                        <tr key={e.agentId} className="table-row">
-                          <td className="table-cell text-app-fg-muted font-mono text-sm">{idx + 1}</td>
-                          <td className="table-cell">
+                <div className="isolate flex min-h-0 flex-1 flex-col overflow-auto overscroll-y-contain">
+                  <CompactTable<CSLeaderboardEntry>
+                    caption="Closer performance"
+                    columns={leaderboardColumns}
+                    rows={lb}
+                    rowKey={(e) => e.agentId}
+                    withCard={false}
+                    className="min-w-[900px] [&_table]:border-separate [&_table]:border-spacing-0"
+                    renderMobileCard={(e, idx) => (
+                      <div className="space-y-2 rounded-xl border border-app-border bg-app-elevated p-4 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs text-app-fg-muted">#{idx + 1}</span>
                             <Link
                               to={`/hr/users/${e.agentId}`}
                               prefetch="intent"
-                              className="text-sm font-medium text-brand-500 hover:text-brand-600 hover:underline"
+                              className="min-w-0 truncate text-sm font-medium text-brand-500 hover:text-brand-600 hover:underline"
                             >
                               {e.agentName}
                             </Link>
-                          </td>
-                          <td className="table-cell text-right text-sm">{e.ordersEngaged}</td>
-                          <td className="table-cell text-right text-sm text-success-600 dark:text-success-400">{e.ordersConfirmed}</td>
-                          <td className="table-cell text-right text-sm font-medium text-brand-600 dark:text-brand-400">{e.ordersDelivered}</td>
-                          <td className="table-cell text-right text-sm">{e.callsMade}</td>
-                          <td className="table-cell text-right text-sm">{e.confirmationRate.toFixed(1)}%</td>
-                          <td className="table-cell text-right">
-                            <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`}>
-                              {e.deliveryRate.toFixed(1)}%
-                            </span>
-                          </td>
-                          <td className="table-cell text-right text-sm text-app-fg-muted">
-                            {e.avgCallDurationSeconds >= 60
-                              ? `${Math.floor(e.avgCallDurationSeconds / 60)}m ${e.avgCallDurationSeconds % 60}s`
-                              : `${e.avgCallDurationSeconds}s`}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Mobile — cards */}
-                <div className="md:hidden overflow-auto flex-1 min-h-0 p-3 space-y-3">
-                  {lb.map((e: CSLeaderboardEntry, idx: number) => (
-                    <div
-                      key={e.agentId}
-                      className="rounded-xl border border-app-border bg-app-elevated p-4 shadow-sm space-y-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-app-fg-muted">#{idx + 1}</span>
-                          <Link
-                            to={`/hr/users/${e.agentId}`}
-                            prefetch="intent"
-                            className="min-w-0 truncate font-medium text-sm text-brand-500 hover:text-brand-600 hover:underline"
-                          >
-                            {e.agentName}
-                          </Link>
+                          </div>
+                          <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`}>
+                            {e.deliveryRate.toFixed(1)}% del.
+                          </span>
                         </div>
-                        <span className={`text-sm font-bold ${e.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : e.deliveryRate >= 50 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`}>
-                          {e.deliveryRate.toFixed(1)}% del.
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div>
-                          <span className="text-app-fg-muted">Confirmed</span>
-                          <p className="font-medium text-app-fg">{e.ordersConfirmed}</p>
-                        </div>
-                        <div>
-                          <span className="text-app-fg-muted">Calls</span>
-                          <p className="font-medium text-app-fg">{e.callsMade}</p>
-                        </div>
-                        <div>
-                          <span className="text-app-fg-muted">Conf. Rate</span>
-                          <p className="font-medium text-app-fg">{e.confirmationRate.toFixed(1)}%</p>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div>
+                            <span className="text-app-fg-muted">Confirmed</span>
+                            <p className="font-medium text-app-fg">{e.ordersConfirmed}</p>
+                          </div>
+                          <div>
+                            <span className="text-app-fg-muted">Calls</span>
+                            <p className="font-medium text-app-fg">{e.callsMade}</p>
+                          </div>
+                          <div>
+                            <span className="text-app-fg-muted">Conf. Rate</span>
+                            <p className="font-medium text-app-fg">{e.confirmationRate.toFixed(1)}%</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    )}
+                  />
                 </div>
               </div>
             );

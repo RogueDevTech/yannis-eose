@@ -1770,6 +1770,7 @@ export class MarketingService {
       }
 
       // Screenshot is mandatory — enforced by Zod schema. status defaults to PENDING in DB.
+      const platform = input.platform ?? 'FACEBOOK';
       const rows = await tx
         .insert(schema.adSpendLogs)
         .values({
@@ -1779,7 +1780,9 @@ export class MarketingService {
           spendAmount: sql`${String(input.spendAmount)}::numeric`,
           screenshotUrl: input.screenshotUrl,
           spendDate: new Date(input.spendDate),
-          platform: input.platform ?? 'FACEBOOK',
+          platform,
+          platformCustomLabel:
+            platform === 'OTHER' && input.platformCustomLabel ? input.platformCustomLabel : null,
           adUrl: input.adUrl ?? null,
         })
         .returning();
@@ -1830,16 +1833,21 @@ export class MarketingService {
       return tx
         .insert(schema.adSpendLogs)
         .values(
-          input.lines.map((line) => ({
-            mediaBuyerId,
-            productId: line.productId,
-            campaignId: line.campaignId,
-            spendAmount: sql`${String(line.spendAmount)}::numeric`,
-            screenshotUrl: line.screenshotUrl,
-            spendDate: spendDateAt,
-            platform: line.platform ?? 'FACEBOOK',
-            adUrl: line.adUrl ?? null,
-          })),
+          input.lines.map((line) => {
+            const platform = line.platform ?? 'FACEBOOK';
+            return {
+              mediaBuyerId,
+              productId: line.productId,
+              campaignId: line.campaignId,
+              spendAmount: sql`${String(line.spendAmount)}::numeric`,
+              screenshotUrl: line.screenshotUrl,
+              spendDate: spendDateAt,
+              platform,
+              platformCustomLabel:
+                platform === 'OTHER' && line.platformCustomLabel ? line.platformCustomLabel : null,
+              adUrl: line.adUrl ?? null,
+            };
+          }),
         )
         .returning();
     });
@@ -1851,12 +1859,63 @@ export class MarketingService {
     // One notification per batch — not per line. HoM should never wake up to
     // 12 push pings because someone logged a busy day.
     const total = input.lines.reduce((acc, l) => acc + l.spendAmount, 0);
+
+    // Personalize the body with the submitter's name + campaign(s) so HoM
+    // can scan and triage at a glance instead of clicking through. Falls
+    // back to "A Media Buyer" / no campaign when lookups fail (notifications
+    // must never block the write).
+    const uniqueCampaignIds = [...new Set(input.lines.map((l) => l.campaignId).filter((id): id is string => !!id))];
+    const [mbRow, campaignRows] = await Promise.all([
+      this.db
+        .select({ name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, mediaBuyerId))
+        .limit(1)
+        .catch(() => []),
+      uniqueCampaignIds.length > 0
+        ? this.db
+            .select({ name: schema.campaigns.name })
+            .from(schema.campaigns)
+            .where(inArray(schema.campaigns.id, uniqueCampaignIds))
+            .catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    const mbName = mbRow[0]?.name?.trim() || 'A Media Buyer';
+    const campaignNames = campaignRows.map((c) => c.name).filter(Boolean);
+    const campaignSegment =
+      campaignNames.length === 1
+        ? ` on ${campaignNames[0]}`
+        : campaignNames.length > 1
+          ? ` across ${campaignNames.length} campaigns`
+          : '';
+    // Friendly date — "May 3, 2026" reads better than "2026-05-03". Parse the
+    // YMD as local-date components so we don't shift across timezones.
+    let dateLabel = input.spendDate;
+    const parts = input.spendDate.split('-').map((p) => parseInt(p, 10));
+    if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+      const [y, m, d] = parts as [number, number, number];
+      dateLabel = new Date(y, m - 1, d).toLocaleDateString('en-NG', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
+    }
+    const lineWord = input.lines.length === 1 ? 'line' : 'lines';
+
     this.notifications
       .createForRole('HEAD_OF_MARKETING', {
         type: 'marketing:ad_spend_submitted',
-        title: 'New ad spend submitted',
-        body: `A Media Buyer logged ${input.lines.length} line${input.lines.length === 1 ? '' : 's'} totalling ₦${total.toLocaleString()} for ${input.spendDate}.`,
-        data: { mediaBuyerId, spendDate: input.spendDate, count: input.lines.length },
+        title: `${mbName} logged ad spend`,
+        body: `${input.lines.length} ${lineWord} · ₦${total.toLocaleString()}${campaignSegment} · ${dateLabel}`,
+        data: {
+          mediaBuyerId,
+          mediaBuyerName: mbName,
+          spendDate: input.spendDate,
+          count: input.lines.length,
+          totalAmount: total,
+          campaignIds: uniqueCampaignIds,
+          campaignNames,
+        },
       })
       .catch(() => {});
 
@@ -2115,6 +2174,7 @@ export class MarketingService {
         ilike(prod.name, `%${searchTrimmed}%`),
         ilike(camp.name, `%${searchTrimmed}%`),
         ilike(schema.adSpendLogs.id, `%${searchTrimmed}%`),
+        ilike(schema.adSpendLogs.platformCustomLabel, `%${searchTrimmed}%`),
       );
       if (searchOr) conditions.push(searchOr);
     }
@@ -2229,6 +2289,7 @@ export class MarketingService {
         ilike(prod.name, `%${searchTrimmed}%`),
         ilike(camp.name, `%${searchTrimmed}%`),
         ilike(schema.adSpendLogs.id, `%${searchTrimmed}%`),
+        ilike(schema.adSpendLogs.platformCustomLabel, `%${searchTrimmed}%`),
       );
       if (searchOr) conditions.push(searchOr);
     }
@@ -2248,6 +2309,7 @@ export class MarketingService {
         screenshotUrl: schema.adSpendLogs.screenshotUrl,
         adUrl: schema.adSpendLogs.adUrl,
         platform: schema.adSpendLogs.platform,
+        platformCustomLabel: schema.adSpendLogs.platformCustomLabel,
         spendDate: schema.adSpendLogs.spendDate,
         status: schema.adSpendLogs.status,
         rejectionReason: schema.adSpendLogs.rejectionReason,

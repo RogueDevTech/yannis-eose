@@ -144,6 +144,52 @@ export function parseCampaigns(res: { ok: boolean; data: unknown }): Campaign[] 
   return data?.campaigns ?? [];
 }
 
+/** Campaigns + products for `/admin/marketing/ad-spend/new` (shared with ad-spend list filtering). */
+export async function loadAdSpendExpenseFormData(
+  cookie: string,
+  opts: { mediaBuyerId?: string },
+): Promise<{ campaigns: Campaign[]; products: Product[] }> {
+  const campaignsInput = JSON.stringify(
+    opts.mediaBuyerId ? { mediaBuyerId: opts.mediaBuyerId, page: 1, limit: 50 } : { page: 1, limit: 50 },
+  );
+  // Explicit input keeps us aligned with the form-page loader (page=1, limit=100,
+  // ACTIVE only, sorted by name) and gives `products.list` enough headroom to
+  // return all the catalog items the dropdown needs. Default `limit` is 20, which
+  // truncates the list and confuses MBs with several products.
+  const productsInput = JSON.stringify({
+    page: 1,
+    limit: 100,
+    status: 'ACTIVE',
+    sortBy: 'name',
+    sortOrder: 'asc',
+  });
+  // `products.list` is the slow side of this fetch on a remote DB (per-viewer
+  // scope queries + list + count + inventory aggregate). Bump the timeout to
+  // 15s so the form doesn't render with empty dropdowns when the default 4.5s
+  // ceiling is exceeded — same pattern the forms list page now uses.
+  const [campaignsRes, productsRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`, {
+      method: 'GET',
+      cookie,
+    }),
+    apiRequest<unknown>(`/trpc/products.list?input=${encodeURIComponent(productsInput)}`, {
+      method: 'GET',
+      cookie,
+      timeoutMs: 15_000,
+    }),
+  ]);
+  if (!campaignsRes.ok) {
+    console.error('[loadAdSpendExpenseFormData] listCampaigns failed', campaignsRes.status, campaignsRes.data);
+  }
+  if (!productsRes.ok) {
+    console.error('[loadAdSpendExpenseFormData] products.list failed', productsRes.status, productsRes.data);
+  }
+  return {
+    campaigns: parseCampaigns(campaignsRes),
+    products: parseProducts(productsRes),
+  };
+}
+
 export function parseLeaderboard(res: { ok: boolean; data: unknown }): LeaderboardEntry[] {
   const data = res.ok ? (res.data as { result?: { data?: LeaderboardEntry[] } })?.result?.data : null;
   return data ?? [];
@@ -457,6 +503,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
         screenshotUrl,
         spendDate: formData.get('spendDate')?.toString() ?? '',
         platform: formData.get('platform')?.toString() || undefined,
+        platformCustomLabel: formData.get('platformCustomLabel')?.toString() || undefined,
         adUrl: formData.get('adUrl')?.toString() || undefined,
       },
     });

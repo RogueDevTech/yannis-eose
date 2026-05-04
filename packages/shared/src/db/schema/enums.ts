@@ -227,6 +227,7 @@ export const adPlatformEnum = pgEnum('ad_platform', [
   'FACEBOOK',
   'TIKTOK',
   'GOOGLE',
+  'OTHER',
 ]);
 
 /** Status of a 3PL→warehouse transfer remittance (receipt upload, HoL marks received). */

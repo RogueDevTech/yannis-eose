@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { createAdSpendLogFormSchema, updateAdSpendSchema } from '@yannis/shared/validators';
@@ -29,6 +29,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
 import { Textarea } from '~/components/ui/textarea';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -36,6 +37,7 @@ import { fetchAdSpendIntervalPreview } from '~/lib/trpc-browser';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
+  AdPlatform,
   AdSpendIntervalPreview,
   AdSpendRecord,
   AdSpendGroupLine,
@@ -45,7 +47,7 @@ import type {
   Product,
   User,
 } from './types';
-import { AddExpenseModal } from './AddExpenseModal';
+import { AD_EXPENSE_PLATFORM_OPTIONS } from './ad-expense-options';
 import { AdSpendDayAccordion } from './AdSpendDayAccordion';
 
 const AD_SPEND_STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -92,13 +94,13 @@ export function MarketingAdSpendPage({
   groups,
   groupsPage,
   groupsTotalPages,
+  currentUserId,
 }: MarketingAdSpendLoaderData) {
   const dateFilters = filters;
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
-  const revalidator = useRevalidator();
   const isFilterLoading = useLoaderRefetchBusy();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
@@ -106,7 +108,6 @@ export function MarketingAdSpendPage({
   const [selectedCampaignId, setSelectedCampaignId] = useState(campaignIdFilter || 'ALL');
   const [selectedMediaBuyerId, setSelectedMediaBuyerId] = useState(mediaBuyerIdFilter || 'ALL');
   const [showAdSpendForm, setShowAdSpendForm] = useState(false);
-  const [showAddExpense, setShowAddExpense] = useState(false);
   const [showLegacyTable, setShowLegacyTable] = useState(false);
   const [adSpendDetailModal, setAdSpendDetailModal] = useState<AdSpendRecord | null>(null);
   const [rejectStep, setRejectStep] = useState(false);
@@ -123,6 +124,8 @@ export function MarketingAdSpendPage({
   const [formProductId, setFormProductId] = useState('');
   const [formSpendDate, setFormSpendDate] = useState('');
   const [formSpendAmount, setFormSpendAmount] = useState('');
+  const [formPlatform, setFormPlatform] = useState<AdPlatform>('FACEBOOK');
+  const [formPlatformCustomLabel, setFormPlatformCustomLabel] = useState('');
   const [adSpendPreview, setAdSpendPreview] = useState<AdSpendIntervalPreview | null>(null);
   const [adSpendPreviewLoading, setAdSpendPreviewLoading] = useState(false);
   const adSpendPreviewGen = useRef(0);
@@ -143,6 +146,8 @@ export function MarketingAdSpendPage({
       setFormProductId('');
       setFormSpendDate('');
       setFormSpendAmount('');
+      setFormPlatform('FACEBOOK');
+      setFormPlatformCustomLabel('');
       setAdSpendScreenshotUrl('');
       setAdSpendFileUploadState('idle');
       setAdSpendPreview(null);
@@ -281,6 +286,9 @@ export function MarketingAdSpendPage({
       spendAmount: spendRaw,
       spendDate: formSpendDate,
       screenshotUrl: adSpendScreenshotUrl.trim(),
+      platform: formPlatform,
+      platformCustomLabel:
+        formPlatform === 'OTHER' ? formPlatformCustomLabel.trim() : undefined,
     });
     if (!parsed.success) {
       const first = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -290,6 +298,10 @@ export function MarketingAdSpendPage({
     const fd = new FormData(e.currentTarget);
     fd.set('screenshotUrl', parsed.data.screenshotUrl);
     fd.set('spendAmount', spendRaw);
+    fd.set('platform', parsed.data.platform);
+    if (parsed.data.platformCustomLabel) {
+      fd.set('platformCustomLabel', parsed.data.platformCustomLabel);
+    }
     ensureBranchForAction({
       actionLabel: 'logging ad spend',
       onProceed: () => fetcher.submit(fd, { method: 'post' }),
@@ -332,7 +344,8 @@ export function MarketingAdSpendPage({
     !formProductId ||
     !formSpendDate.trim() ||
     !hasPositiveSpendAmountInput(formSpendAmount) ||
-    !adSpendScreenshotUrl.trim();
+    !adSpendScreenshotUrl.trim() ||
+    (formPlatform === 'OTHER' && !formPlatformCustomLabel.trim());
 
   const editAdSpendSubmitDisabled =
     editFileUploadState === 'uploading' ||
@@ -376,11 +389,6 @@ export function MarketingAdSpendPage({
     setEditScreenshotUrl(editTarget.screenshotUrl);
     setEditFileUploadState('idle');
   }, [editTarget]);
-
-  // Manual revalidate path is no longer needed — `useCloseOnFetcherSuccess`
-  // (above) calls `revalidator.revalidate()` internally on every success
-  // tick. The local `revalidator` ref stays mounted for the AddExpense
-  // modal's explicit `onSuccess={() => revalidator.revalidate()}` callback.
 
   const getProductName = (productId: string, resolvedProducts: Product[]): string =>
     resolvedProducts.find((p) => p.id === productId)?.name ?? 'Unknown product';
@@ -604,9 +612,12 @@ export function MarketingAdSpendPage({
                     periodAllTime={dateFilters.periodAllTime}
                   />
                 </div>
-                <Button variant="primary" size="sm" onClick={() => setShowAddExpense(true)}>
+                <Link
+                  to="/admin/marketing/ad-spend/new"
+                  className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
+                >
                   + Add Expense
-                </Button>
+                </Link>
                 <PageRefreshButton />
               </>
             }
@@ -620,17 +631,13 @@ export function MarketingAdSpendPage({
                     triggerLayout="blockCenter"
                   />
                 </div>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowAddExpense(true);
-                  }}
+                <Link
+                  to="/admin/marketing/ad-spend/new"
+                  onClick={() => closeSheet()}
+                  className="btn-primary btn-sm w-full justify-center inline-flex items-center"
                 >
                   + Add Expense
-                </Button>
+                </Link>
               </>
             )}
           />
@@ -750,6 +757,32 @@ export function MarketingAdSpendPage({
                 onChange={(e) => setFormSpendDate(e.target.value)}
               />
             </div>
+            <div>
+              <FormSelect
+                label="Platform"
+                id="marketing-adspend-create-platform"
+                value={formPlatform}
+                onChange={(e) => {
+                  const v = e.target.value as AdPlatform;
+                  setFormPlatform(v);
+                  if (v !== 'OTHER') setFormPlatformCustomLabel('');
+                }}
+                options={AD_EXPENSE_PLATFORM_OPTIONS}
+              />
+            </div>
+            {formPlatform === 'OTHER' && (
+              <div className="sm:col-span-2">
+                <TextInput
+                  label="Platform name"
+                  id="marketing-adspend-create-platform-custom"
+                  value={formPlatformCustomLabel}
+                  onChange={(e) => setFormPlatformCustomLabel(e.target.value)}
+                  placeholder="e.g. Snapchat, Taboola"
+                  maxLength={80}
+                  required
+                />
+              </div>
+            )}
             <div className="sm:col-span-2">
               <FileUpload
                 folder={S3_FOLDERS.SCREENSHOTS}
@@ -1096,10 +1129,31 @@ export function MarketingAdSpendPage({
               groups={groups}
               showMediaBuyerColumn={viewMode !== 'media_buyer'}
               canModerate={canApproveAdSpend}
+              currentUserId={currentUserId}
               page={groupsPage}
               totalPages={groupsTotalPages}
               actionUrl="/admin/marketing/ad-spend"
               onPreviewReceipt={openGroupLineReceiptModal}
+              onEdit={(line) =>
+                setEditTarget({
+                  id: line.id,
+                  mediaBuyerId: line.mediaBuyerId,
+                  productId: line.productId,
+                  campaignId: line.campaignId,
+                  spendAmount: line.spendAmount,
+                  screenshotUrl: line.screenshotUrl,
+                  adUrl: line.adUrl,
+                  platform: line.platform,
+                  platformCustomLabel: line.platformCustomLabel ?? null,
+                  spendDate: line.spendDate,
+                  status: line.status,
+                  approvedAt: line.approvedAt,
+                  approvedBy: null,
+                  rejectionReason: line.rejectionReason,
+                  rejectedAt: line.rejectedAt,
+                  rejectedBy: null,
+                })
+              }
             />
           </div>
         </TableLoadingOverlay>
@@ -1245,15 +1299,6 @@ export function MarketingAdSpendPage({
       </div>
       )}
 
-      <AddExpenseModal
-        open={showAddExpense}
-        onClose={() => setShowAddExpense(false)}
-        campaigns={campaigns}
-        products={products}
-        actionUrl="/admin/marketing/ad-spend"
-        onSuccess={() => revalidator.revalidate()}
-      />
-
       {adSpendDetailModal?.screenshotUrl && (
         <Modal
           open
@@ -1286,6 +1331,15 @@ export function MarketingAdSpendPage({
                   year: 'numeric',
                 })}
               </p>
+              {adSpendDetailModal.platform && (
+                <p className="text-sm text-brand-600 dark:text-brand-400">
+                  Platform:{' '}
+                  {adSpendDetailModal.platform === 'OTHER'
+                    ? adSpendDetailModal.platformCustomLabel?.trim() || 'Other'
+                    : AD_EXPENSE_PLATFORM_OPTIONS.find((o) => o.value === adSpendDetailModal.platform)?.label ??
+                      adSpendDetailModal.platform}
+                </p>
+              )}
               <DeferredSection resolve={users} skeleton="inline">
                 {(resolvedUsers: User[]) => (
                   <p className="text-xs text-brand-500 dark:text-brand-400">

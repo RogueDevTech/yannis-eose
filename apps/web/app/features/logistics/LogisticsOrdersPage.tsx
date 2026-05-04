@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
-import { Checkbox } from '~/components/ui/checkbox';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -21,7 +20,13 @@ import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { EmptyState } from '~/components/ui/empty-state';
+import {
+  CompactTable,
+  CompactTableActions,
+  type CompactTableColumn,
+  type CompactTableMobileCardHelpers,
+} from '~/components/ui/compact-table';
+import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
 import { formatStatus } from '~/features/shared/order-status';
@@ -74,6 +79,51 @@ interface LogisticsOrdersPageProps {
   markInTransitLabel?: string;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
   dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+}
+
+// ── Delivery Date Helpers (above page — used by column memo) ─────────────────
+
+function formatDeliveryDate(date: string): string {
+  const d = new Date(date + 'T00:00:00');
+  return d.toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function isOverdue(date: string): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const deliveryDate = new Date(date + 'T00:00:00');
+  return deliveryDate < today;
+}
+
+function isToday(date: string): boolean {
+  const today = new Date();
+  const d = new Date(date + 'T00:00:00');
+  return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+}
+
+function DeliveryDateCell({ date }: { date?: string | null }) {
+  if (!date) {
+    return <span className="text-app-fg-muted text-sm">Not set</span>;
+  }
+
+  const overdue = isOverdue(date);
+  const today = isToday(date);
+
+  return (
+    <span
+      className={`text-sm font-medium ${
+        overdue
+          ? 'text-danger-600 dark:text-danger-400'
+          : today
+            ? 'text-warning-600 dark:text-warning-400'
+            : 'text-app-fg'
+      }`}
+    >
+      {formatDeliveryDate(date)}
+      {overdue && <span className="ml-1 text-xs font-normal">(overdue)</span>}
+      {today && <span className="ml-1 text-xs font-normal">(today)</span>}
+    </span>
+  );
 }
 
 export function LogisticsOrdersPage({
@@ -232,16 +282,6 @@ export function LogisticsOrdersPage({
   /** Locations available for allocation; TPL passes only their location */
   const allocatableLocations = allocatableLocationsProp ?? locations.filter((loc) => !loc.dispatchLocked);
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-    setBulkResult(null);
-  };
-
   const clearSelection = () => {
     setSelectedIds(new Set());
     setBulkResult(null);
@@ -250,6 +290,273 @@ export function LogisticsOrdersPage({
   };
 
   const isSubmitting = fetcher.state !== 'idle';
+
+  const logisticsOrderColumns = useMemo((): CompactTableColumn<LogisticsOrderRow>[] => {
+    return [
+      {
+        key: 'orderId',
+        header: 'Order ID',
+        render: (order) => (
+          <OrderIdBadge id={order.id} linkTo={`${orderDetailBasePath}/${order.id}`} />
+        ),
+      },
+      {
+        key: 'customer',
+        header: 'Customer',
+        render: (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (order) => <OrderStatusBadge status={order.status} />,
+      },
+      {
+        key: 'deliveryDate',
+        header: 'Delivery Date',
+        render: (order) => <DeliveryDateCell date={order.preferredDeliveryDate} />,
+      },
+      {
+        key: 'location',
+        header: '3PL Location',
+        render: (order) => (
+          <span className="text-app-fg-muted">
+            {order.locationProviderName ? `${order.locationName} — ${order.locationProviderName}` : order.locationName}
+          </span>
+        ),
+      },
+      {
+        key: 'rider',
+        header: 'Rider',
+        render: (order) => <span className="text-app-fg-muted">{order.riderName}</span>,
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'right',
+        tight: true,
+        nowrap: true,
+        minWidth: 'min-w-[220px]',
+        mobileShowLabel: false,
+        headerClassName: 'text-right',
+        render: (order) => {
+          const ridersForOrder =
+            order.logisticsLocationId && order.status === 'ALLOCATED'
+              ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
+              : [];
+          return (
+            <CompactTableActions className="inline-flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
+              <TableActionButton to={`${orderDetailBasePath}/${order.id}`} variant="primary">
+                View
+              </TableActionButton>
+              {canEditDeliveryDate && order.status === 'CONFIRMED' && (
+                <TableActionButton
+                  variant="neutral"
+                  onClick={() =>
+                    setEditDeliveryDateOrder({
+                      orderId: order.id,
+                      customerName: order.customerName,
+                      preferredDeliveryDate: order.preferredDeliveryDate ?? null,
+                    })
+                  }
+                >
+                  Resolve order
+                </TableActionButton>
+              )}
+              {order.status === 'IN_TRANSIT' && (
+                <Button
+                  variant="success"
+                  size="sm"
+                  onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}
+                >
+                  Mark Delivered
+                </Button>
+              )}
+              {order.status === 'CONFIRMED' && !allocationOnDetailOnly && (
+                <fetcher.Form method="post" className="inline-flex items-center gap-1">
+                  <input type="hidden" name="intent" value="allocate" />
+                  <input type="hidden" name="orderId" value={order.id} />
+                  <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
+                  <SearchableSelect
+                    id={`logistics-row-allocate-${order.id}`}
+                    required
+                    value={rowAllocateLocationByOrder[order.id] ?? ''}
+                    onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
+                    placeholder="Location"
+                    searchPlaceholder="Search locations..."
+                    options={allocatableLocations.map((loc) => ({
+                      value: loc.id,
+                      label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    }))}
+                    wrapperClassName="w-36"
+                    controlSize="sm"
+                  />
+                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')} loading={isSubmitting}>
+                    Allocate
+                  </Button>
+                </fetcher.Form>
+              )}
+              {order.status === 'ALLOCATED' && (
+                <fetcher.Form method="post" className="inline-flex items-center gap-1">
+                  <input type="hidden" name="intent" value="dispatch" />
+                  <input type="hidden" name="orderId" value={order.id} />
+                  <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
+                  <SearchableSelect
+                    id={`logistics-row-dispatch-${order.id}`}
+                    required
+                    value={rowDispatchRiderByOrder[order.id] ?? ''}
+                    onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
+                    disabled={ridersForOrder.length === 0}
+                    placeholder={ridersForOrder.length === 0 ? 'No riders' : 'Rider'}
+                    searchPlaceholder="Search riders..."
+                    options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
+                    wrapperClassName="w-36"
+                    controlSize="sm"
+                  />
+                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || ridersForOrder.length === 0} loading={isSubmitting}>
+                    Dispatch
+                  </Button>
+                </fetcher.Form>
+              )}
+              {order.status === 'DISPATCHED' && (
+                <fetcher.Form method="post" className="inline">
+                  <input type="hidden" name="intent" value="transition" />
+                  <input type="hidden" name="orderId" value={order.id} />
+                  <input type="hidden" name="newStatus" value="IN_TRANSIT" />
+                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting}>
+                    {markInTransitLabel}
+                  </Button>
+                </fetcher.Form>
+              )}
+            </CompactTableActions>
+          );
+        },
+      },
+    ];
+  }, [
+    fetcher,
+    isSubmitting,
+    orderDetailBasePath,
+    canEditDeliveryDate,
+    allocationOnDetailOnly,
+    rowAllocateLocationByOrder,
+    rowDispatchRiderByOrder,
+    allocatableLocations,
+    riders,
+    markInTransitLabel,
+  ]);
+
+  const renderLogisticsOrderMobileCard = (
+    order: LogisticsOrderRow,
+    _index: number,
+    _helpers: CompactTableMobileCardHelpers<LogisticsOrderRow>,
+  ) => {
+    const ridersForOrder =
+      order.logisticsLocationId && order.status === 'ALLOCATED'
+        ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
+        : [];
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <OrderIdBadge
+            id={order.id}
+            linkTo={`${orderDetailBasePath}/${order.id}`}
+            textClassName="font-medium text-brand-500 hover:text-brand-600"
+          />
+          <OrderStatusBadge status={order.status} />
+        </div>
+        <p className="text-sm text-app-fg">{order.customerName}</p>
+        <div className="flex items-center gap-2 text-sm text-app-fg-muted">
+          <span>
+            {order.locationProviderName ? `${order.locationName} — ${order.locationProviderName}` : order.locationName} ·{' '}
+            {order.riderName}
+          </span>
+          {order.preferredDeliveryDate && (
+            <span className="font-medium text-brand-600 dark:text-brand-400">
+              Delivery: {formatDeliveryDate(order.preferredDeliveryDate)}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2 pt-2">
+          <TableActionButton to={`${orderDetailBasePath}/${order.id}`} variant="primary">
+            View
+          </TableActionButton>
+          {canEditDeliveryDate && order.status === 'CONFIRMED' && (
+            <TableActionButton
+              variant="neutral"
+              onClick={() =>
+                setEditDeliveryDateOrder({
+                  orderId: order.id,
+                  customerName: order.customerName,
+                  preferredDeliveryDate: order.preferredDeliveryDate ?? null,
+                })
+              }
+            >
+              Resolve order
+            </TableActionButton>
+          )}
+          {order.status === 'IN_TRANSIT' && (
+            <Button variant="success" size="sm" onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}>
+              Mark Delivered
+            </Button>
+          )}
+          {order.status === 'CONFIRMED' && !allocationOnDetailOnly && (
+            <fetcher.Form method="post" className="flex flex-wrap gap-1">
+              <input type="hidden" name="intent" value="allocate" />
+              <input type="hidden" name="orderId" value={order.id} />
+              <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
+              <SearchableSelect
+                id={`logistics-mobile-allocate-${order.id}`}
+                required
+                value={rowAllocateLocationByOrder[order.id] ?? ''}
+                onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
+                placeholder="Location"
+                searchPlaceholder="Search locations..."
+                options={allocatableLocations.map((loc) => ({
+                  value: loc.id,
+                  label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                }))}
+                wrapperClassName="min-w-0 flex-1"
+                controlSize="sm"
+              />
+              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')}>
+                Allocate
+              </Button>
+            </fetcher.Form>
+          )}
+          {order.status === 'ALLOCATED' && ridersForOrder.length > 0 && (
+            <fetcher.Form method="post" className="flex gap-1">
+              <input type="hidden" name="intent" value="dispatch" />
+              <input type="hidden" name="orderId" value={order.id} />
+              <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
+              <SearchableSelect
+                id={`logistics-mobile-dispatch-${order.id}`}
+                required
+                value={rowDispatchRiderByOrder[order.id] ?? ''}
+                onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
+                placeholder="Rider"
+                searchPlaceholder="Search riders..."
+                options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
+                controlSize="sm"
+              />
+              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowDispatchRiderByOrder[order.id] ?? '')}>
+                Dispatch
+              </Button>
+            </fetcher.Form>
+          )}
+          {order.status === 'DISPATCHED' && (
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="transition" />
+              <input type="hidden" name="orderId" value={order.id} />
+              <input type="hidden" name="newStatus" value="IN_TRANSIT" />
+              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
+                {markInTransitLabel}
+              </Button>
+            </fetcher.Form>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -516,286 +823,35 @@ export function LogisticsOrdersPage({
         />
       ) : (
       <TableLoadingOverlay show={isFilterLoading}>
-      <div className="card p-0">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header w-10">
-                  <Checkbox
-                    checked={orders.length > 0 && selectedIds.size === orders.length}
-                    onChange={() => {
-                      if (selectedIds.size === orders.length) setSelectedIds(new Set());
-                      else setSelectedIds(new Set(orders.map((o) => o.id)));
-                      setBulkResult(null);
-                    }}
-                  />
-                </th>
-                <th className="table-header">Order ID</th>
-                <th className="table-header">Customer</th>
-                <th className="table-header">Status</th>
-                <th className="table-header">Delivery Date</th>
-                <th className="table-header">3PL Location</th>
-                <th className="table-header">Rider</th>
-                <th className="table-header text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => {
-                const ridersForOrder =
-                  order.logisticsLocationId && order.status === 'ALLOCATED'
-                    ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
-                    : [];
-                return (
-                  <tr key={order.id} className={`table-row ${selectedIds.has(order.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}>
-                    <td className="table-cell w-10">
-                      <Checkbox
-                        checked={selectedIds.has(order.id)}
-                        onChange={() => toggleSelect(order.id)}
-                      />
-                    </td>
-                    <td className="table-cell">
-                      <OrderIdBadge id={order.id} linkTo={`${orderDetailBasePath}/${order.id}`} />
-                    </td>
-                    <td className="table-cell font-medium text-app-fg">
-                      {order.customerName}
-                    </td>
-                    <td className="table-cell">
-                      <OrderStatusBadge status={order.status} />
-                    </td>
-                    <td className="table-cell">
-                      <DeliveryDateCell date={order.preferredDeliveryDate} />
-                    </td>
-                    <td className="table-cell text-app-fg-muted">
-                      {order.locationProviderName ? `${order.locationName} — ${order.locationProviderName}` : order.locationName}
-                    </td>
-                    <td className="table-cell text-app-fg-muted">{order.riderName}</td>
-                    <td className="table-cell text-right">
-                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                        <Link to={`${orderDetailBasePath}/${order.id}`}>
-                          <Button variant="secondary" size="sm">
-                            View
-                          </Button>
-                        </Link>
-                        {canEditDeliveryDate && order.status === 'CONFIRMED' && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() =>
-                              setEditDeliveryDateOrder({
-                                orderId: order.id,
-                                customerName: order.customerName,
-                                preferredDeliveryDate: order.preferredDeliveryDate ?? null,
-                              })
-                            }
-                          >
-                            Resolve order
-                          </Button>
-                        )}
-                        {order.status === 'IN_TRANSIT' && (
-                          <Button
-                            variant="success"
-                            size="sm"
-                            onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}
-                          >
-                            Mark Delivered
-                          </Button>
-                        )}
-                        {order.status === 'CONFIRMED' && !allocationOnDetailOnly && (
-                          <fetcher.Form method="post" className="inline-flex items-center gap-1">
-                            <input type="hidden" name="intent" value="allocate" />
-                            <input type="hidden" name="orderId" value={order.id} />
-                            <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
-                            <SearchableSelect
-                              id={`logistics-row-allocate-${order.id}`}
-                              required
-                              value={rowAllocateLocationByOrder[order.id] ?? ''}
-                              onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
-                              placeholder="Location"
-                              searchPlaceholder="Search locations..."
-                              options={allocatableLocations.map((loc) => ({
-                                value: loc.id,
-                                label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                              }))}
-                              wrapperClassName="w-36"
-                              controlSize="sm"
-                            />
-                            <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')} loading={isSubmitting}>
-                              Allocate
-                            </Button>
-                          </fetcher.Form>
-                        )}
-                        {order.status === 'ALLOCATED' && (
-                          <fetcher.Form method="post" className="inline-flex items-center gap-1">
-                            <input type="hidden" name="intent" value="dispatch" />
-                            <input type="hidden" name="orderId" value={order.id} />
-                            <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
-                            <SearchableSelect
-                              id={`logistics-row-dispatch-${order.id}`}
-                              required
-                              value={rowDispatchRiderByOrder[order.id] ?? ''}
-                              onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
-                              disabled={ridersForOrder.length === 0}
-                              placeholder={ridersForOrder.length === 0 ? 'No riders' : 'Rider'}
-                              searchPlaceholder="Search riders..."
-                              options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
-                              wrapperClassName="w-36"
-                              controlSize="sm"
-                            />
-                            <Button
-                              type="submit"
-                              variant="primary"
-                              size="sm"
-                              disabled={isSubmitting || ridersForOrder.length === 0}
-                              loading={isSubmitting}
-                            >
-                              Dispatch
-                            </Button>
-                          </fetcher.Form>
-                        )}
-                        {order.status === 'DISPATCHED' && (
-                          <fetcher.Form method="post" className="inline">
-                            <input type="hidden" name="intent" value="transition" />
-                            <input type="hidden" name="orderId" value={order.id} />
-                            <input type="hidden" name="newStatus" value="IN_TRANSIT" />
-                            <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting}>
-                              {markInTransitLabel}
-                            </Button>
-                          </fetcher.Form>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {orders.length === 0 && (
-          <EmptyState
-            title={listErrorMessage ? 'Could not load orders' : 'No orders found'}
-            description={listErrorMessage ?? 'Try changing the status filter or date range.'}
+        <div className="card p-0">
+          <CompactTable<LogisticsOrderRow>
+            withCard={false}
+            columns={logisticsOrderColumns}
+            rows={orders}
+            rowKey={(o) => o.id}
+            rowClassName={(o) => (selectedIds.has(o.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '')}
+            selection={{
+              selectedIds,
+              onToggle: (id, selected) => {
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  if (selected) next.add(id);
+                  else next.delete(id);
+                  return next;
+                });
+                setBulkResult(null);
+              },
+              onToggleAll: (selectAll) => {
+                if (selectAll) setSelectedIds(new Set(orders.map((o) => o.id)));
+                else setSelectedIds(new Set());
+                setBulkResult(null);
+              },
+            }}
+            emptyTitle={listErrorMessage ? 'Could not load orders' : 'No orders found'}
+            emptyDescription={listErrorMessage ?? 'Try changing the status filter or date range.'}
+            renderMobileCard={renderLogisticsOrderMobileCard}
           />
-        )}
-
-        {/* Mobile cards */}
-        <div className="md:hidden space-y-3 px-1">
-          {orders.map((order) => {
-            const ridersForOrder =
-              order.logisticsLocationId && order.status === 'ALLOCATED'
-                ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
-                : [];
-            return (
-              <div key={order.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <OrderIdBadge
-                    id={order.id}
-                    linkTo={`${orderDetailBasePath}/${order.id}`}
-                    textClassName="font-medium text-brand-500 hover:text-brand-600"
-                  />
-                  <OrderStatusBadge status={order.status} />
-                </div>
-                <p className="text-sm text-app-fg">{order.customerName}</p>
-                <div className="flex items-center gap-2 text-sm text-app-fg-muted">
-                  <span>
-                    {order.locationProviderName ? `${order.locationName} — ${order.locationProviderName}` : order.locationName} · {order.riderName}
-                  </span>
-                  {order.preferredDeliveryDate && (
-                    <span className="text-brand-600 dark:text-brand-400 font-medium">
-                      Delivery: {formatDeliveryDate(order.preferredDeliveryDate)}
-                    </span>
-                  )}
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <Link to={`${orderDetailBasePath}/${order.id}`}>
-                    <Button variant="secondary" size="sm">
-                      View
-                    </Button>
-                  </Link>
-                        {canEditDeliveryDate && order.status === 'CONFIRMED' && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() =>
-                              setEditDeliveryDateOrder({
-                                orderId: order.id,
-                                customerName: order.customerName,
-                                preferredDeliveryDate: order.preferredDeliveryDate ?? null,
-                              })
-                            }
-                          >
-                            Resolve order
-                          </Button>
-                        )}
-                  {order.status === 'IN_TRANSIT' && (
-                    <Button
-                      variant="success"
-                      size="sm"
-                      onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}
-                    >
-                      Mark Delivered
-                    </Button>
-                  )}
-                  {order.status === 'CONFIRMED' && !allocationOnDetailOnly && (
-                    <fetcher.Form method="post" className="flex gap-1 flex-wrap">
-                      <input type="hidden" name="intent" value="allocate" />
-                      <input type="hidden" name="orderId" value={order.id} />
-                      <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
-                      <SearchableSelect
-                        id={`logistics-mobile-allocate-${order.id}`}
-                        required
-                        value={rowAllocateLocationByOrder[order.id] ?? ''}
-                        onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
-                        placeholder="Location"
-                        searchPlaceholder="Search locations..."
-                        options={allocatableLocations.map((loc) => ({
-                          value: loc.id,
-                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                        }))}
-                        wrapperClassName="flex-1 min-w-0"
-                        controlSize="sm"
-                      />
-                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')}>
-                        Allocate
-                      </Button>
-                    </fetcher.Form>
-                  )}
-                  {order.status === 'ALLOCATED' && ridersForOrder.length > 0 && (
-                    <fetcher.Form method="post" className="flex gap-1">
-                      <input type="hidden" name="intent" value="dispatch" />
-                      <input type="hidden" name="orderId" value={order.id} />
-                      <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
-                      <SearchableSelect
-                        id={`logistics-mobile-dispatch-${order.id}`}
-                        required
-                        value={rowDispatchRiderByOrder[order.id] ?? ''}
-                        onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
-                        placeholder="Rider"
-                        searchPlaceholder="Search riders..."
-                        options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
-                        controlSize="sm"
-                      />
-                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowDispatchRiderByOrder[order.id] ?? '')}>
-                        Dispatch
-                      </Button>
-                    </fetcher.Form>
-                  )}
-                  {order.status === 'DISPATCHED' && (
-                    <fetcher.Form method="post">
-                      <input type="hidden" name="intent" value="transition" />
-                      <input type="hidden" name="orderId" value={order.id} />
-                      <input type="hidden" name="newStatus" value="IN_TRANSIT" />
-                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
-                        {markInTransitLabel}
-                      </Button>
-                    </fetcher.Form>
-                  )}
-                </div>
-              </div>
-            );
-          })}
         </div>
-      </div>
       </TableLoadingOverlay>
       )}
 
@@ -998,49 +1054,3 @@ function EditDeliveryDateModal({
     </Modal>
   );
 }
-
-// ── Delivery Date Helpers ──────────────────────────────────────
-
-function formatDeliveryDate(date: string): string {
-  const d = new Date(date + 'T00:00:00');
-  return d.toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function isOverdue(date: string): boolean {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const deliveryDate = new Date(date + 'T00:00:00');
-  return deliveryDate < today;
-}
-
-function isToday(date: string): boolean {
-  const today = new Date();
-  const d = new Date(date + 'T00:00:00');
-  return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
-}
-
-function DeliveryDateCell({ date }: { date?: string | null }) {
-  if (!date) {
-    return <span className="text-app-fg-muted text-sm">Not set</span>;
-  }
-
-  const overdue = isOverdue(date);
-  const today = isToday(date);
-
-  return (
-    <span
-      className={`text-sm font-medium ${
-        overdue
-          ? 'text-danger-600 dark:text-danger-400'
-          : today
-            ? 'text-warning-600 dark:text-warning-400'
-            : 'text-app-fg'
-      }`}
-    >
-      {formatDeliveryDate(date)}
-      {overdue && <span className="ml-1 text-xs font-normal">(overdue)</span>}
-      {today && <span className="ml-1 text-xs font-normal">(today)</span>}
-    </span>
-  );
-}
-

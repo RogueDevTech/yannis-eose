@@ -90,6 +90,8 @@ export type DistributingFundingEntry =
   | DistributingFundingTransferEntry
   | DistributingFundingRequestEntry;
 
+export type AdPlatform = 'FACEBOOK' | 'TIKTOK' | 'GOOGLE' | 'OTHER';
+
 export interface AdSpendRecord {
   id: string;
   mediaBuyerId: string;
@@ -97,6 +99,9 @@ export interface AdSpendRecord {
   campaignId: string;
   spendAmount: string;
   screenshotUrl: string;
+  adUrl?: string | null;
+  platform?: AdPlatform;
+  platformCustomLabel?: string | null;
   spendDate: string;
   status: string;
   approvedAt: string | null;
@@ -325,7 +330,6 @@ export interface MarketingFundingLoaderData {
 }
 
 export type AdSpendStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
-export type AdPlatform = 'FACEBOOK' | 'TIKTOK' | 'GOOGLE';
 export type RolledStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
 
 /** Single line within an ad-spend day group (Phase 17 accordion). */
@@ -341,6 +345,7 @@ export interface AdSpendGroupLine {
   screenshotUrl: string;
   adUrl: string | null;
   platform: AdPlatform;
+  platformCustomLabel?: string | null;
   spendDate: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   rejectionReason: string | null;
@@ -401,4 +406,7 @@ export interface MarketingAdSpendLoaderData {
   groupsTotal: number;
   groupsPage: number;
   groupsTotalPages: number;
+  /** Current user's id — used to gate per-line "Edit" actions on the accordion
+   *  (MB can edit their own PENDING/REJECTED rows; moderators can edit any). */
+  currentUserId: string;
 }

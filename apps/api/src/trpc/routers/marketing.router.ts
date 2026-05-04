@@ -9,8 +9,8 @@ import {
   getFundingBalanceSchema,
   approveFundingRequestSchema,
   rejectFundingRequestSchema,
-  createAdSpendSchema,
-  createAdSpendBatchSchema,
+  createAdSpendWithBranchSchema,
+  createAdSpendBatchWithBranchSchema,
   listAdSpendSchema,
   listAdSpendGroupedSchema,
   adSpendStatusCountsSchema,
@@ -291,7 +291,7 @@ export const marketingRouter = router({
   // ── Ad Spend ─────────────────────────────────────
   createAdSpend: permissionProcedure('marketing.adSpend')
     .meta({ branchScopedMutation: true })
-    .input(createAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
+    .input(createAdSpendWithBranchSchema)
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...adSpendInput } = input;
       return getMarketingService().createAdSpend(adSpendInput, ctx.user.id, branchId ?? ctx.currentBranchId);
@@ -303,7 +303,7 @@ export const marketingRouter = router({
    */
   createAdSpendBatch: permissionProcedure('marketing.adSpend')
     .meta({ branchScopedMutation: true })
-    .input(createAdSpendBatchSchema.extend({ branchId: z.string().uuid().optional() }))
+    .input(createAdSpendBatchWithBranchSchema)
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...batchInput } = input;
       return getMarketingService().createAdSpendBatch(

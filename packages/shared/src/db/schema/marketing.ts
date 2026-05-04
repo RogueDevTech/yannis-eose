@@ -101,6 +101,8 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
   adUrl: text('ad_url'),
   /** Ad platform — defaults to FACEBOOK (vast majority of spend). */
   platform: adPlatformEnum('platform').default('FACEBOOK').notNull(),
+  /** When `platform` is OTHER, Media Buyer–supplied label (e.g. Snapchat). Otherwise null. */
+  platformCustomLabel: text('platform_custom_label'),
   spendDate: timestamp('spend_date', { withTimezone: true }).notNull(),
   status: adSpendStatusEnum('status').default('PENDING').notNull(),
   approvedAt: timestamp('approved_at', { withTimezone: true }),

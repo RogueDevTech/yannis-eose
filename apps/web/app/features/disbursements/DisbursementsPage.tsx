@@ -21,7 +21,7 @@ import { formatRole } from '~/features/users/types';
 import { PageHeader } from '~/components/ui/page-header';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { EmptyState } from '~/components/ui/empty-state';
+import { CompactTable, CompactTableActions, type CompactTableColumn } from '~/components/ui/compact-table';
 import { Pagination } from '~/components/ui/pagination';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
@@ -615,6 +615,299 @@ export function DisbursementsPage({
 
   const handleCloseCreateModal = useCallback(() => setShowForm(false), []);
 
+  type RecipientBalanceRow = (typeof recipientBalances)[number];
+
+  const fundingLedgerColumns = useMemo((): CompactTableColumn<DisbursementRecord>[] => {
+    return [
+      {
+        key: 'reference',
+        header: 'Reference',
+        render: (f) => (
+          <span className="text-sm text-app-fg-muted">
+            {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </span>
+        ),
+      },
+      {
+        key: 'sender',
+        header: 'Sender',
+        render: (f) => (
+          <Link
+            to={`/admin/finance/staff-accounts/${f.senderId}`}
+            className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+          >
+            {getName(f.senderId)}
+          </Link>
+        ),
+      },
+      {
+        key: 'receiver',
+        header: 'Receiver',
+        render: (f) => (
+          <Link
+            to={`/admin/finance/staff-accounts/${f.receiverId}`}
+            className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+          >
+            {getName(f.receiverId)}
+          </Link>
+        ),
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        headerClassName: 'text-right',
+        render: (f) => (
+          <span className="font-medium text-app-fg">
+            <NairaPrice amount={Number(f.amount)} />
+          </span>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (f) => <StatusBadge status={f.status} />,
+      },
+      {
+        key: 'sent',
+        header: 'Sent',
+        render: (f) => (
+          <span className="text-sm text-app-fg-muted">
+            {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </span>
+        ),
+      },
+      {
+        key: 'verified',
+        header: 'Verified',
+        render: (f) => (
+          <span className="text-sm text-app-fg-muted">
+            {f.verifiedAt
+              ? new Date(f.verifiedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
+              : '—'}
+          </span>
+        ),
+      },
+      {
+        key: 'receipt',
+        header: 'Receipt',
+        align: 'center',
+        headerClassName: 'text-center',
+        render: (f) =>
+          f.receiptUrl ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setReceiptModal(f)}
+              className="inline-flex items-center gap-1 text-xs"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              View
+            </Button>
+          ) : (
+            <span className="text-xs text-surface-400">—</span>
+          ),
+      },
+    ];
+  }, [getName]);
+
+  const fundingRequestColumns = useMemo((): CompactTableColumn<FundingRequestRecord>[] => {
+    return [
+      {
+        key: 'requester',
+        header: 'Requester',
+        render: (r) => (
+          <Link
+            to={`/admin/finance/staff-accounts/${r.requesterId}`}
+            className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400"
+          >
+            {r.requesterName ?? getRequesterName(r.requesterId)}
+          </Link>
+        ),
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        headerClassName: 'text-right',
+        render: (r) => (
+          <span className="font-medium">
+            <NairaPrice amount={Number(r.amount)} />
+          </span>
+        ),
+      },
+      {
+        key: 'reason',
+        header: 'Reason',
+        cellTitle: (r) => r.reason ?? undefined,
+        render: (r) => (
+          <span className="max-w-[200px] truncate text-sm text-app-fg-muted">{r.reason ?? '—'}</span>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (r) => <StatusBadge status={r.status} />,
+      },
+      {
+        key: 'requested',
+        header: 'Requested',
+        render: (r) => (
+          <span className="text-sm text-app-fg-muted">
+            {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </span>
+        ),
+      },
+      {
+        key: 'resolved',
+        header: 'Resolved',
+        render: (r) => (
+          <span className="text-sm text-app-fg-muted">
+            {r.resolvedAt ? new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+          </span>
+        ),
+      },
+      {
+        key: 'receipt',
+        header: 'Receipt',
+        render: (r) =>
+          r.receiptUrl ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="inline-flex items-center gap-1 text-xs text-brand-500 hover:text-brand-600"
+              onClick={() => setRequestReceiptModal(r)}
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              View
+            </Button>
+          ) : (
+            <span className="text-app-fg-muted">—</span>
+          ),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        tight: true,
+        nowrap: true,
+        align: 'right',
+        headerClassName: 'text-right',
+        mobileShowLabel: false,
+        render: (r) =>
+          r.status === 'PENDING' ? (
+            <CompactTableActions className="inline-flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
+              <TableActionButton variant="primary" onClick={() => setApprovingRequestId(r.id)}>
+                Approve
+              </TableActionButton>
+              <TableActionButton variant="danger" onClick={() => setRejectingRequestId(r.id)}>
+                Reject
+              </TableActionButton>
+            </CompactTableActions>
+          ) : null,
+      },
+    ];
+  }, [getRequesterName]);
+
+  const recipientBalanceColumns = useMemo((): CompactTableColumn<RecipientBalanceRow>[] => {
+    return [
+      {
+        key: 'recipient',
+        header: 'Recipient',
+        render: (b) => (
+          <Link
+            to={`/admin/finance/staff-accounts/${b.userId}`}
+            className="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400"
+          >
+            {b.name}
+          </Link>
+        ),
+      },
+      {
+        key: 'role',
+        header: 'Role',
+        render: (b) => (
+          <span className="text-sm text-app-fg-muted">
+            {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}
+          </span>
+        ),
+      },
+      {
+        key: 'received',
+        header: 'Received',
+        align: 'right',
+        headerClassName: 'text-right',
+        render: (b) => (
+          <span className="text-sm">
+            <NairaPrice amount={Number(b.totalReceived)} />
+          </span>
+        ),
+      },
+      {
+        key: 'spent',
+        header: 'Spent',
+        align: 'right',
+        headerClassName: 'text-right',
+        render: (b) => (
+          <span className="text-sm">
+            <NairaPrice amount={Number(b.totalSpend)} />
+          </span>
+        ),
+      },
+      {
+        key: 'balance',
+        header: 'Balance',
+        align: 'right',
+        headerClassName: 'text-right',
+        render: (b) => {
+          const balance = Number(b.balance);
+          return (
+            <span className={`font-medium ${balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'}`}>
+              {formatNaira(balance)}
+            </span>
+          );
+        },
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'center',
+        headerClassName: 'text-center',
+        tight: true,
+        mobileShowLabel: false,
+        render: (b) => {
+          const canSendFundsToRecipient = canCreate && b.role === 'HEAD_OF_MARKETING';
+          return canSendFundsToRecipient ? (
+            <TableActionButton
+              variant="primary"
+              onClick={() => {
+                setSearchParams((p) => {
+                  const next = new URLSearchParams(p);
+                  next.set('receiverId', b.userId);
+                  next.set('tab', 'disbursements');
+                  next.delete('type');
+                  return next;
+                });
+                setShowForm(true);
+              }}
+            >
+              Send funds
+            </TableActionButton>
+          ) : (
+            <span className="text-xs text-surface-400">&mdash;</span>
+          );
+        },
+      },
+    ];
+  }, [canCreate, setSearchParams, setShowForm]);
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -775,123 +1068,46 @@ export function DisbursementsPage({
           </div>
 
           <TableLoadingOverlay show={isFilterLoading}>
-          <div className="card p-0 overflow-hidden rounded-xl">
-            {/* Desktop table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-header">Reference</th>
-                    <th className="table-header">Sender</th>
-                    <th className="table-header">Receiver</th>
-                    <th className="table-header text-right">Amount</th>
-                    <th className="table-header">Status</th>
-                    <th className="table-header">Sent</th>
-                    <th className="table-header">Verified</th>
-                    <th className="table-header text-center">Receipt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {funding.map((f) => (
-                    <tr key={f.id} className="table-row">
-                      <td className="table-cell text-sm text-app-fg-muted">
-                        {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </td>
-                      <td className="table-cell text-sm">
-                        <Link to={`/admin/finance/staff-accounts/${f.senderId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300">
-                          {getName(f.senderId)}
-                        </Link>
-                      </td>
-                      <td className="table-cell text-sm">
-                        <Link to={`/admin/finance/staff-accounts/${f.receiverId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300">
-                          {getName(f.receiverId)}
-                        </Link>
-                      </td>
-                      <td className="table-cell text-right font-medium text-app-fg">
-                        <NairaPrice amount={Number(f.amount)} />
-                      </td>
-                      <td className="table-cell">
-                        <StatusBadge status={f.status} />
-                      </td>
-                      <td className="table-cell text-sm text-app-fg-muted">
-                        {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </td>
-                      <td className="table-cell text-sm text-app-fg-muted">
-                        {f.verifiedAt
-                          ? new Date(f.verifiedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
-                          : '—'}
-                      </td>
-                      <td className="table-cell text-center">
-                        {f.receiptUrl ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setReceiptModal(f)}
-                            className="text-xs inline-flex items-center gap-1"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            View
-                          </Button>
-                        ) : (
-                          <span className="text-surface-400 text-xs">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile cards */}
-            <div className="md:hidden space-y-3 px-1">
-              {funding.map((f) => (
-                <div key={f.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-app-fg-muted">
-                      {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
-                    <StatusBadge status={f.status} />
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm text-app-fg-muted">
-                      {getName(f.senderId)} &rarr; {getName(f.receiverId)}
-                    </div>
-                    <span className="font-medium text-app-fg">
-                      <NairaPrice amount={Number(f.amount)} />
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
-                    <span>{new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                    {f.receiptUrl ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setReceiptModal(f)}
-                      >
-                        View receipt
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {funding.length === 0 && (
-              <EmptyState
-                title="No disbursements found"
-                description={
+            <div className="card p-0 overflow-hidden rounded-xl">
+              <CompactTable<DisbursementRecord>
+                withCard={false}
+                columns={fundingLedgerColumns}
+                rows={funding}
+                rowKey={(f) => f.id}
+                emptyTitle="No disbursements found"
+                emptyDescription={
                   selectedStatus !== 'ALL' || selectedReceiver !== 'ALL'
                     ? 'Try adjusting your filters'
                     : 'Create your first disbursement to get started'
                 }
+                renderMobileCard={(f) => (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-app-fg-muted">
+                        {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                      <StatusBadge status={f.status} />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm text-app-fg-muted">
+                        {getName(f.senderId)} &rarr; {getName(f.receiverId)}
+                      </div>
+                      <span className="font-medium text-app-fg">
+                        <NairaPrice amount={Number(f.amount)} />
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+                      <span>{new Date(f.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      {f.receiptUrl ? (
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setReceiptModal(f)}>
+                          View receipt
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
               />
-            )}
-          </div>
+            </div>
           </TableLoadingOverlay>
 
           {totalPages > 1 && (
@@ -903,133 +1119,62 @@ export function DisbursementsPage({
       {mainTab === 'requests' && (
         <>
               <TableLoadingOverlay show={isFilterLoading}>
-              <div className="card p-0 overflow-hidden rounded-xl">
-                <div className="px-4 py-3 border-b border-app-border">
-                  <h2 className="text-sm font-semibold text-app-fg">Funding requests</h2>
-                  <p className="text-xs text-app-fg-muted mt-0.5">
-                    Send the money to the requester manually, then approve with a receipt image. They will be notified.
-                  </p>
-                </div>
-                {fundingRequests.length > 0 ? (
-                  <>
-                    <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full">
-                      <thead>
-                        <tr>
-                          <th className="table-header">Requester</th>
-                          <th className="table-header text-right">Amount</th>
-                          <th className="table-header">Reason</th>
-                          <th className="table-header">Status</th>
-                          <th className="table-header">Requested</th>
-                          <th className="table-header">Resolved</th>
-                          <th className="table-header">Receipt</th>
-                          <th className="table-header">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                          {fundingRequests.map((r) => (
-                            <tr key={r.id} className="table-row">
-                              <td className="table-cell text-sm">
-                                <Link to={`/admin/finance/staff-accounts/${r.requesterId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400">
-                                  {r.requesterName ?? getRequesterName(r.requesterId)}
-                                </Link>
-                              </td>
-                              <td className="table-cell text-right font-medium"><NairaPrice amount={Number(r.amount)} /></td>
-                              <td className="table-cell text-app-fg-muted text-sm max-w-[200px] truncate" title={r.reason ?? undefined}>
-                                {r.reason ?? '—'}
-                              </td>
-                              <td className="table-cell">
-                                <StatusBadge status={r.status} />
-                              </td>
-                              <td className="table-cell text-app-fg-muted text-sm">
-                                {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                              </td>
-                              <td className="table-cell text-app-fg-muted text-sm">
-                                {r.resolvedAt
-                                  ? new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })
-                                  : '—'}
-                              </td>
-                              <td className="table-cell">
-                                {r.receiptUrl ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="text-xs inline-flex items-center gap-1 text-brand-500 hover:text-brand-600"
-                                    onClick={() => setRequestReceiptModal(r)}
-                                  >
-                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                    </svg>
-                                    View
-                                  </Button>
-                                ) : (
-                                  '—'
-                                )}
-                              </td>
-                              <td className="table-cell">
-                                {r.status === 'PENDING' && (
-                                  <div className="inline-flex gap-1.5">
-                                    <TableActionButton
-                                      variant="primary"
-                                      onClick={() => setApprovingRequestId(r.id)}
-                                    >
-                                      Approve
-                                    </TableActionButton>
-                                    <TableActionButton
-                                      variant="danger"
-                                      onClick={() => setRejectingRequestId(r.id)}
-                                    >
-                                      Reject
-                                    </TableActionButton>
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="md:hidden space-y-3 px-1">
-                      {fundingRequests.map((r) => (
-                        <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
-                          <div className="flex justify-between items-center">
-                            <Link to={`/admin/finance/staff-accounts/${r.requesterId}`} className="font-medium text-app-fg text-sm">
-                              {r.requesterName ?? getRequesterName(r.requesterId)}
-                            </Link>
-                            <StatusBadge status={r.status} />
-                          </div>
-                          <p className="text-sm text-app-fg-muted"><NairaPrice amount={Number(r.amount)} /></p>
-                          {r.reason && <p className="text-sm text-app-fg-muted">{r.reason}</p>}
-                          <p className="text-xs text-app-fg-muted">
-                            {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                            {r.resolvedAt &&
-                              ` — Resolved ${new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`}
-                          </p>
-                          {r.receiptUrl && (
-                            <Button type="button" variant="ghost" size="sm" className="text-brand-500 hover:text-brand-600 text-sm" onClick={() => setRequestReceiptModal(r)}>
-                              View receipt
-                            </Button>
-                          )}
-                          {r.status === 'PENDING' && (
-                            <div className="inline-flex gap-1.5 pt-1">
-                              <TableActionButton variant="primary" onClick={() => setApprovingRequestId(r.id)}>
-                                Approve
-                              </TableActionButton>
-                              <TableActionButton variant="danger" onClick={() => setRejectingRequestId(r.id)}>
-                                Reject
-                              </TableActionButton>
-                            </div>
-                          )}
+                <div className="card p-0 overflow-hidden rounded-xl">
+                  <div className="border-b border-app-border px-4 py-3">
+                    <h2 className="text-sm font-semibold text-app-fg">Funding requests</h2>
+                    <p className="mt-0.5 text-xs text-app-fg-muted">
+                      Send the money to the requester manually, then approve with a receipt image. They will be notified.
+                    </p>
+                  </div>
+                  <CompactTable<FundingRequestRecord>
+                    withCard={false}
+                    columns={fundingRequestColumns}
+                    rows={fundingRequests}
+                    rowKey={(r) => r.id}
+                    emptyTitle="No funding requests"
+                    renderMobileCard={(r) => (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Link to={`/admin/finance/staff-accounts/${r.requesterId}`} className="text-sm font-medium text-app-fg">
+                            {r.requesterName ?? getRequesterName(r.requesterId)}
+                          </Link>
+                          <StatusBadge status={r.status} />
                         </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <EmptyState title="No funding requests" />
-                )}
-              </div>
+                        <p className="text-sm text-app-fg-muted">
+                          <NairaPrice amount={Number(r.amount)} />
+                        </p>
+                        {r.reason ? <p className="text-sm text-app-fg-muted">{r.reason}</p> : null}
+                        <p className="text-xs text-app-fg-muted">
+                          {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {r.resolvedAt
+                            ? ` — Resolved ${new Date(r.resolvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`
+                            : null}
+                        </p>
+                        {r.receiptUrl ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-sm text-brand-500 hover:text-brand-600"
+                            onClick={() => setRequestReceiptModal(r)}
+                          >
+                            View receipt
+                          </Button>
+                        ) : null}
+                        {r.status === 'PENDING' ? (
+                          <div className="inline-flex gap-1.5 pt-1">
+                            <TableActionButton variant="primary" onClick={() => setApprovingRequestId(r.id)}>
+                              Approve
+                            </TableActionButton>
+                            <TableActionButton variant="danger" onClick={() => setRejectingRequestId(r.id)}>
+                              Reject
+                            </TableActionButton>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  />
+                </div>
               </TableLoadingOverlay>
               {requestsTotalPages > 1 && (
                 <Pagination page={requestsPage} totalPages={requestsTotalPages} pageParam="requestsPage" />
@@ -1088,130 +1233,69 @@ export function DisbursementsPage({
 
           <TableLoadingOverlay show={isFilterLoading}>
             <div className="card p-0 overflow-hidden rounded-xl">
-              <div className="px-4 py-3 border-b border-app-border">
+              <div className="border-b border-app-border px-4 py-3">
                 <h2 className="text-sm font-semibold text-app-fg">Recipient balances</h2>
-                <p className="text-xs text-app-fg-muted mt-0.5">
-                  Funding received (confirmed) minus approved ad spend
-                </p>
+                <p className="mt-0.5 text-xs text-app-fg-muted">Funding received (confirmed) minus approved ad spend</p>
               </div>
-              {recipientBalances.length > 0 ? (
-                <>
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr>
-                          <th className="table-header">Recipient</th>
-                          <th className="table-header">Role</th>
-                          <th className="table-header text-right">Received</th>
-                          <th className="table-header text-right">Spent</th>
-                          <th className="table-header text-right">Balance</th>
-                          <th className="table-header text-center">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {recipientBalances.map((b) => {
-                          const balance = Number(b.balance);
-                          const canSendFundsToRecipient = canCreate && b.role === 'HEAD_OF_MARKETING';
-                          return (
-                            <tr key={b.userId} className="table-row">
-                              <td className="table-cell">
-                                <Link to={`/admin/finance/staff-accounts/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 text-sm font-medium">
-                                  {b.name}
-                                </Link>
-                              </td>
-                              <td className="table-cell text-sm text-app-fg-muted">
-                                {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}
-                              </td>
-                              <td className="table-cell text-right text-sm">
-                                <NairaPrice amount={Number(b.totalReceived)} />
-                              </td>
-                              <td className="table-cell text-right text-sm">
-                                <NairaPrice amount={Number(b.totalSpend)} />
-                              </td>
-                              <td className={`table-cell text-right font-medium ${
-                                balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
-                              }`}>
-                                {formatNaira(balance)}
-                              </td>
-                              <td className="table-cell text-center">
-                                {canSendFundsToRecipient ? (
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => {
-                                      setSearchParams((p) => {
-                                        const next = new URLSearchParams(p);
-                                        next.set('receiverId', b.userId);
-                                        next.set('tab', 'disbursements');
-                                        next.delete('type');
-                                        return next;
-                                      });
-                                      setShowForm(true);
-                                    }}
-                                    className="text-xs"
-                                  >
-                                    Send funds
-                                  </Button>
-                                ) : (
-                                  <span className="text-xs text-surface-400">&mdash;</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="md:hidden space-y-3 px-1">
-                    {recipientBalances.map((b) => {
-                      const balance = Number(b.balance);
-                      const canSendFundsToRecipient = canCreate && b.role === 'HEAD_OF_MARKETING';
-                      return (
-                        <div key={b.userId} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                            <Link to={`/admin/finance/staff-accounts/${b.userId}`} className="text-brand-500 hover:text-brand-600 dark:text-brand-400 font-medium">
-                              {b.name}
-                            </Link>
-                            <span className={`font-medium text-sm ${
-                              balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
-                            }`}>
-                              {formatNaira(balance)}
-                            </span>
-                          </div>
-                          <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
-                            <div>Role: {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}</div>
-                            <div>Received: <NairaPrice amount={Number(b.totalReceived)} /></div>
-                            <div>Spent: <NairaPrice amount={Number(b.totalSpend)} /></div>
-                          </div>
-                          {canSendFundsToRecipient && (
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => {
-                                setSearchParams((p) => {
-                                  const next = new URLSearchParams(p);
-                                  next.set('receiverId', b.userId);
-                                  next.set('tab', 'disbursements');
-                                  next.delete('type');
-                                  return next;
-                                });
-                                setShowForm(true);
-                              }}
-                              className="text-xs"
-                            >
-                              Send funds
-                            </Button>
-                          )}
+              <CompactTable<RecipientBalanceRow>
+                withCard={false}
+                columns={recipientBalanceColumns}
+                rows={recipientBalances}
+                rowKey={(b) => b.userId}
+                emptyTitle="No recipient balances available"
+                emptyDescription="Try adjusting your search or role filter."
+                renderMobileCard={(b) => {
+                  const balance = Number(b.balance);
+                  const canSendFundsToRecipient = canCreate && b.role === 'HEAD_OF_MARKETING';
+                  return (
+                    <div className="space-y-3">
+                      <div className="mb-2 flex items-start justify-between gap-2">
+                        <Link
+                          to={`/admin/finance/staff-accounts/${b.userId}`}
+                          className="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400"
+                        >
+                          {b.name}
+                        </Link>
+                        <span
+                          className={`text-sm font-medium ${
+                            balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-brand-600 dark:text-brand-400'
+                          }`}
+                        >
+                          {formatNaira(balance)}
+                        </span>
+                      </div>
+                      <div className="mb-2 space-y-0.5 text-sm text-app-fg-muted">
+                        <div>
+                          Role: {b.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : b.role === 'MEDIA_BUYER' ? 'Media Buyer' : b.role}
                         </div>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : (
-                <EmptyState title="No recipient balances available" description="Try adjusting your search or role filter." />
-              )}
+                        <div>
+                          Received: <NairaPrice amount={Number(b.totalReceived)} />
+                        </div>
+                        <div>
+                          Spent: <NairaPrice amount={Number(b.totalSpend)} />
+                        </div>
+                      </div>
+                      {canSendFundsToRecipient ? (
+                        <TableActionButton
+                          variant="primary"
+                          onClick={() => {
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('receiverId', b.userId);
+                              next.set('tab', 'disbursements');
+                              next.delete('type');
+                              return next;
+                            });
+                            setShowForm(true);
+                          }}
+                        >
+                          Send funds
+                        </TableActionButton>
+                      ) : null}
+                    </div>
+                  );
+                }}
+              />
             </div>
           </TableLoadingOverlay>
           {balancesTotalPages > 1 && (

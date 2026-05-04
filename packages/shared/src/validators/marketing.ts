@@ -107,9 +107,15 @@ export type RejectFundingRequestInput = z.infer<typeof rejectFundingRequestSchem
 // Ad Spend Log Validators
 // ============================================
 
-export const adPlatformValues = ['FACEBOOK', 'TIKTOK', 'GOOGLE'] as const;
+export const adPlatformValues = ['FACEBOOK', 'TIKTOK', 'GOOGLE', 'OTHER'] as const;
 export type AdPlatform = (typeof adPlatformValues)[number];
 export const adPlatformSchema = z.enum(adPlatformValues);
+
+/** Optional MB-supplied label when platform is OTHER; blank → undefined. */
+const platformCustomLabelSchema = z
+  .union([z.literal(''), z.string().trim().max(80)])
+  .optional()
+  .transform((v) => (typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined));
 
 /** Optional URL — accepts blank, http(s), and rejects everything else. */
 const adUrlSchema = z
@@ -117,7 +123,7 @@ const adUrlSchema = z
   .optional()
   .transform((v) => (v ? v : undefined));
 
-export const createAdSpendSchema = z.object({
+const createAdSpendObjectSchema = z.object({
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   spendAmount: z.coerce.number().min(0).multipleOf(0.01),
@@ -125,18 +131,71 @@ export const createAdSpendSchema = z.object({
   spendDate: z.string().date(),
   notes: z.string().max(500).optional(),
   platform: adPlatformSchema.default('FACEBOOK'),
+  platformCustomLabel: platformCustomLabelSchema,
   adUrl: adUrlSchema,
 });
+
+const refineAdSpendPlatform = (data: { platform: AdPlatform; platformCustomLabel?: string | undefined }, ctx: z.RefinementCtx) => {
+  if (data.platform === 'OTHER' && !data.platformCustomLabel) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Enter the platform name when Other is selected',
+      path: ['platformCustomLabel'],
+    });
+  }
+};
+
+export const createAdSpendSchema = createAdSpendObjectSchema.superRefine(refineAdSpendPlatform);
 export type CreateAdSpendInput = z.infer<typeof createAdSpendSchema>;
 
+/** tRPC `createAdSpend` input — same as `createAdSpendSchema` plus optional explicit branch. */
+export const createAdSpendWithBranchSchema = createAdSpendObjectSchema
+  .extend({ branchId: z.string().uuid().optional() })
+  .superRefine(refineAdSpendPlatform);
+
 /** Log ad spend from the admin UI — campaign and product required (stricter than optional API fields). */
-export const createAdSpendLogFormSchema = createAdSpendSchema.merge(
-  z.object({
-    campaignId: z.string().uuid(),
-    productId: z.string().uuid(),
-  }),
-);
+export const createAdSpendLogFormSchema = createAdSpendObjectSchema
+  .merge(
+    z.object({
+      campaignId: z.string().uuid(),
+      productId: z.string().uuid(),
+    }),
+  )
+  .superRefine(refineAdSpendPlatform);
 export type CreateAdSpendLogFormInput = z.infer<typeof createAdSpendLogFormSchema>;
+
+const adSpendBatchLineSchema = z.object({
+  campaignId: z.string().uuid(),
+  productId: z.string().uuid(),
+  spendAmount: z.coerce.number().min(0).multipleOf(0.01),
+  screenshotUrl: z.string().url().min(1),
+  platform: adPlatformSchema.default('FACEBOOK'),
+  platformCustomLabel: platformCustomLabelSchema,
+  adUrl: adUrlSchema,
+});
+
+const createAdSpendBatchObjectSchema = z.object({
+  spendDate: z.string().date(),
+  lines: z
+    .array(adSpendBatchLineSchema)
+    .min(1, 'Add at least one expense line')
+    .max(50, 'Up to 50 lines per submission'),
+});
+
+const refineAdSpendBatchLines = (
+  data: { lines: Array<{ platform: AdPlatform; platformCustomLabel?: string | undefined }> },
+  ctx: z.RefinementCtx,
+) => {
+  data.lines.forEach((line, i) => {
+    if (line.platform === 'OTHER' && !line.platformCustomLabel) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Enter the platform name when Other is selected',
+        path: ['lines', i, 'platformCustomLabel'],
+      });
+    }
+  });
+};
 
 /**
  * Multi-line "Add Expense" submission — one shared spendDate, N line items
@@ -144,23 +203,13 @@ export type CreateAdSpendLogFormInput = z.infer<typeof createAdSpendLogFormSchem
  * Server writes all rows in a single transaction; HoM gets ONE notification
  * for the whole batch, not one per line.
  */
-export const createAdSpendBatchSchema = z.object({
-  spendDate: z.string().date(),
-  lines: z
-    .array(
-      z.object({
-        campaignId: z.string().uuid(),
-        productId: z.string().uuid(),
-        spendAmount: z.coerce.number().min(0).multipleOf(0.01),
-        screenshotUrl: z.string().url().min(1),
-        platform: adPlatformSchema.default('FACEBOOK'),
-        adUrl: adUrlSchema,
-      }),
-    )
-    .min(1, 'Add at least one expense line')
-    .max(50, 'Up to 50 lines per submission'),
-});
+export const createAdSpendBatchSchema = createAdSpendBatchObjectSchema.superRefine(refineAdSpendBatchLines);
 export type CreateAdSpendBatchInput = z.infer<typeof createAdSpendBatchSchema>;
+
+/** tRPC `createAdSpendBatch` input — optional explicit branch for org-wide heads. */
+export const createAdSpendBatchWithBranchSchema = createAdSpendBatchObjectSchema
+  .extend({ branchId: z.string().uuid().optional() })
+  .superRefine(refineAdSpendBatchLines);
 
 export const listAdSpendSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),

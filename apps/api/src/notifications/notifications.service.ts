@@ -1,5 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { eq, and, desc, count, inArray, or, gte, lte } from 'drizzle-orm';
+import { Cron } from '@nestjs/schedule';
+import { eq, and, desc, count, inArray, or, gte, lte, lt } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import sgMail from '@sendgrid/mail';
 import { db as schema } from '@yannis/shared';
@@ -551,6 +552,55 @@ export class NotificationsService {
 
     this.cache.delPattern(`cache:notif:${userId}:*`).catch(() => undefined);
     return { success: true };
+  }
+
+  /**
+   * Daily retention sweep — deletes:
+   *   - Read notifications older than 30 days (the user already saw them)
+   *   - Unread notifications older than 90 days (hard cap; ancient unread is
+   *     unlikely to be acted on and the bell shouldn't surface stale items)
+   *
+   * Push delivery rows are NOT touched — they live on `push_delivery_log` for
+   * its own retention. Audit / temporal data is unaffected.
+   *
+   * Runs at 03:15 server-local time. The 15-minute offset stays clear of the
+   * top-of-hour cron rush (mat-view refresh + push automations).
+   */
+  @Cron('0 15 3 * * *')
+  async cleanupOldNotifications(): Promise<void> {
+    try {
+      const now = Date.now();
+      const READ_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+      const UNREAD_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+      const readCutoff = new Date(now - READ_RETENTION_MS);
+      const unreadCutoff = new Date(now - UNREAD_RETENTION_MS);
+
+      const readDeleted = await this.db
+        .delete(schema.notifications)
+        .where(
+          and(
+            eq(schema.notifications.read, true),
+            lt(schema.notifications.createdAt, readCutoff),
+          ),
+        )
+        .returning({ id: schema.notifications.id });
+
+      const unreadDeleted = await this.db
+        .delete(schema.notifications)
+        .where(lt(schema.notifications.createdAt, unreadCutoff))
+        .returning({ id: schema.notifications.id });
+
+      this.logger.log(
+        `Notification cleanup: removed ${readDeleted.length} read (>30d) + ${unreadDeleted.length} stale (>90d) notifications`,
+      );
+
+      // The unread-count cache is keyed per-user; invalidate broadly so any
+      // affected users see fresh counts on next bell open. delPattern covers
+      // every key matching `cache:notif:*`.
+      await this.cache.delPattern('cache:notif:*').catch(() => undefined);
+    } catch (err) {
+      this.logger.error('Notification cleanup failed', err);
+    }
   }
 
   // ============================================================
