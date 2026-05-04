@@ -71,6 +71,9 @@ const EVENT_BORDER: Record<string, string> = {
   SUPERVISOR_WATCHING: 'border-app-border dark:border-neutral-600',
   PAYMENT_RECEIVED: 'border-success-500',
   ORDER_ARCHIVED: 'border-app-border dark:border-neutral-600',
+  LINE_PRICE_CHANGE_REQUESTED: 'border-amber-500',
+  LINE_PRICE_CHANGE_APPROVED: 'border-success-500',
+  LINE_PRICE_CHANGE_REJECTED: 'border-danger-500',
 };
 
 const RIDER_METADATA_EVENT_TYPES = new Set([

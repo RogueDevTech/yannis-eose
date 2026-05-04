@@ -320,6 +320,25 @@ export class PermissionRequestsService {
         { orderId, items, totalAmount: Number(totalAmount) },
         approver,
       );
+      // Surface the approval on the order timeline. The underlying `update` call writes
+      // a `QUANTITY_UPDATED` event when items change, but that doesn't tell the CS rep
+      // (or auditor) that this was specifically an approval of THEIR pending request.
+      const approvedTotal = Math.round(Number(totalAmount) * 100) / 100;
+      this.ordersService.writeTimelineEvent({
+        orderId,
+        eventType: 'LINE_PRICE_CHANGE_APPROVED',
+        actorId: approver.id,
+        actorName: approver.name ?? null,
+        description:
+          `${approver.name ?? 'Approver'} approved the line price change — ` +
+          `new total ₦${approvedTotal.toLocaleString('en-NG')}.`,
+        metadata: {
+          permissionRequestId: requestId,
+          approvedItems: items,
+          approvedTotalAmount: Number(totalAmount),
+          approvalReason: reason,
+        },
+      });
     } else if (req.type === 'ORDER_DELETION') {
       const payload = req.payload as { orderId?: string } | null;
       const orderId = payload?.orderId;
@@ -429,6 +448,31 @@ export class PermissionRequestsService {
 
       return found;
     });
+
+    // Mirror the rejection on the order timeline so the requester / auditor sees a
+    // single source of truth on the order detail page (they shouldn't have to drill
+    // into permission-requests to find out what happened to their proposal).
+    if (req.type === 'ORDER_LINE_PRICE_CHANGE') {
+      const rejectOrderId = (req.payload as { orderId?: string } | null)?.orderId;
+      const isWithdrawal = req.requesterId === approver.id;
+      if (rejectOrderId) {
+        const reasonSnippet = reason.length > 80 ? `${reason.slice(0, 77)}…` : reason;
+        this.ordersService.writeTimelineEvent({
+          orderId: rejectOrderId,
+          eventType: 'LINE_PRICE_CHANGE_REJECTED',
+          actorId: approver.id,
+          actorName: approver.name ?? null,
+          description: isWithdrawal
+            ? `${approver.name ?? 'Requester'} withdrew the line price change request. Reason: "${reasonSnippet}"`
+            : `${approver.name ?? 'Approver'} rejected the line price change request. Reason: "${reasonSnippet}"`,
+          metadata: {
+            permissionRequestId: requestId,
+            rejectionReason: reason,
+            withdrawn: isWithdrawal,
+          },
+        });
+      }
+    }
 
     const rejectProductName =
       req.type === 'PRODUCT_ARCHIVE'
