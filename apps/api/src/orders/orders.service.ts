@@ -502,6 +502,29 @@ export class OrdersService {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create approval request' });
     }
 
+    // Surface the request on the order timeline so the CS rep, HoCS, and any approver
+    // can see "<actor> proposed price change pending approval" right alongside the
+    // other order events. Without this, the request was completely invisible on the
+    // detail page until the approver acted on it.
+    const proposedTotalForTimeline = Math.round(input.totalAmount * 100) / 100;
+    const reasonSnippet =
+      input.reason.length > 80 ? `${input.reason.slice(0, 77)}…` : input.reason;
+    this.writeTimelineEvent({
+      orderId: input.orderId,
+      eventType: 'LINE_PRICE_CHANGE_REQUESTED',
+      actorId: actor.id,
+      actorName: actor.name ?? null,
+      description:
+        `${actor.name ?? 'Staff'} proposed a line price change pending approval — ` +
+        `new total ₦${proposedTotalForTimeline.toLocaleString('en-NG')}. Reason: "${reasonSnippet}"`,
+      metadata: {
+        permissionRequestId: req.id,
+        proposedItems: input.items,
+        proposedTotalAmount: input.totalAmount,
+        reason: input.reason,
+      },
+    });
+
     void this.notifyOrderLinePriceChangeApprovers({
       requestId: req.id,
       orderId: input.orderId,
@@ -5034,6 +5057,7 @@ export class OrdersService {
       'CALL_FAILED', 'MANUAL_CALL_LOGGED', 'SMS_SENT', 'WHATSAPP_SENT', 'ORDER_CONFIRMED',
       'ORDER_CANCELLED', 'ADDRESS_UPDATED', 'QUANTITY_UPDATED', 'CALLBACK_SCHEDULED',
       'SUPERVISOR_WATCHING', 'PAYMENT_RECEIVED', 'ORDER_ARCHIVED',
+      'LINE_PRICE_CHANGE_REQUESTED', 'LINE_PRICE_CHANGE_APPROVED', 'LINE_PRICE_CHANGE_REJECTED',
     ]);
     const LOGISTICS_EVENTS = new Set([
       'ORDER_ALLOCATED', 'ORDER_DISPATCHED', 'ORDER_IN_TRANSIT', 'ORDER_DELIVERED',

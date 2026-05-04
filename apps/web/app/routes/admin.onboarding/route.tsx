@@ -27,7 +27,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!record) {
     throw new Response('No onboarding payload', { status: 500 });
   }
-  return { record, subject: { id: user.id, name: user.name } };
+  // Include the user's role so StaffOnboardingPage can pick the right reviewer copy
+  // (HR / Admin / SuperAdmin onboardings are reviewed by SuperAdmin, not HR).
+  return { record, subject: { id: user.id, name: user.name, role: user.role } };
 }
 
 export async function action({ request }: ActionFunctionArgs) {

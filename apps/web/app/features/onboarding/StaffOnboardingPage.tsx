@@ -45,7 +45,7 @@ export interface OnboardingRecord {
 
 export interface StaffOnboardingPageProps {
   /** Subject of the page — the staff member whose onboarding is being viewed/edited. */
-  subject: { id: string; name: string };
+  subject: { id: string; name: string; role?: string };
   /** Current onboarding record (synthetic NOT_STARTED placeholder when no row yet). */
   record: OnboardingRecord;
   /**
@@ -58,6 +58,22 @@ export interface StaffOnboardingPageProps {
   /** When true, show breadcrumb back to /hr/users/:id. */
   showBackToProfile?: boolean;
   approverName?: string | null;
+}
+
+/**
+ * HR Manager / SuperAdmin / Admin can't review their own onboarding — SuperAdmin handles
+ * those roles' approvals. The reviewer copy in the "self" submitted/approved banners
+ * branches off this so the message stays accurate per role.
+ */
+function reviewerLabel(subjectRole: string | undefined): string {
+  if (
+    subjectRole === 'HR_MANAGER' ||
+    subjectRole === 'SUPER_ADMIN' ||
+    subjectRole === 'ADMIN'
+  ) {
+    return 'a Super Admin';
+  }
+  return 'HR';
 }
 
 const GENDER_OPTIONS = [
@@ -314,8 +330,8 @@ export function StaffOnboardingPage({
       {readOnly && mode === 'self' ? (
         <div className="rounded-lg border border-app-border bg-app-hover/50 p-3 text-sm text-app-fg-muted">
           {record.status === 'APPROVED'
-            ? 'Your onboarding has been approved by HR and is now locked. Contact HR if anything needs to change.'
-            : 'Your onboarding has been submitted and is waiting for HR review. The form is locked until they approve it.'}
+            ? `Your onboarding has been approved by ${reviewerLabel(subject.role)} and is now locked. Contact ${reviewerLabel(subject.role)} if anything needs to change.`
+            : `Your onboarding has been submitted and is waiting for review by ${reviewerLabel(subject.role)}. The form is locked until it's approved.`}
           {approverName && record.status === 'APPROVED' ? (
             <span className="ml-1">Approved by {approverName}.</span>
           ) : null}

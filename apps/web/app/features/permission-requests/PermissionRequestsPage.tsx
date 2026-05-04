@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import {
   CompactTable,
@@ -16,6 +16,8 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { Textarea } from '~/components/ui/textarea';
 import { Tabs } from '~/components/ui/tabs';
 import { DescriptionList } from '~/components/ui/description-list';
+import { NairaPrice } from '~/components/ui/naira-price';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import type { PermissionRequest, PermissionRequestStatusFilter } from './types';
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
@@ -322,35 +324,7 @@ export function PermissionRequestsPage({
                   : []),
               ]}
             />
-            {viewing.type === 'USER_CREATION' && viewing.payload ? (
-              <div>
-                <p className="text-xs font-medium text-app-fg-muted mb-1.5">Creation payload</p>
-                <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words border border-app-border">
-                  {JSON.stringify(viewing.payload, null, 2)}
-                </pre>
-              </div>
-            ) : viewing.type === 'PRODUCT_ARCHIVE' && viewing.payload ? (
-              <div>
-                <p className="text-xs font-medium text-app-fg-muted mb-1.5">Product</p>
-                <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words border border-app-border">
-                  {JSON.stringify(viewing.payload, null, 2)}
-                </pre>
-              </div>
-            ) : viewing.type === 'ORDER_LINE_PRICE_CHANGE' && viewing.payload ? (
-              <div>
-                <p className="text-xs font-medium text-app-fg-muted mb-1.5">Proposed items & total</p>
-                <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words border border-app-border">
-                  {JSON.stringify(viewing.payload, null, 2)}
-                </pre>
-              </div>
-            ) : viewing.type === 'ORDER_DELETION' && viewing.payload ? (
-              <div>
-                <p className="text-xs font-medium text-app-fg-muted mb-1.5">Order to archive</p>
-                <pre className="text-xs font-mono bg-app-hover rounded-md p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words border border-app-border">
-                  {JSON.stringify(viewing.payload, null, 2)}
-                </pre>
-              </div>
-            ) : null}
+            <RequestPayloadView request={viewing} />
           </div>
           <div className="flex flex-wrap gap-2 justify-end shrink-0 pt-2 border-t border-app-border pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <Button type="button" variant="secondary" size="sm" onClick={() => setViewing(null)}>
@@ -454,6 +428,189 @@ export function PermissionRequestsPage({
               </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+// ─── Payload renderers ──────────────────────────────────────────────────────
+//
+// Permission requests carry a JSON payload that varies per type. Earlier these
+// were dumped via `JSON.stringify(payload, null, 2)` inside a <pre>, which was
+// fast to ship but reads like a stack trace to a non-technical reviewer ("why
+// am I seeing code?"). The components below render each type as a tidy
+// description list / table so HoCS / SuperAdmin can review at a glance.
+
+interface OrderLineItemPayload {
+  productId: string;
+  productName?: string | null;
+  quantity: number;
+  unitPrice: number;
+}
+
+interface OrderPayload {
+  orderId?: string;
+  items?: OrderLineItemPayload[];
+  totalAmount?: number;
+}
+
+interface UserCreationPayload {
+  name?: string;
+  email?: string;
+  role?: string;
+  phone?: string;
+  primaryBranchId?: string;
+  branchIds?: string[];
+  roleTemplateId?: string;
+}
+
+interface ProductArchivePayload {
+  productId?: string;
+  productName?: string;
+  reason?: string;
+}
+
+function RequestPayloadView({ request }: { request: PermissionRequest }) {
+  const payload = request.payload as Record<string, unknown> | null;
+  if (!payload) return null;
+
+  if (request.type === 'ORDER_LINE_PRICE_CHANGE' || request.type === 'ORDER_DELETION') {
+    return <OrderPayloadView payload={payload as OrderPayload} kind={request.type} />;
+  }
+  if (request.type === 'USER_CREATION') {
+    return <UserCreationPayloadView payload={payload as UserCreationPayload} />;
+  }
+  if (request.type === 'PRODUCT_ARCHIVE') {
+    return <ProductArchivePayloadView payload={payload as ProductArchivePayload} />;
+  }
+  return null;
+}
+
+function OrderPayloadView({ payload, kind }: { payload: OrderPayload; kind: 'ORDER_LINE_PRICE_CHANGE' | 'ORDER_DELETION' }) {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const total =
+    typeof payload.totalAmount === 'number'
+      ? payload.totalAmount
+      : items.reduce((acc, line) => acc + (Number(line.unitPrice) || 0) * (Number(line.quantity) || 0), 0);
+
+  const headerLabel =
+    kind === 'ORDER_DELETION' ? 'Order to archive' : 'Proposed items & total';
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs font-medium text-app-fg-muted mb-1.5">{headerLabel}</p>
+        {payload.orderId ? (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-app-fg-muted">Order:</span>
+            <OrderIdBadge id={payload.orderId} linkTo={`/admin/orders/${payload.orderId}`} />
+          </div>
+        ) : null}
+      </div>
+
+      {items.length > 0 ? (
+        <div className="rounded-md border border-app-border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-app-hover text-xs uppercase tracking-wider text-app-fg-muted">
+                <th className="text-left font-medium px-3 py-2">Product</th>
+                <th className="text-right font-medium px-3 py-2 w-16">Qty</th>
+                <th className="text-right font-medium px-3 py-2 w-32">Unit price</th>
+                <th className="text-right font-medium px-3 py-2 w-32">Line total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((line, i) => {
+                const qty = Number(line.quantity) || 0;
+                const unit = Number(line.unitPrice) || 0;
+                const lineTotal = qty * unit;
+                const productLabel =
+                  line.productName?.trim() ||
+                  (line.productId ? `Product · ${line.productId.slice(0, 8)}…` : '—');
+                return (
+                  <tr key={`${line.productId ?? 'p'}-${i}`} className="border-t border-app-border">
+                    <td className="px-3 py-2">
+                      {line.productId ? (
+                        <Link
+                          to={`/admin/products/${line.productId}`}
+                          className="text-brand-500 hover:text-brand-600 hover:underline"
+                        >
+                          {productLabel}
+                        </Link>
+                      ) : (
+                        productLabel
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{qty}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <NairaPrice amount={unit} />
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-medium">
+                      <NairaPrice amount={lineTotal} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-app-border bg-app-hover/50">
+                <td className="px-3 py-2 text-app-fg-muted text-xs uppercase tracking-wider" colSpan={3}>
+                  Total
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold text-app-fg">
+                  <NairaPrice amount={total} />
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ) : (
+        <p className="text-xs text-app-fg-muted">No line items in payload.</p>
+      )}
+    </div>
+  );
+}
+
+function UserCreationPayloadView({ payload }: { payload: UserCreationPayload }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-app-fg-muted mb-1.5">User to create</p>
+      <DescriptionList
+        items={[
+          { label: 'Name', value: payload.name ?? '—' },
+          { label: 'Email', value: payload.email ?? '—' },
+          { label: 'Role', value: payload.role ?? '—' },
+          ...(payload.phone ? [{ label: 'Phone', value: payload.phone }] : []),
+          ...(payload.branchIds && payload.branchIds.length > 0
+            ? [{ label: 'Branches', value: `${payload.branchIds.length} branch(es)` }]
+            : []),
+        ]}
+      />
+    </div>
+  );
+}
+
+function ProductArchivePayloadView({ payload }: { payload: ProductArchivePayload }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-app-fg-muted mb-1.5">Product to archive</p>
+      <DescriptionList
+        items={[
+          {
+            label: 'Product',
+            value: payload.productId ? (
+              <Link
+                to={`/admin/products/${payload.productId}`}
+                className="text-brand-500 hover:text-brand-600 hover:underline"
+              >
+                {payload.productName ?? `Product · ${payload.productId.slice(0, 8)}…`}
+              </Link>
+            ) : (
+              (payload.productName ?? '—')
+            ),
+          },
+          ...(payload.reason ? [{ label: 'Reason', value: payload.reason }] : []),
+        ]}
+      />
     </div>
   );
 }

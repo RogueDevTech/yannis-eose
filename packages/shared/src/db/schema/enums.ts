@@ -330,6 +330,9 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'SUPERVISOR_WATCHING',
   'PAYMENT_RECEIVED',
   'ORDER_ARCHIVED',
+  'LINE_PRICE_CHANGE_REQUESTED',
+  'LINE_PRICE_CHANGE_APPROVED',
+  'LINE_PRICE_CHANGE_REJECTED',
 ]);
 
 /** Staff onboarding workflow — non-blocking record-keeping flow. */

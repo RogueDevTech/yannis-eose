@@ -976,14 +976,33 @@ export function OrderDetailPage({
       )}
 
       {canEditOrder && order.pendingOrderLinePriceRequestId && (
-        <div className="rounded-lg border border-info-200 dark:border-info-800/50 bg-info-50 dark:bg-info-900/20 px-4 py-3 text-sm text-info-900 dark:text-info-100">
-          <p>
-            A line price change is pending approval.{' '}
-            <Link to="/admin/permission-requests" className="font-medium text-brand-600 dark:text-brand-400 underline">
-              Open permission requests
-            </Link>
-            .
-          </p>
+        <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <svg
+              className="h-5 w-5 shrink-0 text-warning-600 dark:text-warning-400 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <div className="text-sm text-warning-900 dark:text-warning-100">
+              <p className="font-semibold">Line price change pending approval</p>
+              <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
+                The order shows the original prices until a Head of CS, branch admin, or admin
+                approves the change. See the order timeline below for full context, or{' '}
+                <Link
+                  to="/admin/permission-requests"
+                  className="font-medium text-warning-900 dark:text-warning-100 underline underline-offset-2"
+                >
+                  open the request
+                </Link>
+                .
+              </p>
+            </div>
+          </div>
         </div>
       )}
 

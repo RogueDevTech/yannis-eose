@@ -43,7 +43,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     (onboardingRes.data as { result?: { data?: OnboardingRecord } })?.result?.data ?? null;
   const userPayload =
     (userRes.data as {
-      result?: { data?: { user?: { id: string; name: string } } | { id: string; name: string } };
+      result?: {
+        data?:
+          | { user?: { id: string; name: string; role?: string } }
+          | { id: string; name: string; role?: string };
+      };
     })?.result?.data ?? null;
   if (!record || !userPayload) {
     throw new Response('Missing payload', { status: 500 });
@@ -51,8 +55,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // users.getById returns either { user } or the user directly depending on path; handle both.
   const user =
     'id' in (userPayload as { id?: string }) && 'name' in (userPayload as { name?: string })
-      ? (userPayload as { id: string; name: string })
-      : ((userPayload as { user: { id: string; name: string } }).user);
+      ? (userPayload as { id: string; name: string; role?: string })
+      : ((userPayload as { user: { id: string; name: string; role?: string } }).user);
 
   let approverName: string | null = null;
   if (record.approvedBy) {
@@ -70,7 +74,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
-  return { record, subject: { id: user.id, name: user.name }, approverName };
+  return {
+    record,
+    subject: { id: user.id, name: user.name, role: user.role },
+    approverName,
+  };
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
