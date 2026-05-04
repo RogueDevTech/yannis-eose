@@ -4,6 +4,8 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryConfirmationsPage } from '~/features/logistics/DeliveryConfirmationsPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_DELIVERY_CONFIRMATIONS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { AllocatedDeliveryOrder, DeliveryConfirmationRequest } from '~/features/logistics/types';
 
 export const meta: MetaFunction = () => [
@@ -189,6 +191,11 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function DeliveryConfirmationsRoute() {
   const data = useLoaderData<typeof loader>();
   return (
+    <>
+      <ListFilterPersistence
+        scope={LIST_FILTER_SCOPES.deliveryConfirmations}
+        allowlist={ALLOWLIST_DELIVERY_CONFIRMATIONS}
+      />
     <DeliveryConfirmationsPage
       requests={data.requests}
       total={data.total}
@@ -200,5 +207,6 @@ export default function DeliveryConfirmationsRoute() {
       allocatedOrders={data.allocatedOrders ?? []}
       canAdjustOrder={data.canAdjustOrder}
     />
+    </>
   );
 }

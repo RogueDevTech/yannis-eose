@@ -210,6 +210,16 @@ export function DateFilterBar({
   const hasDraftDates = Boolean(draftStart || draftEnd) && !draftPeriodAllTime;
   const periodLabel = formatPeriodLabel(startDate, endDate, periodAllTime);
   const activeDraftId = getActiveDraftSelectionId(draftStart, draftEnd, draftPeriodAllTime);
+  /** Custom date inputs are hidden by default. They auto-open if the current draft is
+   *  already a non-preset range (e.g. user reopens the modal after picking custom dates),
+   *  and they open when the user explicitly clicks the Custom preset button. */
+  const [customOpen, setCustomOpen] = useState(false);
+  useEffect(() => {
+    if (modalOpen) {
+      setCustomOpen(activeDraftId === 'custom');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen]);
 
   const triggerClassName =
     triggerLayout === 'blockCenter'
@@ -263,43 +273,65 @@ export function DateFilterBar({
                           ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-app-canvas bg-brand-500/10 text-brand-700 dark:bg-brand-900/30 dark:text-brand-200'
                           : ''
                       }
-                      onClick={() => setDraftPreset(id)}
+                      onClick={() => {
+                        setDraftPreset(id);
+                        setCustomOpen(false);
+                      }}
                     >
                       {label}
                     </Button>
                   );
                 })}
+                {/* Custom — toggles the calendar/date inputs below. Hidden by default
+                    so the modal opens compact (presets only); the calendar appears
+                    only after the user explicitly initiates it. */}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="md"
+                  aria-pressed={customOpen || activeDraftId === 'custom'}
+                  className={
+                    customOpen || activeDraftId === 'custom'
+                      ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-app-canvas bg-brand-500/10 text-brand-700 dark:bg-brand-900/30 dark:text-brand-200'
+                      : ''
+                  }
+                  onClick={() => setCustomOpen((v) => !v)}
+                >
+                  Custom…
+                </Button>
               </div>
-              <div
-                className={[
-                  'flex flex-col gap-3 rounded-lg border-2 p-3 transition-colors',
-                  activeDraftId === 'custom'
-                    ? 'border-brand-500 bg-brand-500/5'
-                    : 'border-transparent',
-                ].join(' ')}
-              >
-                <h4 className="text-xs font-medium text-app-fg-muted">Custom date</h4>
-                <div>
-                  <label className="block text-xs font-medium text-app-fg-muted mb-1">From</label>
-                  <input
-                    type="date"
-                    value={draftStart}
-                    onChange={(e) => setDraftCustomDate(e.target.value, draftEnd)}
-                    className="input text-sm w-full"
-                    disabled={draftPeriodAllTime}
-                  />
+              {customOpen && (
+                <div
+                  className={[
+                    'flex flex-col gap-3 rounded-lg border-2 p-3 transition-colors',
+                    activeDraftId === 'custom'
+                      ? 'border-brand-500 bg-brand-500/5'
+                      : 'border-app-border',
+                  ].join(' ')}
+                >
+                  <h4 className="text-xs font-medium text-app-fg-muted">Custom date</h4>
+                  <div>
+                    <label className="block text-xs font-medium text-app-fg-muted mb-1">From</label>
+                    <input
+                      type="date"
+                      value={draftStart}
+                      onChange={(e) => setDraftCustomDate(e.target.value, draftEnd)}
+                      className="input text-sm w-full"
+                      disabled={draftPeriodAllTime}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-app-fg-muted mb-1">To</label>
+                    <input
+                      type="date"
+                      value={draftEnd}
+                      onChange={(e) => setDraftCustomDate(draftStart, e.target.value)}
+                      className="input text-sm w-full"
+                      disabled={draftPeriodAllTime}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-app-fg-muted mb-1">To</label>
-                  <input
-                    type="date"
-                    value={draftEnd}
-                    onChange={(e) => setDraftCustomDate(draftStart, e.target.value)}
-                    className="input text-sm w-full"
-                    disabled={draftPeriodAllTime}
-                  />
-                </div>
-              </div>
+              )}
               {(hasDraftDates || draftPeriodAllTime) && (
                 <Button type="button" variant="secondary" size="md" className="w-full" onClick={clearDraft}>
                   Clear

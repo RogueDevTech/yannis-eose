@@ -24,6 +24,7 @@ import { db as schema } from '@yannis/shared';
 import type { AuthService } from '../auth/auth.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { PermissionsService } from '../permissions/permissions.service';
+import type { EventsService } from '../events/events.service';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -34,6 +35,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
   const authStub = {} as unknown as AuthService;
   const notificationsStub = {} as unknown as NotificationsService;
   const permissionsStub = {} as unknown as PermissionsService;
+  const eventsStub = { emitToUser: () => undefined } as unknown as EventsService;
 
   beforeEach(async () => {
     await pgClient`BEGIN`;
@@ -73,7 +75,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, homLagos, mbLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, homLagos.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' },
       { id: homLagos.id, role: 'HEAD_OF_MARKETING' },
@@ -90,7 +92,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, homLagos, mbLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, homLagos.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
     const result = await svc.list(
       {
         page: 1,
@@ -112,7 +114,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, mbLagos, mbMain, admin } = await seedTwoBranches();
     await setSessionActor(pgClient, admin.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', allBranches: true },
       { id: admin.id, role: 'SUPER_ADMIN' },
@@ -128,7 +130,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, homLagos, mbLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, homLagos.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', allBranches: true },
       { id: homLagos.id, role: 'HEAD_OF_MARKETING' },
@@ -144,7 +146,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { admin, mbLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, admin.id, null);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' },
       { id: admin.id, role: 'SUPER_ADMIN' },
@@ -160,7 +162,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, main, homLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, homLagos.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', branchId: main.id },
       { id: homLagos.id, role: 'HEAD_OF_MARKETING' },
@@ -190,6 +192,8 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () 
     isSensitiveRole: () => false,
   } as unknown as PermissionsService;
 
+  const eventsStub = { emitToUser: () => undefined } as unknown as EventsService;
+
   beforeEach(async () => {
     await pgClient`BEGIN`;
   });
@@ -198,7 +202,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () 
     await pgClient`ROLLBACK`;
   });
 
-  it('createStaff rejects a second HEAD_OF_CS while another ACTIVE holder exists', async () => {
+  it('createStaff allows a second HEAD_OF_CS now that the singleton is retired (CEO 2026-05-03)', async () => {
     const branch = await createTestBranch(db as any);
     const branch2 = await createTestBranch(db as any);
     const existing = await createTestUser(db as any, { role: 'HEAD_OF_CS' });
@@ -207,8 +211,11 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () 
     const admin = await createTestUser(db as any, { role: 'SUPER_ADMIN' });
     await setSessionActor(pgClient, admin.id, null);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
 
+    // Migration 0108 dropped the singleton DB index; the service no longer
+    // throws CONFLICT for duplicate heads. Permissions handle the actual
+    // capability now — multiple HEAD_OF_CS holders are allowed.
     await expect(
       svc.createStaff(
         {
@@ -221,6 +228,6 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () 
         },
         { id: admin.id, role: 'SUPER_ADMIN', name: 'Admin', currentBranchId: null } as any,
       ),
-    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    ).resolves.toMatchObject({ role: 'HEAD_OF_CS' });
   });
 });

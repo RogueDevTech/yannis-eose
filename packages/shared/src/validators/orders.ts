@@ -229,25 +229,74 @@ export const bulkReassignSchema = z.object({
 
 export type BulkReassignInput = z.infer<typeof bulkReassignSchema>;
 
+/** CS / list: filter by callback queue, delivery day, overdue undelivered, etc. (see OrdersService.list). */
+export const listOrdersScheduleKindSchema = z.enum([
+  'callback_due',
+  'callback_on_day',
+  'delivery_on_day',
+  'delivery_overdue',
+]);
+
+export type ListOrdersScheduleKind = z.infer<typeof listOrdersScheduleKindSchema>;
+
 /**
  * List orders — filtering and pagination.
  */
-export const listOrdersSchema = z.object({
-  status: orderStatusSchema.optional(),
-  statuses: z.array(orderStatusSchema).min(1).optional(),
-  assignedCsId: z.string().uuid().optional(),
-  mediaBuyerId: z.string().uuid().optional(),
-  campaignId: z.string().uuid().optional(),
-  productId: z.string().uuid().optional(),
-  riderId: z.string().uuid().optional(),
-  logisticsLocationId: z.string().uuid().optional(),
-  search: z.string().optional(),
-  startDate: z.string().date().optional(),
-  endDate: z.string().date().optional(),
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
-  sortBy: z.enum(['createdAt', 'updatedAt', 'status', 'totalAmount', 'preferredDeliveryDate']).default('createdAt'),
-  sortOrder: z.enum(['asc', 'desc']).default('desc'),
-});
+export const listOrdersSchema = z
+  .object({
+    status: orderStatusSchema.optional(),
+    statuses: z.array(orderStatusSchema).min(1).optional(),
+    assignedCsId: z.string().uuid().optional(),
+    mediaBuyerId: z.string().uuid().optional(),
+    campaignId: z.string().uuid().optional(),
+    productId: z.string().uuid().optional(),
+    riderId: z.string().uuid().optional(),
+    logisticsLocationId: z.string().uuid().optional(),
+    search: z.string().optional(),
+    startDate: z.string().date().optional(),
+    endDate: z.string().date().optional(),
+    scheduleKind: listOrdersScheduleKindSchema.optional(),
+    /** Required when scheduleKind is callback_on_day or delivery_on_day (YYYY-MM-DD). */
+    scheduleDate: z.string().date().optional(),
+    page: z.number().int().min(1).default(1),
+    limit: z.number().int().min(1).max(100).default(20),
+    sortBy: z.enum(['createdAt', 'updatedAt', 'status', 'totalAmount', 'preferredDeliveryDate']).default('createdAt'),
+    sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  })
+  .superRefine((val, ctx) => {
+    if (val.scheduleKind === 'callback_on_day' || val.scheduleKind === 'delivery_on_day') {
+      if (!val.scheduleDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'scheduleDate is required for this scheduleKind',
+          path: ['scheduleDate'],
+        });
+      }
+    }
+    if (val.scheduleDate && !val.scheduleKind) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'scheduleKind is required when scheduleDate is set',
+        path: ['scheduleKind'],
+      });
+    }
+    if (val.scheduleKind === 'delivery_overdue' && val.scheduleDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'scheduleDate must not be set for delivery_overdue',
+        path: ['scheduleDate'],
+      });
+    }
+  });
 
 export type ListOrdersInput = z.infer<typeof listOrdersSchema>;
+
+/** Per-day heat for CS schedule calendar (callbacks in Africa/Lagos + ISO preferred_delivery_date). */
+export const scheduleCalendarHeatSchema = z.object({
+  yearMonth: z.string().regex(/^\d{4}-\d{2}$/, 'Expected YYYY-MM'),
+  assignedCsId: z.string().uuid().optional(),
+  mediaBuyerId: z.string().uuid().optional(),
+  status: orderStatusSchema.optional(),
+});
+
+export type ScheduleCalendarHeatInput = z.infer<typeof scheduleCalendarHeatSchema>;

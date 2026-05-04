@@ -8,7 +8,7 @@ import {
   type BottomNavItem,
   type BottomNavGroup,
 } from './bottom-nav';
-import { useSocket, useRealtimeNotifications } from '~/hooks/useSocket';
+import { useSocket, useRealtimeNotifications, useForceLogoutOnRevoke } from '~/hooks/useSocket';
 import { ToastProvider } from '~/components/ui/toast';
 import { NotificationsStateProvider, useNotificationsState } from '~/contexts/notifications-state';
 import { IosInstallBanner } from '~/components/ui/ios-install-banner';
@@ -664,6 +664,10 @@ function DashboardLayoutInner({
   const [updateProgress, setUpdateProgress] = useState(0);
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const { isConnected } = useSocket();
+  // Hard-logout the browser if the server revokes the user's sessions
+  // (deactivation, status change). Without this the user can keep clicking
+  // around in already-rendered UI even though every API call is 401-ing.
+  useForceLogoutOnRevoke();
   const {
     realtimeCount,
     realtimeNotifications,

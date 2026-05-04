@@ -6,6 +6,8 @@ import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeSt
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { DisbursementsPage } from '~/features/disbursements/DisbursementsPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_DISBURSEMENTS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { DisbursementRecord, DisbursementsPageData } from '~/features/disbursements/DisbursementsPage';
 import type { FundingRequestRecord } from '~/features/marketing/types';
 
@@ -331,5 +333,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function DisbursementsRoute() {
   const data = useLoaderData<typeof loader>() as DisbursementsPageData;
-  return <DisbursementsPage {...data} />;
+  return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.disbursements} allowlist={ALLOWLIST_DISBURSEMENTS} />
+      <DisbursementsPage {...data} />
+    </>
+  );
 }

@@ -8,6 +8,8 @@ import {
 } from '~/lib/api.server';
 import { resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 import { LogisticsTeamPage } from '~/features/logistics/LogisticsTeamPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_LOGISTICS_TEAM, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { LogisticsProviderRow } from '~/features/logistics/team-types';
 
 export const meta: MetaFunction = () => [
@@ -131,6 +133,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function LogisticsTeamRoute() {
   const data = useLoaderData<typeof loader>();
   return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.logisticsTeam} allowlist={ALLOWLIST_LOGISTICS_TEAM} />
     <LogisticsTeamPage
       providers={data.providers}
       dateFilters={data.dateFilters}
@@ -142,5 +146,6 @@ export default function LogisticsTeamRoute() {
       sortBy={data.sortBy}
       sortDir={data.sortDir}
     />
+    </>
   );
 }

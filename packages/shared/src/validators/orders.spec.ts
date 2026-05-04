@@ -259,6 +259,40 @@ describe('listOrdersSchema', () => {
     expect(result.campaignId).toBe(VALID_UUID);
     expect(result.productId).toBe(VALID_UUID);
   });
+
+  it('accepts callback_due without scheduleDate', () => {
+    expect(() => listOrdersSchema.parse({ scheduleKind: 'callback_due' })).not.toThrow();
+  });
+
+  it('accepts delivery_overdue without scheduleDate', () => {
+    expect(() => listOrdersSchema.parse({ scheduleKind: 'delivery_overdue' })).not.toThrow();
+  });
+
+  it('rejects delivery_overdue with scheduleDate', () => {
+    expect(() =>
+      listOrdersSchema.parse({
+        scheduleKind: 'delivery_overdue',
+        scheduleDate: '2026-05-04',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects callback_on_day without scheduleDate', () => {
+    expect(() => listOrdersSchema.parse({ scheduleKind: 'callback_on_day' })).toThrow();
+  });
+
+  it('accepts delivery_on_day with scheduleDate', () => {
+    const r = listOrdersSchema.parse({
+      scheduleKind: 'delivery_on_day',
+      scheduleDate: '2026-05-04',
+    });
+    expect(r.scheduleKind).toBe('delivery_on_day');
+    expect(r.scheduleDate).toBe('2026-05-04');
+  });
+
+  it('rejects scheduleDate without scheduleKind', () => {
+    expect(() => listOrdersSchema.parse({ scheduleDate: '2026-05-04' })).toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------

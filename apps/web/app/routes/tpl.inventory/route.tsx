@@ -5,6 +5,8 @@ import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } fr
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_INVENTORY, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type {
   InventoryLevel,
   StockMovement,
@@ -190,5 +192,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function TplInventoryRoute() {
   const data = useLoaderData<typeof loader>() as InventoryStreamData;
   usePageRefreshOnEvent(['stock:updated', 'transfer:created', 'order:status_changed']);
-  return <InventoryPage {...data} />;
+  return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.tplInventory} allowlist={ALLOWLIST_INVENTORY} />
+      <InventoryPage {...data} />
+    </>
+  );
 }

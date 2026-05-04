@@ -154,6 +154,18 @@ export const STATUS_OPTIONS = [
   'COMPLETED',
 ];
 
+/** Omitted from CS Orders status dropdown — logistics stages + accounting closure. */
+export const CS_ORDERS_STATUS_DROPDOWN_EXCLUDE = new Set([
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'PARTIALLY_DELIVERED',
+  'COMPLETED',
+]);
+
+export const CS_ORDERS_STATUS_DROPDOWN_OPTIONS = STATUS_OPTIONS.filter(
+  (s) => s === 'ALL' || !CS_ORDERS_STATUS_DROPDOWN_EXCLUDE.has(s),
+);
+
 export function formatStatus(status: string): string {
   return status.replace(/_/g, ' ');
 }

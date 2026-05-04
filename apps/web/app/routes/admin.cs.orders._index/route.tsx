@@ -1,4 +1,4 @@
-import { json } from '@remix-run/node';
+import { json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
@@ -8,6 +8,11 @@ import { handleExportReportAction } from '~/lib/export-report.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { OrdersListPage } from '~/features/orders/OrdersListPage';
 import type { Order } from '~/features/orders/types';
+import type { ListOrdersScheduleKind } from '@yannis/shared';
+import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
+import { CS_ORDERS_STATUS_DROPDOWN_EXCLUDE } from '~/features/shared/order-status';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_CS_ORDERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 
 export const meta: MetaFunction = () => [
   { title: 'CS Orders — Yannis EOSE' },
@@ -32,9 +37,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const status = url.searchParams.get('status') || undefined;
+  let status = url.searchParams.get('status') || undefined;
+  if (status && CS_ORDERS_STATUS_DROPDOWN_EXCLUDE.has(status)) {
+    url.searchParams.delete('status');
+    const qs = url.searchParams.toString();
+    throw redirect(qs ? `${url.pathname}?${qs}` : url.pathname);
+  }
   const search = url.searchParams.get('search') || undefined;
   const csAgentIdParam = url.searchParams.get('csAgentId') || undefined;
+
+  const scheduleKindRaw = url.searchParams.get('scheduleKind') || undefined;
+  const scheduleDateRaw = url.searchParams.get('scheduleDate') || undefined;
+  const calendarMonthRaw = url.searchParams.get('calendarMonth') || undefined;
+
+  let scheduleKind: ListOrdersScheduleKind | undefined;
+  if (
+    scheduleKindRaw === 'callback_due' ||
+    scheduleKindRaw === 'callback_on_day' ||
+    scheduleKindRaw === 'delivery_on_day' ||
+    scheduleKindRaw === 'delivery_overdue'
+  ) {
+    scheduleKind = scheduleKindRaw as ListOrdersScheduleKind;
+  }
+  const scheduleDate =
+    scheduleDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(scheduleDateRaw) ? scheduleDateRaw : undefined;
+  if (scheduleKind === 'callback_on_day' || scheduleKind === 'delivery_on_day') {
+    if (!scheduleDate) scheduleKind = undefined;
+  }
+
+  const now = new Date();
+  const defaultCalendarMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  let calendarMonth =
+    calendarMonthRaw && /^\d{4}-\d{2}$/.test(calendarMonthRaw) ? calendarMonthRaw : defaultCalendarMonth;
+  if (scheduleDate && !calendarMonthRaw) {
+    calendarMonth = scheduleDate.slice(0, 7);
+  }
 
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
@@ -62,7 +99,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'CS_AGENT' ||
     userPerms.includes(canonicalPermissionCode('orders.createOffline'));
 
-  const listInput = {
+  const listInput: Record<string, unknown> = {
     page,
     limit: ORDERS_PER_PAGE,
     status: status || undefined,
@@ -71,6 +108,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
   };
+  if (scheduleKind === 'callback_due') {
+    listInput.scheduleKind = 'callback_due';
+  } else if (scheduleKind === 'delivery_overdue') {
+    listInput.scheduleKind = 'delivery_overdue';
+  } else if (scheduleKind === 'delivery_on_day' && scheduleDate) {
+    listInput.scheduleKind = 'delivery_on_day';
+    listInput.scheduleDate = scheduleDate;
+  } else if (scheduleKind === 'callback_on_day' && scheduleDate) {
+    listInput.scheduleKind = 'callback_on_day';
+    listInput.scheduleDate = scheduleDate;
+  }
   const countsInput: { assignedCsId?: string; startDate?: string; endDate?: string } = assignedCsId ? { assignedCsId } : {};
   if (startDate) countsInput.startDate = startDate;
   if (endDate) countsInput.endDate = endDate;
@@ -87,17 +135,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (endDate) trendInput.endDate = endDate;
   const trendInputEnc = encodeURIComponent(JSON.stringify(trendInput));
 
-  const [res, countsRes, myWorkloadRes, trendRes] = await Promise.all([
+  const heatInput = {
+    yearMonth: calendarMonth,
+    ...(assignedCsId && { assignedCsId }),
+    ...(status && { status }),
+  };
+  const heatInputEnc = encodeURIComponent(JSON.stringify(heatInput));
+
+  const [res, countsRes, myWorkloadRes, trendRes, heatRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
     isCSAgent ? apiRequest<unknown>('/trpc/orders.myCSWorkload', { method: 'GET', cookie }) : Promise.resolve(null),
     apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/orders.scheduleCalendarHeat?input=${heatInputEnc}`, { method: 'GET', cookie }),
   ]);
 
   const dailyCounts = trendRes.ok
     ? ((trendRes.data as {
         result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
       })?.result?.data ?? [])
+    : [];
+
+  const scheduleHeat: ScheduleHeatDay[] = heatRes.ok
+    ? ((heatRes.data as { result?: { data?: ScheduleHeatDay[] } })?.result?.data ?? [])
     : [];
 
   const trpcData = res.ok
@@ -117,13 +177,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : null;
 
   let csAgentsForFilter: Array<{ agentId: string; agentName: string }> = [];
+  let logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }> = [];
   if (showCSAgentColumn) {
-    const workloadsRes = await apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
-      '/trpc/orders.csWorkloads?input=%7B%7D',
-      { method: 'GET', cookie },
-    );
+    const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 100 }));
+    const [workloadsRes, locationsRes] = await Promise.all([
+      apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
+        '/trpc/orders.csWorkloads?input=%7B%7D',
+        { method: 'GET', cookie },
+      ),
+      apiRequest<{ result?: { data?: { locations: Array<{ id: string; name: string; providerName: string | null }> } } }>(
+        `/trpc/logistics.listLocations?input=${locationsInput}`,
+        { method: 'GET', cookie },
+      ),
+    ]);
     if (workloadsRes.ok && Array.isArray(workloadsRes.data?.result?.data)) {
       csAgentsForFilter = workloadsRes.data.result.data.map((w) => ({ agentId: w.agentId, agentName: w.agentName }));
+    }
+    if (locationsRes.ok && Array.isArray(locationsRes.data?.result?.data?.locations)) {
+      logisticsLocationsForBulk = locationsRes.data.result.data.locations.map((loc) => ({
+        id: loc.id,
+        name: loc.name,
+        providerName: loc.providerName ?? null,
+      }));
     }
   }
 
@@ -153,6 +228,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     currentUserId: user.id,
     myWorkload,
     csAgentsForFilter,
+    logisticsLocationsForBulk,
     canCreateOffline,
     productsForOfflineOrder,
     dailyCounts,
@@ -160,6 +236,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
       periodAllTime,
+    },
+    scheduleHeat,
+    scheduleFilters: {
+      calendarMonth,
+      scheduleKind: scheduleKind ?? null,
+      scheduleDate: scheduleKind === 'delivery_overdue' ? null : (scheduleDate ?? null),
     },
   };
 }
@@ -238,7 +320,11 @@ export async function action({ request }: ActionFunctionArgs) {
       orderIds,
       newStatus,
     };
-    if (reason) body.metadata = { reason };
+    const metadata: Record<string, unknown> = {};
+    if (reason) metadata.reason = reason;
+    const logisticsLocationId = form.get('logisticsLocationId')?.toString();
+    if (logisticsLocationId) metadata.logisticsLocationId = logisticsLocationId;
+    if (Object.keys(metadata).length) body.metadata = metadata;
 
     const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; total: number; results: Array<{ orderId: string; success: boolean; error?: string }> } } }>(
       '/trpc/orders.bulkTransition',
@@ -298,6 +384,8 @@ export default function CSOrdersRoute() {
   const userRole = parentData?.user?.role;
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
   return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.csOrders} allowlist={ALLOWLIST_CS_ORDERS} />
     <OrdersListPage
       {...data}
       userRole={userRole}
@@ -305,5 +393,6 @@ export default function CSOrdersRoute() {
       canCreateOffline={data.canCreateOffline}
       productsForOfflineOrder={data.productsForOfflineOrder}
     />
+    </>
   );
 }

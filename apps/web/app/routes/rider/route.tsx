@@ -4,6 +4,7 @@ import { Outlet, useLoaderData, Form } from '@remix-run/react';
 import { getCurrentUser } from '~/lib/api.server';
 import { useOfflineSync, useOnlineStatus, usePendingCount } from '~/hooks/useOnlineStatus';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
+import { useSocket, useForceLogoutOnRevoke } from '~/hooks/useSocket';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -36,6 +37,11 @@ export default function RiderLayout() {
   const isOnline = useOnlineStatus();
   const pendingCount = usePendingCount();
   const { canInstall, install } = usePwaInstall();
+  // Initialise the socket + listen for forced-logout from the server. Same
+  // flow as the admin layout — kicks the rider to /auth when their account
+  // is deactivated, so they can't keep working from a stale tab.
+  useSocket();
+  useForceLogoutOnRevoke();
 
   return (
     <div className="min-h-screen bg-app-canvas">

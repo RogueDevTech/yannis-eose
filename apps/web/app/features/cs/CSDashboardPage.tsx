@@ -909,14 +909,46 @@ export function CSDashboardPage({
 
   const clearQueueSelection = () => setSelectedQueueIds(new Set());
 
-  // Clear selection and close the assign modal after successful bulk assign.
-  useEffect(() => {
-    if (bulkAssignFetcher.state === 'idle' && bulkAssignFetcher.data?.success) {
-      setBulkAssignAgentId('');
-      clearQueueSelection();
-      setAssignCloserModalOpen(false);
+  // Edge-trigger close-on-success — fires the instant `bulkAssignFetcher.data`
+  // flips to `{ success: true }` (not on idle, which waits for loader
+  // revalidation and lags 100–500ms behind the toast). See CLAUDE.md →
+  // "Modal + Optimistic UI Pattern".
+  useCloseOnFetcherSuccess(bulkAssignFetcher, () => {
+    setBulkAssignAgentId('');
+    clearQueueSelection();
+    setAssignCloserModalOpen(false);
+  });
+
+  /** IDs of orders currently being bulk-assigned — derived from the in-flight
+   *  fetcher payload. We hide these from the Unassigned Queue strip the same
+   *  tick the user clicks Assign so the modal close, toast, and visual list
+   *  update happen together. The loader revalidation (after the action
+   *  resolves) brings the list back in sync; on error, the toast surfaces and
+   *  the orders re-appear because the formData is gone. */
+  const inFlightAssignIds = useMemo(() => {
+    const fd = bulkAssignFetcher.formData;
+    if (!fd) return new Set<string>();
+    if (fd.get('intent') !== 'bulkAssignToCS') return new Set<string>();
+    const json = fd.get('orderIds')?.toString();
+    if (!json) return new Set<string>();
+    try {
+      const arr = JSON.parse(json) as unknown;
+      if (!Array.isArray(arr)) return new Set<string>();
+      return new Set<string>(arr.filter((x): x is string => typeof x === 'string'));
+    } catch {
+      return new Set<string>();
     }
-  }, [bulkAssignFetcher.state, bulkAssignFetcher.data]);
+  }, [bulkAssignFetcher.formData]);
+
+  /** Visible cards in the strip — strips out orders currently being assigned
+   *  so the list "moves" the same tick the user clicks Assign. */
+  const displayedUnassignedOrders = useMemo(
+    () =>
+      inFlightAssignIds.size === 0
+        ? unassignedOrders
+        : unassignedOrders.filter((o) => !inFlightAssignIds.has(o.id)),
+    [unassignedOrders, inFlightAssignIds],
+  );
   const [selectedAgent, setSelectedAgent] = useState<AgentWorkload | null>(null);
   /** Agent Workloads: View all modal and pagination */
   const [viewAllAgentsOpen, setViewAllAgentsOpen] = useState(false);
@@ -1766,17 +1798,17 @@ export function CSDashboardPage({
               opens the detail modal; toggling the checkbox in the top-left selects without
               opening the modal. Per CEO directive 2026-04-26: HoCS need a way to assign a
               batch of unassigned orders to a closer in one go. */}
-          {unassignedOrders.length > 0 && (
+          {displayedUnassignedOrders.length > 0 && (
             <div className="rounded-lg border border-app-border bg-app-elevated px-3 py-2 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   {selectedQueueIds.size === 0 ? (
                     <button
                       type="button"
-                      onClick={() => setSelectedQueueIds(new Set(unassignedOrders.map((o) => o.id)))}
+                      onClick={() => setSelectedQueueIds(new Set(displayedUnassignedOrders.map((o) => o.id)))}
                       className="text-xs text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
                     >
-                      Select all ({unassignedOrders.length})
+                      Select all ({displayedUnassignedOrders.length})
                     </button>
                   ) : (
                     <>
@@ -1818,7 +1850,7 @@ export function CSDashboardPage({
             </div>
           )}
 
-          {unassignedOrders.length === 0 ? (
+          {displayedUnassignedOrders.length === 0 ? (
             <div className="rounded-xl border border-app-border bg-app-elevated p-10 text-center text-app-fg-muted">
               No unassigned orders in queue
             </div>
@@ -1855,7 +1887,7 @@ export function CSDashboardPage({
                 ref={unassignedQueueScrollRef}
                 className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
               >
-                {unassignedOrders.map((order: CSOrder) => {
+                {displayedUnassignedOrders.map((order: CSOrder) => {
                   const isSelected = selectedQueueIds.has(order.id);
                   return (
                     <div
@@ -1881,7 +1913,23 @@ export function CSDashboardPage({
                         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning-500" />
                       </span>
 
-                      <div className="p-3.5 pr-8">
+                      {/* Selection checkbox — wired to the same toggle the whole card uses,
+                          but rendered as an explicit affordance so HoCS can see what's
+                          selected at a glance. `stopPropagation` prevents a double-toggle
+                          (the card's own click handler still toggles when other parts are
+                          clicked). */}
+                      <span
+                        className="absolute top-3 left-3 z-10"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          onChange={() => toggleQueueSelection(order.id)}
+                          aria-label={`Select order for ${order.customerName}`}
+                        />
+                      </span>
+
+                      <div className="p-3.5 pl-10 pr-8">
                         <div className="mb-2">
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
                             Unassigned

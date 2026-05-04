@@ -5,6 +5,8 @@ import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMont
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_DELIVERY_REMITTANCES, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
 
 export const meta: MetaFunction = () => [
@@ -231,6 +233,11 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminFinanceDeliveryRemittancesRoute() {
   const data = useLoaderData<typeof loader>();
   return (
+    <>
+      <ListFilterPersistence
+        scope={LIST_FILTER_SCOPES.deliveryRemittances}
+        allowlist={ALLOWLIST_DELIVERY_REMITTANCES}
+      />
     <DeliveryRemittancesPage
       remittances={data.remittances}
       pagination={data.pagination}
@@ -244,5 +251,6 @@ export default function AdminFinanceDeliveryRemittancesRoute() {
       canCreateRemittance={data.canCreateRemittance}
       canMarkReceived={data.canMarkReceived}
     />
+    </>
   );
 }

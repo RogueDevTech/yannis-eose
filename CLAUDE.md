@@ -639,16 +639,22 @@ Files to know: [apps/api/src/hr/payroll-batch.service.ts](apps/api/src/hr/payrol
 - Branch visibility: `canViewAllBranches` returns true for admin-class **and** for org-wide department heads (`HEAD_OF_CS`, `HEAD_OF_MARKETING`, `HEAD_OF_LOGISTICS`).
 - `SENSITIVE_ROLES` includes both `SUPER_ADMIN` and `ADMIN` — creating/promoting anyone into an admin-level role generates a `permission_request` for SuperAdmin approval.
 
-**Head / HR uniqueness (ACTIVE + PENDING both count):**
-- **Org-wide singletons:** `HEAD_OF_CS`, `HEAD_OF_MARKETING`, and `HEAD_OF_LOGISTICS` — at most one `ACTIVE` holder per role for the **whole org** (partial unique indexes `uq_active_head_of_*_org_wide` in migration `0080_org_wide_department_heads.sql`). Service-layer conflict checks use the same roles **without** filtering by `primary_branch_id`.
-- **Per branch:** **`HR_MANAGER`** — at most one `ACTIVE`/`PENDING` per `primary_branch_id` (migration 0060 + service check on `HR_MANAGER` + branch).
+**Head / HR uniqueness (CEO directive 2026-05-03 — soft-warning model, no hard block):**
 
-Only `INACTIVE` / `DEACTIVATED` / `ARCHIVED` frees a slot for the next invite. Enforcement lives at:
-- **Service:** `UsersService.createStaff` / `UsersService.update` — org-wide head roles vs `HR_MANAGER` branch-scoped path; filter `inArray(status, ['ACTIVE', 'PENDING'])`.
-- **DB:** org-wide partial unique on `(true)` per head role (`0080`) + `uq_active_hr_manager_per_branch` for HR. Service checks remain the canonical guard for `PENDING`.
-- **UI proactive warning:** `users.listActiveHeads` + `HEAD_ROLES` on `UserCreatePage.tsx` / `UserDetailPage.tsx` — org-wide head conflicts show for **any** primary branch choice; HR conflicts stay branch-keyed.
+`HEAD_OF_CS`, `HEAD_OF_MARKETING`, `HEAD_OF_LOGISTICS`, and `HR_MANAGER` are **NOT singletons.** Permissions gate capability; multiple holders are allowed (handover periods, co-heads, regional splits, etc.). Migration `0108_drop_role_singleton_indexes.sql` dropped the partial unique indexes from `0080` (org-wide heads) and `0060` (per-branch HR), and the service-layer `CONFLICT` throws in `UsersService.createStaff` / `UsersService.update` were removed in the same change.
 
-**Edge case — `primary_branch_id`:** Org-wide heads still **carry** a primary branch for HR/home-branch UX; uniqueness for their role is **not** keyed on that column. `HR_MANAGER` remains keyed on `primary_branch_id`.
+**What's still in place (so role collisions stay visible, never accidental):**
+- **`users.listActiveHeads`** — used by the user create/edit forms to fetch existing holders of head + HR_MANAGER roles, including PENDING invites.
+- **Inline notification on the form** — info-style pill: "X already holds {role}. Yannis allows multiple holders — continue if intended."
+- **Confirm-to-proceed modal** — first submit attempt opens a modal explaining the implication (both holders get the role's notifications + visibility). Admin clicks **Continue anyway** to set `confirmedConflict = true`; the next submit goes through. Changing role / branch resets the flag — different conflict requires re-acknowledgment.
+
+**Still singleton (don't relax these):**
+- **`SUPER_ADMIN`** — security boundary, created only via `/auth/setup`. Migration of ownership requires an explicit transfer mutation, not `createStaff`/`update`.
+- **Finance hat (`users.is_finance_officer`)** — explicit deputy slot with its own atomic-swap UX. Partial unique index `users_only_one_finance_officer` is intentionally **kept**.
+
+**Org-wide head visibility behavior (unchanged):** Heads still carry `scope_org_wide_head = true` and log in with `currentBranchId = NULL`, giving them cross-branch visibility. Multiple holders simply means multiple people share that visibility — `createForRole(...)` notifications fan out to all holders, which is the correct behavior.
+
+Do NOT reintroduce the singleton checks unless a CEO directive reverses this.
 
 ---
 
@@ -904,7 +910,7 @@ These tables carry `branch_id` and are filtered by RLS: `orders`, `campaigns`, `
 SuperAdmin and global Finance bypass branch RLS entirely. Their session `current_branch_id` is set to `NULL` and RLS policies treat NULL as "show all branches".
 
 ### Org-wide department heads (CS, Marketing, Logistics)
-`HEAD_OF_CS`, `HEAD_OF_MARKETING`, and `HEAD_OF_LOGISTICS` are **org-wide singletons** (at most one `ACTIVE` holder per role for the whole org — migration `0080_org_wide_department_heads.sql`). They use the same session pattern as admin-class: `canViewAllBranches` is true, so **`currentBranchId` is `NULL`** on login. They see and act across all branches for their domain (orders, marketing, logistics, payroll batch prep, mirror targets). **Mutations** that require branch context still use explicit `branchId` in the payload (see `requireBranchScopeForGlobalAdminMutations` in `apps/api/src/trpc/trpc.ts` and `BranchScopeGuardProvider` on the web). **Branch team supervisors** remain branch-scoped (`branch_teams`); they do not replace org-wide heads.
+`HEAD_OF_CS`, `HEAD_OF_MARKETING`, and `HEAD_OF_LOGISTICS` are **org-wide roles** — multiple holders allowed (CEO directive 2026-05-03; migration `0108_drop_role_singleton_indexes.sql`). They use the same session pattern as admin-class: `canViewAllBranches` is true, so **`currentBranchId` is `NULL`** on login. They see and act across all branches for their domain (orders, marketing, logistics, payroll batch prep, mirror targets). When there are multiple holders of a head role, role-targeted notifications fan out to all of them and any can act — permissions are the canonical authority, not the count of role holders. **Mutations** that require branch context still use explicit `branchId` in the payload (see `requireBranchScopeForGlobalAdminMutations` in `apps/api/src/trpc/trpc.ts` and `BranchScopeGuardProvider` on the web). **Branch team supervisors** remain branch-scoped (`branch_teams`); they do not replace org-wide heads.
 
 ### Branch Switcher Session
 If a user belongs to multiple branches, the active branch is stored in their Redis session as `currentBranchId`. The sidebar shows a branch selector. Switching branch calls `auth.switchBranch(branchId)` which updates the Redis session.
@@ -969,7 +975,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT serve the heavy CEO Executive Overview on `/admin` for SuperAdmin/Admin. The landing page is intentionally lightweight (`dashboard.quickOverview`); the full report lives at `/admin/ceo` and is reached via the card on the landing. Reverting to "show everything on /admin" reintroduces the slow-first-paint problem flagged 2026-04-23.
 - Do NOT query a materialized view without applying the user's date filter to it. Every cost line in `getFastProfitReport` must be scoped by `startDate`/`endDate` (via `spend_date`, `period_month`, `delivery_date`, etc.). An unfiltered MV query silently returns all-time totals and corrupts the CEO dashboard.
 - Do NOT set the audit actor with `this.pgClient\`SELECT set_config('yannis.current_user_id', ..., true)\``. It runs outside any drizzle transaction and the setting dies before the next `this.db.*` call — writes get attributed to "System" in the audit trail. Always use `withActor(this.db, actor, async (tx) => { ... })` from `apps/api/src/common/db/with-actor.ts` and route every write through `tx`, never `this.db`, inside the callback. See the "Actor Injection Pattern" section for the full rationale.
-- Do NOT remove `HR_MANAGER` from the `HEAD_ROLES` tuples in `users.service.ts` or the frontend equivalents. CEO directive 2026-04-23: HR follows **one per branch** (`ACTIVE`/`PENDING` on `primary_branch_id`). The three department heads are **org-wide** singletons (migration `0080` + service); do not collapse HR into the org-wide head indexes.
+- Do NOT reintroduce singleton checks on `HEAD_OF_CS` / `HEAD_OF_MARKETING` / `HEAD_OF_LOGISTICS` / `HR_MANAGER` without an explicit CEO directive. CEO directive 2026-05-03 retired the singleton model — migration `0108_drop_role_singleton_indexes.sql` dropped the partial unique indexes; service-layer `CONFLICT` throws in `UsersService.createStaff` / `UsersService.update` were removed in the same change. Multiple holders are intentional (handover, co-heads, regional split). The frontend keeps a soft warning + confirm-to-proceed via `users.listActiveHeads`, but the form no longer blocks the save. SuperAdmin and the Finance hat (`is_finance_officer`) remain singletons by design.
 - Do NOT let HR approve payroll batches one payout at a time. The unit of HR review is the **batch** (`payroll_batches`) — `approveBatch` / `rejectBatch` move the whole `(branch, dept, month)` slot together so the audit trail tells one coherent story per stage. Per-payout APIs (`hr.approvePayout`, `hr.generatePayouts`) still exist for legacy DRAFT rows, but new flows must use the batch lifecycle.
 - Do NOT bypass `withActorAndBranch()` on payroll batch writes. Every batch insert/update/transition must run inside that wrapper so both `yannis.current_user_id` AND `yannis.current_branch_id` are set on the same pinned connection — RLS on branch-scoped child tables (and audit attribution on `payroll_batches_history`) depend on it. See "Actor Injection Pattern".
 - Do NOT regenerate a non-DRAFT payroll batch. `generateBatch` rejects any slot already in `PENDING_HR` / `PENDING_FINANCE` / `PAID` with `CONFLICT`. To revise a submitted batch, the reviewer must first `rejectBatch` it (sends back to `DRAFT`), then the head re-generates and re-submits.

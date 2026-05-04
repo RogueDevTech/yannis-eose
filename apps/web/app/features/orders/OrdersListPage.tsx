@@ -22,14 +22,34 @@ import { ExportModal } from '~/components/ui/export-modal';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
-import { STATUS_OPTIONS, STATUS_LABELS, STATUS_TEXT_CLASS, formatStatus } from '~/features/shared/order-status';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherToast } from '~/components/ui/toast';
+import {
+  STATUS_OPTIONS,
+  CS_ORDERS_STATUS_DROPDOWN_OPTIONS,
+  STATUS_LABELS,
+  STATUS_TEXT_CLASS,
+  formatStatus,
+} from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { CompactTable, type CompactTableColumn, type CompactTableMobileCardHelpers } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { TextInput } from '~/components/ui/text-input';
+import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
+import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
+import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { Order } from './types';
+
+function addMonthsYm(ym: string, delta: number): string {
+  const [ys, ms] = ym.split('-');
+  const y = parseInt(ys ?? '0', 10);
+  const mo = parseInt(ms ?? '1', 10);
+  const d = new Date(y, mo - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 
 // Status transitions that make sense for bulk operations
 const BULK_TRANSITIONS: Record<string, string[]> = {
@@ -39,6 +59,23 @@ const BULK_TRANSITIONS: Record<string, string[]> = {
   ALLOCATED: ['DISPATCHED'],
   DISPATCHED: ['IN_TRANSIT'],
 };
+
+// Friendly action verbs for bulk transition buttons.
+// Falls back to the generic "Transition to <STATUS>" form for any status not listed.
+function bulkTransitionLabel(targetStatus: string): string {
+  switch (targetStatus) {
+    case 'CANCELLED':
+      return 'Cancel orders';
+    case 'ALLOCATED':
+      return 'Mark allocated';
+    case 'DISPATCHED':
+      return 'Mark dispatched';
+    case 'IN_TRANSIT':
+      return 'Mark in transit';
+    default:
+      return `Transition to ${formatStatus(targetStatus)}`;
+  }
+}
 
 interface OrdersListPageProps {
   orders: Order[];
@@ -57,6 +94,8 @@ interface OrdersListPageProps {
   showCSAgentColumn?: boolean;
   /** For "Filter by CS Agent" dropdown (HoS/SuperAdmin). */
   csAgentsForFilter?: Array<{ agentId: string; agentName: string }>;
+  /** Logistics locations for the "Allocate to 3PL" bulk modal (HoS/SuperAdmin/Admin). */
+  logisticsLocationsForBulk?: Array<{ id: string; name: string; providerName: string | null }>;
   /** HoS/SuperAdmin can assign directly. */
   canAssignDirectly?: boolean;
   /** Current user id. */
@@ -77,6 +116,13 @@ interface OrdersListPageProps {
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
   dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+  /** CS orders: per-day callback + delivery heat (optional — only `/admin/cs/orders` passes this). */
+  scheduleHeat?: ScheduleHeatDay[];
+  scheduleFilters?: {
+    calendarMonth: string;
+    scheduleKind: ListOrdersScheduleKind | null;
+    scheduleDate: string | null;
+  };
 }
 
 export function OrdersListPage({
@@ -93,6 +139,7 @@ export function OrdersListPage({
   isCSAgent = false,
   showCSAgentColumn = false,
   csAgentsForFilter,
+  logisticsLocationsForBulk = [],
   canAssignDirectly = false,
   currentUserId = '',
   myWorkload = null,
@@ -100,10 +147,17 @@ export function OrdersListPage({
   canCreateOffline = false,
   productsForOfflineOrder = [],
   dailyCounts,
+  scheduleHeat,
+  scheduleFilters,
 }: OrdersListPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const [showChartView, setShowChartView] = useState(false);
+  /** Schedule heat calendar lives in a modal — opened only when the user picks a
+   *  "…on date" schedule option (the date is required) or clicks the date badge to
+   *  change the picked day. Page never renders the calendar inline. */
+  const [scheduleCalendarModalOpen, setScheduleCalendarModalOpen] = useState(false);
+
   const liveState = useLiveIndicator(liveEvents ?? []);
   const navigate = useNavigate();
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
@@ -166,8 +220,79 @@ export function OrdersListPage({
   const fetcher = useFetcher();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
 
+  // Bulk Assign-to-CS modal state + dedicated fetcher (so the toast/close trigger
+  // doesn't collide with the bulk transition fetcher above).
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignAgentId, setAssignAgentId] = useState('');
+  const assignFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
+  const isAssigning = assignFetcher.state !== 'idle';
+  useFetcherToast(assignFetcher.data, { successMessage: 'Orders assigned to closer' });
+  useCloseOnFetcherSuccess(assignFetcher, () => {
+    setAssignModalOpen(false);
+    setAssignAgentId('');
+    setSelectedIds(new Set());
+  });
+
+  // Bulk Allocate-to-3PL modal state + dedicated fetcher.
+  const [allocateModalOpen, setAllocateModalOpen] = useState(false);
+  const [allocateLocationId, setAllocateLocationId] = useState('');
+  const allocateFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
+  const isAllocating = allocateFetcher.state !== 'idle';
+  useFetcherToast(allocateFetcher.data, { successMessage: 'Orders allocated to 3PL' });
+  useCloseOnFetcherSuccess(allocateFetcher, () => {
+    setAllocateModalOpen(false);
+    setAllocateLocationId('');
+    setSelectedIds(new Set());
+  });
+
   // Server-side filtering via URL params; orders are already filtered by loader
   const filteredOrders = orders;
+
+  const enableScheduleCalendar = scheduleHeat !== undefined && scheduleFilters !== undefined;
+
+  const scheduleSelectValue =
+    scheduleFilters?.scheduleKind === 'callback_due'
+      ? 'callback_due'
+      : scheduleFilters?.scheduleKind === 'delivery_on_day'
+        ? 'delivery_on_day'
+        : scheduleFilters?.scheduleKind === 'callback_on_day'
+          ? 'callback_on_day'
+          : scheduleFilters?.scheduleKind === 'delivery_overdue'
+            ? 'delivery_overdue'
+            : '';
+
+  const applyScheduleKind = (v: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('page', '1');
+      if (!v) {
+        next.delete('scheduleKind');
+        next.delete('scheduleDate');
+      } else if (v === 'callback_due') {
+        next.set('scheduleKind', 'callback_due');
+        next.delete('scheduleDate');
+      } else if (v === 'delivery_overdue') {
+        next.set('scheduleKind', 'delivery_overdue');
+        next.delete('scheduleDate');
+      } else {
+        next.set('scheduleKind', v);
+        const existing = prev.get('scheduleDate');
+        if (existing && /^\d{4}-\d{2}-\d{2}$/.test(existing)) next.set('scheduleDate', existing);
+        else next.delete('scheduleDate');
+      }
+      return next;
+    });
+  };
+
+  const applyScheduleDate = (v: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('page', '1');
+      if (v) next.set('scheduleDate', v);
+      else next.delete('scheduleDate');
+      return next;
+    });
+  };
 
   const buildQueryString = (overrides: { page?: number; status?: string; search?: string; csAgentId?: string }) => {
     const params = new URLSearchParams(searchParams);
@@ -254,6 +379,58 @@ export function OrdersListPage({
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
             newStatus,
+          },
+          { method: 'post' },
+        ),
+    });
+  };
+
+  // Eligibility: every selected order in {UNPROCESSED, CS_ASSIGNED} AND
+  // we have a populated closer list (HoCS / SuperAdmin / Admin scope).
+  const canBulkAssignToCS =
+    selectedOrders.length > 0 &&
+    (csAgentsForFilter?.length ?? 0) > 0 &&
+    selectedOrders.every((o) => o.status === 'UNPROCESSED' || o.status === 'CS_ASSIGNED');
+
+  // Eligibility: every selected order in CONFIRMED AND we have at least one location.
+  const canBulkAllocateTo3PL =
+    selectedOrders.length > 0 &&
+    logisticsLocationsForBulk.length > 0 &&
+    selectedOrders.every((o) => o.status === 'CONFIRMED');
+
+  const assignCloserOptions = (csAgentsForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName }));
+  const allocateLocationOptions = logisticsLocationsForBulk.map((loc) => ({
+    value: loc.id,
+    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+  }));
+
+  const submitBulkAssign = () => {
+    setBulkResult(null);
+    ensureBranchForAction({
+      actionLabel: 'assigning selected orders to a closer',
+      onProceed: () =>
+        assignFetcher.submit(
+          {
+            intent: 'bulkAssign',
+            orderIds: JSON.stringify([...selectedIds]),
+            csAgentId: assignAgentId,
+          },
+          { method: 'post' },
+        ),
+    });
+  };
+
+  const submitBulkAllocate = () => {
+    setBulkResult(null);
+    ensureBranchForAction({
+      actionLabel: 'allocating selected orders to a 3PL location',
+      onProceed: () =>
+        allocateFetcher.submit(
+          {
+            intent: 'bulkTransition',
+            orderIds: JSON.stringify([...selectedIds]),
+            newStatus: 'ALLOCATED',
+            logisticsLocationId: allocateLocationId,
           },
           { method: 'post' },
         ),
@@ -357,7 +534,7 @@ export function OrdersListPage({
     return cols;
   }, [showCSAgentColumn]);
 
-  const statusOptions = STATUS_OPTIONS.map((status) => ({
+  const statusOptions = CS_ORDERS_STATUS_DROPDOWN_OPTIONS.map((status) => ({
     value: status,
     label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
   }));
@@ -372,8 +549,87 @@ export function OrdersListPage({
     if (selectedStatus !== 'ALL') n += 1;
     const agent = searchParams.get('csAgentId') || 'ALL';
     if (showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && agent !== 'ALL') n += 1;
+    if (scheduleFilters?.scheduleKind) n += 1;
     return n;
-  }, [selectedStatus, showCSAgentColumn, csAgentsForFilter?.length, searchParams]);
+  }, [selectedStatus, showCSAgentColumn, csAgentsForFilter?.length, searchParams, scheduleFilters?.scheduleKind]);
+
+  const scheduleFilterFields =
+    enableScheduleCalendar && scheduleFilters ? (
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:gap-3">
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-1">
+          <FormSelect
+            aria-label="Filter by schedule"
+            value={scheduleSelectValue}
+            placeholder="Schedule"
+            onChange={(e) => {
+              setSelectedIds(new Set());
+              setBulkResult(null);
+              const v = e.target.value;
+              applyScheduleKind(v);
+              if ((v === 'delivery_on_day' || v === 'callback_on_day') && !scheduleFilters.scheduleDate) {
+                setScheduleCalendarModalOpen(true);
+              }
+            }}
+            options={[
+              { value: '', label: 'All schedules' },
+              { value: 'delivery_on_day', label: 'Deliveries (on date)' },
+              { value: 'callback_on_day', label: 'Callbacks (on date)' },
+              { value: 'delivery_overdue', label: 'Overdue (undelivered)' },
+            ]}
+            wrapperClassName="w-full min-w-0 sm:w-52"
+          />
+        </div>
+        {(scheduleSelectValue === 'delivery_on_day' || scheduleSelectValue === 'callback_on_day') && (
+          <div className="flex flex-col gap-1 w-full min-w-0 sm:w-auto">
+            <span className="text-xs font-medium text-app-fg-muted">On date</span>
+            <div className="inline-flex items-stretch gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setScheduleCalendarModalOpen(true);
+                }}
+                className="inline-flex flex-1 items-center justify-between gap-2 h-9 px-3 rounded-md border border-app-border bg-app-elevated text-sm text-app-fg hover:border-brand-300 dark:hover:border-brand-700 transition-colors min-w-[10rem]"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>
+                    {scheduleFilters.scheduleDate
+                      ? new Date(scheduleFilters.scheduleDate).toLocaleDateString('en-NG', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : 'Pick a date…'}
+                  </span>
+                </span>
+                <svg className="w-3 h-3 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {/* Clear schedule filter — wipes both the kind and the date so the page
+                  returns to the default "no schedule filter" state. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedIds(new Set());
+                  setBulkResult(null);
+                  applyScheduleKind('');
+                }}
+                className="inline-flex items-center justify-center h-9 w-9 rounded-md border border-app-border bg-app-elevated text-app-fg-muted hover:text-app-fg hover:border-brand-300 dark:hover:border-brand-700 transition-colors"
+                aria-label="Clear schedule filter"
+                title="Clear schedule filter"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    ) : null;
 
   return (
     <div className="space-y-4">
@@ -555,18 +811,46 @@ export function OrdersListPage({
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {/* Bulk Assign to CS — appears when selection is in {UNPROCESSED, CS_ASSIGNED} */}
+              {canBulkAssignToCS && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    setAssignAgentId('');
+                    setAssignModalOpen(true);
+                  }}
+                  disabled={isSubmitting || isAssigning || isAllocating}
+                >
+                  Assign to CS
+                </Button>
+              )}
+              {/* Bulk Allocate to 3PL — appears when every selection is CONFIRMED */}
+              {canBulkAllocateTo3PL && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    setAllocateLocationId('');
+                    setAllocateModalOpen(true);
+                  }}
+                  disabled={isSubmitting || isAssigning || isAllocating}
+                >
+                  Allocate to 3PL
+                </Button>
+              )}
               {/* Bulk Transition buttons */}
               {availableTransitions.map((status: string) => (
                 <Button
                   key={status}
-                  variant="primary"
+                  variant={status === 'CANCELLED' ? 'danger' : 'primary'}
                   size="sm"
                   onClick={() => submitBulkTransition(status)}
                   disabled={isSubmitting}
                   loading={isSubmitting}
                   loadingText="Processing..."
                 >
-                  {`Transition to ${formatStatus(status)}`}
+                  {bulkTransitionLabel(status)}
                 </Button>
               ))}
               {selectedStatuses.length > 1 && (
@@ -708,9 +992,12 @@ export function OrdersListPage({
               </div>
             </div>
           }
-          desktopInlineFilters={null}
+          desktopInlineFilters={scheduleFilterFields}
           sheetFilterBody={
             <>
+              {scheduleFilterFields ? (
+                <div className="space-y-1.5 pb-2 border-b border-app-border mb-3">{scheduleFilterFields}</div>
+              ) : null}
               <div className="space-y-1.5">
                 <span className="text-xs font-medium text-app-fg-muted">Status</span>
                 <FormSelect
@@ -760,6 +1047,102 @@ export function OrdersListPage({
           }
         />
       </div>
+
+      {/* Schedule heat calendar — modal only. The Schedule dropdown's "…on date" options
+          open this; the date badge next to the dropdown reopens it to change the day. */}
+      {enableScheduleCalendar && scheduleFilters && scheduleHeat && scheduleCalendarModalOpen ? (
+        <Modal
+          open
+          onClose={() => setScheduleCalendarModalOpen(false)}
+          maxWidth="max-w-md"
+          backdropBlur
+          contentClassName="p-4 sm:p-5 space-y-3"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <h3 className="text-sm font-semibold text-app-fg">
+                {scheduleFilters.scheduleKind === 'callback_on_day'
+                  ? 'Pick a callback day'
+                  : 'Pick a delivery day'}
+              </h3>
+              <p className="text-xs text-app-fg-muted">
+                {scheduleFilters.scheduleKind === 'callback_on_day'
+                  ? 'Lagos callback date matches the day you select.'
+                  : 'ISO preferred delivery date matches the day you select.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setScheduleCalendarModalOpen(false)}
+              className="shrink-0 text-app-fg-muted hover:text-app-fg p-1"
+              aria-label="Close"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {/* Loading overlay — kicks in while the loader is recomputing the heat
+              for the new month (← / → buttons trigger a URL change). The calendar
+              stays mounted under a blur so the user sees the new data fade in
+              instead of a flash of empty cells. */}
+          <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[18rem]">
+            <ScheduleHeatCalendar
+              yearMonth={scheduleFilters.calendarMonth}
+              heat={scheduleHeat}
+              selectedDate={scheduleFilters.scheduleDate}
+              onSelectDay={(iso) => {
+                setSelectedIds(new Set());
+                setBulkResult(null);
+                // Pick the right bucket based on what the day actually contains:
+                //   • only callbacks → callback_on_day
+                //   • only deliveries → delivery_on_day
+                //   • both → respect the current view's kind so the user stays in
+                //     the bucket they were already filtering by
+                //   • neither (cell shouldn't be clickable, but defensive) → keep
+                //     the current kind, fallback to delivery_on_day
+                const dayHeat = (scheduleHeat ?? []).find((d) => d.date === iso);
+                const cb = dayHeat?.callbackCount ?? 0;
+                const del = dayHeat?.deliveryCount ?? 0;
+                const currentIsCallback = scheduleFilters.scheduleKind === 'callback_on_day';
+                const dayKind: 'callback_on_day' | 'delivery_on_day' =
+                  cb > 0 && del === 0
+                    ? 'callback_on_day'
+                    : del > 0 && cb === 0
+                      ? 'delivery_on_day'
+                      : currentIsCallback
+                        ? 'callback_on_day'
+                        : 'delivery_on_day';
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.set('page', '1');
+                  next.set('calendarMonth', iso.slice(0, 7));
+                  next.set('scheduleKind', dayKind);
+                  next.set('scheduleDate', iso);
+                  return next;
+                });
+                setScheduleCalendarModalOpen(false);
+              }}
+              onPrevMonth={() => {
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.set('page', '1');
+                  next.set('calendarMonth', addMonthsYm(scheduleFilters.calendarMonth, -1));
+                  return next;
+                });
+              }}
+              onNextMonth={() => {
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.set('page', '1');
+                  next.set('calendarMonth', addMonthsYm(scheduleFilters.calendarMonth, 1));
+                  return next;
+                });
+              }}
+            />
+          </TableLoadingOverlay>
+        </Modal>
+      ) : null}
 
       {/* Orders table — replaced with chart view when the user toggles "View data in chart" */}
       {showChartView ? (
@@ -931,8 +1314,7 @@ export function OrdersListPage({
               </Button>
               <Button
                 type="button"
-                variant="primary"
-                className="border-danger-500 bg-danger-500 hover:bg-danger-600 text-white"
+                variant="danger"
                 disabled={cancelReason.trim().length < 10 || isSubmitting}
                 loading={isSubmitting}
                 loadingText="Cancelling..."
@@ -941,6 +1323,130 @@ export function OrdersListPage({
                 Cancel {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
               </Button>
             </div>
+        </Modal>
+      )}
+
+      {/* Bulk Assign to CS modal */}
+      {assignModalOpen && (
+        <Modal
+          open
+          onClose={() => {
+            if (isAssigning) return;
+            setAssignModalOpen(false);
+            setAssignAgentId('');
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">
+            Assign {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} to a closer
+          </h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            Pick a CS closer to take over these orders.
+          </p>
+          <div data-branch-scoped-action="true">
+            <div className="mb-4">
+              <SearchableSelect
+                id="bulk-assign-closer"
+                label="Closer"
+                value={assignAgentId}
+                onChange={setAssignAgentId}
+                options={assignCloserOptions}
+                placeholder="Select a closer..."
+                searchPlaceholder="Search closers..."
+              />
+            </div>
+            {assignFetcher.data?.error && !assignFetcher.data?.success && (
+              <p className="mb-3 text-xs text-danger-600 dark:text-danger-400">
+                {assignFetcher.data.error}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isAssigning}
+                onClick={() => {
+                  setAssignModalOpen(false);
+                  setAssignAgentId('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!assignAgentId || isAssigning}
+                loading={isAssigning}
+                loadingText="Assigning..."
+                onClick={submitBulkAssign}
+              >
+                Assign
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Bulk Allocate to 3PL modal */}
+      {allocateModalOpen && (
+        <Modal
+          open
+          onClose={() => {
+            if (isAllocating) return;
+            setAllocateModalOpen(false);
+            setAllocateLocationId('');
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">
+            Allocate {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} to a 3PL location
+          </h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            Pick the 3PL location that will fulfill these orders.
+          </p>
+          <div data-branch-scoped-action="true">
+            <div className="mb-4">
+              <SearchableSelect
+                id="bulk-allocate-location"
+                label="3PL location"
+                value={allocateLocationId}
+                onChange={setAllocateLocationId}
+                options={allocateLocationOptions}
+                placeholder="Select a location..."
+                searchPlaceholder="Search locations..."
+              />
+            </div>
+            {allocateFetcher.data?.error && !allocateFetcher.data?.success && (
+              <p className="mb-3 text-xs text-danger-600 dark:text-danger-400">
+                {allocateFetcher.data.error}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isAllocating}
+                onClick={() => {
+                  setAllocateModalOpen(false);
+                  setAllocateLocationId('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!allocateLocationId || isAllocating}
+                loading={isAllocating}
+                loadingText="Allocating..."
+                onClick={submitBulkAllocate}
+              >
+                Allocate
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
 

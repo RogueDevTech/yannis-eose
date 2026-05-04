@@ -595,8 +595,6 @@ export function OrderDetailPage({
   const scheduleFetcher = useFetcher();
   const adjustItemsFetcher = useFetcher();
   const priceRequestFetcher = useFetcher();
-  const archiveRequestFetcher = useFetcher();
-  const archiveNowFetcher = useFetcher();
   const revalidator = useRevalidator();
 
   // Team Live View — broadcast CS agent state to cs-all room.
@@ -620,9 +618,6 @@ export function OrderDetailPage({
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number }>>([]);
   const [priceApprovalReason, setPriceApprovalReason] = useState('');
-  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
-  const [archiveModalMode, setArchiveModalMode] = useState<'request' | 'now'>('request');
-  const [archiveReason, setArchiveReason] = useState('');
   const [callDebugLog, setCallDebugLog] = useState<string[]>([]);
   const [allocateModalOpen, setAllocateModalOpen] = useState(false);
   const [allocateLocationId, setAllocateLocationId] = useState('');
@@ -657,8 +652,6 @@ export function OrderDetailPage({
   }, [actionError, requiresBranchSelection, ensureBranchForAction]);
   useFetcherToast(adjustItemsFetcher.data, { successMessage: 'Order items updated' });
   useFetcherToast(priceRequestFetcher.data, { successMessage: 'Price change request submitted' });
-  useFetcherToast(archiveRequestFetcher.data, { successMessage: 'Archive request submitted' });
-  useFetcherToast(archiveNowFetcher.data, { successMessage: 'Order archived' });
   const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
   const logisticsLocationWithGroupLink =
     order.logisticsLocationId != null
@@ -771,12 +764,6 @@ export function OrderDetailPage({
     order.status === 'ALLOCATED' ||
     order.status === 'DISPATCHED' ||
     order.status === 'IN_TRANSIT';
-
-  /** Pre-confirmation only — matches server rule for archive / archive-request. */
-  const orderArchivableForRequest =
-    order.status === 'UNPROCESSED' ||
-    order.status === 'CS_ASSIGNED' ||
-    order.status === 'CS_ENGAGED';
 
   const priceDriftProposing =
     !canEditLinePrices &&
@@ -911,15 +898,6 @@ export function OrderDetailPage({
   const adjustItemsData = adjustItemsFetcher.data as { success?: boolean; error?: string } | undefined;
   const priceRequestData = priceRequestFetcher.data as { success?: boolean; error?: string } | undefined;
 
-  const handleArchiveSuccess = useCallback(() => {
-    setArchiveModalOpen(false);
-    setArchiveReason('');
-  }, []);
-  useCloseOnFetcherSuccess(archiveRequestFetcher, handleArchiveSuccess);
-  useCloseOnFetcherSuccess(archiveNowFetcher, handleArchiveSuccess);
-  const archiveRequestData = archiveRequestFetcher.data as { success?: boolean; error?: string } | undefined;
-  const archiveNowData = archiveNowFetcher.data as { success?: boolean; error?: string } | undefined;
-
   // Escape to close adjust items modal
   useEffect(() => {
     if (!adjustItemsModalOpen) return;
@@ -932,18 +910,6 @@ export function OrderDetailPage({
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [adjustItemsModalOpen]);
-
-  useEffect(() => {
-    if (!archiveModalOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setArchiveModalOpen(false);
-        setArchiveReason('');
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [archiveModalOpen]);
 
   return (
     <div className="space-y-4 overflow-x-hidden min-w-0">
@@ -1021,18 +987,6 @@ export function OrderDetailPage({
         </div>
       )}
 
-      {canEditOrder && order.pendingOrderDeletionRequestId && (
-        <div className="rounded-lg border border-info-200 dark:border-info-800/50 bg-info-50 dark:bg-info-900/20 px-4 py-3 text-sm text-info-900 dark:text-info-100">
-          <p>
-            An order archive request is pending approval. The order stays active until a Head of CS, Head of
-            Logistics, branch admin, or admin approves.{' '}
-            <Link to="/admin/permission-requests" className="font-medium text-brand-600 dark:text-brand-400 underline">
-              Open permission requests
-            </Link>
-            .
-          </p>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Left column */}
@@ -1251,7 +1205,7 @@ export function OrderDetailPage({
                 {order.status === 'UNPROCESSED' && !order.assignedCsId && (
                   <div className="rounded-lg bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-700/50 px-4 py-3 mb-3">
                     <p className="text-sm text-info-800 dark:text-info-200">
-                      Assign a closer to begin. Other actions (call, confirm, cancel, archive)
+                      Assign a closer to begin. Other actions (call, confirm, cancel)
                       will appear once a closer is assigned.
                     </p>
                   </div>
@@ -1356,49 +1310,6 @@ export function OrderDetailPage({
                     Cancel order
                   </Button>
 
-                  {orderArchivableForRequest && (
-                    <>
-                      {!canEditLinePrices && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="w-full"
-                          onClick={() => {
-                            setArchiveModalMode('request');
-                            setArchiveReason('');
-                            setArchiveModalOpen(true);
-                          }}
-                          disabled={
-                            !canPerformCSActionsOnOrder ||
-                            !!order.pendingOrderDeletionRequestId ||
-                            archiveRequestFetcher.state === 'submitting' ||
-                            archiveNowFetcher.state === 'submitting'
-                          }
-                        >
-                          Request archive
-                        </Button>
-                      )}
-                      {canEditLinePrices && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="w-full"
-                          onClick={() => {
-                            setArchiveModalMode('now');
-                            setArchiveReason('');
-                            setArchiveModalOpen(true);
-                          }}
-                          disabled={
-                            !!order.pendingOrderDeletionRequestId ||
-                            archiveRequestFetcher.state === 'submitting' ||
-                            archiveNowFetcher.state === 'submitting'
-                          }
-                        >
-                          Archive order now
-                        </Button>
-                      )}
-                    </>
-                  )}
                   </>
                   )}
 
@@ -1802,91 +1713,6 @@ export function OrderDetailPage({
               </Button>
             </div>
           </scheduleFetcher.Form>
-        </Modal>
-      )}
-
-      {archiveModalOpen && (
-        <Modal
-          open
-          onClose={() => {
-            setArchiveModalOpen(false);
-            setArchiveReason('');
-          }}
-          maxWidth="max-w-md"
-          contentClassName="p-6"
-        >
-          <h3 className="text-lg font-semibold text-app-fg mb-1">
-            {archiveModalMode === 'request' ? 'Request order archive' : 'Archive order now'}
-          </h3>
-          <p className="text-sm text-app-fg-muted mb-3">
-            {archiveModalMode === 'request'
-              ? 'The order stays in the system but is hidden from active lists after approval. Rows are never permanently deleted — finance and audit history remain intact.'
-              : 'This archives the order immediately (soft delete). The database row is kept for audit; it will disappear from order lists and this page.'}
-          </p>
-          {archiveRequestData?.error && archiveModalMode === 'request' && (
-            <p className="text-sm text-danger-600 dark:text-danger-400 mb-2">{archiveRequestData.error}</p>
-          )}
-          {archiveNowData?.error && archiveModalMode === 'now' && (
-            <p className="text-sm text-danger-600 dark:text-danger-400 mb-2">{archiveNowData.error}</p>
-          )}
-          <Textarea
-            label="Reason"
-            hint="Minimum 10 characters"
-            value={archiveReason}
-            onChange={(e) => setArchiveReason(e.target.value)}
-            rows={3}
-            placeholder="Why should this order be archived?"
-          />
-          <div className="flex gap-2 mt-4 justify-end">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setArchiveModalOpen(false);
-                setArchiveReason('');
-              }}
-            >
-              Back
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              disabled={
-                archiveReason.trim().length < 10 ||
-                (archiveModalMode === 'request' && archiveRequestFetcher.state === 'submitting') ||
-                (archiveModalMode === 'now' && archiveNowFetcher.state === 'submitting')
-              }
-              loading={
-                archiveModalMode === 'request'
-                  ? archiveRequestFetcher.state === 'submitting'
-                  : archiveNowFetcher.state === 'submitting'
-              }
-              loadingText={archiveModalMode === 'request' ? 'Submitting…' : 'Archiving…'}
-              onClick={() => {
-                const fd: Record<string, string> = {
-                  reason: archiveReason.trim(),
-                };
-                if (order.branchId) {
-                  fd.branchId = order.branchId;
-                }
-                if (archiveModalMode === 'request') {
-                  fd.intent = 'requestOrderDeletion';
-                  ensureBranchForAction({
-                    actionLabel: 'submitting the archive request',
-                    onProceed: () => archiveRequestFetcher.submit(fd, { method: 'post' }),
-                  });
-                } else {
-                  fd.intent = 'softDeleteOrder';
-                  ensureBranchForAction({
-                    actionLabel: 'archiving this order',
-                    onProceed: () => archiveNowFetcher.submit(fd, { method: 'post' }),
-                  });
-                }
-              }}
-            >
-              {archiveModalMode === 'request' ? 'Submit for approval' : 'Archive now'}
-            </Button>
-          </div>
         </Modal>
       )}
 

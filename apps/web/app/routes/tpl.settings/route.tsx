@@ -4,6 +4,8 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { SettingsPage } from '~/features/settings/SettingsPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_SETTINGS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 
 export const meta: MetaFunction = () => [
   { title: 'Settings — Yannis EOSE' },
@@ -81,10 +83,13 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function TplSettingsRoute() {
   const { user, systemSettings, notificationEmailConfig } = useLoaderData<typeof loader>();
   return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.tplSettings} allowlist={ALLOWLIST_SETTINGS} />
     <SettingsPage
       user={user}
       systemSettings={systemSettings}
       notificationEmailConfig={notificationEmailConfig}
     />
+    </>
   );
 }

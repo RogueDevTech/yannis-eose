@@ -5,6 +5,8 @@ import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRol
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type LogisticsOrderRow } from '~/features/logistics/LogisticsOrdersPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_LOGISTICS_ORDERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { Location } from '~/features/logistics/types';
 
 export const meta: MetaFunction = () => [
@@ -494,5 +496,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function TplOrdersRoute() {
   const data = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
-  return <LogisticsOrdersPage {...data} orders={data.orders as LogisticsOrderRow[]} />;
+  return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.logisticsOrdersTpl} allowlist={ALLOWLIST_LOGISTICS_ORDERS} />
+      <LogisticsOrdersPage {...data} orders={data.orders as LogisticsOrderRow[]} />
+    </>
+  );
 }

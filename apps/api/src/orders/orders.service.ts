@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
-import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray, exists, isNull } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray, notInArray, exists, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
@@ -14,6 +14,7 @@ import {
   type RequestOrderLinePriceChangeInput,
   type RequestOrderDeletionInput,
   type ListOrdersInput,
+  type ScheduleCalendarHeatInput,
   type OrderStatus,
   customFormFieldSchema,
   getMissingRequiredCustomFormLabels,
@@ -42,6 +43,22 @@ const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
 
 /** Pre-confirmation orders only — avoids inventory side effects on soft-archive. */
 const ARCHIVABLE_ORDER_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
+
+/** ISO YYYY-MM-DD on `preferred_delivery_date` (excludes edge-form option strings). */
+const PREFERRED_DELIVERY_ISO_SQL = sql`${schema.orders.preferredDeliveryDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`;
+
+const CALLBACK_PRECONFIRM_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
+
+/** Undelivered vs preferred date: exclude terminal / returned rows (OrdersService.list delivery_overdue). */
+const DELIVERY_OVERDUE_EXCLUDED_STATUSES = [
+  'DELIVERED',
+  'COMPLETED',
+  'CANCELLED',
+  'RETURNED',
+  'RESTOCKED',
+  'WRITTEN_OFF',
+  'PARTIALLY_DELIVERED',
+] as const;
 
 @Injectable()
 export class OrdersService {
@@ -1312,6 +1329,34 @@ export class OrdersService {
     };
   }
 
+  /**
+   * Same rules as tRPC `orders.getById` — call after loading an order row before returning
+   * order-scoped payloads (e.g. `finance.getInvoiceByOrder`).
+   */
+  assertActorMayViewOrderForRead(
+    actor: SessionUser,
+    order: { mediaBuyerId: string | null },
+  ): void {
+    if (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN') return;
+    const perms = actor.permissions ?? [];
+    const hasOrdersRead = perms.includes('orders.read');
+    const hasMarketingOrders = perms.includes('marketing.orders');
+    if (!hasOrdersRead) {
+      if (!hasMarketingOrders) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Not authorized to view this order',
+        });
+      }
+      if (actor.role !== 'HEAD_OF_MARKETING' && order.mediaBuyerId !== actor.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Not authorized to view this order',
+        });
+      }
+    }
+  }
+
   async listAllocatableLocations(
     orderId: string,
     viewerRole?: string | null,
@@ -1609,6 +1654,29 @@ export class OrdersService {
       conditions.push(eq(schema.orders.branchId, branchId));
     }
 
+    if (input.scheduleKind === 'callback_due') {
+      conditions.push(sql`${schema.orders.callbackScheduledAt} IS NOT NULL`);
+      conditions.push(sql`${schema.orders.callbackScheduledAt} <= NOW()`);
+      conditions.push(inArray(schema.orders.status, [...CALLBACK_PRECONFIRM_STATUSES]));
+    } else if (input.scheduleKind === 'callback_on_day' && input.scheduleDate) {
+      conditions.push(sql`${schema.orders.callbackScheduledAt} IS NOT NULL`);
+      conditions.push(sql`${schema.orders.callbackAttempts} > 0`);
+      conditions.push(inArray(schema.orders.status, [...CALLBACK_PRECONFIRM_STATUSES]));
+      // Lagos wall date — org ops default (same as scheduleCalendarHeat).
+      conditions.push(
+        sql`(${schema.orders.callbackScheduledAt} AT TIME ZONE 'Africa/Lagos')::date = ${input.scheduleDate}::date`,
+      );
+    } else if (input.scheduleKind === 'delivery_on_day' && input.scheduleDate) {
+      conditions.push(PREFERRED_DELIVERY_ISO_SQL);
+      conditions.push(eq(schema.orders.preferredDeliveryDate, input.scheduleDate));
+    } else if (input.scheduleKind === 'delivery_overdue') {
+      conditions.push(PREFERRED_DELIVERY_ISO_SQL);
+      conditions.push(
+        sql`(${schema.orders.preferredDeliveryDate})::date < (timezone('Africa/Lagos', now()))::date`,
+      );
+      conditions.push(notInArray(schema.orders.status, [...DELIVERY_OVERDUE_EXCLUDED_STATUSES]));
+    }
+
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const orderByColumn = {
@@ -1682,6 +1750,89 @@ export class OrdersService {
         totalPages: Math.ceil(total / input.limit),
       },
     };
+  }
+
+  /**
+   * Per-day counts for CS schedule heat: ISO `preferred_delivery_date` + scheduled callbacks
+   * (`callback_attempts > 0`, pre-confirm statuses), callback days in Africa/Lagos.
+   */
+  async scheduleCalendarHeat(
+    input: ScheduleCalendarHeatInput,
+    branchId?: string | null,
+  ): Promise<Array<{ date: string; callbackCount: number; deliveryCount: number }>> {
+    const [yearStr, monthStr] = input.yearMonth.split('-');
+    const year = parseInt(yearStr!, 10);
+    const month = parseInt(monthStr!, 10);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const firstDay = `${year}-${pad(month)}-01`;
+    const lastDayNum = new Date(year, month, 0).getDate();
+    const lastDay = `${year}-${pad(month)}-${pad(lastDayNum)}`;
+
+    const base: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
+    if (branchId) base.push(eq(schema.orders.branchId, branchId));
+    if (input.assignedCsId) base.push(eq(schema.orders.assignedCsId, input.assignedCsId));
+    if (input.mediaBuyerId) base.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+    if (input.status) base.push(eq(schema.orders.status, input.status));
+
+    const deliveryWhere = and(
+      ...base,
+      PREFERRED_DELIVERY_ISO_SQL,
+      gte(schema.orders.preferredDeliveryDate, firstDay),
+      lte(schema.orders.preferredDeliveryDate, lastDay),
+    );
+
+    const deliveryRows = await this.db
+      .select({
+        date: schema.orders.preferredDeliveryDate,
+        deliveryCount: count(),
+      })
+      .from(schema.orders)
+      .where(deliveryWhere)
+      .groupBy(schema.orders.preferredDeliveryDate);
+
+    const lagosDayExpr = sql`(${schema.orders.callbackScheduledAt} AT TIME ZONE 'Africa/Lagos')::date`;
+
+    const callbackWhere = and(
+      ...base,
+      sql`${schema.orders.callbackScheduledAt} IS NOT NULL`,
+      sql`${schema.orders.callbackAttempts} > 0`,
+      inArray(schema.orders.status, [...CALLBACK_PRECONFIRM_STATUSES]),
+      sql`${lagosDayExpr} >= ${firstDay}::date`,
+      sql`${lagosDayExpr} <= ${lastDay}::date`,
+    );
+
+    const callbackRows = await this.db
+      .select({
+        date: lagosDayExpr,
+        callbackCount: count(),
+      })
+      .from(schema.orders)
+      .where(callbackWhere)
+      .groupBy(lagosDayExpr);
+
+    const normalizeDate = (d: unknown): string => {
+      if (typeof d === 'string') return d.split('T')[0]!;
+      if (d instanceof Date) return d.toISOString().split('T')[0]!;
+      return String(d);
+    };
+
+    const map = new Map<string, { date: string; callbackCount: number; deliveryCount: number }>();
+    for (const row of deliveryRows) {
+      if (!row.date) continue;
+      const date = row.date;
+      map.set(date, { date, deliveryCount: Number(row.deliveryCount ?? 0), callbackCount: 0 });
+    }
+    for (const row of callbackRows) {
+      const date = normalizeDate(row.date);
+      const existing = map.get(date);
+      if (existing) {
+        existing.callbackCount = Number(row.callbackCount ?? 0);
+      } else {
+        map.set(date, { date, callbackCount: Number(row.callbackCount ?? 0), deliveryCount: 0 });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
   }
 
   /**
@@ -2536,8 +2687,16 @@ export class OrdersService {
         userId: csAgentId,
         type: 'order:assigned',
         title: 'Order assigned to you',
-        body: 'An order has been assigned to you. Please attend to it.',
-        data: { orderId },
+        body: this.formatAssignedOrderBody({
+          customerName: updated.customerName,
+          totalAmount: updated.totalAmount,
+        }),
+        data: {
+          orderId,
+          customerName: updated.customerName,
+          totalAmount: updated.totalAmount,
+          assignedBy: actor.name ?? null,
+        },
       })
       .catch(() => {});
 
@@ -2595,12 +2754,22 @@ export class OrdersService {
       count: updated.length,
       fromAgentId,
     });
+    // Total value of the reassigned batch — gives the receiving rep a sense of priority
+    // ("3 orders · ₦45,000" lands harder than "3 order(s) reassigned to you").
+    const bulkTotal = updated.reduce((sum, o) => {
+      const n = Number(o.totalAmount ?? 0);
+      return Number.isFinite(n) ? sum + n : sum;
+    }, 0);
+    const formattedTotal =
+      bulkTotal > 0 ? `₦${Math.round(bulkTotal).toLocaleString('en-NG')}` : null;
+    const noun = updated.length === 1 ? 'order' : 'orders';
+
     this.notifications
       .create({
         userId: fromAgentId,
         type: 'order:reassigned',
         title: 'Orders reassigned',
-        body: `${updated.length} order(s) have been reassigned to another agent.`,
+        body: `${updated.length} ${noun}${formattedTotal ? ` (${formattedTotal})` : ''} moved off your queue.`,
         data: { count: updated.length, toAgentId },
       })
       .catch(() => {});
@@ -2609,7 +2778,7 @@ export class OrdersService {
         userId: toAgentId,
         type: 'order:assigned_bulk',
         title: 'Orders assigned to you',
-        body: `${updated.length} order(s) have been reassigned to you.`,
+        body: `${updated.length} ${noun}${formattedTotal ? ` · ${formattedTotal}` : ''} added to your queue — tap to start calling.`,
         data: { count: updated.length, fromAgentId, orderIds: updated.map((o) => o.id) },
       })
       .catch(() => {});
@@ -2843,7 +3012,7 @@ export class OrdersService {
           userId: agentId,
           type: 'order:reassigned',
           title: 'Orders redistributed',
-          body: `${redistributed} order(s) have been redistributed to other agents.`,
+          body: `${redistributed} ${redistributed === 1 ? 'order' : 'orders'} moved off your queue and spread across the team.`,
           data: { count: redistributed },
         })
         .catch(() => {});
@@ -2853,12 +3022,13 @@ export class OrdersService {
           fromAgentId: agentId,
           orderIds,
         });
+        const noun = orderIds.length === 1 ? 'order' : 'orders';
         this.notifications
           .create({
             userId: toAgentId,
             type: 'order:assigned_bulk',
             title: 'Orders assigned to you',
-            body: `${orderIds.length} order(s) have been reassigned to you.`,
+            body: `${orderIds.length} ${noun} added to your queue — tap to start calling.`,
             data: { count: orderIds.length, fromAgentId: agentId, orderIds },
           })
           .catch(() => {});
@@ -3549,7 +3719,11 @@ export class OrdersService {
    */
   private async assignOrderToBestAvailableAgent(orderId: string): Promise<boolean> {
     const [orderRow] = await this.db
-      .select({ branchId: schema.orders.branchId })
+      .select({
+        branchId: schema.orders.branchId,
+        customerName: schema.orders.customerName,
+        totalAmount: schema.orders.totalAmount,
+      })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
       .limit(1);
@@ -3600,8 +3774,16 @@ export class OrdersService {
         userId: targetAgent.agentId,
         type: 'order:assigned',
         title: 'Order assigned to you',
-        body: 'A new order has been assigned to you. Please attend to it.',
-        data: { orderId },
+        body: this.formatAssignedOrderBody({
+          customerName: orderRow?.customerName ?? null,
+          totalAmount: orderRow?.totalAmount ?? null,
+        }),
+        data: {
+          orderId,
+          customerName: orderRow?.customerName ?? null,
+          totalAmount: orderRow?.totalAmount ?? null,
+          assignedBy: 'Auto-dispatch',
+        },
       })
       .catch(() => {});
 
@@ -4806,6 +4988,33 @@ export class OrdersService {
   private maskPhone(phoneHash: string): string {
     if (phoneHash.length <= 8) return '****';
     return `${phoneHash.slice(0, 4)}****${phoneHash.slice(-4)}`;
+  }
+
+  /**
+   * Build a meaningful notification body for "order assigned to you" pings — replaces
+   * the legacy "An order has been assigned to you. Please attend to it." stub. Includes
+   * customer name + amount so the CS rep can prioritise without opening the order.
+   */
+  private formatAssignedOrderBody(input: {
+    customerName: string | null;
+    totalAmount: string | number | null;
+    branchName?: string | null;
+  }): string {
+    const parts: string[] = [];
+    const name = input.customerName?.trim();
+    if (name) parts.push(name);
+    const amt =
+      typeof input.totalAmount === 'string'
+        ? Number(input.totalAmount)
+        : input.totalAmount;
+    if (typeof amt === 'number' && Number.isFinite(amt) && amt > 0) {
+      parts.push(`₦${Math.round(amt).toLocaleString('en-NG')}`);
+    }
+    if (input.branchName?.trim()) parts.push(input.branchName.trim());
+    if (parts.length === 0) {
+      return 'A new order is in your queue. Tap to call the customer.';
+    }
+    return `${parts.join(' • ')} — tap to call the customer.`;
   }
 
   /**

@@ -7,10 +7,14 @@ import {
   processApprovalSchema,
   listApprovalRequestsSchema,
   setBudgetSchema,
+  canonicalPermissionCode,
 } from '@yannis/shared';
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { FinanceService } from '../../finance/finance.service';
+import { getOrdersService } from './orders.router';
+import { isAdminLevel } from '../../common/authz';
 
 let financeServiceInstance: FinanceService | null = null;
 
@@ -41,17 +45,35 @@ export const financeRouter = router({
 
   getInvoice: authedProcedure
     .input(z.object({ invoiceId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getFinanceService().getInvoiceById(input.invoiceId);
+    .query(async ({ input, ctx }) => {
+      const inv = await getFinanceService().getInvoiceById(input.invoiceId);
+      if (inv.orderId) {
+        const order = await getOrdersService().getById(inv.orderId);
+        getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
+      } else {
+        const perms = (ctx.user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+        const may =
+          isAdminLevel(ctx.user) || perms.includes(canonicalPermissionCode('finance.read'));
+        if (!may) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Not authorized to view this invoice',
+          });
+        }
+      }
+      return inv;
     }),
 
   /**
    * Fetch the invoice attached to a given order. Returns null when none exists.
    * Used by CS / Logistics order-detail pages to show & preview the auto-generated invoice.
+   * Gated with the same rules as `orders.getById` so invoice rows cannot be enumerated cross-tenant.
    */
   getInvoiceByOrder: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      const order = await getOrdersService().getById(input.orderId);
+      getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
       return getFinanceService().getInvoiceByOrderId(input.orderId);
     }),
 
